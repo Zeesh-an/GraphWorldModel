@@ -1,0 +1,18 @@
+{
+  "dataset": "cora_ml",
+  "n_nodes": 2995,
+  "n_edges": 8416,
+  "k": 10,
+  "n_samples": 200,
+  "mc_runs": 50,
+  "max_steps": 50,
+  "models": [
+    "IC",
+    "LT"
+  ],
+  "seed": 42,
+  "spread_mean_IC": 17.412099838256836,
+  "spread_std_IC": 3.2287347316741943,
+  "spread_mean_LT": 18.263099670410156,
+  "spread_std_LT": 2.4736509323120117
+}

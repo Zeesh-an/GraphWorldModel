@@ -1,0 +1,6 @@
+dataset:        cora_ml
+diffusion:      IC
+seed_rate:      1
+seed_num:       1
+spread:         1.70
+seed_set:       [164]

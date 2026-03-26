@@ -1,0 +1,45 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Claude
+.claude/
+CLAUDE.md
+
+# Research notes
+ResearchNotes/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Checkpoints & model weights
+*.pt
+*.pth
+*.ckpt
+
+# Data (large files)
+*.npz
+*.pkl
+*.SG
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+runs/
+wandb/
