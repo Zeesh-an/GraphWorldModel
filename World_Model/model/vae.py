@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 VAE — Encoder / Decoder / VAEModel
 ====================================
@@ -16,6 +15,7 @@ class Encoder(nn.Module):
     3-layer MLP encoder: seed_vec (N,) → latent (latent_dim,)
     Mirrors baseline Encoder exactly.
     """
+
     def __init__(self, input_dim: int, hidden_dim: int, latent_dim: int):
         super().__init__()
         self.net = nn.Sequential(
@@ -37,8 +37,12 @@ class Decoder(nn.Module):
     4-layer MLP decoder: latent (latent_dim,) → seed_vec (N,) ∈ [0,1]
     Mirrors baseline Decoder exactly.
     """
-    def __init__(self, input_dim: int, latent_dim: int, hidden_dim: int, output_dim: int):
+
+    def __init__(
+        self, input_dim: int, latent_dim: int, hidden_dim: int, output_dim: int
+    ):
         super().__init__()
+
         self.net = nn.Sequential(
             nn.Linear(input_dim, latent_dim),
             nn.ReLU(),
@@ -59,12 +63,15 @@ class VAEModel(nn.Module):
     For inference phase (latent optimisation), the encoder is bypassed —
     z is optimised directly as a free variable.
     """
+
     def __init__(self, encoder: Encoder, decoder: Decoder):
         super().__init__()
+
         self.encoder = encoder
         self.decoder = decoder
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        z    = self.encoder(x)
+        z = self.encoder(x)
         x_hat = self.decoder(z)
+
         return x_hat
