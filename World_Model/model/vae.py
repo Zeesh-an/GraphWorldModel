@@ -18,14 +18,15 @@ class Encoder(nn.Module):
 
     def __init__(self, input_dim: int, hidden_dim: int, latent_dim: int):
         super().__init__()
+
         self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(in_features=input_dim, out_features=hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(in_features=hidden_dim, out_features=hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(in_features=hidden_dim, out_features=hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, latent_dim),
+            nn.Linear(in_features=hidden_dim, out_features=latent_dim),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -44,13 +45,13 @@ class Decoder(nn.Module):
         super().__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(input_dim, latent_dim),
+            nn.Linear(in_features=input_dim, out_features=latent_dim),
             nn.ReLU(),
-            nn.Linear(latent_dim, hidden_dim),
+            nn.Linear(in_features=latent_dim, out_features=hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(in_features=hidden_dim, out_features=hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, output_dim),
+            nn.Linear(in_features=hidden_dim, out_features=output_dim),
         )
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
@@ -59,9 +60,8 @@ class Decoder(nn.Module):
 
 class VAEModel(nn.Module):
     """
-    VAE wrapper: encode → reparameterise → decode.
-    For inference phase (latent optimisation), the encoder is bypassed —
-    z is optimised directly as a free variable.
+    VAE wrapper: encode → reparameterize → decode.
+    For inference phase (latent optimization), the encoder is bypassed, and latent z is optimized directly as a free variable.
     """
 
     def __init__(self, encoder: Encoder, decoder: Decoder):

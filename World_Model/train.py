@@ -32,7 +32,6 @@ from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.metrics import precision_score, recall_score
 from torch.optim import Adam
@@ -50,14 +49,13 @@ from utils import (
     load_data,
     InverseProblemDataset,
     adj_process,
-    top_diffusion_sampling,
-    bottom_connectivity_sampling,
+    top_sampling_init_indices,
     diffusion_evaluation,
     connectivity_evaluation,
 )
 
 
-# CLI  (same flags as baseline genim.py)
+# CLI (same flags as baseline genim.py)
 def parse_args():
     p = argparse.ArgumentParser(
         description="Graph Transformer — Inverse Graph Problems"
@@ -140,36 +138,45 @@ def parse_args():
     return p.parse_args()
 
 
-# Loss functions  (identical to baseline)
-def loss_phase1(x, x_hat, y, y_hat):
+def loss_phase_1(x, x_hat, y, y_hat):
     """
     Joint VAE + forward model loss.
 
     reproduction_loss = BCE(x_hat, x) — how well VAE reconstructs seed
     forward_loss = MSE(y_hat, y) — how well GT predicts influence
+
+    total_loss = reproduction_loss + forward_loss
     """
+
+    # Measures how well the VAE reconstructs the seed vector
     reproduction_loss = F.binary_cross_entropy(x_hat, x, reduction="sum")
+
+    # Measures how well the Graph Transformer predicts the influence vector
     forward_loss = F.mse_loss(y_hat, y, reduction="sum")
 
     return reproduction_loss + forward_loss, reproduction_loss, forward_loss
 
 
-def loss_phase2(y_true, y_hat, x_hat):
+def loss_phase_2(y_true, y_hat, x_hat):
     """
     Latent optimisation loss.
     forward_loss = MSE(y_hat, y_true) — push toward target state
-                    IM: y_true = ones (maximize spread)
-                    CND: y_true = zeros (maximize disruption)
+        For IM: y_true = ones (maximize spread)
+        For CND: y_true = zeros (maximize disruption)
 
     L0_loss = L1 sparsity on x_hat — keep node set small
+
+    loss = forward_loss + L0_loss
     """
+
     forward_loss = F.mse_loss(y_hat, y_true)
+
+    # L0 sparsity penalty to encourage the decoded seed vector to be sparse — sum(|x_hat|) / N
     L0_loss = torch.sum(torch.abs(x_hat)) / x_hat.shape[1]
 
     return forward_loss + L0_loss, L0_loss
 
 
-# Main
 def main():
     args = parse_args()
     torch.manual_seed(args.seed)
@@ -181,9 +188,10 @@ def main():
     ckpt_dir = Path(args.ckpt_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    # Data
-    is_cnd = args.task == "CND"
+    # Data loading
+    is_im = args.task == "IM"
 
+    # Try loading data from .npz, before falling back to .sg
     adj, inverse_pairs = load_data(
         dataset=args.dataset,
         diffusion_model=args.diffusion_model,
@@ -193,14 +201,14 @@ def main():
         sg_dir=Path(args.sg_dir),
     )
 
-    N = inverse_pairs.shape[1]
-    task_label = f"{args.task}" + (f" | {args.diffusion_model}" if not is_cnd else "")
+    N = inverse_pairs.shape[1]  # Number of nodes
+    task_label = f"{args.task}" + (f" | {args.diffusion_model}" if is_im else "")
     print(
         f"[data] {args.dataset} | {task_label} | "
         f"N={N} | samples={len(inverse_pairs)}"
     )
 
-    # Adjacency: symmetrise, normalise, to sparse COO
+    # Process the adjacency matrix: symmetrize, normalize, and convert to sparse COO
     adj_t = adj_process(adj).to(device)
 
     # Dataset / loaders (same split logic as baseline)
@@ -213,14 +221,16 @@ def main():
         hidden_dim = args.hidden_dim
         latent_dim = args.latent_dim
 
+    # Train-test (90% - 10%) data split
     n_test = min(batch_size, len(inverse_pairs) // 10)
     n_train = len(inverse_pairs) - n_test
 
     train_set, test_set = random_split(inverse_pairs, [n_train, n_test])
-    train_loader = DataLoader(
-        train_set, batch_size=batch_size, shuffle=True, drop_last=False
+
+    train_dataloader = DataLoader(
+        train_set, batch_size=batch_size, shuffle=True, pin_memory=True, drop_last=False
     )
-    test_loader = DataLoader(test_set, batch_size=1, shuffle=False)
+    test_dataloader = DataLoader(test_set, batch_size=1, shuffle=False, pin_memory=True)
 
     # Models
     encoder = Encoder(input_dim=N, hidden_dim=hidden_dim, latent_dim=latent_dim)
@@ -228,7 +238,7 @@ def main():
         input_dim=latent_dim, latent_dim=latent_dim, hidden_dim=hidden_dim, output_dim=N
     )
 
-    vae_model = VAEModel(encoder, decoder).to(device)
+    vae_model = VAEModel(encoder=encoder, decoder=decoder).to(device)
     forward_model = GraphTransformerForwardModel(
         d_model=args.gt_d_model,
         n_heads=args.gt_heads,
@@ -237,16 +247,16 @@ def main():
         dropout=args.gt_dropout,
     ).to(device)
 
-    n_vae = sum(p.numel() for p in vae_model.parameters())
-    n_gt = sum(p.numel() for p in forward_model.parameters())
-    print(f"[model] VAE params={n_vae:,}  |  GT params={n_gt:,}")
+    num_vae_params = sum(param.numel() for param in vae_model.parameters())
+    num_gt_params = sum(param.numel() for param in forward_model.parameters())
+    print(f"[model] VAE params={num_vae_params:,}  |  GT params={num_gt_params:,}")
 
     optimizer = Adam(
         [{"params": vae_model.parameters()}, {"params": forward_model.parameters()}],
         lr=args.lr,
     )
 
-    #  PHASE 1 — Joint training
+    # PHASE 1 — Joint training
     print(f"\n{'='*60}")
     print(f" Phase 1 — Joint VAE + Graph Transformer training ({args.task})")
     print(f" Epochs: {args.epochs}  |  batch: {batch_size}")
@@ -266,11 +276,11 @@ def main():
         recall_re_ep = 0.0
         n_seen = 0
 
-        for data_pair in train_loader:
+        for data_pair in train_dataloader:
             # data_pair: (B, N, 2)
             x = data_pair[:, :, 0].float().to(device)  # seed vectors
             y = data_pair[:, :, 1].float().to(device)  # influence vectors
-            B = x.size(0)
+            B = x.size(0)  # batch size
 
             optimizer.zero_grad()
             batch_loss = torch.tensor(0.0, device=device)
@@ -280,13 +290,14 @@ def main():
                 y_i = y[i]  # (N,)
 
                 x_hat = vae_model(x_i.unsqueeze(0))  # (1, N)
+
                 # Forward model: (N, 1) → (N, 1)
                 y_hat = forward_model(x_hat.squeeze(0).unsqueeze(-1), adj_t).squeeze(
                     -1
                 )  # (N,)
 
                 # BCE(x_hat, x) + MSE(y_hat, y)
-                total, recon, forw = loss_phase1(
+                total, recon, forw = loss_phase_1(
                     x_i.unsqueeze(0),
                     x_hat,
                     y_i.unsqueeze(0),
@@ -311,10 +322,11 @@ def main():
 
             total_loss_ep += batch_loss.item()
             batch_loss = batch_loss / B
+
             batch_loss.backward()
             optimizer.step()
 
-            # Clamp GT params ≥ 0  (mirrors baseline's clamp for SpGAT)
+            # Clamp Graph Transformer forward mdoel params ≥ 0  (mirrors baseline's clamp for SpGAT)
             for p in forward_model.parameters():
                 p.data.clamp_(min=0)
 
@@ -333,11 +345,12 @@ def main():
             f"  t={elapsed:.2f}s"
         )
 
-        # Checkpoint best model
+        # Checkpoint the best model
         if avg(total_loss_ep) < best_loss:
             best_loss = avg(total_loss_ep)
-            ckpt_suffix = "CND" if is_cnd else args.diffusion_model
+            ckpt_suffix = args.diffusion_model if is_im else "CND"
             ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}.pt"
+
             torch.save(
                 {
                     "epoch": epoch,
@@ -352,70 +365,77 @@ def main():
     print(f"\n[✓] Phase 1 done. Best loss={best_loss:.4f}")
     print(f"[✓] Checkpoint saved → {ckpt}")
 
-    #  PHASE 2 — Latent optimisation
+    # PHASE 2 — Latent optimisation
     print(f"\n{'='*60}")
     print(f" Phase 2 — Latent z optimisation ({args.opt_iters} iters)")
     print(f"{'='*60}")
 
-    # Freeze both models
+    # Freeze both models to prevent weight updates
     for p in vae_model.parameters():
         p.requires_grad = False
+
     for p in forward_model.parameters():
         p.requires_grad = False
+
     vae_model.eval()
     forward_model.eval()
 
-    # Initialise z from best-performing samples' encodings
-    # IM: top-spreading samples (highest channel 1 sum)
-    # CND: most-destructive samples (lowest channel 1 sum)
-    if is_cnd:
-        init_idx = bottom_connectivity_sampling(inverse_pairs, frac=0.1)
-    else:
-        init_idx = top_diffusion_sampling(inverse_pairs, frac=0.1)
+    # Initialise z from the best-performing training samples' encodings
+    # IM: top-spreading samples (highest channel 1 sum) - Get the top 10%
+    # CND: most-destructive samples (lowest channel 1 sum) - Get the bottom 10%
+    init_idx = top_sampling_init_indices(inverse_pairs, frac=0.1, largest=is_im)
 
     z_hat = torch.zeros(1, latent_dim, device=device)
     with torch.no_grad():
         for i in init_idx:
             vec_i = inverse_pairs[i, :, 0].float().unsqueeze(0).to(device)
             z_hat += encoder(vec_i)
+
     z_hat = z_hat / len(init_idx)
     z_hat = z_hat.detach().requires_grad_(True)
+    # z_hat starts warm in the general area in latent space for the optimal seed node set
 
     z_optimizer = Adam([z_hat], lr=args.lr_z)
 
-    # Budget: estimated from mean reconstruction
+    # Estimate the node budget from the mean reconstruction
     with torch.no_grad():
         x_init = decoder(z_hat)
 
     node_budget = max(1, int(x_init.sum().item()))
 
     # Phase 2 target:
-    # IM:  ones — want to activate all nodes (maximize spread)
+    # IM: ones — want to activate all nodes (maximize spread)
     # CND: zeros — want to disconnect all nodes (maximize disruption)
-    if is_cnd:
-        y_target = torch.zeros(1, N, device=device)
-    else:
+    if is_im:
         y_target = torch.ones(1, N, device=device)
+    else:
+        y_target = torch.zeros(1, N, device=device)
 
-    budget_label = "removal" if is_cnd else "seed"
+    budget_label = "seed" if is_im else "removal"
     print(f"[phase2] Estimated {budget_label} budget = {node_budget}")
 
+    # Optimization iterations for inverse graph optimization of latent optimal seed node vector z_hat
+    # The smooth and continuous latent vector z_hat is optimized rather than directly optimizing the binary, sparse seed node vector because optimization works better on the smooth vector
     for i in range(1, args.opt_iters + 1):
+        # Decode the current z_hat through VAE decoder
         x_hat = vae_model.decoder(z_hat)  # (1, N)
+
+        # Pass the decoded vector through the forward Graph Transformer to predict influence/connectivity y_hat
         y_hat = (
             forward_model(x_hat.squeeze(0).unsqueeze(-1), adj_t)
             .squeeze(-1)
             .unsqueeze(0)
         )  # (1, N)
 
-        loss, L0 = loss_phase2(y_target, y_hat, x_hat)
+        loss, L0 = loss_phase_2(y_target, y_hat, x_hat)
 
+        # Perform backpropagation (∂L/z_hat) and gradient descent to optimize and update z_hat
         z_optimizer.zero_grad()
         loss.backward()
         z_optimizer.step()
 
         if i % 50 == 0 or i == 1:
-            metric_label = "PredConn" if is_cnd else "PredSpread"
+            metric_label = "PredSpread" if is_im else "PredConn"
             print(
                 f"  Iter {i:>4d}/{args.opt_iters}"
                 f"  Loss={loss.item():.5f}"
@@ -423,23 +443,42 @@ def main():
                 f"  {metric_label}={y_hat.sum().item():.1f}"
             )
 
-    # Extract final node set
+    # Extract the final optimal node set for the inverse graph problem
     with torch.no_grad():
+        # Decode the optimzed z_hat to get x_final of probabiliites
         x_final = vae_model.decoder(z_hat)
 
+    # Get the optimal node set, by choosing the top-K best nodes by probability
     top_k = x_final.topk(node_budget, dim=1)
     node_set = top_k.indices[0].cpu().numpy().tolist()
 
-    set_label = "removal" if is_cnd else "seed"
+    set_label = "seed" if is_im else "removal"
     print(
         f"\n[result] Predicted {set_label} set (size={len(node_set)}): "
         f"{node_set[:20]}{'...' if len(node_set) > 20 else ''}"
     )
 
     # Evaluate
-    ckpt_suffix = "CND" if is_cnd else args.diffusion_model
+    ckpt_suffix = args.diffusion_model if is_im else "CND"
 
-    if is_cnd:
+    if is_im:
+        print("\n[eval] Running diffusion evaluation (10 MC runs)...")
+        spread = diffusion_evaluation(
+            adj, node_set, diffusion=args.diffusion_model, n_runs=10
+        )
+        print(f"[result] Influence spread = {spread:.1f}")
+
+        result_path = ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}.txt"
+
+        with open(result_path, "w") as f:
+            f.write(f"task:           {args.task}\n")
+            f.write(f"dataset:        {args.dataset}\n")
+            f.write(f"diffusion:      {args.diffusion_model}\n")
+            f.write(f"seed_rate:      {args.seed_rate}\n")
+            f.write(f"seed_num:       {node_budget}\n")
+            f.write(f"spread:         {spread:.2f}\n")
+            f.write(f"seed_set:       {node_set}\n")
+    else:
         print("\n[eval] Running connectivity evaluation...")
         metrics = connectivity_evaluation(adj, node_set)
         print(
@@ -452,6 +491,7 @@ def main():
         )
 
         result_path = ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}.txt"
+
         with open(result_path, "w") as f:
             f.write(f"task:           {args.task}\n")
             f.write(f"dataset:        {args.dataset}\n")
@@ -461,22 +501,6 @@ def main():
             f.write(f"pairwise_conn:  {metrics['pairwise_conn']}\n")
             f.write(f"frac_connected: {metrics['frac_connected']:.4f}\n")
             f.write(f"removal_set:    {node_set}\n")
-    else:
-        print("\n[eval] Running diffusion evaluation (10 MC runs)...")
-        spread = diffusion_evaluation(
-            adj, node_set, diffusion=args.diffusion_model, n_runs=10
-        )
-        print(f"[result] Influence spread = {spread:.1f}")
-
-        result_path = ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}.txt"
-        with open(result_path, "w") as f:
-            f.write(f"task:           {args.task}\n")
-            f.write(f"dataset:        {args.dataset}\n")
-            f.write(f"diffusion:      {args.diffusion_model}\n")
-            f.write(f"seed_rate:      {args.seed_rate}\n")
-            f.write(f"seed_num:       {node_budget}\n")
-            f.write(f"spread:         {spread:.2f}\n")
-            f.write(f"seed_set:       {node_set}\n")
 
     print(f"[✓] Results saved → {result_path}")
 

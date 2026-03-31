@@ -21,7 +21,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# Positional Encoding — degree-based (no PE params needed)
+# Fixed, degree-based Positional Encoding
 def degree_encoding(
     adj: torch.Tensor, d_model: int, device: torch.device
 ) -> torch.Tensor:
@@ -29,20 +29,24 @@ def degree_encoding(
     Simple degree-based positional encoding.
     Encodes log(1 + degree) projected to d_model dims via a fixed sinusoidal scheme.
 
+    adj: sparse COO (N, N) or dense (N, N)
+
     Returns: (N, d_model) float tensor
     """
+
+    # Compute the degree of each node in the graph adjacency matrix
     if adj.is_sparse:
         deg = torch.sparse.sum(adj, dim=1).to_dense()  # (N,)
     else:
         deg = adj.sum(dim=1)
 
-    deg = torch.log1p(deg).unsqueeze(1)  # (N, 1)
+    deg = torch.log1p(deg).unsqueeze(dim=1)  # (N, 1)
 
-    # Sinusoidal projection across d_model dimensions
+    # Sinusoidal projection across d_model dimensions for positional encodings
     div = torch.exp(
         torch.arange(0, d_model, 2, dtype=torch.float, device=device)
         * -(math.log(10000.0) / d_model)
-    )  # (d_model/2,)
+    )  # (d_model / 2,)
 
     pe = torch.zeros(deg.shape[0], d_model, device=device)
     pe[:, 0::2] = torch.sin(deg * div)
@@ -57,7 +61,7 @@ class GraphTransformerLayer(nn.Module):
     One layer of the Graph Transformer.
 
     Sparse edge-masked multi-head scaled dot-product attention:
-        For each edge (u → v):
+        For each edge (u → v), compute attention scores:
             score(u,v) = (Wq·h_v) · (Wk·h_u)^T / sqrt(d_k)
 
         Softmax over all incoming neighbors of v.
@@ -80,18 +84,18 @@ class GraphTransformerLayer(nn.Module):
         self.n_heads = n_heads
         self.d_k = d_model // n_heads
 
-        # Multi-head projections
-        self.Wq = nn.Linear(d_model, d_model, bias=False)
-        self.Wk = nn.Linear(d_model, d_model, bias=False)
-        self.Wv = nn.Linear(d_model, d_model, bias=False)
-        self.Wo = nn.Linear(d_model, d_model, bias=False)
+        # Multi-head Projections
+        self.Wq = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
+        self.Wk = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
+        self.Wv = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
+        self.Wo = nn.Linear(in_features=d_model, out_features=d_model, bias=False)
 
-        # FFN
+        # Feed-forward Network (FFN)
         self.ffn = nn.Sequential(
-            nn.Linear(d_model, ffn_dim),
+            nn.Linear(d_model, out_features=ffn_dim),
             nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(ffn_dim, d_model),
+            nn.Dropout(p=dropout),
+            nn.Linear(ffn_dim, out_features=d_model),
         )
 
         self.norm1 = nn.LayerNorm(d_model)
@@ -106,23 +110,25 @@ class GraphTransformerLayer(nn.Module):
 
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
         """
-        x          : (N, d_model)
-        edge_index : (2, E)  long — [src, dst]
-        returns    : (N, d_model)
+        x: (N, d_model)
+        edge_index: (2, E) long — [src, dst]
+        returns: (N, d_model)
         """
         N = x.size(0)
-        src, dst = edge_index[0], edge_index[1]  # each (E,)
-        E = src.size(0)
 
-        # ── Attention sublayer (pre-norm) ──
+        # Extract source and destination node indices
+        # src[i] → dst[i] is the ith edge
+        src, dst = edge_index[0], edge_index[1]  # each (E,) E = number of edges
+
+        # Attention sublayer (pre-norm)
         h = self.norm1(x)
 
-        # Project Q/K/V  →  (N, H, d_k)
+        # Project Q/K/V → (N, H, d_k), split by heads
         Q = self.Wq(h).view(N, self.n_heads, self.d_k)
         K = self.Wk(h).view(N, self.n_heads, self.d_k)
         V = self.Wv(h).view(N, self.n_heads, self.d_k)
 
-        # For each edge (u→v): score = Q[dst] · K[src] / sqrt(d_k)
+        # For each edge (u → v), compute attention scores per edge, per head: score = Q[dst] · K[src] / sqrt(d_k)
         # Q[dst]: (E, H, d_k),  K[src]: (E, H, d_k)
         Q_e = Q[dst]  # (E, H, d_k)
         K_e = K[src]  # (E, H, d_k)
@@ -130,7 +136,7 @@ class GraphTransformerLayer(nn.Module):
 
         scores = (Q_e * K_e).sum(dim=-1) / math.sqrt(self.d_k)  # (E, H)
 
-        # Softmax over incoming edges per node per head
+        # Compute softmax over incoming edges per node per head
         # Use scatter softmax: subtract max per (dst, head) for stability
         scores_max = torch.full((N, self.n_heads), float("-inf"), device=x.device)
         scores_max.scatter_reduce_(
@@ -157,10 +163,12 @@ class GraphTransformerLayer(nn.Module):
             attn.unsqueeze(-1) * V_e,
         )  # (N, H, d_k)
 
+        # Reshape multiple attention heads and output projection
         agg = agg.reshape(N, self.d_model)  # (N, d_model)
         agg = self.Wo(agg)
 
-        x = x + self.dropout(agg)  # residual
+        # Residual/skip connection
+        x = x + self.dropout(agg)
 
         # FFN sublayer (pre-norm)
         x = x + self.dropout(self.ffn(self.norm2(x)))
@@ -193,24 +201,27 @@ class GraphTransformerForwardModel(nn.Module):
         dropout: float = 0.1,
     ):
         super().__init__()
+
         self.d_model = d_model
 
         # Project scalar node feature (seed prob) + PE → d_model
         self.input_proj = nn.Sequential(
-            nn.Linear(1 + d_model, d_model),
+            nn.Linear(in_features=1 + d_model, out_features=d_model),
             nn.GELU(),
         )
 
         self.layers = nn.ModuleList(
             [
-                GraphTransformerLayer(d_model, n_heads, ffn_dim, dropout)
+                GraphTransformerLayer(
+                    d_model=d_model, n_heads=n_heads, ffn_dim=ffn_dim, dropout=dropout
+                )
                 for _ in range(n_layers)
             ]
         )
 
         self.output_proj = nn.Sequential(
             nn.LayerNorm(d_model),
-            nn.Linear(d_model, 1),
+            nn.Linear(in_features=d_model, out_features=1),
         )
 
         self._reset_parameters()
@@ -224,11 +235,11 @@ class GraphTransformerForwardModel(nn.Module):
 
     def forward(self, seed_vec: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
         """
-        seed_vec: (N, 1)   soft seed probabilities
-        adj     : sparse COO (N, N) or dense (N, N)
-        returns : (N, 1)   influence probabilities in [0, 1]
+        seed_vec: (N, 1) soft seed probabilities
+        adj: sparse COO (N, N) or dense (N, N)
+        returns: (N, 1) influence probabilities in [0, 1]
         """
-        N = seed_vec.size(0)
+        N = seed_vec.size(0)  # N = number of nodes
         device = seed_vec.device
 
         # Build edge_index from adj
@@ -237,7 +248,7 @@ class GraphTransformerForwardModel(nn.Module):
         else:
             edge_index = adj.nonzero(as_tuple=False).t()  # (2, E)
 
-        # Degree positional encoding
+        # Compute degree positional encodings
         pe = degree_encoding(adj, self.d_model, device)  # (N, d_model)
 
         # Input projection: cat(seed_vec, PE) → d_model
@@ -247,7 +258,7 @@ class GraphTransformerForwardModel(nn.Module):
         for layer in self.layers:
             x = layer(x, edge_index)
 
-        # Output
+        # Output projection
         out = torch.sigmoid(self.output_proj(x))  # (N, 1)
 
         return out
