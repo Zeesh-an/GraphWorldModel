@@ -334,7 +334,7 @@ def diffusion_evaluation(
             # Get a random threshold for each node
             thresholds = np.random.uniform(0, 1, N)
 
-            # Initialize with the seed set and
+            # Initialize with the seed set
             active = set(seed)
             newly_active = set(seed)
             influence = np.zeros(N)
@@ -355,7 +355,7 @@ def diffusion_evaluation(
                 if not wave:
                     break
 
-                # Merge wave into the active set.
+                # Merge wave into the active set
                 active |= wave
                 newly_active = wave
 

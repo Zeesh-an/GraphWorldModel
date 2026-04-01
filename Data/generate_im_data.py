@@ -6,18 +6,18 @@ Generates training/eval data for IM models on the Cora-ML graph.
 What this produces
 ------------------
 For each diffusion model (IC, LT):
-    - samples_<model>.npz  : (seed_sets, spreads, cascade_traces) arrays
-    - graph_data.npz       : adjacency, edge_probs, node_features, node_labels
-    - metadata.json        : graph stats and generation config
+    - samples_<model>.npz: (seed_sets, spreads, cascade_traces) arrays
+    - graph_data.npz: adjacency, edge_probs, node_features, node_labels
+    - metadata.json: graph stats and generation config
 
 Data format
 -----------
 graph_data.npz:
-    edge_index : (2, E) int32   — COO format [src, dst]
-    edge_probs : (E,)  float32  — IC propagation probability per edge
-    lt_weights : (E,)  float32  — LT edge weights (row-normalized)
-    node_feats : (N, F) float32 — original bag-of-words features
-    node_labels: (N,)  int32    — class labels (7 classes)
+    edge_index: (2, E) int32 — COO format [src, dst]
+    edge_probs: (E,) float32 — IC propagation probability per edge
+    lt_weights: (E,) float32 — LT edge weights (row-normalized)
+    node_feats: (N, F) float32 — original bag-of-words features
+    node_labels: (N,) int32 — class labels (7 classes)
 
 samples_ic.npz / samples_lt.npz:
     seed_sets       : (S, k) int32   — S samples, each with k seed nodes
@@ -33,7 +33,7 @@ Usage
 
 Then load with:
     data = np.load('graph_data.npz')
-    ic   = np.load('samples_ic.npz')
+    ic = np.load('samples_ic.npz')
 """
 
 import os
@@ -48,7 +48,7 @@ from pathlib import Path
 from collections import defaultdict
 
 
-# 1. Download + Load Cora-ML
+# Download and load Cora-ML
 CORA_ML_URL = "https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz"
 DATA_DIR = Path(__file__).parent / "cora_ml"
 
@@ -56,12 +56,15 @@ DATA_DIR = Path(__file__).parent / "cora_ml"
 def download_cora_ml() -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     dest = DATA_DIR / "cora_ml.npz"
+
     if dest.exists():
         print(f"[✓] Cora-ML already downloaded at {dest}")
         return dest
+
     print(f"[↓] Downloading Cora-ML from {CORA_ML_URL} ...")
     urllib.request.urlretrieve(CORA_ML_URL, dest)
     print(f"[✓] Saved to {dest}")
+
     return dest
 
 
@@ -69,13 +72,14 @@ def load_cora_ml(path: Path):
     """
     Returns
     -------
-    adj       : scipy.sparse.csr_matrix  (N, N) binary directed adjacency
-    features  : np.ndarray               (N, F) float32 bag-of-words
-    labels    : np.ndarray               (N,)   int32   class labels
+    adj: scipy.sparse.csr_matrix (N, N) binary directed adjacency
+    features: np.ndarray (N, F) float32 bag-of-words
+    labels: np.ndarray (N,) int32 class labels
     """
     raw = np.load(path, allow_pickle=True)
 
     # The npz stores the adjacency as a sparse matrix in COO format
+    # Reconstruct the (N, N) sparse binary adjacency matrix from CSR components
     adj = sp.csr_matrix(
         (raw["adj_data"], raw["adj_indices"], raw["adj_indptr"]),
         shape=raw["adj_shape"],
@@ -100,14 +104,14 @@ def load_cora_ml(path: Path):
     return adj, features, labels
 
 
-# 2. Graph Preprocessing
 def build_graph(adj: sp.csr_matrix):
     """
-    Convert adjacency to COO edge_index and compute edge probabilities.
+    Convert the sparse adjacency matrix to COO edge_index and compute edge probabilities.
 
-    IC probability  p(u→v) = 1 / in_degree(v)   [weighted cascade model]
-    LT weight       w(u→v) = 1 / in_degree(v)   [same, but semantics differ]
+    Independent Cascade (IC) probability p(u → v) = 1 / in_degree(v) (weighted cascade model)
+    Linear Threshold (LT) weight w(u → v) = 1 / in_degree(v) (same, but semantics differ)
     """
+    # Convert to COO and extract source and destination arrays from adjacency matrix
     adj_coo = adj.tocoo()
     src = adj_coo.row.astype(np.int32)
     dst = adj_coo.col.astype(np.int32)
@@ -116,22 +120,25 @@ def build_graph(adj: sp.csr_matrix):
     in_deg = np.array(adj.sum(axis=0)).flatten()  # (N,) in-degree
     in_deg = np.where(in_deg == 0, 1, in_deg)  # avoid divide-by-zero
 
-    # IC: each edge gets probability = 1/in_degree(dst)
+    # Independent Cascade (IC): each edge gets probability = 1/in_degree(dst)
     ic_probs = (1.0 / in_deg[dst]).astype(np.float32)
     ic_probs = np.clip(ic_probs, 0.001, 0.5)  # cap for realism
 
-    # LT: weights must sum to ≤ 1 per node (already true with 1/in_deg)
+    # Linear Threshold (LT): weights must sum to ≤ 1 per node (already true with 1/in_deg)
     lt_weights = ic_probs.copy()
 
     edge_index = np.stack([src, dst], axis=0)  # (2, E)
 
-    # Build adjacency list for fast simulation
+    # Build adjacency lists for fast simulation
     # adj_list[v] = list of (neighbor_u, prob_u_v) incoming edges
-    in_adj = defaultdict(list)  # in_adj[v]  = [(u, p), ...]  used by LT
-    out_adj = defaultdict(list)  # out_adj[u] = [(v, p), ...]  used by IC
+    in_adj = defaultdict(list)  # in_adj[v] = [(u, p), ...] used by LT
+    out_adj = defaultdict(list)  # out_adj[u] = [(v, p), ...] used by IC
 
     for i, (u, v) in enumerate(zip(src, dst)):
+        # List of (v, p) for outgoing edges from u (used by IC)
         out_adj[int(u)].append((int(v), float(ic_probs[i])))
+
+        # List of (u, w) for incoming edges to v (used by LT)
         in_adj[int(v)].append((int(u), float(lt_weights[i])))
 
     print(f"[✓] Graph built: {N} nodes, {len(src)} edges")
@@ -143,7 +150,6 @@ def build_graph(adj: sp.csr_matrix):
     return edge_index, ic_probs, lt_weights, dict(out_adj), dict(in_adj), N
 
 
-# 3. Diffusion Simulations
 def simulate_IC(seed_set: list[int], out_adj: dict, N: int, max_steps: int = 50):
     """
     Independent Cascade simulation.
@@ -153,27 +159,33 @@ def simulate_IC(seed_set: list[int], out_adj: dict, N: int, max_steps: int = 50)
 
     Returns
     -------
-    cascade_trace : list of sets  — nodes newly activated at each timestep
+    cascade_trace: list of sets — nodes newly activated at each timestep
                     cascade_trace[0] == seed_set (t=0)
-    final_spread  : int           — total number of activated nodes
+    final_spread : int — total number of activated nodes
     """
+    # Initialize with the seed set
     active = set(seed_set)
     newly_active = set(seed_set)
     cascade_trace = [set(seed_set)]
 
     for _ in range(max_steps):
         next_wave = set()
+
+        # For every newly active node u, attempt to activate each neighbor node v with probability p
         for u in newly_active:
             for v, p in out_adj.get(u, []):
                 if v not in active and np.random.random() < p:
                     next_wave.add(v)
+
         if not next_wave:
             break
+
+        # Merge the next wave into the active set and record it in the cascade trace
         active |= next_wave
         newly_active = next_wave
         cascade_trace.append(next_wave)
 
-    return cascade_trace, len(active)
+    return cascade_trace, len(active)  # len(active) = total spread count
 
 
 def simulate_LT(seed_set: list[int], in_adj: dict, N: int, max_steps: int = 50):
@@ -185,16 +197,21 @@ def simulate_LT(seed_set: list[int], in_adj: dict, N: int, max_steps: int = 50):
 
     Returns
     -------
-    cascade_trace : list of sets
-    final_spread  : int
+    cascade_trace: list of sets
+    final_spread: int
     """
+    # Get a random threshold for each node
     thresholds = np.random.uniform(0, 1, N)
+
+    # Initialize with the seed set
     active = set(seed_set)
     newly_active = set(seed_set)
     cascade_trace = [set(seed_set)]
 
     # Track accumulated influence per node
     influence_sum = np.zeros(N, dtype=np.float32)
+
+    # For each seed node, add its edge weight to each neighbor's influence score
     for u in seed_set:
         for v, w in in_adj.get(u, []):
             if v not in active:
@@ -202,22 +219,27 @@ def simulate_LT(seed_set: list[int], in_adj: dict, N: int, max_steps: int = 50):
 
     for _ in range(max_steps):
         next_wave = set()
+
+        # Find all inactive nodes whose accumulated influence meets their threshold for wave
         for v in range(N):
             if v not in active and influence_sum[v] >= thresholds[v]:
                 next_wave.add(v)
+
         if not next_wave:
             break
+
+        # Merge wave into the active set and record it in the cascade trace
         active |= next_wave
         newly_active = next_wave
         cascade_trace.append(next_wave)
 
-        # Update influence sums for newly activated nodes
+        # Propagate the influence from newly active nodes to their inactive neighbors
         for u in newly_active:
             for v, w in in_adj.get(u, []):
                 if v not in active:
                     influence_sum[v] += w
 
-    return cascade_trace, len(active)
+    return cascade_trace, len(active)  # len(active) = total spread count
 
 
 def estimate_spread(
@@ -239,6 +261,7 @@ def estimate_spread(
     kwargs = dict(out_adj=out_adj, N=N) if model == "IC" else dict(in_adj=in_adj, N=N)
 
     for _ in range(mc_runs):
+        # Run each simulation, collect spread values, and record traces
         trace, spread = sim_fn(seed_set, **kwargs)
         spreads.append(spread)
         all_traces.append(trace)
@@ -246,7 +269,6 @@ def estimate_spread(
     return np.mean(spreads), np.std(spreads), all_traces
 
 
-# 4. Dataset Generation
 def generate_samples(
     N: int,
     out_adj: dict,
@@ -266,11 +288,11 @@ def generate_samples(
 
     Returns
     -------
-    seed_sets       : (n_samples, k)       int32
-    spreads         : (n_samples,)         float32   mean spread
-    spread_stds     : (n_samples,)         float32   std of spread
-    cascade_arrays  : list of np.ndarray   each (T_i, N) bool
-                      T_i = number of timesteps in cascade i
+    seed_sets: (n_samples, k) int32
+    spreads: (n_samples,) float32 mean spread
+    spread_stds: (n_samples,) float32  std of spread
+    cascade_arrays: list of np.ndarray each (T_i, N) bool
+                    T_i = number of timesteps in cascade i
     """
     np.random.seed(rng_seed)
     nodes = np.arange(N, dtype=np.int32)
@@ -282,37 +304,42 @@ def generate_samples(
 
     sim_fn = simulate_IC if model == "IC" else simulate_LT
 
-    t0 = time.time()
+    time_0 = time.time()
     for i in range(n_samples):
         if (i + 1) % 100 == 0:
-            elapsed = time.time() - t0
+            elapsed = time.time() - time_0
             eta = elapsed / (i + 1) * (n_samples - i - 1)
+
             print(
                 f"  [{model}] sample {i+1}/{n_samples} | "
                 f"elapsed={elapsed:.0f}s | ETA={eta:.0f}s"
             )
 
+        # Sample k random nodes as the seed set
         seed = sorted(np.random.choice(nodes, size=k, replace=False).tolist())
 
-        # Run mc_runs simulations for spread estimate
         spread_vals = []
         rep_trace = None
 
         kwargs = (
             dict(out_adj=out_adj, N=N) if model == "IC" else dict(in_adj=in_adj, N=N)
         )
-        for r in range(mc_runs):
+
+        # Run mc_runs Monte Carlo simulations for spread estimate
+        for run in range(mc_runs):
             trace, spread = sim_fn(seed, **kwargs)
             spread_vals.append(spread)
-            if r == 0:
-                rep_trace = trace  # save first run as representative cascade
+
+            if run == 0:
+                rep_trace = trace  # Save the first run as representative cascade
 
         mean_sp = float(np.mean(spread_vals))
         std_sp = float(np.std(spread_vals))
 
-        # Convert trace to dense timestep matrix: (T, N) bool
+        # Convert the representative trace to a dense, boolean timestep matrix: (T, N)
         T = len(rep_trace)
         cascade_mat = np.zeros((T, N), dtype=bool)
+
         for t, wave in enumerate(rep_trace):
             for v in wave:
                 cascade_mat[t, v] = True
@@ -339,9 +366,9 @@ def save_samples(
 ):
     """
     Save samples to npz. Cascades are saved as a ragged structure:
-        cascade_data    : concatenated (T_i * N,) booleans (flattened rows)
-        cascade_offsets : (S+1,) int — start index in cascade_data for sample i
-        cascade_lengths : (S,)   int — number of timesteps T_i for sample i
+        cascade_data: concatenated (T_i * N,) booleans (flattened rows)
+        cascade_offsets: (S + 1,) int — start index in cascade_data for sample i
+        cascade_lengths: (S,) int — number of timesteps T_i for sample i
     """
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -404,7 +431,6 @@ def save_graph(
     return out_path
 
 
-# 5. Loading Utilities (for downstream use)
 def load_graph(data_dir: Path):
     """Load graph data. Returns dict with numpy arrays."""
     d = np.load(data_dir / "graph_data.npz")
@@ -418,10 +444,10 @@ def load_samples(data_dir: Path, model: str = "IC"):
 
     Returns
     -------
-    seed_sets  : (S, k) int32
-    spreads    : (S,)   float32
-    spread_stds: (S,)   float32
-    cascades   : list of (T_i, N) bool arrays — one per sample
+    seed_sets: (S, k) int32
+    spreads: (S,) float32
+    spread_stds: (S,) float32
+    cascades: list of (T_i, N) bool arrays — one per sample
     """
     d = np.load(data_dir / f"samples_{model.lower()}.npz")
     N = int(d["n_nodes"][0])
@@ -439,7 +465,6 @@ def load_samples(data_dir: Path, model: str = "IC"):
     return d["seed_sets"], d["spreads"], d["spread_stds"], cascades
 
 
-# 6. Quick Stats / Sanity Check
 def print_dataset_stats(seed_sets, spreads, spread_stds, cascades, model):
     S, k = seed_sets.shape
     N = cascades[0].shape[1]
@@ -457,7 +482,6 @@ def print_dataset_stats(seed_sets, spreads, spread_stds, cascades, model):
     print(f"  Avg density    : {spreads.mean()/N*100:.1f}% of graph reached")
 
 
-# 7. Main
 def parse_args():
     p = argparse.ArgumentParser(description="Generate IM data on Cora-ML")
     p.add_argument(
@@ -493,6 +517,7 @@ def parse_args():
         default=str(Path(__file__).parent / "cora_ml"),
         help="Output directory",
     )
+
     return p.parse_args()
 
 
@@ -500,18 +525,19 @@ def main():
     args = parse_args()
     out_dir = Path(args.out_dir)
 
-    # Step 1: Download and load graph
+    # Download and load graph data
     npz_path = download_cora_ml()
     adj, node_feats, node_labels = load_cora_ml(npz_path)
 
-    # Step 2: Build propagation structures
+    # Build propagation structures with edge index, propagation probabilities, and adjacency lists
     edge_index, ic_probs, lt_weights, out_adj, in_adj, N = build_graph(adj)
 
-    # Step 3: Save graph data
+    # Save the graph data
     save_graph(out_dir, edge_index, ic_probs, lt_weights, node_feats, node_labels)
 
-    # Step 4: Generate samples for each diffusion model
+    # Generate samples for each diffusion model (IC, LT)
     metadata = {
+        "task": "IM",
         "dataset": "cora_ml",
         "n_nodes": N,
         "n_edges": int(edge_index.shape[1]),
@@ -547,7 +573,7 @@ def main():
         metadata[f"spread_mean_{model}"] = float(spreads.mean())
         metadata[f"spread_std_{model}"] = float(spreads.std())
 
-    # Step 5: Save metadata
+    # Save metadata as JSON
     meta_path = out_dir / "metadata.json"
     with open(meta_path, "w") as f:
         json.dump(metadata, f, indent=2)
