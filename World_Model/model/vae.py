@@ -1,6 +1,7 @@
 """
 VAE — Encoder / Decoder / VAEModel
 ====================================
+
 Identical role to the baseline's Encoder/Decoder/VAEModel in DeepIM.
 Encodes/decodes N-dimensional binary seed vectors through a latent space.
 """

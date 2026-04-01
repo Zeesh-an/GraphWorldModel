@@ -1,6 +1,7 @@
 """
 Graph Transformer — Inverse Graph Problem Training
 =====================================================
+
 Supports two tasks:
     IM  — Influence Maximization (select seeds to maximize spread)
     CND — Critical Node Detection (select nodes to maximize disruption / minimize connectivity)

@@ -1,6 +1,7 @@
 """
 Data utilities — mirrors baseline's main/utils.py
 ===================================================
+
 Supports loading from:
     1. Our generated .npz files  (Data/cora_ml/)         ← preferred
     2. Baseline .SG pickle files (Baselines/DeepIM/data/) ← for comparison

@@ -1,0 +1,66 @@
+"""
+Cora-ML Dataset Loader
+======================
+
+Downloads and loads the Cora-ML citation network.
+"""
+
+import urllib.request
+import numpy as np
+import scipy.sparse as sp
+from pathlib import Path
+
+
+CORA_ML_URL = "https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz"
+DATA_DIR = Path(__file__).resolve().parent.parent / "cora_ml"
+
+
+def download_cora_ml() -> Path:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    dest = DATA_DIR / "cora_ml.npz"
+
+    if dest.exists():
+        print(f"[✓] Cora-ML already downloaded at {dest}")
+        return dest
+
+    print(f"[↓] Downloading Cora-ML from {CORA_ML_URL} ...")
+    urllib.request.urlretrieve(CORA_ML_URL, dest)
+    print(f"[✓] Saved to {dest}")
+
+    return dest
+
+
+def load_cora_ml(path: Path):
+    """
+    Returns
+    -------
+    adj: scipy.sparse.csr_matrix (N, N) binary directed adjacency
+    features: np.ndarray (N, F) float32 bag-of-words
+    labels: np.ndarray (N,) int32 class labels
+    """
+    raw = np.load(path, allow_pickle=True)
+
+    # The npz stores the adjacency as a sparse matrix in COO format
+    # Reconstruct the (N, N) sparse binary adjacency matrix from CSR components
+    adj = sp.csr_matrix(
+        (raw["adj_data"], raw["adj_indices"], raw["adj_indptr"]),
+        shape=raw["adj_shape"],
+    ).astype(np.float32)
+
+    features = (
+        sp.csr_matrix(
+            (raw["attr_data"], raw["attr_indices"], raw["attr_indptr"]),
+            shape=raw["attr_shape"],
+        )
+        .toarray()
+        .astype(np.float32)
+    )
+
+    labels = raw["labels"].astype(np.int32)
+
+    print(
+        f"[✓] Cora-ML loaded: {adj.shape[0]} nodes, "
+        f"{adj.nnz} edges, {features.shape[1]} features, "
+        f"{len(np.unique(labels))} classes"
+    )
+    return adj, features, labels

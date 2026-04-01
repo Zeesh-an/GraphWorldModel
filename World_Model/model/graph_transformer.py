@@ -1,6 +1,7 @@
 """
 Graph Transformer — Forward Diffusion Model
 ============================================
+
 Replaces the SpGAT in DeepIM with a proper Graph Transformer.
 
 Key differences from GAT:
