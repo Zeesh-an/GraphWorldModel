@@ -30,13 +30,14 @@ def download_cora_ml() -> Path:
     return dest
 
 
-def load_cora_ml(path: Path):
+def load_cora_ml(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
     """
     Returns
     -------
     adj: scipy.sparse.csr_matrix (N, N) binary directed adjacency
     features: np.ndarray (N, F) float32 bag-of-words
     labels: np.ndarray (N,) int32 class labels
+    N: int -- number of nodes
     """
     raw = np.load(path, allow_pickle=True)
 
@@ -63,4 +64,5 @@ def load_cora_ml(path: Path):
         f"{adj.nnz} edges, {features.shape[1]} features, "
         f"{len(np.unique(labels))} classes"
     )
-    return adj, features, labels
+    N = adj.shape[0]
+    return adj, features, labels, N

@@ -1,12 +1,8 @@
 """
-Critical Node Detection Data Generation — Digg
-================================================
+Critical Node Detection Data Generation
+=========================================
 
-Generates training/eval data for CND models on the Digg social network.
-
-Source: https://datasets.syr.edu/datasets/Digg.html
-    - 116,893 core users, ~2.6M friendship edges (undirected)
-    - Edges to users outside the core set are dropped
+Generates training/eval data for CND models on a chosen graph dataset.
 
 Problem: Given graph G and budget k, find k nodes whose removal
 causes maximum damage to network connectivity.
@@ -60,9 +56,12 @@ import numpy as np
 import networkx as nx
 from pathlib import Path
 
+from datasets.cora_ml import download_cora_ml, load_cora_ml
 from datasets.digg import download_digg, load_digg
 from graph_utils import build_edge_index, save_graph
 from connectivity import simulate_removal
+
+DATASET_CHOICES = ["cora_ml", "digg"]
 
 
 def generate_samples(
@@ -195,12 +194,34 @@ def load_samples(
     )
 
 
+def load_dataset(dataset: str) -> tuple:
+    """
+    Download and load the specified dataset.
+
+    Returns
+    -------
+    adj: scipy.sparse.csr_matrix (N, N)
+    node_feats: np.ndarray (N, F) float32
+    node_labels: np.ndarray (N,) int32
+    N: int
+    """
+    if dataset == "cora_ml":
+        raw_path = download_cora_ml()
+        return load_cora_ml(raw_path)
+    elif dataset == "digg":
+        raw_path = download_digg()
+        return load_digg(raw_path)
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
+
+
 def print_dataset_stats(
     removal_sets: np.ndarray,
     connectivity_vecs: np.ndarray,
     n_components: np.ndarray,
     largest_cc_sizes: np.ndarray,
     pairwise_conn: np.ndarray,
+    dataset: str = "digg",
 ) -> None:
     S, k = removal_sets.shape
     N = connectivity_vecs.shape[1]
@@ -209,7 +230,7 @@ def print_dataset_stats(
     avg_conn_density = connectivity_vecs.sum(axis=1).mean() / remaining
 
     print(f"\n{'='*50}")
-    print("Dataset stats [CND — Digg]")
+    print(f"Dataset stats [CND — {dataset}]")
     print(f"{'='*50}")
     print(f"  Samples           : {S}")
     print(f"  Removal size (k)  : {k}")
@@ -233,7 +254,14 @@ def print_dataset_stats(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Generate CND data on Digg social network")
+    p = argparse.ArgumentParser(description="Generate CND data")
+    p.add_argument(
+        "-d",
+        "--dataset",
+        default="digg",
+        choices=DATASET_CHOICES,
+        help="Dataset to generate CND data for (default: digg)",
+    )
     p.add_argument(
         "--samples",
         type=int,
@@ -250,20 +278,25 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--out-dir",
         type=str,
-        default=str(Path(__file__).parent / "digg"),
-        help="Output directory (default: Data/digg)",
+        default=None,
+        help="Output directory (default: Data/<dataset>)",
     )
 
-    return p.parse_args()
+    args = p.parse_args()
+
+    # Default out-dir based on dataset
+    if args.out_dir is None:
+        args.out_dir = str(Path(__file__).parent / args.dataset)
+
+    return args
 
 
 def main() -> None:
     args = parse_args()
     out_dir = Path(args.out_dir)
 
-    # Download and load Digg graph
-    raw_path = download_digg()
-    adj, node_feats, node_labels, N = load_digg(raw_path)
+    # Download and load graph
+    adj, node_feats, node_labels, N = load_dataset(args.dataset)
 
     # Save graph_data.npz
     graph_path = out_dir / "graph_data.npz"
@@ -274,7 +307,6 @@ def main() -> None:
         save_graph(out_dir, edge_index, ic_probs, lt_weights, node_feats, node_labels)
 
     # Build NetworkX graph for connectivity computation
-    # adj is already undirected (symmetric) from load_digg
     print("[→] Building NetworkX graph ...")
     G = nx.from_scipy_sparse_array(adj)
     print(
@@ -310,13 +342,14 @@ def main() -> None:
         n_components,
         largest_cc_sizes,
         pairwise_conn,
+        dataset=args.dataset,
     )
 
     # Save metadata
     n_edges_undirected = adj.nnz // 2
     metadata = {
         "task": "CND",
-        "dataset": "digg",
+        "dataset": args.dataset,
         "n_nodes": N,
         "n_edges_undirected": n_edges_undirected,
         "k": args.k,

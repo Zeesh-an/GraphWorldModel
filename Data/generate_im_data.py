@@ -1,8 +1,8 @@
 """
-Influence Maximization Data Generation — Cora-ML
-=================================================
+Influence Maximization Data Generation
+=======================================
 
-Generates training/eval data for IM models on the Cora-ML graph.
+Generates training/eval data for IM models on a chosen graph dataset.
 
 What this produces
 ------------------
@@ -45,8 +45,11 @@ import scipy.sparse as sp
 from pathlib import Path
 
 from datasets.cora_ml import download_cora_ml, load_cora_ml
+from datasets.digg import download_digg, load_digg
 from graph_utils import build_edge_index, build_adjacency_lists, save_graph
 from diffusion import simulate_IC, simulate_LT
+
+DATASET_CHOICES = ["cora_ml", "digg"]
 
 
 def build_graph(adj: sp.csr_matrix):
@@ -256,8 +259,36 @@ def print_dataset_stats(seed_sets, spreads, spread_stds, cascades, model):
     print(f"  Avg density    : {spreads.mean()/N*100:.1f}% of graph reached")
 
 
+def load_dataset(dataset: str) -> tuple:
+    """
+    Download and load the specified dataset.
+
+    Returns
+    -------
+    adj: scipy.sparse.csr_matrix (N, N)
+    node_feats: np.ndarray (N, F) float32
+    node_labels: np.ndarray (N,) int32
+    N: int
+    """
+    if dataset == "cora_ml":
+        raw_path = download_cora_ml()
+        return load_cora_ml(raw_path)
+    elif dataset == "digg":
+        raw_path = download_digg()
+        return load_digg(raw_path)
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
+
+
 def parse_args():
-    p = argparse.ArgumentParser(description="Generate IM data on Cora-ML")
+    p = argparse.ArgumentParser(description="Generate IM data")
+    p.add_argument(
+        "-d",
+        "--dataset",
+        default="cora_ml",
+        choices=DATASET_CHOICES,
+        help="Dataset to generate IM data for (default: cora_ml)",
+    )
     p.add_argument(
         "--samples",
         type=int,
@@ -288,11 +319,17 @@ def parse_args():
     p.add_argument(
         "--out-dir",
         type=str,
-        default=str(Path(__file__).parent / "cora_ml"),
-        help="Output directory",
+        default=None,
+        help="Output directory (default: Data/<dataset>)",
     )
 
-    return p.parse_args()
+    args = p.parse_args()
+
+    # Default out-dir based on dataset
+    if args.out_dir is None:
+        args.out_dir = str(Path(__file__).parent / args.dataset)
+
+    return args
 
 
 def main():
@@ -300,8 +337,7 @@ def main():
     out_dir = Path(args.out_dir)
 
     # Download and load graph data
-    npz_path = download_cora_ml()
-    adj, node_feats, node_labels = load_cora_ml(npz_path)
+    adj, node_feats, node_labels, N = load_dataset(args.dataset)
 
     # Build propagation structures with edge index, propagation probabilities, and adjacency lists
     edge_index, ic_probs, lt_weights, out_adj, in_adj, N = build_graph(adj)
@@ -312,7 +348,7 @@ def main():
     # Generate samples for each diffusion model (IC, LT)
     metadata = {
         "task": "IM",
-        "dataset": "cora_ml",
+        "dataset": args.dataset,
         "n_nodes": N,
         "n_edges": int(edge_index.shape[1]),
         "k": args.k,
