@@ -58,10 +58,11 @@ from pathlib import Path
 
 from datasets.cora_ml import download_cora_ml, load_cora_ml
 from datasets.digg import download_digg, load_digg
+from datasets.twitter import download_twitter, load_twitter
 from graph_utils import build_edge_index, save_graph
 from connectivity import simulate_removal
 
-DATASET_CHOICES = ["cora_ml", "digg"]
+DATASET_CHOICES = ["cora_ml", "digg", "twitter"]
 
 
 def generate_samples(
@@ -211,6 +212,9 @@ def load_dataset(dataset: str) -> tuple:
     elif dataset == "digg":
         raw_path = download_digg()
         return load_digg(raw_path)
+    elif dataset == "twitter":
+        raw_path = download_twitter()
+        return load_twitter(raw_path)
     else:
         raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
 
