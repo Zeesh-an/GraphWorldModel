@@ -15,6 +15,10 @@ IM  task:
 CND task:
     [:, :, 0] = binary removal vector (1 = node removed)
     [:, :, 1] = binary connectivity vector (1 = node in largest CC after removal)
+
+SL  task (source localization):
+    [:, :, 0] = binary seed vector (ground truth sources — the label)
+    [:, :, 1] = binary snapshot vector (partial observation at time t — the input to invert)
 """
 
 import math
@@ -106,7 +110,7 @@ def load_npz_im(data_dir: Path, diffusion_model: str = "IC"):
     """
     samples, N, adj = load_npz(
         graph_data_path=data_dir / "graph_data.npz",
-        samples_data_path=data_dir / f"samples_{diffusion_model.lower()}.npz",
+        samples_data_path=data_dir / f"samples_im_{diffusion_model.lower()}.npz",
     )
 
     # Build (S, N, 2) inverse_pairs
@@ -171,6 +175,42 @@ def load_npz_cnd(data_dir: Path):
     return adj, inverse_pairs
 
 
+def load_npz_sl(data_dir: Path, diffusion_model: str = "IC"):
+    """
+    Load graph and Source Localization (SL) samples from generated .npz files.
+
+    SL shares the same forward model as IM (seeds → activation), but channel 1
+    stores a partial snapshot (observed at a random timestep) rather than the
+    full cascade union.
+
+    Returns
+    -------
+    adj: scipy sparse CSR  (N, N)
+    inverse_pairs: torch.Tensor (S, N, 2) float32
+                    [:,:,0] = binary seed vector (ground truth sources)
+                    [:,:,1] = binary snapshot vector (partial observation)
+    """
+    samples, N, adj = load_npz(
+        graph_data_path=data_dir / "graph_data.npz",
+        samples_data_path=data_dir / f"samples_sl_{diffusion_model.lower()}.npz",
+    )
+
+    seed_sets = samples["seed_sets"]  # (S, k)
+    snapshots = samples["snapshots"]  # (S, N)
+    S = seed_sets.shape[0]
+
+    # Build seed vectors from seed_sets indices
+    seed_vecs = np.zeros((S, N), dtype=np.float32)
+    for i in range(S):
+        seed_vecs[i, seed_sets[i]] = 1.0
+
+    inverse_pairs = torch.from_numpy(
+        np.stack([seed_vecs, snapshots], axis=-1)  # (S, N, 2)
+    )
+
+    return adj, inverse_pairs
+
+
 def load_sg(sg_path: Path):
     """
     Load data from the baseline's .SG pickle format.
@@ -195,7 +235,7 @@ def load_data(
     dataset: str = "cora_ml",
     diffusion_model: str = "IC",
     seed_rate: int = 1,
-    task: str = "IM",  # "CND"
+    task: str = "IM",
     npz_dir: Path = None,
     sg_dir: Path = None,
 ):
@@ -213,7 +253,7 @@ def load_data(
         if (
             npz_dir is not None
             and (npz_dir / "graph_data.npz").exists()
-            and (npz_dir / f"samples_{diffusion_model.lower()}.npz").exists()
+            and (npz_dir / f"samples_im_{diffusion_model.lower()}.npz").exists()
         ):
             print(f"[data] Loading IM from npz: {npz_dir}")
             return load_npz_im(npz_dir, diffusion_model)
@@ -226,7 +266,7 @@ def load_data(
                 return load_sg(sg_path)
 
         raise FileNotFoundError(
-            f"No IM data found. Run generate_im_data.py first, then provide npz_dir containing graph_data.npz and samples_{diffusion_model.lower()}.npz or sg_dir (with {dataset}_mean_{diffusion_model.lower()}*.SG)"
+            f"No IM data found. Run generate_im_data.py first, then provide npz_dir containing graph_data.npz and samples_im_{diffusion_model.lower()}.npz or sg_dir (with {dataset}_mean_{diffusion_model.lower()}*.SG)"
         )
 
     if task == "CND":
@@ -240,6 +280,20 @@ def load_data(
 
         raise FileNotFoundError(
             f"No CND data found. Run generate_cnd_data.py first, then provide npz_dir containing graph_data.npz and samples_cnd.npz"
+        )
+
+    if task == "SL":
+        sl_file = f"samples_sl_{diffusion_model.lower()}.npz"
+        if (
+            npz_dir is not None
+            and (npz_dir / "graph_data.npz").exists()
+            and (npz_dir / sl_file).exists()
+        ):
+            print(f"[data] Loading SL from npz: {npz_dir}")
+            return load_npz_sl(npz_dir, diffusion_model)
+
+        raise FileNotFoundError(
+            f"No SL data found. Run generate_sl_data.py first, then provide npz_dir containing graph_data.npz and {sl_file}"
         )
 
 
@@ -436,4 +490,72 @@ def connectivity_evaluation(
         "n_components": len(components),
         "pairwise_conn": pairwise_conn,
         "frac_connected": largest_cc_size / max(n_remaining, 1),
+    }
+
+
+# Source Localization (SL) Evaluation
+def source_localization_evaluation(
+    predicted_sources: list[int],
+    true_sources: list[int],
+    observed_snapshot: np.ndarray,
+    adj: sp.spmatrix,
+    diffusion: str = "IC",
+    n_runs: int = 10,
+    max_steps: int = 100,
+) -> dict[str, float]:
+    """
+    Evaluate a source localization solution by comparing predicted sources
+    against ground truth and optionally checking if the predicted sources
+    reproduce the observed snapshot via forward simulation.
+
+    Parameters
+    ----------
+    predicted_sources: list of predicted source node indices
+    true_sources: list of ground truth source node indices
+    observed_snapshot: (N,) float32 binary — the observed infection snapshot
+    adj: scipy sparse adjacency matrix
+    diffusion: diffusion model used ("IC" or "LT")
+    n_runs: Monte Carlo runs for forward simulation check
+    max_steps: max cascade propagation steps
+
+    Returns
+    -------
+    dict with keys:
+        precision: fraction of predicted sources that are true sources
+        recall: fraction of true sources that were predicted
+        f1: harmonic mean of precision and recall
+        jaccard: |predicted ∩ true| / |predicted ∪ true|
+        predicted_spread: mean spread when simulating from predicted sources
+        observed_spread: number of activated nodes in the observed snapshot
+        spread_error: |predicted_spread - observed_spread| / observed_spread
+    """
+    pred_set = set(predicted_sources)
+    true_set = set(true_sources)
+
+    # Set-based source recovery metrics
+    true_positives = len(pred_set & true_set)
+    precision = true_positives / max(len(pred_set), 1)
+    recall = true_positives / max(len(true_set), 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-9)
+    jaccard = true_positives / max(len(pred_set | true_set), 1)
+
+    # Forward simulation: do the predicted sources reproduce the observation?
+    predicted_spread = diffusion_evaluation(
+        adj,
+        predicted_sources,
+        diffusion=diffusion,
+        n_runs=n_runs,
+        max_steps=max_steps,
+    )
+    observed_spread = float(observed_snapshot.sum())
+    spread_error = abs(predicted_spread - observed_spread) / max(observed_spread, 1.0)
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "jaccard": jaccard,
+        "predicted_spread": predicted_spread,
+        "observed_spread": observed_spread,
+        "spread_error": spread_error,
     }

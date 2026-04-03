@@ -2,14 +2,16 @@
 Graph Transformer — Inverse Graph Problem Training
 =====================================================
 
-Supports two tasks:
+Supports three tasks:
     IM  — Influence Maximization (select seeds to maximize spread)
     CND — Critical Node Detection (select nodes to maximize disruption / minimize connectivity)
+    SL  — Source Localization (infer which sources caused an observed infection snapshot)
 
-Both share the same architecture (VAE + Graph Transformer) with different
+All share the same architecture (VAE + Graph Transformer) with different
 Phase 2 objectives:
     IM:  MSE(y_hat, ones)  — maximize spread
     CND: MSE(y_hat, zeros) — minimize residual connectivity
+    SL:  MSE(y_hat, observed_snapshot) — match predicted activation to observation
 
 Phase 1 (--epochs,  default 600):
     Train VAE (Encoder + Decoder) + GraphTransformerForwardModel jointly.
@@ -23,6 +25,7 @@ Usage
 -----
     python World_Model/train.py -d cora_ml -dm IC -sp 1
     python World_Model/train.py -d cora_ml --task CND
+    python World_Model/train.py -d cora_ml --task SL -dm IC
 """
 
 import argparse
@@ -53,6 +56,7 @@ from utils import (
     top_sampling_init_indices,
     diffusion_evaluation,
     connectivity_evaluation,
+    source_localization_evaluation,
 )
 
 
@@ -66,8 +70,8 @@ def parse_args():
         "-t",
         "--task",
         default="IM",
-        choices=["IM", "CND"],
-        help="Task: IM (influence maximization) or CND (critical node detection)",
+        choices=["IM", "CND", "SL"],
+        help="Task: IM (influence maximization), CND (critical node detection), or SL (source localization)",
     )
     p.add_argument(
         "-d",
@@ -162,8 +166,9 @@ def loss_phase_2(y_true, y_hat, x_hat):
     """
     Latent optimisation loss.
     forward_loss = MSE(y_hat, y_true) — push toward target state
-        For IM: y_true = ones (maximize spread)
+        For IM:  y_true = ones (maximize spread)
         For CND: y_true = zeros (maximize disruption)
+        For SL:  y_true = observed_snapshot (match predicted activation to observation)
 
     L0_loss = L1 sparsity on x_hat — keep node set small
 
@@ -190,7 +195,7 @@ def main():
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
     # Data loading
-    is_im = args.task == "IM"
+    uses_diffusion = args.task in ("IM", "SL")
 
     # Try loading data from .npz, before falling back to .sg
     adj, inverse_pairs = load_data(
@@ -203,7 +208,9 @@ def main():
     )
 
     N = inverse_pairs.shape[1]  # Number of nodes
-    task_label = f"{args.task}" + (f" | {args.diffusion_model}" if is_im else "")
+    task_label = f"{args.task}" + (
+        f" | {args.diffusion_model}" if uses_diffusion else ""
+    )
     print(
         f"[data] {args.dataset} | {task_label} | "
         f"N={N} | samples={len(inverse_pairs)}"
@@ -281,7 +288,7 @@ def main():
             # data_pair: (B, N, 2)
             x = data_pair[:, :, 0].float().to(device)  # seed vectors
             y = data_pair[:, :, 1].float().to(device)  # influence vectors
-            B = x.size(0)  # batch size
+            B = x.shape[0]  # batch size
 
             optimizer.zero_grad()
             batch_loss = torch.tensor(0.0, device=device)
@@ -349,7 +356,7 @@ def main():
         # Checkpoint the best model
         if avg(total_loss_ep) < best_loss:
             best_loss = avg(total_loss_ep)
-            ckpt_suffix = args.diffusion_model if is_im else "CND"
+            ckpt_suffix = args.diffusion_model if uses_diffusion else "CND"
             ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}.pt"
 
             torch.save(
@@ -381,10 +388,12 @@ def main():
     vae_model.eval()
     forward_model.eval()
 
-    # Initialise z from the best-performing training samples' encodings
-    # IM: top-spreading samples (highest channel 1 sum) - Get the top 10%
-    # CND: most-destructive samples (lowest channel 1 sum) - Get the bottom 10%
-    init_idx = top_sampling_init_indices(inverse_pairs, frac=0.1, largest=is_im)
+    # Initialize z from the top-performing training samples' encodings
+    # IM / SL: highest channel 1 sum (top-spreading samples)
+    # CND: lowest channel 1 sum (most-destructive samples)
+    init_idx = top_sampling_init_indices(
+        inverse_pairs, frac=0.1, largest=(args.task != "CND")
+    )
 
     z_hat = torch.zeros(1, latent_dim, device=device)
     with torch.no_grad():
@@ -394,26 +403,51 @@ def main():
 
     z_hat = z_hat / len(init_idx)
     z_hat = z_hat.detach().requires_grad_(True)
-    # z_hat starts warm in the general area in latent space for the optimal seed node set
 
-    z_optimizer = Adam([z_hat], lr=args.lr_z)
+    print(f"[phase2] Initialized z from top-{len(init_idx)} samples")
 
-    # Estimate the node budget from the mean reconstruction
-    with torch.no_grad():
-        x_init = decoder(z_hat)
+    # Set the node budget and y_target
+    if args.task == "SL":
+        # For Source Localization (SL), use the first test sample as the target
+        test_sample = test_set[0]  # (N, 2)
 
-    node_budget = max(1, int(x_init.sum().item()))
+        sl_true_sources = test_sample[
+            :, 0
+        ].numpy()  # (N,) binary ground truth seed vector
+        sl_observed_snapshot = test_sample[
+            :, 1
+        ].numpy()  # (N,) binary observation snapshot
+        sl_obs_tensor = test_sample[:, 1].float().unsqueeze(0).to(device)  # (1, N)
 
-    # Phase 2 target:
-    # IM: ones — want to activate all nodes (maximize spread)
-    # CND: zeros — want to disconnect all nodes (maximize disruption)
-    if is_im:
+        node_budget = int(sl_true_sources.sum())
+        y_target = sl_obs_tensor  # (1, N)
+
+        print(
+            f"[phase2] SL query — observed spread = {int(sl_observed_snapshot.sum())}"
+        )
+        print(f"[phase2] Ground truth source count = {node_budget}")
+    elif args.task == "IM":
+        with torch.no_grad():
+            x_init = decoder(z_hat)
+
+        node_budget = max(1, int(x_init.sum().item()))
+
+        # For Influence Maximization (IM), the target is for all nodes to be activated/influenced
         y_target = torch.ones(1, N, device=device)
-    else:
+
+        print(f"[phase2] Estimated seed budget = {node_budget}")
+    elif args.task == "CND":
+        with torch.no_grad():
+            x_init = decoder(z_hat)
+
+        node_budget = max(1, int(x_init.sum().item()))
+
+        # For Critical Node Detection (CND), the target is for all nodes to be deactivated/disconnected
         y_target = torch.zeros(1, N, device=device)
 
-    budget_label = "seed" if is_im else "removal"
-    print(f"[phase2] Estimated {budget_label} budget = {node_budget}")
+        print(f"[phase2] Estimated removal budget = {node_budget}")
+
+    z_optimizer = Adam([z_hat], lr=args.lr_z)
 
     # Optimization iterations for inverse graph optimization of latent optimal seed node vector z_hat
     # The smooth and continuous latent vector z_hat is optimized rather than directly optimizing the binary, sparse seed node vector because optimization works better on the smooth vector
@@ -436,7 +470,13 @@ def main():
         z_optimizer.step()
 
         if i % 50 == 0 or i == 1:
-            metric_label = "PredSpread" if is_im else "PredConn"
+            if args.task == "SL":
+                metric_label = "PredMatch"
+            elif args.task == "IM":
+                metric_label = "PredSpread"
+            elif args.task == "CND":
+                metric_label = "PredConn"
+
             print(
                 f"  Iter {i:>4d}/{args.opt_iters}"
                 f"  Loss={loss.item():.5f}"
@@ -446,23 +486,69 @@ def main():
 
     # Extract the final optimal node set for the inverse graph problem
     with torch.no_grad():
-        # Decode the optimzed z_hat to get x_final of probabiliites
+        # Decode the optimized z_hat to get x_final of probabilities
         x_final = vae_model.decoder(z_hat)
 
     # Get the optimal node set, by choosing the top-K best nodes by probability
     top_k = x_final.topk(node_budget, dim=1)
     node_set = top_k.indices[0].cpu().numpy().tolist()
 
-    set_label = "seed" if is_im else "removal"
+    if args.task == "SL":
+        set_label = "source"
+    elif args.task == "IM":
+        set_label = "seed"
+    elif args.task == "CND":
+        set_label = "removal"
+
     print(
         f"\n[result] Predicted {set_label} set (size={len(node_set)}): "
         f"{node_set[:20]}{'...' if len(node_set) > 20 else ''}"
     )
 
     # Evaluate
-    ckpt_suffix = args.diffusion_model if is_im else "CND"
+    ckpt_suffix = args.diffusion_model if uses_diffusion else "CND"
 
-    if is_im:
+    if args.task == "SL":
+        print("\n[eval] Running source localization evaluation...")
+        true_source_indices = np.where(sl_true_sources > 0.5)[0].tolist()
+        metrics = source_localization_evaluation(
+            predicted_sources=node_set,
+            true_sources=true_source_indices,
+            observed_snapshot=sl_observed_snapshot,
+            adj=adj,
+            diffusion=args.diffusion_model,
+            n_runs=10,
+        )
+        print(
+            f"[result] Precision={metrics['precision']:.3f}  "
+            f"Recall={metrics['recall']:.3f}  "
+            f"F1={metrics['f1']:.3f}  "
+            f"Jaccard={metrics['jaccard']:.3f}"
+        )
+        print(
+            f"[result] Predicted spread={metrics['predicted_spread']:.1f}  "
+            f"Observed spread={metrics['observed_spread']:.0f}  "
+            f"Spread error={metrics['spread_error']:.3f}"
+        )
+
+        result_path = ckpt_dir / f"results_{args.dataset}_SL_{ckpt_suffix}.txt"
+
+        with open(result_path, "w") as f:
+            f.write(f"task:              {args.task}\n")
+            f.write(f"dataset:           {args.dataset}\n")
+            f.write(f"diffusion:         {args.diffusion_model}\n")
+            f.write(f"source_budget:     {node_budget}\n")
+            f.write(f"precision:         {metrics['precision']:.4f}\n")
+            f.write(f"recall:            {metrics['recall']:.4f}\n")
+            f.write(f"f1:                {metrics['f1']:.4f}\n")
+            f.write(f"jaccard:           {metrics['jaccard']:.4f}\n")
+            f.write(f"predicted_spread:  {metrics['predicted_spread']:.2f}\n")
+            f.write(f"observed_spread:   {metrics['observed_spread']:.0f}\n")
+            f.write(f"spread_error:      {metrics['spread_error']:.4f}\n")
+            f.write(f"predicted_sources: {node_set}\n")
+            f.write(f"true_sources:      {true_source_indices}\n")
+
+    elif args.task == "IM":
         print("\n[eval] Running diffusion evaluation (10 MC runs)...")
         spread = diffusion_evaluation(
             adj, node_set, diffusion=args.diffusion_model, n_runs=10
@@ -479,7 +565,7 @@ def main():
             f.write(f"seed_num:       {node_budget}\n")
             f.write(f"spread:         {spread:.2f}\n")
             f.write(f"seed_set:       {node_set}\n")
-    else:
+    elif args.task == "CND":
         print("\n[eval] Running connectivity evaluation...")
         metrics = connectivity_evaluation(adj, node_set)
         print(

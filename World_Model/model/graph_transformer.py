@@ -115,7 +115,7 @@ class GraphTransformerLayer(nn.Module):
         edge_index: (2, E) long — [src, dst]
         returns: (N, d_model)
         """
-        N = x.size(0)
+        N = x.shape[0]
 
         # Extract source and destination node indices
         # src[i] → dst[i] is the ith edge
@@ -240,7 +240,7 @@ class GraphTransformerForwardModel(nn.Module):
         adj: sparse COO (N, N) or dense (N, N)
         returns: (N, 1) influence probabilities in [0, 1]
         """
-        N = seed_vec.size(0)  # N = number of nodes
+        N = seed_vec.shape[0]  # N = number of nodes
         device = seed_vec.device
 
         # Build edge_index from adj

@@ -196,7 +196,7 @@ def save_samples(
     cascade_offsets = np.array(cascade_offsets, dtype=np.int64)
     cascade_lengths = np.array(cascade_lengths, dtype=np.int32)
 
-    out_path = out_dir / f"samples_{model.lower()}.npz"
+    out_path = out_dir / f"samples_im_{model.lower()}.npz"
     np.savez_compressed(
         out_path,
         seed_sets=seed_sets,
@@ -227,7 +227,7 @@ def load_samples(data_dir: Path, model: str = "IC"):
     spread_stds: (S,) float32
     cascades: list of (T_i, N) bool arrays — one per sample
     """
-    d = np.load(data_dir / f"samples_{model.lower()}.npz")
+    d = np.load(data_dir / f"samples_im_{model.lower()}.npz")
     N = int(d["n_nodes"][0])
     cascade_data = d["cascade_data"]
     cascade_offsets = d["cascade_offsets"]
