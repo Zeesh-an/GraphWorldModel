@@ -58,8 +58,8 @@ def load_twitter(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
     N: int -- number of nodes
     """
     # Parse space-separated directed edge list
-    raw_src: list[int] = []
-    raw_dst: list[int] = []
+    raw_src = []
+    raw_dst = []
 
     with open(path) as f:
         for line in f:
@@ -72,12 +72,12 @@ def load_twitter(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
 
     # Collect unique node IDs and remap to contiguous 0..N-1
     all_ids = sorted(set(raw_src) | set(raw_dst))
-    id_to_idx: dict[int, int] = {nid: idx for idx, nid in enumerate(all_ids)}
+    id_to_idx = {nid: idx for idx, nid in enumerate(all_ids)}
     N = len(id_to_idx)
 
     # Build symmetric (undirected) edge arrays
-    src_list: list[int] = []
-    dst_list: list[int] = []
+    src_list = []
+    dst_list = []
 
     for a, b in zip(raw_src, raw_dst):
         ia, ib = id_to_idx[a], id_to_idx[b]

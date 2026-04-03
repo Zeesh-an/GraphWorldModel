@@ -119,7 +119,7 @@ def generate_samples(
             eta = elapsed / (i + 1) * (n_samples - i - 1)
 
             print(
-                f"  [{model}] sample {i+1}/{n_samples} | "
+                f"  [IM-{model}] sample {i+1}/{n_samples} | "
                 f"elapsed={elapsed:.0f}s | ETA={eta:.0f}s"
             )
 
@@ -227,11 +227,11 @@ def load_samples(data_dir: Path, model: str = "IC"):
     spread_stds: (S,) float32
     cascades: list of (T_i, N) bool arrays — one per sample
     """
-    d = np.load(data_dir / f"samples_im_{model.lower()}.npz")
-    N = int(d["n_nodes"][0])
-    cascade_data = d["cascade_data"]
-    cascade_offsets = d["cascade_offsets"]
-    cascade_lengths = d["cascade_lengths"]
+    data = np.load(data_dir / f"samples_im_{model.lower()}.npz")
+    N = int(data["n_nodes"][0])
+    cascade_data = data["cascade_data"]
+    cascade_offsets = data["cascade_offsets"]
+    cascade_lengths = data["cascade_lengths"]
 
     cascades = []
     for i, T in enumerate(cascade_lengths):
@@ -240,7 +240,7 @@ def load_samples(data_dir: Path, model: str = "IC"):
         mat = cascade_data[start:end].reshape(T, N)
         cascades.append(mat)
 
-    return d["seed_sets"], d["spreads"], d["spread_stds"], cascades
+    return data["seed_sets"], data["spreads"], data["spread_stds"], cascades
 
 
 def print_dataset_stats(seed_sets, spreads, spread_stds, cascades, model):
@@ -284,7 +284,7 @@ def load_dataset(dataset: str) -> tuple:
         raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
 
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate IM data")
     p.add_argument(
         "-d",

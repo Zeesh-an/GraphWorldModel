@@ -411,16 +411,16 @@ def main():
         # For Source Localization (SL), use the first test sample as the target
         test_sample = test_set[0]  # (N, 2)
 
-        sl_true_sources = test_sample[
-            :, 0
-        ].numpy()  # (N,) binary ground truth seed vector
-        sl_observed_snapshot = test_sample[
-            :, 1
-        ].numpy()  # (N,) binary observation snapshot
-        sl_obs_tensor = test_sample[:, 1].float().unsqueeze(0).to(device)  # (1, N)
+        # Binary groud-truth seed nodes vector
+        sl_true_sources = test_sample[:, 0].numpy()  # (N,)
+
+        # Binary observation snapshot of nodes
+        sl_observed_snapshot = test_sample[:, 1].numpy()  # (N,)
+
+        # Source Localization Optimization Target
+        y_target = test_sample[:, 1].float().unsqueeze(dim=0).to(device)  # (1, N)
 
         node_budget = int(sl_true_sources.sum())
-        y_target = sl_obs_tensor  # (1, N)
 
         print(
             f"[phase2] SL query — observed spread = {int(sl_observed_snapshot.sum())}"

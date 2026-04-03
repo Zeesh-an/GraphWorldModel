@@ -184,39 +184,15 @@ def load_samples(
     largest_cc_sizes: (S,) int32
     pairwise_conn: (S,) int64
     """
-    d = np.load(data_dir / "samples_cnd.npz")
+    data = np.load(data_dir / "samples_cnd.npz")
 
     return (
-        d["removal_sets"],
-        d["connectivity_vecs"],
-        d["n_components"],
-        d["largest_cc_sizes"],
-        d["pairwise_conn"],
+        data["removal_sets"],
+        data["connectivity_vecs"],
+        data["n_components"],
+        data["largest_cc_sizes"],
+        data["pairwise_conn"],
     )
-
-
-def load_dataset(dataset: str) -> tuple:
-    """
-    Download and load the specified dataset.
-
-    Returns
-    -------
-    adj: scipy.sparse.csr_matrix (N, N)
-    node_feats: np.ndarray (N, F) float32
-    node_labels: np.ndarray (N,) int32
-    N: int
-    """
-    if dataset == "cora_ml":
-        raw_path = download_cora_ml()
-        return load_cora_ml(raw_path)
-    elif dataset == "digg":
-        raw_path = download_digg()
-        return load_digg(raw_path)
-    elif dataset == "twitter":
-        raw_path = download_twitter()
-        return load_twitter(raw_path)
-    else:
-        raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
 
 
 def print_dataset_stats(
@@ -255,6 +231,30 @@ def print_dataset_stats(
     )
     print(f"                      range [{pairwise_conn.min()}, {pairwise_conn.max()}]")
     print(f"  Avg largest CC %  : {avg_conn_density*100:.1f}% of remaining nodes")
+
+
+def load_dataset(dataset: str) -> tuple:
+    """
+    Download and load the specified dataset.
+
+    Returns
+    -------
+    adj: scipy.sparse.csr_matrix (N, N)
+    node_feats: np.ndarray (N, F) float32
+    node_labels: np.ndarray (N,) int32
+    N: int
+    """
+    if dataset == "cora_ml":
+        raw_path = download_cora_ml()
+        return load_cora_ml(raw_path)
+    elif dataset == "digg":
+        raw_path = download_digg()
+        return load_digg(raw_path)
+    elif dataset == "twitter":
+        raw_path = download_twitter()
+        return load_twitter(raw_path)
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
 
 
 def parse_args() -> argparse.Namespace:

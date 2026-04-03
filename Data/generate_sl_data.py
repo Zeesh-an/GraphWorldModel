@@ -61,13 +61,15 @@ def build_graph(adj: sp.csr_matrix):
     """
     Convert the sparse adjacency matrix to COO edge_index and compute edge probabilities.
 
-    IC probability p(u -> v) = 1 / in_degree(v)
-    LT weight w(u -> v) = 1 / in_degree(v)
+    Independent Cascade (IC) probability p(u → v) = 1 / in_degree(v) (weighted cascade model)
+    Linear Threshold (LT) weight w(u → v) = 1 / in_degree(v) (same, but semantics differ)
     """
     edge_index, ic_probs, lt_weights = build_edge_index(adj)
     src, dst = edge_index[0], edge_index[1]
     N = adj.shape[0]
 
+    # Build adjacency lists for fast simulation
+    # adj_list[v] = list of (neighbor_u, prob_u_v) incoming edges
     out_adj, in_adj = build_adjacency_lists(src, dst, ic_probs, lt_weights)
 
     print(f"[✓] Graph built: {N} nodes, {len(src)} edges")
@@ -109,13 +111,13 @@ def generate_samples(
     np.random.seed(rng_seed)
     nodes = np.arange(N, dtype=np.int32)
 
-    sim_fn = simulate_IC if model == "IC" else simulate_LT
-
     seed_sets_list = []
     snapshots_list = []
     observe_times_list = []
     cascade_lengths_list = []
     spreads_list = []
+
+    sim_fn = simulate_IC if model == "IC" else simulate_LT
 
     time_0 = time.time()
     for i in range(n_samples):
@@ -137,8 +139,8 @@ def generate_samples(
         # trace is a list of sets: trace[0] = seeds, trace[1] = first wave, ...
         T = len(trace)
 
-        # Pick a random observation time — at least t=1 so we see propagation beyond seeds
-        # If cascade didn't propagate (T=1, only seeds), observe at t=1 (just the seeds)
+        # Pick a random observation time — at least t = 1 so we see propagation beyond seeds
+        # If the cascade didn't propagate (T = 1, only seeds), observe at t = 1 (just the seeds)
         min_t = min(2, T)
         observe_t = np.random.randint(min_t, T + 1)
 
@@ -212,14 +214,14 @@ def load_samples(
     cascade_lengths: (S,) int32
     spreads: (S,) int32
     """
-    d = np.load(data_dir / f"samples_sl_{model.lower()}.npz")
+    data = np.load(data_dir / f"samples_sl_{model.lower()}.npz")
 
     return (
-        d["seed_sets"],
-        d["snapshots"],
-        d["observe_times"],
-        d["cascade_lengths"],
-        d["spreads"],
+        data["seed_sets"],
+        data["snapshots"],
+        data["observe_times"],
+        data["cascade_lengths"],
+        data["spreads"],
     )
 
 

@@ -58,7 +58,7 @@ def load_digg(data_path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, i
     N: int -- number of core nodes
     """
     # Load core node IDs
-    core_ids: list[int] = []
+    core_ids = []
     with open(data_path / "nodes.csv") as f:
         for line in f:
             line = line.strip()
@@ -72,8 +72,8 @@ def load_digg(data_path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, i
     N = len(id_to_idx)
 
     # Load edges, keep only those between core nodes
-    src_list: list[int] = []
-    dst_list: list[int] = []
+    src_list = []
+    dst_list = []
     n_dropped = 0
 
     with open(data_path / "edges.csv") as f:
