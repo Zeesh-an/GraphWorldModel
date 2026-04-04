@@ -35,7 +35,7 @@ Training tensor (built by loader): shape (S, N, 2)
 
 Usage
 -----
-    python Data/generate_sl_data.py -d cora_ml --samples 1000 --k 10
+    python generate_sl_data.py [--dataset cora_ml] [--samples 1000] [--k 10] [--mc-runs 100]
 
 Then train with:
     python World_Model/train.py --task SL -d cora_ml -dm IC --npz-dir Data/cora_ml
@@ -51,10 +51,22 @@ from pathlib import Path
 from datasets.cora_ml import download_cora_ml, load_cora_ml
 from datasets.digg import download_digg, load_digg
 from datasets.twitter import download_twitter, load_twitter
+from datasets.jazz import download_jazz, load_jazz
+from datasets.netscience import download_netscience, load_netscience
+from datasets.power_grid import download_power_grid, load_power_grid
+from datasets.nethept import download_nethept, load_nethept
 from graph_utils import build_edge_index, build_adjacency_lists, save_graph
 from diffusion import simulate_IC, simulate_LT
 
-DATASET_CHOICES = ["cora_ml", "digg", "twitter"]
+DATASET_CHOICES = [
+    "cora_ml",
+    "digg",
+    "twitter",
+    "jazz",
+    "netscience",
+    "power_grid",
+    "nethept",
+]
 
 
 def build_graph(adj: sp.csr_matrix):
@@ -265,17 +277,22 @@ def load_dataset(dataset: str) -> tuple:
     node_labels: np.ndarray (N,) int32
     N: int
     """
-    if dataset == "cora_ml":
-        raw_path = download_cora_ml()
-        return load_cora_ml(raw_path)
-    elif dataset == "digg":
-        raw_path = download_digg()
-        return load_digg(raw_path)
-    elif dataset == "twitter":
-        raw_path = download_twitter()
-        return load_twitter(raw_path)
-    else:
+    loaders = {
+        "cora_ml": (download_cora_ml, load_cora_ml),
+        "digg": (download_digg, load_digg),
+        "twitter": (download_twitter, load_twitter),
+        "jazz": (download_jazz, load_jazz),
+        "netscience": (download_netscience, load_netscience),
+        "power_grid": (download_power_grid, load_power_grid),
+        "nethept": (download_nethept, load_nethept),
+    }
+
+    if dataset not in loaders:
         raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
+
+    download_fn, load_fn = loaders[dataset]
+    raw_path = download_fn()
+    return load_fn(raw_path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -351,7 +368,6 @@ def main() -> None:
         "max_steps": args.max_steps,
         "models": args.models,
         "seed": args.seed,
-        "observation": "partial_snapshot_at_random_time_t",
     }
 
     for model in args.models:

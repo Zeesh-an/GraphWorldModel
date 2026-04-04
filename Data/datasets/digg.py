@@ -6,7 +6,10 @@ Downloads and loads the Digg social network.
 
 Source: https://datasets.syr.edu/datasets/Digg.html
     - 116,893 core users, ~2.6M friendship edges (undirected)
+    - Undirected: mutual friendships
     - Edges to users outside the core set are dropped
+    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No node labels
 """
 
 import csv

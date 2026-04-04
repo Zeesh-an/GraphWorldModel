@@ -3,6 +3,15 @@ Cora-ML Dataset Loader
 ======================
 
 Downloads and loads the Cora-ML citation network.
+
+Source: https://github.com/abojchevski/graph2gauss
+    - 2,995 nodes (scientific papers), 8,416 directed edges (citations)
+    - Directed: edge (a, b) means paper a cites paper b
+    - Node features: 2,879-dim bag-of-words vectors
+    - Node labels: 7 topic classes
+
+Original paper: A. McCallum et al., "Automating the Construction of
+    Internet Portals with Machine Learning," Information Retrieval (2000)
 """
 
 import urllib.request
