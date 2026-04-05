@@ -97,7 +97,7 @@ def load_npz(graph_data_path: Path, samples_data_path: Path):
     return samples, N, adj
 
 
-def load_npz_im(data_dir: Path, diffusion_model: str = "IC"):
+def load_npz_im(data_dir: Path, diffusion_model: str = "IC", k: int = 10):
     """
     Load graph and Influence Maximization (IM) samples from generated .npz files.
 
@@ -110,7 +110,7 @@ def load_npz_im(data_dir: Path, diffusion_model: str = "IC"):
     """
     samples, N, adj = load_npz(
         graph_data_path=data_dir / "graph_data.npz",
-        samples_data_path=data_dir / f"samples_im_{diffusion_model.lower()}.npz",
+        samples_data_path=data_dir / f"samples_im_{diffusion_model.lower()}_k{k}.npz",
     )
 
     # Build (S, N, 2) inverse_pairs
@@ -143,7 +143,7 @@ def load_npz_im(data_dir: Path, diffusion_model: str = "IC"):
     return adj, inverse_pairs
 
 
-def load_npz_cnd(data_dir: Path):
+def load_npz_cnd(data_dir: Path, k: int = 10):
     """
     Load graph and Critical Node Detection (CND) samples from generated .npz files.
 
@@ -156,7 +156,7 @@ def load_npz_cnd(data_dir: Path):
     """
     samples, N, adj = load_npz(
         graph_data_path=data_dir / "graph_data.npz",
-        samples_data_path=data_dir / "samples_cnd.npz",
+        samples_data_path=data_dir / f"samples_cnd_k{k}.npz",
     )
 
     removal_sets = samples["removal_sets"]  # (S, k)
@@ -175,7 +175,7 @@ def load_npz_cnd(data_dir: Path):
     return adj, inverse_pairs
 
 
-def load_npz_sl(data_dir: Path, diffusion_model: str = "IC"):
+def load_npz_sl(data_dir: Path, diffusion_model: str = "IC", k: int = 10):
     """
     Load graph and Source Localization (SL) samples from generated .npz files.
 
@@ -192,7 +192,7 @@ def load_npz_sl(data_dir: Path, diffusion_model: str = "IC"):
     """
     samples, N, adj = load_npz(
         graph_data_path=data_dir / "graph_data.npz",
-        samples_data_path=data_dir / f"samples_sl_{diffusion_model.lower()}.npz",
+        samples_data_path=data_dir / f"samples_sl_{diffusion_model.lower()}_k{k}.npz",
     )
 
     seed_sets = samples["seed_sets"]  # (S, k)
@@ -235,6 +235,7 @@ def load_data(
     dataset: str = "cora_ml",
     diffusion_model: str = "IC",
     seed_rate: int = 1,
+    k: int = 10,
     task: str = "IM",
     npz_dir: Path = None,
     sg_dir: Path = None,
@@ -245,18 +246,20 @@ def load_data(
 
     Parameters
     ----------
-    task: "IM" or "CND" — selects which samples file to load
+    task: "IM", "CND", or "SL" — selects which samples file to load
+    k: seed/removal/source set size — used in the filename (e.g. samples_im_ic_k10.npz)
 
     Returns: adj (scipy sparse), inverse_pairs (S, N, 2) torch float
     """
     if task == "IM":
+        im_file = f"samples_im_{diffusion_model.lower()}_k{k}.npz"
         if (
             npz_dir is not None
             and (npz_dir / "graph_data.npz").exists()
-            and (npz_dir / f"samples_im_{diffusion_model.lower()}.npz").exists()
+            and (npz_dir / im_file).exists()
         ):
-            print(f"[data] Loading IM from npz: {npz_dir}")
-            return load_npz_im(npz_dir, diffusion_model)
+            print(f"[data] Loading IM from npz: {npz_dir}/{im_file}")
+            return load_npz_im(npz_dir, diffusion_model, k)
 
         if sg_dir is not None:
             sg_name = f"{dataset}_mean_{diffusion_model.lower()}{10 * seed_rate}.SG"
@@ -266,34 +269,38 @@ def load_data(
                 return load_sg(sg_path)
 
         raise FileNotFoundError(
-            f"No IM data found. Run generate_im_data.py first, then provide npz_dir containing graph_data.npz and samples_im_{diffusion_model.lower()}.npz or sg_dir (with {dataset}_mean_{diffusion_model.lower()}*.SG)"
+            f"No IM data found. Run generate_im_data.py first. "
+            f"Expected: {npz_dir}/{im_file}"
         )
 
     if task == "CND":
+        cnd_file = f"samples_cnd_k{k}.npz"
         if (
             npz_dir is not None
             and (npz_dir / "graph_data.npz").exists()
-            and (npz_dir / "samples_cnd.npz").exists()
+            and (npz_dir / cnd_file).exists()
         ):
-            print(f"[data] Loading CND from npz: {npz_dir}")
-            return load_npz_cnd(npz_dir)
+            print(f"[data] Loading CND from npz: {npz_dir}/{cnd_file}")
+            return load_npz_cnd(npz_dir, k)
 
         raise FileNotFoundError(
-            f"No CND data found. Run generate_cnd_data.py first, then provide npz_dir containing graph_data.npz and samples_cnd.npz"
+            f"No CND data found. Run generate_cnd_data.py first. "
+            f"Expected: {npz_dir}/{cnd_file}"
         )
 
     if task == "SL":
-        sl_file = f"samples_sl_{diffusion_model.lower()}.npz"
+        sl_file = f"samples_sl_{diffusion_model.lower()}_k{k}.npz"
         if (
             npz_dir is not None
             and (npz_dir / "graph_data.npz").exists()
             and (npz_dir / sl_file).exists()
         ):
-            print(f"[data] Loading SL from npz: {npz_dir}")
-            return load_npz_sl(npz_dir, diffusion_model)
+            print(f"[data] Loading SL from npz: {npz_dir}/{sl_file}")
+            return load_npz_sl(npz_dir, diffusion_model, k)
 
         raise FileNotFoundError(
-            f"No SL data found. Run generate_sl_data.py first, then provide npz_dir containing graph_data.npz and {sl_file}"
+            f"No SL data found. Run generate_sl_data.py first. "
+            f"Expected: {npz_dir}/{sl_file}"
         )
 
 

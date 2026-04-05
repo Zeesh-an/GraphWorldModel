@@ -15,7 +15,7 @@ Inverse problem:
 
 What this produces
 ------------------
-    - samples_cnd.npz: (removal_sets, connectivity_vecs, damage metrics)
+    - samples_cnd_k{k}.npz: (removal_sets, connectivity_vecs, damage metrics)
     - graph_data.npz: adjacency, node features (degree-based)
     - metadata_cnd.json: graph stats and generation config
 
@@ -28,7 +28,7 @@ graph_data.npz:
     ic_probs: (E,) float32 -- IC propagation prob = 1/in_degree(v)
     lt_weights: (E,) float32 -- LT edge weights (same as ic_probs)
 
-samples_cnd.npz:
+samples_cnd_k{k}.npz:
     removal_sets: (S, k) int32 -- S samples, each removing k nodes
     connectivity_vecs: (S, N) float32 -- 1.0 if node is in largest CC after removal
     n_components: (S,) int32 -- number of connected components after removal
@@ -42,11 +42,28 @@ Training tensor (built by loader): shape (S, N, 2)
 
 Usage
 -----
-    python Data/generate_cnd_data.py [--samples 1000] [--k 10]
+    python Data/generate_cnd_data.py --dataset cora_ml --samples 1000 --k 10
 
-Then load with:
-    from generate_cnd_data import load_samples
-    removal_sets, conn_vecs, n_comp, lcc, pw = load_samples(Path('Data/digg'))
+    (k = 10, 20, 50)
+    python generate_cnd_data.py --dataset cora_ml --samples 1000 --k 10
+
+    (k = 50, 100)
+    python generate_cnd_data.py --dataset digg --samples 5000 --k 50
+
+    (k = 50, 100)
+    python generate_cnd_data.py --dataset twitter --samples 5000 --k 50
+
+    (k = 5, 10, 15)
+    python generate_cnd_data.py --dataset jazz --samples 500 --k 5
+
+    (k = 10, 20, 30)
+    python generate_cnd_data.py --dataset netscience --samples 1000 --k 10
+
+    (k = 10, 20, 50)
+    python generate_cnd_data.py --dataset power_grid --samples 1000 --k 10
+
+    (k = 20, 50)
+    python generate_cnd_data.py --dataset nethept --samples 5000 --k 20
 """
 
 import json
@@ -59,10 +76,22 @@ from pathlib import Path
 from datasets.cora_ml import download_cora_ml, load_cora_ml
 from datasets.digg import download_digg, load_digg
 from datasets.twitter import download_twitter, load_twitter
+from datasets.jazz import download_jazz, load_jazz
+from datasets.netscience import download_netscience, load_netscience
+from datasets.power_grid import download_power_grid, load_power_grid
+from datasets.nethept import download_nethept, load_nethept
 from graph_utils import build_edge_index, save_graph
 from connectivity import simulate_removal
 
-DATASET_CHOICES = ["cora_ml", "digg", "twitter"]
+DATASET_CHOICES = [
+    "cora_ml",
+    "digg",
+    "twitter",
+    "jazz",
+    "netscience",
+    "power_grid",
+    "nethept",
+]
 
 
 def generate_samples(
@@ -151,7 +180,8 @@ def save_samples(
 ) -> Path:
     """Save CND samples to npz."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "samples_cnd.npz"
+    k = removal_sets.shape[1]
+    out_path = out_dir / f"samples_cnd_k{k}.npz"
     np.savez_compressed(
         out_path,
         removal_sets=removal_sets,
@@ -172,6 +202,7 @@ def save_samples(
 
 def load_samples(
     data_dir: Path,
+    k: int = 10,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load CND samples from npz.
@@ -184,7 +215,7 @@ def load_samples(
     largest_cc_sizes: (S,) int32
     pairwise_conn: (S,) int64
     """
-    data = np.load(data_dir / "samples_cnd.npz")
+    data = np.load(data_dir / f"samples_cnd_k{k}.npz")
 
     return (
         data["removal_sets"],
@@ -244,17 +275,22 @@ def load_dataset(dataset: str) -> tuple:
     node_labels: np.ndarray (N,) int32
     N: int
     """
-    if dataset == "cora_ml":
-        raw_path = download_cora_ml()
-        return load_cora_ml(raw_path)
-    elif dataset == "digg":
-        raw_path = download_digg()
-        return load_digg(raw_path)
-    elif dataset == "twitter":
-        raw_path = download_twitter()
-        return load_twitter(raw_path)
-    else:
+    loaders = {
+        "cora_ml": (download_cora_ml, load_cora_ml),
+        "digg": (download_digg, load_digg),
+        "twitter": (download_twitter, load_twitter),
+        "jazz": (download_jazz, load_jazz),
+        "netscience": (download_netscience, load_netscience),
+        "power_grid": (download_power_grid, load_power_grid),
+        "nethept": (download_nethept, load_nethept),
+    }
+
+    if dataset not in loaders:
         raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
+
+    download_fn, load_fn = loaders[dataset]
+    raw_path = download_fn()
+    return load_fn(raw_path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -312,12 +348,24 @@ def main() -> None:
 
     # Build NetworkX graph for connectivity computation
     print("[→] Building NetworkX graph ...")
+
+    # Converts every directed edge (u → v)into an undirected one (u - v)
     G = nx.from_scipy_sparse_array(adj)
     print(
         f"[✓] NetworkX graph: {G.number_of_nodes()} nodes, {G.number_of_edges()} edges"
     )
 
     # Generate CND samples
+    metadata = {
+        "task": "CND",
+        "dataset": args.dataset,
+        "n_nodes": N,
+        "n_edges": adj.nnz,
+        "k": args.k,
+        "n_samples": args.samples,
+        "seed": args.seed,
+    }
+
     print(f"\n[→] Generating {args.samples} CND samples (k={args.k}) ...")
 
     removal_sets, connectivity_vecs, n_components, largest_cc_sizes, pairwise_conn = (
@@ -349,18 +397,10 @@ def main() -> None:
         dataset=args.dataset,
     )
 
-    # Save metadata
-    n_edges_undirected = adj.nnz // 2
-    metadata = {
-        "task": "CND",
-        "dataset": args.dataset,
-        "n_nodes": N,
-        "n_edges_undirected": n_edges_undirected,
-        "k": args.k,
-        "n_samples": args.samples,
-        "seed": args.seed,
-    }
+    metadata[f"n_components_mean"] = float(n_components.mean())
+    metadata[f"largest_cc_sizes_mean"] = float(largest_cc_sizes.mean())
 
+    # Save metadata
     meta_path = out_dir / "metadata_cnd.json"
     with open(meta_path, "w") as f:
         json.dump(metadata, f, indent=2)

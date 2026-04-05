@@ -7,7 +7,10 @@ Downloads and loads the SNAP ego-Twitter social network.
 Source: https://snap.stanford.edu/data/ego-Twitter.html
     - 81,306 nodes, 1,768,149 directed edges (follow graph)
     - Union of 973 ego networks
-    - Directed: edge (a, b) means a follows b
+    - Originally directed: edge (a, b) means a follows b
+    - Symmetrized to undirected during loading
+    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No node labels
 """
 
 import gzip

@@ -96,6 +96,12 @@ def parse_args():
         help="Seed rate (x 10 = seed set size percentage, IM only)",
     )
     p.add_argument(
+        "--k",
+        default=10,
+        type=int,
+        help="Seed/removal/source set size k — must match the k used during data generation (default: 10)",
+    )
+    p.add_argument(
         "-m",
         "--mode",
         default="normal",
@@ -202,6 +208,7 @@ def main():
         dataset=args.dataset,
         diffusion_model=args.diffusion_model,
         seed_rate=args.seed_rate,
+        k=args.k,
         task=args.task,
         npz_dir=Path(args.npz_dir),
         sg_dir=Path(args.sg_dir),

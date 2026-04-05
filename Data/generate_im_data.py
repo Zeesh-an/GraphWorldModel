@@ -20,7 +20,7 @@ graph_data.npz:
     node_feats: (N, F) float32 — original bag-of-words features
     node_labels: (N,) int32 — class labels (7 classes)
 
-samples_ic.npz / samples_lt.npz:
+samples_im_ic_k{k}.npz / samples_im_lt_k{k}.npz:
     seed_sets: (S, k) int32  — S samples, each with k seed nodes
     spreads: (S,)  float32 — mean spread over R MC runs
     spread_std: (S,)  float32 — std over R MC runs
@@ -30,11 +30,26 @@ samples_ic.npz / samples_lt.npz:
 
 Usage
 -----
-    python generate_im_data.py [--samples 1000] [--k 10] [--mc-runs 100]
+    (k = 10, 20, 50)
+    python generate_im_data.py --dataset cora_ml --samples 1000 --k 10 --mc-runs 1000
 
-Then load with:
-    data = np.load('graph_data.npz')
-    ic = np.load('samples_ic.npz')
+    (k = 50, 100, 200)
+    python generate_im_data.py --dataset digg --samples 5000 --k 50 --mc-runs 1000
+
+    (k = 50, 100, 200)
+    python generate_im_data.py --dataset twitter --samples 5000 --k 50 --mc-runs 1000
+
+    (k = 5, 10, 20)
+    python generate_im_data.py --dataset jazz --samples 500 --k 5 --mc-runs 10000
+
+    (k = 10, 20, 50)
+    python generate_im_data.py --dataset netscience --samples 1000 --k 10 --mc-runs 10000
+
+    (k = 10, 20, 50)
+    python generate_im_data.py --dataset power_grid --samples 1000 --k 10 --mc-runs 10000
+
+    (k = 10, 20, 50, 100)
+    python generate_im_data.py --dataset nethept --samples 5000 --k 10 --mc-runs 10000
 """
 
 import json
@@ -47,10 +62,22 @@ from pathlib import Path
 from datasets.cora_ml import download_cora_ml, load_cora_ml
 from datasets.digg import download_digg, load_digg
 from datasets.twitter import download_twitter, load_twitter
+from datasets.jazz import download_jazz, load_jazz
+from datasets.netscience import download_netscience, load_netscience
+from datasets.power_grid import download_power_grid, load_power_grid
+from datasets.nethept import download_nethept, load_nethept
 from graph_utils import build_edge_index, build_adjacency_lists, save_graph
 from diffusion import simulate_IC, simulate_LT
 
-DATASET_CHOICES = ["cora_ml", "digg", "twitter"]
+DATASET_CHOICES = [
+    "cora_ml",
+    "digg",
+    "twitter",
+    "jazz",
+    "netscience",
+    "power_grid",
+    "nethept",
+]
 
 
 def build_graph(adj: sp.csr_matrix):
@@ -196,7 +223,8 @@ def save_samples(
     cascade_offsets = np.array(cascade_offsets, dtype=np.int64)
     cascade_lengths = np.array(cascade_lengths, dtype=np.int32)
 
-    out_path = out_dir / f"samples_im_{model.lower()}.npz"
+    k = seed_sets.shape[1]
+    out_path = out_dir / f"samples_im_{model.lower()}_k{k}.npz"
     np.savez_compressed(
         out_path,
         seed_sets=seed_sets,
@@ -216,7 +244,7 @@ def save_samples(
     return out_path
 
 
-def load_samples(data_dir: Path, model: str = "IC"):
+def load_samples(data_dir: Path, model: str = "IC", k: int = 10):
     """
     Load IM samples from npz and reconstruct cascade traces.
 
@@ -227,7 +255,7 @@ def load_samples(data_dir: Path, model: str = "IC"):
     spread_stds: (S,) float32
     cascades: list of (T_i, N) bool arrays — one per sample
     """
-    data = np.load(data_dir / f"samples_im_{model.lower()}.npz")
+    data = np.load(data_dir / f"samples_im_{model.lower()}_k{k}.npz")
     N = int(data["n_nodes"][0])
     cascade_data = data["cascade_data"]
     cascade_offsets = data["cascade_offsets"]
@@ -271,17 +299,22 @@ def load_dataset(dataset: str) -> tuple:
     node_labels: np.ndarray (N,) int32
     N: int
     """
-    if dataset == "cora_ml":
-        raw_path = download_cora_ml()
-        return load_cora_ml(raw_path)
-    elif dataset == "digg":
-        raw_path = download_digg()
-        return load_digg(raw_path)
-    elif dataset == "twitter":
-        raw_path = download_twitter()
-        return load_twitter(raw_path)
-    else:
+    loaders = {
+        "cora_ml": (download_cora_ml, load_cora_ml),
+        "digg": (download_digg, load_digg),
+        "twitter": (download_twitter, load_twitter),
+        "jazz": (download_jazz, load_jazz),
+        "netscience": (download_netscience, load_netscience),
+        "power_grid": (download_power_grid, load_power_grid),
+        "nethept": (download_nethept, load_nethept),
+    }
+
+    if dataset not in loaders:
         raise ValueError(f"Unknown dataset: {dataset}. Choose from {DATASET_CHOICES}")
+
+    download_fn, load_fn = loaders[dataset]
+    raw_path = download_fn()
+    return load_fn(raw_path)
 
 
 def parse_args() -> argparse.Namespace:
