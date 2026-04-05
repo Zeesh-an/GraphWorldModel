@@ -67,7 +67,7 @@ Usage
 """
 
 import json
-import time
+from tqdm.auto import tqdm
 import argparse
 import numpy as np
 import networkx as nx
@@ -134,17 +134,7 @@ def generate_samples(
         f"largest CC={baseline_largest}, pairwise={baseline_pairwise}"
     )
 
-    time_0 = time.time()
-    for i in range(n_samples):
-        if (i + 1) % 10 == 0:
-            elapsed = time.time() - time_0
-            eta = elapsed / (i + 1) * (n_samples - i - 1)
-
-            print(
-                f"  [CND] sample {i+1}/{n_samples} | "
-                f"elapsed={elapsed:.0f}s | ETA={eta:.0f}s"
-            )
-
+    for i in tqdm(range(n_samples), desc=f"CND samples (k={k})"):
         removal = sorted(np.random.choice(nodes, size=k, replace=False).tolist())
         conn_vec, n_comp, lcc_size, pw_conn = simulate_removal(removal, G, N)
 

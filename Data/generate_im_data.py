@@ -53,7 +53,7 @@ Usage
 """
 
 import json
-import time
+from tqdm.auto import tqdm
 import argparse
 import numpy as np
 import scipy.sparse as sp
@@ -139,17 +139,7 @@ def generate_samples(
 
     sim_fn = simulate_IC if model == "IC" else simulate_LT
 
-    time_0 = time.time()
-    for i in range(n_samples):
-        if (i + 1) % 100 == 0:
-            elapsed = time.time() - time_0
-            eta = elapsed / (i + 1) * (n_samples - i - 1)
-
-            print(
-                f"  [IM-{model}] sample {i+1}/{n_samples} | "
-                f"elapsed={elapsed:.0f}s | ETA={eta:.0f}s"
-            )
-
+    for i in tqdm(range(n_samples), desc=f"IM-{model} samples (k={k})"):
         # Sample k random nodes as the seed set
         seed = sorted(np.random.choice(nodes, size=k, replace=False).tolist())
 
@@ -162,7 +152,7 @@ def generate_samples(
 
         # Run mc_runs Monte Carlo simulations for spread estimate
         for run in range(mc_runs):
-            trace, spread = sim_fn(seed, **kwargs)
+            trace, spread = sim_fn(seed, **kwargs, max_steps=max_steps)
             spread_vals.append(spread)
 
             if run == 0:

@@ -30,7 +30,7 @@ Usage
 
 import argparse
 import sys
-import time
+from tqdm.auto import tqdm
 from pathlib import Path
 
 import numpy as np
@@ -141,7 +141,7 @@ def parse_args():
     )
     p.add_argument(
         "--ckpt-dir",
-        default=str(ROOT / "World_model" / "checkpoints"),
+        default=str(ROOT / "World_Model" / "checkpoints"),
         help="Directory to save checkpoints",
     )
 
@@ -281,9 +281,11 @@ def main():
     forward_model.train()
     best_loss = float("inf")
 
-    for epoch in range(1, args.epochs + 1):
-        t0 = time.time()
+    epoch_progress_bar = tqdm(
+        range(1, args.epochs + 1), desc=f"Phase 1 — {args.task} training"
+    )
 
+    for epoch in epoch_progress_bar:
         total_loss_ep = 0.0
         forward_loss_ep = 0.0
         recon_loss_ep = 0.0
@@ -347,17 +349,14 @@ def main():
 
             n_seen += B
 
-        elapsed = time.time() - t0
         avg = lambda v: v / max(n_seen, 1)
 
-        print(
-            f"Epoch {epoch:>4d}/{args.epochs}"
-            f"  Total={avg(total_loss_ep):.4f}"
-            f"  Recon={avg(recon_loss_ep):.4f}"
-            f"  Fwd={avg(forward_loss_ep):.4f}"
-            f"  Prec={avg(precision_re_ep):.4f}"
-            f"  Rec={avg(recall_re_ep):.4f}"
-            f"  t={elapsed:.2f}s"
+        epoch_progress_bar.set_postfix(
+            loss=f"{avg(total_loss_ep):.4f}",
+            recon=f"{avg(recon_loss_ep):.4f}",
+            fwd=f"{avg(forward_loss_ep):.4f}",
+            prec=f"{avg(precision_re_ep):.4f}",
+            rec=f"{avg(recall_re_ep):.4f}",
         )
 
         # Checkpoint the best model
@@ -458,7 +457,12 @@ def main():
 
     # Optimization iterations for inverse graph optimization of latent optimal seed node vector z_hat
     # The smooth and continuous latent vector z_hat is optimized rather than directly optimizing the binary, sparse seed node vector because optimization works better on the smooth vector
-    for i in range(1, args.opt_iters + 1):
+    metric_labels = {"SL": "PredMatch", "IM": "PredSpread", "CND": "PredConn"}
+    optimization_progress_bar = tqdm(
+        range(1, args.opt_iters + 1), desc=f"Phase 2 — {args.task} latent optimization"
+    )
+
+    for i in optimization_progress_bar:
         # Decode the current z_hat through VAE decoder
         x_hat = vae_model.decoder(z_hat)  # (1, N)
 
@@ -476,20 +480,11 @@ def main():
         loss.backward()
         z_optimizer.step()
 
-        if i % 50 == 0 or i == 1:
-            if args.task == "SL":
-                metric_label = "PredMatch"
-            elif args.task == "IM":
-                metric_label = "PredSpread"
-            elif args.task == "CND":
-                metric_label = "PredConn"
-
-            print(
-                f"  Iter {i:>4d}/{args.opt_iters}"
-                f"  Loss={loss.item():.5f}"
-                f"  L0={L0.item():.5f}"
-                f"  {metric_label}={y_hat.sum().item():.1f}"
-            )
+        optimization_progress_bar.set_postfix(
+            loss=f"{loss.item():.5f}",
+            L0=f"{L0.item():.5f}",
+            **{metric_labels[args.task]: f"{y_hat.sum().item():.1f}"},
+        )
 
     # Extract the final optimal node set for the inverse graph problem
     with torch.no_grad():
