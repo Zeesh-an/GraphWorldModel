@@ -20,7 +20,7 @@ graph_data.npz:
     node_feats: (N, F) float32 — original bag-of-words features
     node_labels: (N,) int32 — class labels (7 classes)
 
-samples_ic.npz / samples_lt.npz:
+samples_im_ic_k{k}.npz / samples_im_lt_k{k}.npz:
     seed_sets: (S, k) int32  — S samples, each with k seed nodes
     spreads: (S,)  float32 — mean spread over R MC runs
     spread_std: (S,)  float32 — std over R MC runs
@@ -30,38 +30,26 @@ samples_ic.npz / samples_lt.npz:
 
 Usage
 -----
-    python generate_im_data.py [--dataset cora_ml] [--samples 1000] [--k 10] [--mc-runs 1000]
-    python generate_im_data.py [--dataset cora_ml] [--samples 1000] [--k 20] [--mc-runs 1000]
-    python generate_im_data.py [--dataset cora_ml] [--samples 1000] [--k 50] [--mc-runs 1000]
+    (k = 10, 20, 50)
+    python generate_im_data.py --dataset cora_ml --samples 1000 --k 10 --mc-runs 1000
 
-    python generate_im_data.py [--dataset digg] [--samples 5000] [--k 50] [--mc-runs 1000]
-    python generate_im_data.py [--dataset digg] [--samples 5000] [--k 100] [--mc-runs 1000]
-    python generate_im_data.py [--dataset digg] [--samples 5000] [--k 200] [--mc-runs 1000]
+    (k = 50, 100, 200)
+    python generate_im_data.py --dataset digg --samples 5000 --k 50 --mc-runs 1000
 
-    python generate_im_data.py [--dataset twitter] [--samples 5000] [--k 50] [--mc-runs 1000]
-    python generate_im_data.py [--dataset twitter] [--samples 5000] [--k 100] [--mc-runs 1000]
-    python generate_im_data.py [--dataset twitter] [--samples 5000] [--k 200] [--mc-runs 1000]
+    (k = 50, 100, 200)
+    python generate_im_data.py --dataset twitter --samples 5000 --k 50 --mc-runs 1000
 
-    python generate_im_data.py [--dataset jazz] [--samples 500] [--k 5] [--mc-runs 10000]
-    python generate_im_data.py [--dataset jazz] [--samples 500] [--k 10] [--mc-runs 10000]
-    python generate_im_data.py [--dataset jazz] [--samples 500] [--k 20] [--mc-runs 10000]
+    (k = 5, 10, 20)
+    python generate_im_data.py --dataset jazz --samples 500 --k 5 --mc-runs 10000
 
-    python generate_im_data.py [--dataset netscience] [--samples 1000] [--k 10] [--mc-runs 10000]
-    python generate_im_data.py [--dataset netscience] [--samples 1000] [--k 20] [--mc-runs 10000]
-    python generate_im_data.py [--dataset netscience] [--samples 1000] [--k 50] [--mc-runs 10000]
+    (k = 10, 20, 50)
+    python generate_im_data.py --dataset netscience --samples 1000 --k 10 --mc-runs 10000
 
-    python generate_im_data.py [--dataset power_grid] [--samples 1000] [--k 10] [--mc-runs 10000]
-    python generate_im_data.py [--dataset power_grid] [--samples 1000] [--k 20] [--mc-runs 10000]
-    python generate_im_data.py [--dataset power_grid] [--samples 1000] [--k 50] [--mc-runs 10000]
+    (k = 10, 20, 50)
+    python generate_im_data.py --dataset power_grid --samples 1000 --k 10 --mc-runs 10000
 
-    python generate_im_data.py [--dataset nethept] [--samples 5000] [--k 10] [--mc-runs 10000]
-    python generate_im_data.py [--dataset nethept] [--samples 5000] [--k 20] [--mc-runs 10000]
-    python generate_im_data.py [--dataset nethept] [--samples 5000] [--k 50] [--mc-runs 10000]
-    python generate_im_data.py [--dataset nethept] [--samples 5000] [--k 100] [--mc-runs 10000]
-
-Then load with:
-    data = np.load('graph_data.npz')
-    ic = np.load('samples_ic.npz')
+    (k = 10, 20, 50, 100)
+    python generate_im_data.py --dataset nethept --samples 5000 --k 10 --mc-runs 10000
 """
 
 import json
@@ -235,7 +223,8 @@ def save_samples(
     cascade_offsets = np.array(cascade_offsets, dtype=np.int64)
     cascade_lengths = np.array(cascade_lengths, dtype=np.int32)
 
-    out_path = out_dir / f"samples_im_{model.lower()}.npz"
+    k = seed_sets.shape[1]
+    out_path = out_dir / f"samples_im_{model.lower()}_k{k}.npz"
     np.savez_compressed(
         out_path,
         seed_sets=seed_sets,
@@ -255,7 +244,7 @@ def save_samples(
     return out_path
 
 
-def load_samples(data_dir: Path, model: str = "IC"):
+def load_samples(data_dir: Path, model: str = "IC", k: int = 10):
     """
     Load IM samples from npz and reconstruct cascade traces.
 
@@ -266,7 +255,7 @@ def load_samples(data_dir: Path, model: str = "IC"):
     spread_stds: (S,) float32
     cascades: list of (T_i, N) bool arrays — one per sample
     """
-    data = np.load(data_dir / f"samples_im_{model.lower()}.npz")
+    data = np.load(data_dir / f"samples_im_{model.lower()}_k{k}.npz")
     N = int(data["n_nodes"][0])
     cascade_data = data["cascade_data"]
     cascade_offsets = data["cascade_offsets"]

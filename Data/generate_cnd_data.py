@@ -15,7 +15,7 @@ Inverse problem:
 
 What this produces
 ------------------
-    - samples_cnd.npz: (removal_sets, connectivity_vecs, damage metrics)
+    - samples_cnd_k{k}.npz: (removal_sets, connectivity_vecs, damage metrics)
     - graph_data.npz: adjacency, node features (degree-based)
     - metadata_cnd.json: graph stats and generation config
 
@@ -28,7 +28,7 @@ graph_data.npz:
     ic_probs: (E,) float32 -- IC propagation prob = 1/in_degree(v)
     lt_weights: (E,) float32 -- LT edge weights (same as ic_probs)
 
-samples_cnd.npz:
+samples_cnd_k{k}.npz:
     removal_sets: (S, k) int32 -- S samples, each removing k nodes
     connectivity_vecs: (S, N) float32 -- 1.0 if node is in largest CC after removal
     n_components: (S,) int32 -- number of connected components after removal
@@ -42,11 +42,28 @@ Training tensor (built by loader): shape (S, N, 2)
 
 Usage
 -----
-    python Data/generate_cnd_data.py [--dataset cora_ml] [--samples 1000] [--k 10]
+    python Data/generate_cnd_data.py --dataset cora_ml --samples 1000 --k 10
 
-Then load with:
-    from generate_cnd_data import load_samples
-    removal_sets, conn_vecs, n_comp, lcc, pw = load_samples(Path('Data/digg'))
+    (k = 10, 20, 50)
+    python generate_cnd_data.py --dataset cora_ml --samples 1000 --k 10
+
+    (k = 50, 100)
+    python generate_cnd_data.py --dataset digg --samples 5000 --k 50
+
+    (k = 50, 100)
+    python generate_cnd_data.py --dataset twitter --samples 5000 --k 50
+
+    (k = 5, 10, 15)
+    python generate_cnd_data.py --dataset jazz --samples 500 --k 5
+
+    (k = 10, 20, 30)
+    python generate_cnd_data.py --dataset netscience --samples 1000 --k 10
+
+    (k = 10, 20, 50)
+    python generate_cnd_data.py --dataset power_grid --samples 1000 --k 10
+
+    (k = 20, 50)
+    python generate_cnd_data.py --dataset nethept --samples 5000 --k 20
 """
 
 import json
@@ -163,7 +180,8 @@ def save_samples(
 ) -> Path:
     """Save CND samples to npz."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "samples_cnd.npz"
+    k = removal_sets.shape[1]
+    out_path = out_dir / f"samples_cnd_k{k}.npz"
     np.savez_compressed(
         out_path,
         removal_sets=removal_sets,
@@ -184,6 +202,7 @@ def save_samples(
 
 def load_samples(
     data_dir: Path,
+    k: int = 10,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load CND samples from npz.
@@ -196,7 +215,7 @@ def load_samples(
     largest_cc_sizes: (S,) int32
     pairwise_conn: (S,) int64
     """
-    data = np.load(data_dir / "samples_cnd.npz")
+    data = np.load(data_dir / f"samples_cnd_k{k}.npz")
 
     return (
         data["removal_sets"],

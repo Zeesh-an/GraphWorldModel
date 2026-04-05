@@ -21,7 +21,7 @@ For each diffusion model (IC, LT):
 
 Data format
 -----------
-samples_sl_ic.npz / samples_sl_lt.npz:
+samples_sl_ic_k{k}.npz / samples_sl_lt_k{k}.npz:
     seed_sets: (S, k) int32 — S samples, each with k source nodes (ground truth)
     snapshots: (S, N) float32 — binary partial observation at random time t
     observe_times: (S,) int32 — timestep at which the snapshot was taken
@@ -35,10 +35,26 @@ Training tensor (built by loader): shape (S, N, 2)
 
 Usage
 -----
-    python generate_sl_data.py [--dataset cora_ml] [--samples 1000] [--k 10] [--mc-runs 100]
+    (k = 3, 5, 10)
+    python generate_sl_data.py --dataset cora_ml --samples 1000 --k 3 --mc-runs 1000
 
-Then train with:
-    python World_Model/train.py --task SL -d cora_ml -dm IC --npz-dir Data/cora_ml
+    (k = 1, 5, 10)
+    python generate_sl_data.py --dataset digg --samples 5000 --k 1 --mc-runs 1000
+
+    (k = 1, 5, 10)
+    python generate_sl_data.py --dataset twitter --samples 5000 --k 1 --mc-runs 1000
+
+    (k = 1, 3, 5)
+    python generate_sl_data.py --dataset jazz --samples 500 --k 1 --mc-runs 10000
+
+    (k = 1, 3, 5)
+    python generate_sl_data.py --dataset netscience --samples 1000 --k 1 --mc-runs 10000
+
+    (k = 1, 3, 5, 10)
+    python generate_sl_data.py --dataset power_grid --samples 1000 --k 1 --mc-runs 10000
+
+    (k = 5, 10)
+    python generate_sl_data.py --dataset nethept --samples 5000 --k 5 --mc-runs 10000
 """
 
 import json
@@ -192,7 +208,8 @@ def save_samples(
     """Save SL samples to npz."""
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    out_path = out_dir / f"samples_sl_{model.lower()}.npz"
+    k = seed_sets.shape[1]
+    out_path = out_dir / f"samples_sl_{model.lower()}_k{k}.npz"
     np.savez_compressed(
         out_path,
         seed_sets=seed_sets,
@@ -214,6 +231,7 @@ def save_samples(
 def load_samples(
     data_dir: Path,
     model: str = "IC",
+    k: int = 10,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load SL samples from npz.
@@ -226,7 +244,7 @@ def load_samples(
     cascade_lengths: (S,) int32
     spreads: (S,) int32
     """
-    data = np.load(data_dir / f"samples_sl_{model.lower()}.npz")
+    data = np.load(data_dir / f"samples_sl_{model.lower()}_k{k}.npz")
 
     return (
         data["seed_sets"],
