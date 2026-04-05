@@ -1,6 +1,6 @@
 # Baselines
 
-Reference implementations from prior work, used for comparison against models in `World_model/`.
+Reference implementations from prior work, used for comparison against models in `World_Model/`.
 
 ---
 
@@ -12,6 +12,7 @@ Reference implementations from prior work, used for comparison against models in
 > [paper](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf)
 
 VAE + SpGAT approach for influence maximization. Two-phase training:
+
 1. Joint VAE + GAT forward model training
 2. Latent z optimisation to find seed set
 
@@ -36,6 +37,7 @@ Pre-generated `.SG` pickle files are in `DeepIM/data/`.
 Format: `<dataset>_mean_<diffusion><seed_rate*10>.SG`
 
 Each file contains:
+
 - `adj` — scipy sparse adjacency matrix
 - `inverse_pairs` — `(S, N, 2)` array: `[:,: ,0]` = seed vectors, `[:,:,1]` = influence vectors
 
