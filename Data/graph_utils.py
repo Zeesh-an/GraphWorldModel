@@ -37,7 +37,9 @@ def build_edge_index(
 
     # Independent Cascade (IC): each edge gets probability = 1/in_degree(dst)
     ic_probs = (1.0 / in_deg[dst]).astype(np.float32)
-    ic_probs = np.clip(ic_probs, 0.001, 0.5)  # cap for realism
+
+    # DeepIM does not use clipping
+    # ic_probs = np.clip(ic_probs, 0.001, 0.5)  # cap for realism
 
     # Linear Threshold (LT): weights must sum to ≤ 1 per node (already true with 1/in_deg)
     lt_weights = ic_probs.copy()
