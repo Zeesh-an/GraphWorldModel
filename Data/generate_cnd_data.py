@@ -302,6 +302,12 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Removal set size / budget (default: 10)",
     )
+    p.add_argument(
+        "--k-pct",
+        type=float,
+        default=None,
+        help="Removal set size as percentage of N (e.g., 5 = 5%%). Overrides --k.",
+    )
     p.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     p.add_argument(
         "--out-dir",
@@ -325,6 +331,11 @@ def main() -> None:
 
     # Download and load graph
     adj, node_feats, node_labels, N = load_dataset(args.dataset)
+
+    # Resolve --k-pct to a concrete k
+    if args.k_pct is not None:
+        args.k = max(1, int(N * args.k_pct / 100))
+        print(f"[config] --k-pct={args.k_pct}% of N={N} → k={args.k}")
 
     # Save graph_data.npz
     graph_path = out_dir / "graph_data.npz"

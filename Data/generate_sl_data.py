@@ -321,6 +321,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--k", type=int, default=10, help="Source set size (default: 10)")
     p.add_argument(
+        "--k-pct",
+        type=float,
+        default=None,
+        help="Source set size as percentage of N (e.g., 5 = 5%%). Overrides --k.",
+    )
+    p.add_argument(
         "--models",
         nargs="+",
         default=["IC", "LT"],
@@ -355,6 +361,11 @@ def main() -> None:
 
     # Download and load graph data
     adj, node_feats, node_labels, N = load_dataset(args.dataset)
+
+    # Resolve --k-pct to a concrete k
+    if args.k_pct is not None:
+        args.k = max(1, int(N * args.k_pct / 100))
+        print(f"[config] --k-pct={args.k_pct}% of N={N} → k={args.k}")
 
     # Build propagation structures
     edge_index, ic_probs, lt_weights, out_adj, in_adj, N = build_graph(adj)

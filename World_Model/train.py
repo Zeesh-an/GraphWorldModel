@@ -85,7 +85,7 @@ def parse_args():
         "--diffusion_model",
         default="IC",
         choices=["IC", "LT", "SIS"],
-        help="Diffusion model (IM only)",
+        help="Diffusion model",
     )
     p.add_argument(
         "-sp",
@@ -100,6 +100,13 @@ def parse_args():
         default=10,
         type=int,
         help="Seed/removal/source set size k — must match the k used during data generation (default: 10)",
+    )
+    p.add_argument(
+        "--k-pct",
+        default=None,
+        type=float,
+        help="Seed/removal budget as percentage of N (e.g., 5 = 5%%). Overrides --k for Phase 2 node budget. "
+        "Note: --k is still used for data loading (must match data generation k).",
     )
     p.add_argument(
         "-m",
@@ -215,6 +222,16 @@ def main():
     )
 
     N = inverse_pairs.shape[1]  # Number of nodes
+
+    # Resolve --k-pct → node budget (requires N, so must happen after data load)
+    if args.k_pct is not None:
+        args.node_budget = max(1, int(N * args.k_pct / 100))
+        print(
+            f"[config] --k-pct={args.k_pct}% of N={N} → node budget = {args.node_budget}"
+        )
+    else:
+        args.node_budget = args.k
+
     task_label = f"{args.task}" + (
         f" | {args.diffusion_model}" if uses_diffusion else ""
     )
@@ -270,6 +287,8 @@ def main():
         [{"params": vae_model.parameters()}, {"params": forward_model.parameters()}],
         lr=args.lr,
     )
+
+    node_budget = args.node_budget
 
     # PHASE 1 — Joint training
     print(f"\n{'='*60}")
@@ -363,7 +382,7 @@ def main():
         if avg(total_loss_ep) < best_loss:
             best_loss = avg(total_loss_ep)
             ckpt_suffix = args.diffusion_model if uses_diffusion else "CND"
-            ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}.pt"
+            ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}_k{node_budget}.pt"
 
             torch.save(
                 {
@@ -412,9 +431,7 @@ def main():
 
     print(f"[phase2] Initialized z from top-{len(init_idx)} samples")
 
-    # Set the node budget and y_target
-    node_budget = args.k
-
+    # Set the y_target per task
     if args.task == "SL":
         # For Source Localization (SL), use the first test sample as the target
         test_sample = test_set[0]  # (N, 2)
@@ -537,7 +554,9 @@ def main():
             f"[result] Source budget = {node_budget} nodes  ({source_pct:.2f}% of N={N})"
         )
 
-        result_path = ckpt_dir / f"results_{args.dataset}_SL_{ckpt_suffix}.txt"
+        result_path = (
+            ckpt_dir / f"results_{args.dataset}_SL_{ckpt_suffix}_k{node_budget}.txt"
+        )
 
         with open(result_path, "w") as f:
             f.write(f"task:              {args.task}\n")
@@ -571,7 +590,9 @@ def main():
         )
         print(f"[result] Seed budget = {node_budget} nodes  ({seed_pct:.2f}% of N={N})")
 
-        result_path = ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}.txt"
+        result_path = (
+            ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}_k{node_budget}.txt"
+        )
 
         with open(result_path, "w") as f:
             f.write(f"task:           {args.task}\n")
@@ -607,7 +628,9 @@ def main():
             f"[result] Removal budget = {node_budget} nodes  ({removal_pct:.2f}% of N={N})"
         )
 
-        result_path = ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}.txt"
+        result_path = (
+            ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}_k{node_budget}.txt"
+        )
 
         with open(result_path, "w") as f:
             f.write(f"task:           {args.task}\n")
