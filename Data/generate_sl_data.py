@@ -36,25 +36,25 @@ Training tensor (built by loader): shape (S, N, 2)
 Usage
 -----
     (k = 3, 5, 10)
-    python generate_sl_data.py --dataset cora_ml --samples 1000 --k 3 --mc-runs 1000
+    python Data/generate_sl_data.py --dataset cora_ml --samples 1000 --k 3 --mc-runs 1000
 
     (k = 1, 5, 10)
-    python generate_sl_data.py --dataset digg --samples 5000 --k 1 --mc-runs 1000
+    python Data/generate_sl_data.py --dataset digg --samples 5000 --k 1 --mc-runs 1000
 
     (k = 1, 5, 10)
-    python generate_sl_data.py --dataset twitter --samples 5000 --k 1 --mc-runs 1000
+    python Data/generate_sl_data.py --dataset twitter --samples 5000 --k 1 --mc-runs 1000
 
     (k = 1, 3, 5)
-    python generate_sl_data.py --dataset jazz --samples 500 --k 1 --mc-runs 10000
+    python Data/generate_sl_data.py --dataset jazz --samples 500 --k 1 --mc-runs 10000
 
     (k = 1, 3, 5)
-    python generate_sl_data.py --dataset netscience --samples 1000 --k 1 --mc-runs 10000
+    python Data/generate_sl_data.py --dataset netscience --samples 1000 --k 1 --mc-runs 10000
 
     (k = 1, 3, 5, 10)
-    python generate_sl_data.py --dataset power_grid --samples 1000 --k 1 --mc-runs 10000
+    python Data/generate_sl_data.py --dataset power_grid --samples 1000 --k 1 --mc-runs 10000
 
     (k = 5, 10)
-    python generate_sl_data.py --dataset nethept --samples 5000 --k 5 --mc-runs 10000
+    python Data/generate_sl_data.py --dataset nethept --samples 5000 --k 5 --mc-runs 10000
 """
 
 import json
@@ -321,6 +321,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--k", type=int, default=10, help="Source set size (default: 10)")
     p.add_argument(
+        "--k-pct",
+        type=float,
+        default=None,
+        help="Source set size as percentage of N (e.g., 5 = 5%%). Overrides --k.",
+    )
+    p.add_argument(
         "--models",
         nargs="+",
         default=["IC", "LT"],
@@ -355,6 +361,11 @@ def main() -> None:
 
     # Download and load graph data
     adj, node_feats, node_labels, N = load_dataset(args.dataset)
+
+    # Resolve --k-pct to a concrete k
+    if args.k_pct is not None:
+        args.k = max(1, int(N * args.k_pct / 100))
+        print(f"[config] --k-pct={args.k_pct}% of N={N} → k={args.k}")
 
     # Build propagation structures
     edge_index, ic_probs, lt_weights, out_adj, in_adj, N = build_graph(adj)

@@ -1,7 +1,0 @@
-task:           IM
-dataset:        cora_ml
-diffusion:      IC
-seed_rate:      1
-seed_num:       1
-spread:         3.80
-seed_set:       [734]

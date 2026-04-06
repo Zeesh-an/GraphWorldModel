@@ -18,14 +18,16 @@ Phase 1 (--epochs,  default 600):
     Loss = BCE(x_hat, x) + MSE(y_hat, y)
 
 Phase 2 (--opt-iters, default 300):
-    Freeze both models. Optimise latent z directly via backprop.
+    Freeze both models. Optimize latent z directly via backprop.
     Pick top-k nodes from x_hat as the predicted node set.
 
 Usage
 -----
-    python World_Model/train.py -d cora_ml -dm IC -sp 1
-    python World_Model/train.py -d cora_ml --task CND
-    python World_Model/train.py -d cora_ml --task SL -dm IC
+    python World_Model/train.py --task IM -d cora_ml -dm IC --k 30 --k-pct 1 \
+        --hidden-dim 512 --latent-dim 256 \
+        --gt-d-model 64 --gt-heads 4 --gt-layers 3 --gt-ffn 128 \
+        --epochs 600 --opt-iters 500 --lr 1e-4 --lr-z 1e-3 \
+        --npz-dir Data/cora_ml
 """
 
 import argparse
@@ -85,7 +87,7 @@ def parse_args():
         "--diffusion_model",
         default="IC",
         choices=["IC", "LT", "SIS"],
-        help="Diffusion model (IM only)",
+        help="Diffusion model",
     )
     p.add_argument(
         "-sp",
@@ -102,6 +104,13 @@ def parse_args():
         help="Seed/removal/source set size k — must match the k used during data generation (default: 10)",
     )
     p.add_argument(
+        "--k-pct",
+        default=None,
+        type=float,
+        help="Seed/removal budget as percentage of N (e.g., 5 = 5%%). Overrides --k for Phase 2 node budget. "
+        "Note: --k is still used for data loading (must match data generation k).",
+    )
+    p.add_argument(
         "-m",
         "--mode",
         default="normal",
@@ -112,7 +121,7 @@ def parse_args():
     # Training hyperparameters
     p.add_argument("--epochs", default=600, type=int, help="Phase 1 training epochs")
     p.add_argument(
-        "--opt-iters", default=300, type=int, help="Phase 2 latent optimisation iters"
+        "--opt-iters", default=300, type=int, help="Phase 2 latent optimization iters"
     )
     p.add_argument("--lr", default=1e-4, type=float)
     p.add_argument(
@@ -170,7 +179,7 @@ def loss_phase_1(x, x_hat, y, y_hat):
 
 def loss_phase_2(y_true, y_hat, x_hat):
     """
-    Latent optimisation loss.
+    Latent optimization loss.
     forward_loss = MSE(y_hat, y_true) — push toward target state
         For IM:  y_true = ones (maximize spread)
         For CND: y_true = zeros (maximize disruption)
@@ -215,6 +224,16 @@ def main():
     )
 
     N = inverse_pairs.shape[1]  # Number of nodes
+
+    # Resolve --k-pct → node budget (requires N, so must happen after data load)
+    if args.k_pct is not None:
+        args.node_budget = max(1, int(N * args.k_pct / 100))
+        print(
+            f"[config] --k-pct={args.k_pct}% of N={N} → node budget = {args.node_budget}"
+        )
+    else:
+        args.node_budget = args.k
+
     task_label = f"{args.task}" + (
         f" | {args.diffusion_model}" if uses_diffusion else ""
     )
@@ -270,6 +289,8 @@ def main():
         [{"params": vae_model.parameters()}, {"params": forward_model.parameters()}],
         lr=args.lr,
     )
+
+    node_budget = args.node_budget
 
     # PHASE 1 — Joint training
     print(f"\n{'='*60}")
@@ -362,8 +383,10 @@ def main():
         # Checkpoint the best model
         if avg(total_loss_ep) < best_loss:
             best_loss = avg(total_loss_ep)
-            ckpt_suffix = args.diffusion_model if uses_diffusion else "CND"
-            ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}.pt"
+            ckpt_suffix = (
+                f"{args.task}_{args.diffusion_model}" if uses_diffusion else "CND"
+            )
+            ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}_k{node_budget}.pt"
 
             torch.save(
                 {
@@ -379,9 +402,9 @@ def main():
     print(f"\n[✓] Phase 1 done. Best loss={best_loss:.4f}")
     print(f"[✓] Checkpoint saved → {ckpt}")
 
-    # PHASE 2 — Latent optimisation
+    # PHASE 2 — Latent optimization
     print(f"\n{'='*60}")
-    print(f" Phase 2 — Latent z optimisation ({args.opt_iters} iters)")
+    print(f" Phase 2 — Latent z optimization ({args.opt_iters} iters)")
     print(f"{'='*60}")
 
     # Freeze both models to prevent weight updates
@@ -412,12 +435,12 @@ def main():
 
     print(f"[phase2] Initialized z from top-{len(init_idx)} samples")
 
-    # Set the node budget and y_target
+    # Set the y_target per task
     if args.task == "SL":
         # For Source Localization (SL), use the first test sample as the target
         test_sample = test_set[0]  # (N, 2)
 
-        # Binary groud-truth seed nodes vector
+        # Binary ground-truth seed nodes vector
         sl_true_sources = test_sample[:, 0].numpy()  # (N,)
 
         # Binary observation snapshot of nodes
@@ -426,6 +449,7 @@ def main():
         # Source Localization Optimization Target
         y_target = test_sample[:, 1].float().unsqueeze(dim=0).to(device)  # (1, N)
 
+        # SL uses ground truth source count as budget (may differ from args.k)
         node_budget = int(sl_true_sources.sum())
 
         print(
@@ -433,25 +457,19 @@ def main():
         )
         print(f"[phase2] Ground truth source count = {node_budget}")
     elif args.task == "IM":
-        with torch.no_grad():
-            x_init = decoder(z_hat)
-
-        node_budget = max(1, int(x_init.sum().item()))
-
         # For Influence Maximization (IM), the target is for all nodes to be activated/influenced
         y_target = torch.ones(1, N, device=device)
 
-        print(f"[phase2] Estimated seed budget = {node_budget}")
+        print(
+            f"[phase2] Seed budget (k) = {node_budget}  ({node_budget / N * 100:.2f}% of N={N})"
+        )
     elif args.task == "CND":
-        with torch.no_grad():
-            x_init = decoder(z_hat)
-
-        node_budget = max(1, int(x_init.sum().item()))
-
         # For Critical Node Detection (CND), the target is for all nodes to be deactivated/disconnected
         y_target = torch.zeros(1, N, device=device)
 
-        print(f"[phase2] Estimated removal budget = {node_budget}")
+        print(
+            f"[phase2] Removal budget (k) = {node_budget}  ({node_budget / N * 100:.2f}% of N={N})"
+        )
 
     z_optimizer = Adam([z_hat], lr=args.lr_z)
 
@@ -521,6 +539,10 @@ def main():
             diffusion=args.diffusion_model,
             n_runs=10,
         )
+        source_pct = node_budget / N * 100
+        pred_spread_pct = metrics["predicted_spread"] / N * 100
+        obs_spread_pct = metrics["observed_spread"] / N * 100
+
         print(
             f"[result] Precision={metrics['precision']:.3f}  "
             f"Recall={metrics['recall']:.3f}  "
@@ -528,24 +550,33 @@ def main():
             f"Jaccard={metrics['jaccard']:.3f}"
         )
         print(
-            f"[result] Predicted spread={metrics['predicted_spread']:.1f}  "
-            f"Observed spread={metrics['observed_spread']:.0f}  "
+            f"[result] Predicted spread={metrics['predicted_spread']:.1f} ({pred_spread_pct:.2f}%)  "
+            f"Observed spread={metrics['observed_spread']:.0f} ({obs_spread_pct:.2f}%)  "
             f"Spread error={metrics['spread_error']:.3f}"
         )
+        print(
+            f"[result] Source budget = {node_budget} nodes  ({source_pct:.2f}% of N={N})"
+        )
 
-        result_path = ckpt_dir / f"results_{args.dataset}_SL_{ckpt_suffix}.txt"
+        result_path = (
+            ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}_k{node_budget}.txt"
+        )
 
         with open(result_path, "w") as f:
             f.write(f"task:              {args.task}\n")
             f.write(f"dataset:           {args.dataset}\n")
             f.write(f"diffusion:         {args.diffusion_model}\n")
+            f.write(f"N:                 {N}\n")
             f.write(f"source_budget:     {node_budget}\n")
+            f.write(f"source_budget_pct: {source_pct:.2f}%\n")
             f.write(f"precision:         {metrics['precision']:.4f}\n")
             f.write(f"recall:            {metrics['recall']:.4f}\n")
             f.write(f"f1:                {metrics['f1']:.4f}\n")
             f.write(f"jaccard:           {metrics['jaccard']:.4f}\n")
             f.write(f"predicted_spread:  {metrics['predicted_spread']:.2f}\n")
+            f.write(f"pred_spread_pct:   {pred_spread_pct:.2f}%\n")
             f.write(f"observed_spread:   {metrics['observed_spread']:.0f}\n")
+            f.write(f"obs_spread_pct:    {obs_spread_pct:.2f}%\n")
             f.write(f"spread_error:      {metrics['spread_error']:.4f}\n")
             f.write(f"predicted_sources: {node_set}\n")
             f.write(f"true_sources:      {true_source_indices}\n")
@@ -555,37 +586,64 @@ def main():
         spread = diffusion_evaluation(
             adj, node_set, diffusion=args.diffusion_model, n_runs=10
         )
-        print(f"[result] Influence spread = {spread:.1f}")
+        spread_pct = spread / N * 100
+        seed_pct = node_budget / N * 100
 
-        result_path = ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}.txt"
+        print(
+            f"[result] Influence spread = {spread:.1f} nodes  ({spread_pct:.2f}% of N={N})"
+        )
+        print(f"[result] Seed budget = {node_budget} nodes  ({seed_pct:.2f}% of N={N})")
+
+        result_path = (
+            ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}_k{node_budget}.txt"
+        )
 
         with open(result_path, "w") as f:
             f.write(f"task:           {args.task}\n")
             f.write(f"dataset:        {args.dataset}\n")
             f.write(f"diffusion:      {args.diffusion_model}\n")
-            f.write(f"seed_rate:      {args.seed_rate}\n")
-            f.write(f"seed_num:       {node_budget}\n")
+            f.write(f"N:              {N}\n")
+            f.write(f"k:              {node_budget}\n")
+            f.write(f"k_pct:          {seed_pct:.2f}%\n")
             f.write(f"spread:         {spread:.2f}\n")
+            f.write(f"spread_pct:     {spread_pct:.2f}%\n")
             f.write(f"seed_set:       {node_set}\n")
     elif args.task == "CND":
         print("\n[eval] Running connectivity evaluation...")
         metrics = connectivity_evaluation(adj, node_set)
+        remaining_nodes = N - node_budget
+        removal_pct = node_budget / N * 100
+        largest_cc_pct = (
+            metrics["largest_cc"] / remaining_nodes * 100
+            if remaining_nodes > 0
+            else 0.0
+        )
+        largest_cc_pct_total = metrics["largest_cc"] / N * 100
+
         print(
-            f"[result] Largest CC = {metrics['largest_cc']}  "
-            f"({metrics['frac_connected']*100:.1f}% of remaining)"
+            f"[result] Largest CC = {metrics['largest_cc']} nodes  "
+            f"({largest_cc_pct:.2f}% of remaining, {largest_cc_pct_total:.2f}% of N={N})"
         )
         print(
             f"[result] Components = {metrics['n_components']}  "
             f"| Pairwise conn = {metrics['pairwise_conn']}"
         )
+        print(
+            f"[result] Removal budget = {node_budget} nodes  ({removal_pct:.2f}% of N={N})"
+        )
 
-        result_path = ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}.txt"
+        result_path = (
+            ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}_k{node_budget}.txt"
+        )
 
         with open(result_path, "w") as f:
             f.write(f"task:           {args.task}\n")
             f.write(f"dataset:        {args.dataset}\n")
-            f.write(f"node_budget:    {node_budget}\n")
+            f.write(f"N:              {N}\n")
+            f.write(f"k:              {node_budget}\n")
+            f.write(f"k_pct:          {removal_pct:.2f}%\n")
             f.write(f"largest_cc:     {metrics['largest_cc']}\n")
+            f.write(f"largest_cc_pct: {largest_cc_pct:.2f}%\n")
             f.write(f"n_components:   {metrics['n_components']}\n")
             f.write(f"pairwise_conn:  {metrics['pairwise_conn']}\n")
             f.write(f"frac_connected: {metrics['frac_connected']:.4f}\n")

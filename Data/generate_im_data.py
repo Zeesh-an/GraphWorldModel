@@ -31,25 +31,25 @@ samples_im_ic_k{k}.npz / samples_im_lt_k{k}.npz:
 Usage
 -----
     (k = 10, 20, 50)
-    python generate_im_data.py --dataset cora_ml --samples 1000 --k 10 --mc-runs 1000
+    python Data/generate_im_data.py --dataset cora_ml --samples 1000 --k 30 --k-pct 1 --mc-runs 1000
 
     (k = 50, 100, 200)
-    python generate_im_data.py --dataset digg --samples 5000 --k 50 --mc-runs 1000
+    python Data/generate_im_data.py --dataset digg --samples 5000 --k 50 --mc-runs 1000
 
     (k = 50, 100, 200)
-    python generate_im_data.py --dataset twitter --samples 5000 --k 50 --mc-runs 1000
+    python Data/generate_im_data.py --dataset twitter --samples 5000 --k 50 --mc-runs 1000
 
     (k = 5, 10, 20)
-    python generate_im_data.py --dataset jazz --samples 500 --k 5 --mc-runs 10000
+    python Data/generate_im_data.py --dataset jazz --samples 500 --k 5 --mc-runs 10000
 
     (k = 10, 20, 50)
-    python generate_im_data.py --dataset netscience --samples 1000 --k 10 --mc-runs 10000
+    python Data/generate_im_data.py --dataset netscience --samples 1000 --k 10 --mc-runs 10000
 
     (k = 10, 20, 50)
-    python generate_im_data.py --dataset power_grid --samples 1000 --k 10 --mc-runs 10000
+    python Data/generate_im_data.py --dataset power_grid --samples 1000 --k 10 --mc-runs 10000
 
     (k = 10, 20, 50, 100)
-    python generate_im_data.py --dataset nethept --samples 5000 --k 10 --mc-runs 10000
+    python Data/generate_im_data.py --dataset nethept --samples 5000 --k 10 --mc-runs 10000
 """
 
 import json
@@ -324,6 +324,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--k", type=int, default=10, help="Seed set size (default: 10)")
     p.add_argument(
+        "--k-pct",
+        type=float,
+        default=None,
+        help="Seed set size as percentage of N (e.g., 5 = 5%%). Overrides --k.",
+    )
+    p.add_argument(
         "--mc-runs",
         type=int,
         default=100,
@@ -365,6 +371,11 @@ def main():
 
     # Download and load graph data
     adj, node_feats, node_labels, N = load_dataset(args.dataset)
+
+    # Resolve --k-pct to a concrete k
+    if args.k_pct is not None:
+        args.k = max(1, int(N * args.k_pct / 100))
+        print(f"[config] --k-pct={args.k_pct}% of N={N} → k={args.k}")
 
     # Build propagation structures with edge index, propagation probabilities, and adjacency lists
     edge_index, ic_probs, lt_weights, out_adj, in_adj, N = build_graph(adj)

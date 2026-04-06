@@ -42,28 +42,26 @@ Training tensor (built by loader): shape (S, N, 2)
 
 Usage
 -----
+    (k = 10, 20, 50)
     python Data/generate_cnd_data.py --dataset cora_ml --samples 1000 --k 10
 
-    (k = 10, 20, 50)
-    python generate_cnd_data.py --dataset cora_ml --samples 1000 --k 10
+    (k = 50, 100)
+    python Data/generate_cnd_data.py --dataset digg --samples 5000 --k 50
 
     (k = 50, 100)
-    python generate_cnd_data.py --dataset digg --samples 5000 --k 50
-
-    (k = 50, 100)
-    python generate_cnd_data.py --dataset twitter --samples 5000 --k 50
+    python Data/generate_cnd_data.py --dataset twitter --samples 5000 --k 50
 
     (k = 5, 10, 15)
-    python generate_cnd_data.py --dataset jazz --samples 500 --k 5
+    python Data/generate_cnd_data.py --dataset jazz --samples 500 --k 5
 
     (k = 10, 20, 30)
-    python generate_cnd_data.py --dataset netscience --samples 1000 --k 10
+    python Data/generate_cnd_data.py --dataset netscience --samples 1000 --k 10
 
     (k = 10, 20, 50)
-    python generate_cnd_data.py --dataset power_grid --samples 1000 --k 10
+    python Data/generate_cnd_data.py --dataset power_grid --samples 1000 --k 10
 
     (k = 20, 50)
-    python generate_cnd_data.py --dataset nethept --samples 5000 --k 20
+    python Data/generate_cnd_data.py --dataset nethept --samples 5000 --k 20
 """
 
 import json
@@ -304,6 +302,12 @@ def parse_args() -> argparse.Namespace:
         default=10,
         help="Removal set size / budget (default: 10)",
     )
+    p.add_argument(
+        "--k-pct",
+        type=float,
+        default=None,
+        help="Removal set size as percentage of N (e.g., 5 = 5%%). Overrides --k.",
+    )
     p.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
     p.add_argument(
         "--out-dir",
@@ -327,6 +331,11 @@ def main() -> None:
 
     # Download and load graph
     adj, node_feats, node_labels, N = load_dataset(args.dataset)
+
+    # Resolve --k-pct to a concrete k
+    if args.k_pct is not None:
+        args.k = max(1, int(N * args.k_pct / 100))
+        print(f"[config] --k-pct={args.k_pct}% of N={N} → k={args.k}")
 
     # Save graph_data.npz
     graph_path = out_dir / "graph_data.npz"
