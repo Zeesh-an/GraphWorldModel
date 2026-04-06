@@ -381,7 +381,7 @@ def main():
         # Checkpoint the best model
         if avg(total_loss_ep) < best_loss:
             best_loss = avg(total_loss_ep)
-            ckpt_suffix = args.diffusion_model if uses_diffusion else "CND"
+            ckpt_suffix = f"{args.task}_{args.diffusion_model}" if uses_diffusion else "CND"
             ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}_k{node_budget}.pt"
 
             torch.save(
@@ -555,7 +555,7 @@ def main():
         )
 
         result_path = (
-            ckpt_dir / f"results_{args.dataset}_SL_{ckpt_suffix}_k{node_budget}.txt"
+            ckpt_dir / f"results_{args.dataset}_{ckpt_suffix}_k{node_budget}.txt"
         )
 
         with open(result_path, "w") as f:
