@@ -364,7 +364,7 @@ def main() -> None:
 
     # Resolve --k-pct to a concrete k
     if args.k_pct is not None:
-        args.k = max(1, int(N * args.k_pct / 100))
+        args.k = max(1, round(N * args.k_pct / 100))
         print(f"[config] --k-pct={args.k_pct}% of N={N} → k={args.k}")
 
     # Build propagation structures

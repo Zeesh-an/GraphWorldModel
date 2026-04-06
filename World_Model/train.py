@@ -227,7 +227,7 @@ def main():
 
     # Resolve --k-pct → node budget (requires N, so must happen after data load)
     if args.k_pct is not None:
-        args.node_budget = max(1, int(N * args.k_pct / 100))
+        args.node_budget = max(1, round(N * args.k_pct / 100))
         print(
             f"[config] --k-pct={args.k_pct}% of N={N} → node budget = {args.node_budget}"
         )
