@@ -42,28 +42,26 @@ Training tensor (built by loader): shape (S, N, 2)
 
 Usage
 -----
+    (k = 10, 20, 50)
     python Data/generate_cnd_data.py --dataset cora_ml --samples 1000 --k 10
 
-    (k = 10, 20, 50)
-    python generate_cnd_data.py --dataset cora_ml --samples 1000 --k 10
+    (k = 50, 100)
+    python Data/generate_cnd_data.py --dataset digg --samples 5000 --k 50
 
     (k = 50, 100)
-    python generate_cnd_data.py --dataset digg --samples 5000 --k 50
-
-    (k = 50, 100)
-    python generate_cnd_data.py --dataset twitter --samples 5000 --k 50
+    python Data/generate_cnd_data.py --dataset twitter --samples 5000 --k 50
 
     (k = 5, 10, 15)
-    python generate_cnd_data.py --dataset jazz --samples 500 --k 5
+    python Data/generate_cnd_data.py --dataset jazz --samples 500 --k 5
 
     (k = 10, 20, 30)
-    python generate_cnd_data.py --dataset netscience --samples 1000 --k 10
+    python Data/generate_cnd_data.py --dataset netscience --samples 1000 --k 10
 
     (k = 10, 20, 50)
-    python generate_cnd_data.py --dataset power_grid --samples 1000 --k 10
+    python Data/generate_cnd_data.py --dataset power_grid --samples 1000 --k 10
 
     (k = 20, 50)
-    python generate_cnd_data.py --dataset nethept --samples 5000 --k 20
+    python Data/generate_cnd_data.py --dataset nethept --samples 5000 --k 20
 """
 
 import json

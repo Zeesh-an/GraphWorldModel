@@ -31,25 +31,25 @@ samples_im_ic_k{k}.npz / samples_im_lt_k{k}.npz:
 Usage
 -----
     (k = 10, 20, 50)
-    python generate_im_data.py --dataset cora_ml --samples 1000 --k 10 --mc-runs 1000
+    python Data/generate_im_data.py --dataset cora_ml --samples 1000 --k 10 --mc-runs 1000
 
     (k = 50, 100, 200)
-    python generate_im_data.py --dataset digg --samples 5000 --k 50 --mc-runs 1000
+    python Data/generate_im_data.py --dataset digg --samples 5000 --k 50 --mc-runs 1000
 
     (k = 50, 100, 200)
-    python generate_im_data.py --dataset twitter --samples 5000 --k 50 --mc-runs 1000
+    python Data/generate_im_data.py --dataset twitter --samples 5000 --k 50 --mc-runs 1000
 
     (k = 5, 10, 20)
-    python generate_im_data.py --dataset jazz --samples 500 --k 5 --mc-runs 10000
+    python Data/generate_im_data.py --dataset jazz --samples 500 --k 5 --mc-runs 10000
 
     (k = 10, 20, 50)
-    python generate_im_data.py --dataset netscience --samples 1000 --k 10 --mc-runs 10000
+    python Data/generate_im_data.py --dataset netscience --samples 1000 --k 10 --mc-runs 10000
 
     (k = 10, 20, 50)
-    python generate_im_data.py --dataset power_grid --samples 1000 --k 10 --mc-runs 10000
+    python Data/generate_im_data.py --dataset power_grid --samples 1000 --k 10 --mc-runs 10000
 
     (k = 10, 20, 50, 100)
-    python generate_im_data.py --dataset nethept --samples 5000 --k 10 --mc-runs 10000
+    python Data/generate_im_data.py --dataset nethept --samples 5000 --k 10 --mc-runs 10000
 """
 
 import json

@@ -14,7 +14,7 @@ Reference implementations from prior work, used for comparison against models in
 VAE + SpGAT approach for influence maximization. Two-phase training:
 
 1. Joint VAE + GAT forward model training
-2. Latent z optimisation to find seed set
+2. Latent z optimization to find seed set
 
 ### Run
 
