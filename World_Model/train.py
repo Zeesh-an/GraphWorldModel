@@ -23,9 +23,11 @@ Phase 2 (--opt-iters, default 300):
 
 Usage
 -----
-    python World_Model/train.py -t IM -d cora_ml -dm IC -sp 1 --k 10
-    python World_Model/train.py -d cora_ml --task CND
-    python World_Model/train.py -d cora_ml --task SL -dm IC
+    python World_Model/train.py --task IM -d cora_ml -dm IC --k 30 --k-pct 1 \
+        --hidden-dim 512 --latent-dim 256 \
+        --gt-d-model 64 --gt-heads 4 --gt-layers 3 --gt-ffn 128 \
+        --epochs 600 --opt-iters 500 --lr 1e-4 --lr-z 1e-3 \
+        --npz-dir Data/cora_ml
 """
 
 import argparse
@@ -381,7 +383,9 @@ def main():
         # Checkpoint the best model
         if avg(total_loss_ep) < best_loss:
             best_loss = avg(total_loss_ep)
-            ckpt_suffix = f"{args.task}_{args.diffusion_model}" if uses_diffusion else "CND"
+            ckpt_suffix = (
+                f"{args.task}_{args.diffusion_model}" if uses_diffusion else "CND"
+            )
             ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}_k{node_budget}.pt"
 
             torch.save(
