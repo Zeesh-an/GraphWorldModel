@@ -364,9 +364,9 @@ def main():
             batch_loss.backward()
             optimizer.step()
 
-            # Clamp Graph Transformer forward mdoel params ≥ 0  (mirrors baseline's clamp for SpGAT)
-            for p in forward_model.parameters():
-                p.data.clamp_(min=0)
+            # Clamp Graph Transformer forward mdoel params >= 0  (mirrors baseline's clamp for SpGAT)
+            # for p in forward_model.parameters():
+            #     p.data.clamp_(min=0)
 
             n_seen += B
 

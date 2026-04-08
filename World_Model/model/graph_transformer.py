@@ -260,6 +260,7 @@ class GraphTransformerForwardModel(nn.Module):
             x = layer(x, edge_index)
 
         # Output projection
-        out = torch.sigmoid(self.output_proj(x))  # (N, 1)
+        # out = F.sigmoid(self.output_proj(x))  # (N, 1)
+        out = F.elu(self.output_proj(x))  # (N, 1)
 
         return out

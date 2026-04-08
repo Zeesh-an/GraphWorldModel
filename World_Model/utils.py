@@ -360,9 +360,10 @@ def diffusion_evaluation(
         in_deg = np.where(in_deg == 0, 1, in_deg)
 
         for u, v in zip(coo.row, coo.col):
-            # For each edge (u, v), the propagation probability is 1/in_degree(v), capped at 0.5.
+            # For each edge (u, v), the propagation probability is 1/in_degree(v)
             p = float(1.0 / in_deg[v])
-            out_adj[int(u)].append((int(v), min(p, 0.5)))
+            # out_adj[int(u)].append((int(v), min(p, 0.5)))
+            out_adj[int(u)].append((int(v), p))
 
     total = 0
 
