@@ -119,18 +119,6 @@ def parse_args():
     )
 
     # Training hyperparameters
-    p.add_argument(
-        "--pretrain-epochs",
-        default=0,
-        type=int,
-        help="Phase 0 VAE-only reconstruction pretrain epochs (0 = skip)",
-    )
-    p.add_argument(
-        "--pretrain-lr",
-        default=1e-4,
-        type=float,
-        help="Phase 0 VAE-only pretrain learning rate",
-    )
     p.add_argument("--epochs", default=600, type=int, help="Phase 1 training epochs")
     p.add_argument(
         "--opt-iters", default=300, type=int, help="Phase 2 latent optimization iters"
@@ -303,71 +291,6 @@ def main():
     )
 
     node_budget = args.node_budget
-
-    # PHASE 0 — VAE-only reconstruction pretraining
-    if args.pretrain_epochs > 0:
-        print(f"\n{'='*60}")
-        print(f" Phase 0 — VAE-only reconstruction pretrain")
-        print(
-            f" Epochs: {args.pretrain_epochs}  |  lr: {args.pretrain_lr}  |  batch: {batch_size}"
-        )
-        print(f"{'='*60}")
-
-        vae_optimizer = Adam(vae_model.parameters(), lr=args.pretrain_lr)
-        vae_model.train()
-        forward_model.eval()
-
-        pretrain_progress_bar = tqdm(
-            range(1, args.pretrain_epochs + 1),
-            desc=f"Phase 0 — VAE pretrain",
-        )
-
-        for epoch in pretrain_progress_bar:
-            recon_loss_ep = 0.0
-            precision_re_ep = 0.0
-            recall_re_ep = 0.0
-            n_seen = 0
-
-            for data_pair in train_dataloader:
-                x = data_pair[:, :, 0].float().to(device)  # (B, N)
-                B = x.shape[0]
-
-                vae_optimizer.zero_grad()
-                batch_loss = torch.tensor(0.0, device=device)
-
-                for i in range(B):
-                    x_i = x[i]  # (N,)
-                    x_hat = vae_model(x_i.unsqueeze(0))  # (1, N)
-
-                    recon = F.binary_cross_entropy(
-                        x_hat, x_i.unsqueeze(0), reduction="sum"
-                    )
-                    batch_loss += recon
-                    recon_loss_ep += recon.item()
-
-                    # Monitor collapse: precision/recall of reconstruction
-                    x_pred_np = (x_hat.detach().cpu().numpy() > 0.01).astype(float)
-                    x_true_np = x_i.unsqueeze(0).cpu().numpy()
-                    precision_re_ep += precision_score(
-                        x_true_np[0], x_pred_np[0], zero_division=0
-                    )
-                    recall_re_ep += recall_score(
-                        x_true_np[0], x_pred_np[0], zero_division=0
-                    )
-
-                batch_loss = batch_loss / B
-                batch_loss.backward()
-                vae_optimizer.step()
-                n_seen += B
-
-            avg = lambda v: v / max(n_seen, 1)
-            pretrain_progress_bar.set_postfix(
-                recon=f"{avg(recon_loss_ep):.4f}",
-                prec=f"{avg(precision_re_ep):.4f}",
-                rec=f"{avg(recall_re_ep):.4f}",
-            )
-
-        print(f"[✓] Phase 0 done. Final recon loss={avg(recon_loss_ep):.4f}")
 
     # PHASE 1 — Joint training
     print(f"\n{'='*60}")
