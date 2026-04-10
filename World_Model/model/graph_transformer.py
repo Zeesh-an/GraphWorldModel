@@ -5,7 +5,7 @@ Graph Transformer — Forward Diffusion Model
 Replaces the SpGAT in DeepIM with a proper Graph Transformer.
 
 Key differences from GAT:
-    - Scaled dot-product attention  (Q·K / sqrt(d_k))  vs additive LeakyReLU attention
+    - Scaled dot-product attention  (Q·K / sqrt(d_k)) vs additive LeakyReLU attention
     - Pre-LayerNorm residual blocks (more stable training)
     - Position-wise FFN after attention
     - Degree-based positional encoding injected into node features
@@ -260,7 +260,7 @@ class GraphTransformerForwardModel(nn.Module):
             x = layer(x, edge_index)
 
         # Output projection
-        # out = F.sigmoid(self.output_proj(x))  # (N, 1)
-        out = F.elu(self.output_proj(x))  # (N, 1)
+        out = F.sigmoid(self.output_proj(x))  # (N, 1)
+        # out = F.elu(self.output_proj(x))  # (N, 1)
 
         return out
