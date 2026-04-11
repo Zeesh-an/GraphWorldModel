@@ -2,8 +2,6 @@
 Forward Graph Model — Inverse Graph Problem Training
 =====================================================
 
-VAE-free pipeline. Supports five forward model architectures and three tasks:
-
 Models:
     GT — Graph Transformer (scatter-softmax attention, scale-invariant)
     GCN — GCN with pre-norm residual blocks
@@ -24,9 +22,9 @@ Phase 2 (--opt-iters, default 300):
     Freeze forward model. Optimize logits directly via backprop, where
     x_hat = sigmoid(logits). Pick top-k nodes from x_hat as the predicted node set.
     Phase 2 targets differ by task:
-        IM:  MSE(y_hat, ones)              — maximize spread
-        CND: MSE(y_hat, zeros)             — minimize residual connectivity
-        SL:  MSE(y_hat, observed_snapshot) — match predicted activation to observation
+        IM: MSE(y_hat, ones) — maximize spread
+        CND: MSE(y_hat, zeros) — minimize residual connectivity
+        SL: MSE(y_hat, observed_snapshot) — match predicted activation to observation
 
 Usage
 -----
@@ -135,6 +133,14 @@ def parse_args():
         default=1e-4,
         type=float,
         help="Phase 2 logit optimization learning rate",
+    )
+    p.add_argument(
+        "--l0-weight",
+        default=1.0,
+        type=float,
+        help="Phase 2 L0/L1 sparsity weight on x_hat. Higher values pull x_hat "
+        "toward the sparse regime the forward model was trained on. Try 50-500 "
+        "if Phase 2 PredSpread stays stuck near 0.",
     )
 
     # Model selection
@@ -285,7 +291,12 @@ def loss_phase_1(y: torch.Tensor, y_hat: torch.Tensor) -> torch.Tensor:
     return F.mse_loss(y_hat, y, reduction="sum")
 
 
-def loss_phase_2(y_true, y_hat, x_hat):
+def loss_phase_2(
+    y_true: torch.Tensor,
+    y_hat: torch.Tensor,
+    x_hat: torch.Tensor,
+    l0_weight: float = 1.0,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Latent optimization loss.
     forward_loss = MSE(y_hat, y_true) — push toward target state
@@ -294,16 +305,18 @@ def loss_phase_2(y_true, y_hat, x_hat):
         For SL:  y_true = observed_snapshot (match predicted activation to observation)
 
     L0_loss = L1 sparsity on x_hat — keep node set small
+        Scaled by l0_weight to pull x_hat into the sparse regime the forward
+        model was trained on (binary k-hot vectors).
 
-    loss = forward_loss + L0_loss
+    loss = forward_loss + l0_weight * L0_loss
     """
 
     forward_loss = F.mse_loss(y_hat, y_true)
 
-    # L0 sparsity penalty to encourage the decoded seed vector to be sparse — sum(|x_hat|) / N
+    # L1 sparsity penalty on x_hat — sum(|x_hat|) / N
     L0_loss = torch.sum(torch.abs(x_hat)) / x_hat.shape[1]
 
-    return forward_loss + L0_loss, L0_loss
+    return forward_loss + l0_weight * L0_loss, L0_loss
 
 
 def main():
@@ -527,7 +540,7 @@ def main():
             .unsqueeze(0)
         )  # (1, N)
 
-        loss, L0 = loss_phase_2(y_target, y_hat, x_hat)
+        loss, L0 = loss_phase_2(y_target, y_hat, x_hat, l0_weight=args.l0_weight)
 
         z_optimizer.zero_grad()
         loss.backward()
