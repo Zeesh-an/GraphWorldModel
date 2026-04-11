@@ -5,6 +5,7 @@ env/
 
 # Claude
 .claude/
+docs/
 CLAUDE.md
 
 # Research notes
