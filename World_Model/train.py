@@ -142,6 +142,14 @@ def parse_args():
         "toward the sparse regime the forward model was trained on. Try 50-500 "
         "if Phase 2 PredSpread stays stuck near 0.",
     )
+    p.add_argument(
+        "--augment",
+        action="store_true",
+        help="Phase 1 input augmentation: randomly perturb ground-truth x with "
+        "additive noise and label smoothing so the forward model sees soft "
+        "distributions (not only exact k-hot). Fixes Phase 1/Phase 2 "
+        "distribution mismatch so gradients flow through soft x_hat in Phase 2.",
+    )
 
     # Model selection
     p.add_argument(
@@ -291,6 +299,29 @@ def loss_phase_1(y: torch.Tensor, y_hat: torch.Tensor) -> torch.Tensor:
     return F.mse_loss(y_hat, y, reduction="sum")
 
 
+def augment_x(x: torch.Tensor) -> torch.Tensor:
+    """
+    Phase 1 input augmentation — stochastically perturb a ground-truth binary
+    action vector so the forward model sees a mix of regimes during training,
+    closing the distribution gap with Phase 2's soft sigmoid(logits) inputs.
+
+    Three regimes, sampled per example:
+        clean (50%)            — exact binary x, preserves supervised signal
+        additive noise (30%)   — x + U(0, 0.3), clamped to [0, 1]
+        label smoothing (20%)  — 1 → 1-U(0, 0.2), 0 → U(0, 0.2)
+
+    The target y is NOT perturbed — we still want the model to predict the
+    cascade outcome tied to the *original* seed set.
+    """
+    regime = torch.rand(1).item()
+    if regime < 0.5:
+        return x
+    if regime < 0.8:
+        return (x + torch.rand_like(x) * 0.3).clamp(min=0.0, max=1.0)
+    noise = torch.rand_like(x) * 0.2  # shape: (N,)
+    return torch.where(x > 0.5, 1.0 - noise, noise)
+
+
 def loss_phase_2(
     y_true: torch.Tensor,
     y_hat: torch.Tensor,
@@ -420,8 +451,10 @@ def main():
                 x_i = x[i]  # (N,)
                 y_i = y[i]  # (N,)
 
-                # Ground-truth x straight into the forward model (no VAE)
-                y_hat = forward_model(x_i.unsqueeze(-1), adj_t).squeeze(-1)  # (N,)
+                # Ground-truth x — optionally augmented to close the Phase 1 /
+                # Phase 2 distribution gap. Target y stays tied to the original.
+                x_input = augment_x(x_i) if args.augment else x_i
+                y_hat = forward_model(x_input.unsqueeze(-1), adj_t).squeeze(-1)  # (N,)
 
                 loss_i = loss_phase_1(y_i.unsqueeze(0), y_hat.unsqueeze(0))
                 batch_loss += loss_i
