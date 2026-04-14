@@ -1,253 +1,210 @@
 # Graph World Model
 
-A unified framework for solving **graph inverse problems** using a learned world model. Given a graph and a desired or observed outcome, the system infers the node-level action (seed set, removal set, source set) that produces that outcome — without running expensive classical algorithms at inference time.
+A framework for solving **graph inverse problems** using learned forward models. Given a graph and a desired or observed outcome, the system infers the node-level action (seed set, removal set, source set) that produces that outcome — without running expensive classical algorithms at inference time.
 
----
+## How It Works
 
-## Graph Inverse Problems
+**Pipeline:** Generate (action, outcome) samples &rarr; Train a forward graph model &rarr; Optimize input logits &rarr; Extract best node set.
 
-A graph inverse problem asks: **given a graph and an outcome, what input caused it?**
+The forward model learns to predict `outcome = f(action, graph)`. At inference (Phase 2), we freeze the model and backpropagate through it to find the action that best achieves a target outcome. The action vector is parameterized as `x_hat = sigmoid(logits)`, and the top-k nodes by probability form the predicted node set.
 
-The forward process is well-defined (e.g., diffusion spreads from seeds to neighbors), but the inverse is combinatorial and NP-hard. Classical approaches (greedy, CELF++, simulated annealing) require thousands of forward simulations per query. This project replaces that with a learned world model that can be queried via gradient-based optimization in continuous latent space.
+## Tasks
 
-### Tasks
+| Task                              | Problem                                                 | Action (x)            | Outcome (y)                                      |
+| --------------------------------- | ------------------------------------------------------- | --------------------- | ------------------------------------------------ |
+| **Influence Maximization (IM)**   | Select k seed nodes to maximize spread                  | Binary seed vector    | Full cascade activation (union across timesteps) |
+| **Critical Node Detection (CND)** | Select k nodes whose removal fragments the network      | Binary removal vector | Residual connectivity (largest CC membership)    |
+| **Source Localization (SL)**      | Given an observed infection snapshot, infer the sources | Binary source vector  | Partial snapshot at random time t                |
 
-| Task                              | Problem                                                               | Action (Channel 0)                  | Outcome (Channel 1)                              |
-| --------------------------------- | --------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------ |
-| **Influence Maximization (IM)**   | Select k seed nodes to maximize information spread                    | Binary seed vector                  | Full cascade activation (union across timesteps) |
-| **Critical Node Detection (CND)** | Select k nodes whose removal maximally fragments the network          | Binary removal vector               | Residual connectivity (largest CC membership)    |
-| **Source Localization (SL)**      | Given an observed infection snapshot, infer the original source nodes | Binary source vector (ground truth) | Partial snapshot at random time t                |
+**IM** and **CND** are design problems — optimize toward an ideal outcome. **SL** is an inference problem — optimize toward an observed outcome.
 
-**IM** is a design problem — optimize toward an ideal outcome (activate all nodes).
-**CND** is a design problem — optimize toward an ideal outcome (disconnect all nodes).
-**SL** is an inference problem — optimize toward an observed outcome (match the snapshot).
+## Forward Models
 
----
+Five forward model architectures are implemented, all sharing the same interface:
+
+```
+forward(seed_vec: (N, 1), adj: sparse COO (N, N)) -> (N, 1)
+```
+
+| Model         | Description                                      | Key Properties                                                                            |
+| ------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| **GT**        | Graph Transformer with scatter-softmax attention | Scaled dot-product QKV, pre-norm residual, FFN, degree PE                                 |
+| **GCN**       | Kipf-Welling GCN                                 | `X' = Â X W`, pre-norm residual blocks, degree PE                                         |
+| **GAT**       | GATv2 (Brody et al. 2022)                        | Dynamic attention via `LeakyReLU(W_l h_v + W_r h_u)`, multi-head scatter-softmax          |
+| **GraphSAGE** | Hamilton et al. 2017, mean aggregator            | `concat(h_self, mean(h_neighbors))`, self-loop-filtered aggregation                       |
+| **GCNII**     | Chen et al. 2020                                 | Initial residual `(1-α)·Â·H + α·H⁰`, identity mapping `(1-β)·I + β·W`, designed for depth |
+
+All models use degree-based sinusoidal positional encoding (can be disabled with `--<model>-no-pe`), sigmoid output activation, and xavier-uniform weight initialization.
 
 ## Datasets
 
-| Dataset        | Nodes   | Edges  | Type                        | Node Features          | Source                                                                   |
-| -------------- | ------- | ------ | --------------------------- | ---------------------- | ------------------------------------------------------------------------ |
-| **Cora-ML**    | 2,995   | 8,416  | Directed (citations)        | 2,879-dim bag-of-words | [graph2gauss](https://github.com/abojchevski/graph2gauss)                |
-| **Jazz**       | 198     | 2,742  | Undirected (collaborations) | log(1 + degree)        | [Network Repository](https://networkrepository.com/arenas-jazz.php)      |
-| **NetScience** | 1,589   | 2,742  | Undirected (coauthorship)   | log(1 + degree)        | [Netzschleuder](https://networks.skewed.de/net/netscience)               |
-| **Power Grid** | 4,941   | 6,594  | Undirected (power lines)    | log(1 + degree)        | [Network Repository](https://networkrepository.com/opsahl-powergrid.php) |
-| **NetHEPT**    | 15,229  | 62,752 | Directed (citations)        | log(1 + total degree)  | [GitHub mirror](https://github.com/SparklyYS/Simultaneous-IMM)           |
-| **Digg**       | 116,893 | ~2.6M  | Undirected (friendships)    | log(1 + degree)        | [Syracuse datasets](https://datasets.syr.edu/datasets/Digg.html)         |
-| **Twitter**    | 81,306  | 1.77M  | Symmetrized to undirected   | log(1 + degree)        | [SNAP](https://snap.stanford.edu/data/ego-Twitter.html)                  |
-
-IM and SL respect the original graph directionality. CND symmetrizes all graphs to undirected (connectivity is measured via undirected connected components).
-
----
-
-## Architecture
-
-The system has two jointly trained models that together form the world model:
-
-### Model 1: Variational Autoencoder (VAE)
-
-Encodes and decodes the action vector (seed/removal/source set) through a continuous latent space.
-
-```
-Encoder: (N,) -> hidden -> hidden -> hidden -> (latent_dim,)
-Decoder: (latent_dim,) -> latent_dim -> hidden -> hidden -> (N,)
-Activation: ReLU (encoder), Sigmoid output (decoder)
-```
-
-The VAE maps sparse binary node-set vectors into a smooth, continuous latent space where gradient-based optimization is tractable. Directly optimizing a binary vector is combinatorial; optimizing the latent z is smooth.
-
-### Model 2: Graph Transformer (GT)
-
-A differentiable forward model that predicts the outcome of an action on the graph.
-
-```
-Input: (N, 1) action probs + degree PE -> input_proj -> (N, d_model)
-GT Layers x n_layers:
-    LayerNorm -> Multi-Head Attention (with graph-masked softmax) -> residual
-    LayerNorm -> FFN (GELU) -> residual
-Output: LayerNorm -> Linear -> Sigmoid -> (N, 1)
-```
-
-The GT uses **scatter softmax** over graph neighborhoods — each node only attends to its neighbors, not all nodes. Positional encoding is degree-based sinusoidal (no learned parameters).
-
----
-
-## Methodology
-
-### Training Data Format
-
-All tasks use the same tensor format: **(S, N, 2)**
-
-- **Channel 0**: the action vector (binary, sparse) — seeds for IM, removals for CND, sources for SL
-- **Channel 1**: the outcome vector (binary or continuous) — spread pattern, connectivity, or snapshot
-
-Data is generated by running the forward process (diffusion simulation or connectivity computation) on random action sets, producing (action, outcome) pairs.
-
-### Phase 1: Joint Training
-
-Both models train together end-to-end:
-
-```
-x = inverse_pairs[:, :, 0]    # ground truth action vector
-y = inverse_pairs[:, :, 1]    # ground truth outcome vector
-
-z = encoder(x)                # encode action to latent space
-x_hat = decoder(z)            # reconstruct action from latent
-y_hat = GT(x_hat, adj)        # predict outcome via graph transformer
-
-Loss = BCE(x_hat, x) + MSE(y_hat, y)
-```
-
-The VAE learns to compress and reconstruct action vectors. The GT learns the forward mapping from actions to outcomes on this specific graph. Checkpoint saved when loss improves.
-
-### Phase 2: Latent Optimization
-
-Both models are **frozen**. A latent vector z_hat is optimized directly via backpropagation to find the optimal action.
-
-**Initialization:** z_hat is initialized from the top 10% of training samples (by channel 1 sum), encoded and averaged in latent space. This warm-starts the optimization in a promising region.
-
-**Optimization loop** (gradient descent on z_hat):
-
-```
-for each iteration:
-    x_hat = decoder(z_hat)          # decode to action probabilities
-    y_hat = GT(x_hat, adj)          # predict outcome
-    loss = MSE(y_hat, y_target) + L0_sparsity(x_hat)
-    loss.backward()                 # gradients flow through GT and decoder to z_hat
-    optimizer.step()                # update z_hat
-```
-
-**y_target differs by task:**
-
-| Task | y_target          | Meaning                                       |
-| ---- | ----------------- | --------------------------------------------- |
-| IM   | `ones(N)`         | Activate all nodes (maximize spread)          |
-| CND  | `zeros(N)`        | Disconnect all nodes (maximize fragmentation) |
-| SL   | observed snapshot | Match the observed infection pattern          |
-
-The L0 sparsity term `sum(abs(x_hat)) / N` encourages the decoded action vector to remain sparse (few selected nodes).
-
-**Final extraction:** After optimization converges, the top-k nodes by probability in the decoded x_hat form the predicted action set.
-
----
+| Dataset        | Nodes  | Edges  | Type                        | Node Features          |
+| -------------- | ------ | ------ | --------------------------- | ---------------------- |
+| **Cora-ML**    | 2,995  | 8,416  | Directed (citations)        | 2,879-dim bag-of-words |
+| **Jazz**       | 198    | 2,742  | Undirected (collaborations) | log(1 + degree)        |
+| **NetScience** | 1,589  | 2,742  | Undirected (coauthorship)   | log(1 + degree)        |
+| **Power Grid** | 4,941  | 6,594  | Undirected (power lines)    | log(1 + degree)        |
+| **NetHEPT**    | 15,229 | 62,752 | Directed (citations)        | log(1 + total degree)  |
 
 ## Quick Start
 
-### 1. Install dependencies
+### Step 1 — Generate Data
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Requires Python 3.12+. Dependencies: `torch`, `numpy`, `scipy`, `networkx`, `pandas`, `scikit-learn`.
-
-### 2. Generate data
-
-```bash
-# Influence Maximization (Cora-ML, IC diffusion, k=10)
+# Influence Maximization (Cora-ML, IC model, k=10, 1000 samples)
 python Data/generate_im_data.py -d cora_ml --k 10 --samples 1000
 
-# Critical Node Detection (Jazz, k=10)
+# Critical Node Detection (Jazz, k=10, 500 samples)
 python Data/generate_cnd_data.py -d jazz --k 10 --samples 500
 
-# Source Localization (Power Grid, IC diffusion, k=5)
+# Source Localization (Power Grid, IC model, k=5, 1000 samples)
 python Data/generate_sl_data.py -d power_grid --k 5 --samples 1000
 ```
 
-### 3. Train
+### Step 2 — Train Forward Model + Inverse Optimization
 
 ```bash
-# IM on Cora-ML
-python World_Model/train.py --task IM -d cora_ml -dm IC --k 10 --npz-dir Data/cora_ml
+# IM on Cora-ML with GraphSAGE
+python World_Model/train.py --task IM -d cora_ml -dm IC --k 10 \
+    --model sage --sage-hidden 128 --sage-layers 3 \
+    --epochs 600 --opt-iters 500 --lr 1e-4 --lr-z 1e-2 \
+    --npz-dir Data/cora_ml
 
-# CND on Jazz
-python World_Model/train.py --task CND -d jazz --k 10 --npz-dir Data/jazz
+# CND on Jazz with GCN
+python World_Model/train.py --task CND -d jazz --k 10 \
+    --model gcn --gcn-hidden 64 --gcn-layers 3 \
+    --epochs 600 --opt-iters 300 \
+    --npz-dir Data/jazz
 
-# SL on Power Grid
-python World_Model/train.py --task SL -d power_grid -dm IC --k 5 --npz-dir Data/power_grid
+# SL on Power Grid with Graph Transformer
+python World_Model/train.py --task SL -d power_grid -dm IC --k 5 \
+    --model gt --gt-d-model 64 --gt-heads 4 --gt-layers 3 --gt-ffn 128 \
+    --epochs 600 --opt-iters 300 \
+    --npz-dir Data/power_grid
 ```
 
-### CLI flags
+### Key Training Flags
 
-| Flag                        | Default                   | Description                                               |
-| --------------------------- | ------------------------- | --------------------------------------------------------- |
-| `--task`                    | `IM`                      | Task: `IM`, `CND`, or `SL`                                |
-| `-d` / `--dataset`          | `cora_ml`                 | Dataset name                                              |
-| `-dm` / `--diffusion_model` | `IC`                      | Diffusion model: `IC`, `LT`, `SIS` (IM and SL only)       |
-| `--k`                       | `10`                      | Seed/removal/source set size (must match data generation) |
-| `-sp` / `--seed_rate`       | `1`                       | Seed rate for baseline .SG fallback                       |
-| `--epochs`                  | `600`                     | Phase 1 training epochs                                   |
-| `--opt-iters`               | `300`                     | Phase 2 latent optimization iterations                    |
-| `--lr`                      | `1e-4`                    | Phase 1 learning rate                                     |
-| `--lr-z`                    | `1e-4`                    | Phase 2 latent z learning rate                            |
-| `--hidden-dim`              | `1024`                    | VAE hidden layer width                                    |
-| `--latent-dim`              | `512`                     | VAE latent space dimension                                |
-| `--gt-d-model`              | `64`                      | Graph Transformer hidden dim                              |
-| `--gt-heads`                | `4`                       | GT attention heads                                        |
-| `--gt-layers`               | `3`                       | Number of GT layers                                       |
-| `--gt-ffn`                  | `128`                     | GT FFN hidden dim                                         |
-| `--gt-dropout`              | `0.1`                     | GT dropout rate                                           |
-| `--npz-dir`                 | `Data/cora_ml`            | Path to generated .npz data directory                     |
-| `--ckpt-dir`                | `World_Model/checkpoints` | Where to save checkpoints                                 |
+| Flag          | Default | Description                                                  |
+| ------------- | ------- | ------------------------------------------------------------ |
+| `--model`     | `gt`    | Forward model: `gt`, `gcn`, `gat`, `sage`, `gcnii`           |
+| `--epochs`    | `600`   | Phase 1 supervised training epochs                           |
+| `--opt-iters` | `300`   | Phase 2 logit optimization iterations                        |
+| `--lr`        | `1e-4`  | Phase 1 learning rate                                        |
+| `--lr-z`      | `1e-4`  | Phase 2 logit optimization learning rate                     |
+| `--l0-weight` | `1.0`   | Phase 2 L1 sparsity penalty weight on x_hat                  |
+| `--augment`   | off     | Phase 1 input augmentation (noise + label smoothing)         |
+| `--k`         | `10`    | Seed/removal/source set size (must match data generation)    |
+| `--k-pct`     | —       | Node budget as percentage of N (overrides `--k` for Phase 2) |
 
----
+### Model-Specific Flags
+
+```
+GT:        --gt-d-model  --gt-heads  --gt-layers  --gt-ffn  --gt-dropout
+GCN:       --gcn-hidden  --gcn-layers  --gcn-dropout  --gcn-no-pe
+GAT:       --gat-hidden  --gat-heads  --gat-layers  --gat-dropout  --gat-no-pe
+GraphSAGE: --sage-hidden  --sage-layers  --sage-dropout  --sage-no-pe
+GCNII:     --gcnii-hidden  --gcnii-layers  --gcnii-alpha  --gcnii-lamda  --gcnii-dropout  --gcnii-no-pe
+```
+
+## Training Phases
+
+### Phase 1 — Supervised Forward Training
+
+The forward model learns to predict the outcome vector from the action vector:
+
+```
+x = ground truth action vector          # (N,) binary
+y = ground truth outcome vector          # (N,) binary
+
+y_hat = forward_model(x, adj)           # predict outcome
+loss = MSE(y_hat, y)                    # supervised loss
+```
+
+With `--augment`, the input `x` is stochastically perturbed (additive noise, label smoothing) while the target `y` stays clean. This teaches the forward model to handle the soft inputs it will see in Phase 2.
+
+### Phase 2 — Direct Logit Optimization
+
+The forward model is frozen. A logit vector is optimized via backpropagation to find the action that best achieves the target outcome:
+
+```
+logits = initialized from top-performing training samples
+x_hat = sigmoid(logits)                         # soft action probabilities
+y_hat = forward_model(x_hat, adj)               # predicted outcome
+loss = MSE(y_hat, y_target) + l0_weight * L1(x_hat)   # task loss + sparsity
+
+# y_target differs by task:
+#   IM:  ones(N)            — maximize spread
+#   CND: zeros(N)           — maximize fragmentation
+#   SL:  observed_snapshot   — match observation
+```
+
+The top-k nodes by probability in `x_hat` form the final predicted node set.
+
+## Coding Agent (Planned)
+
+The Graph World Model is designed to serve as a **predictive environment** inside a coding agent loop for graph algorithm evolution. This component is not yet implemented.
+
+### Concept
+
+A coding agent generates candidate graph algorithms tailored to a given graph and task. Evaluating these candidates by fully executing them on real graphs is expensive. The GWM provides a fast, differentiable simulator for predicted rollouts:
+
+```
+# The coding agent generates a candidate algorithm
+pi = A_phi(G, task, history)
+
+# The GWM predicts graph-state transitions without full execution
+s_hat_next = f_theta(s_t, a_t, task)
+
+# Predicted rollout provides algorithmic insights for refinement
+rollout = Rollout_GWM(pi, G, task)  -->  Refine(pi)
+```
+
+### Graph Action Space
+
+Rather than allowing unrestricted code execution, the agent operates over a structured set of parameterized graph action primitives (candidate expansion, node selection, score propagation, subgraph update, termination). Each action is represented as `(operator, arguments)`, providing a unified interface for both algorithm execution and world model prediction.
+
+### Agent Loop
+
+1. **Generate**: The coding agent produces a candidate graph algorithm as a composition of action primitives
+2. **Simulate**: The GWM predicts the graph-state trajectory under the candidate algorithm
+3. **Evaluate**: Predicted outcomes (spread, connectivity, reachability) are compared against the task objective
+4. **Refine**: The agent uses the GWM's predictions as feedback to iteratively improve the algorithm
+
+### Baselines (Planned)
+
+| Baseline                  | Description                                                       |
+| ------------------------- | ----------------------------------------------------------------- |
+| **Native coding agent**   | Agent without GWM — improves only through real execution feedback |
+| **Pure graph algorithms** | Fixed hand-designed algorithms (greedy IM, BFS, PageRank, etc.)   |
+| **GA routing**            | Learned or heuristic selection over a predefined algorithm pool   |
+| **Coding agent + GWM**    | Full method — agent guided by world model predictions             |
 
 ## Project Structure
 
 ```
 GraphWorldModel/
-├── README.md                            # This file
-├── CLAUDE.md                            # Development instructions and architecture reference
-├── RESEARCH.md                          # Literature survey
-├── requirements.txt                     # Python dependencies
-│
 ├── Data/
-│   ├── generate_im_data.py             # Generate IM training data (seed sets + cascade traces)
-│   ├── generate_cnd_data.py            # Generate CND training data (removal sets + connectivity)
-│   ├── generate_sl_data.py             # Generate SL training data (source sets + partial snapshots)
-│   ├── diffusion.py                    # IC and LT diffusion simulation functions
-│   ├── connectivity.py                 # Node removal and residual connectivity computation
-│   ├── graph_utils.py                  # Shared utilities: edge index, adjacency lists, save/load
-│   │
-│   ├── datasets/                       # Dataset download and loading scripts
-│   │   ├── cora_ml.py                  # Cora-ML citation network (2,995 nodes, directed, bag-of-words features)
-│   │   ├── jazz.py                     # Jazz musician collaborations (198 nodes, undirected)
-│   │   ├── netscience.py               # Network Science coauthorship (1,589 nodes, undirected)
-│   │   ├── power_grid.py              # US Western power grid (4,941 nodes, undirected)
-│   │   ├── nethept.py                  # HEP-Theory citations (15,229 nodes, directed)
-│   │   ├── digg.py                     # Digg social network (116,893 nodes, undirected)
-│   │   └── twitter.py                  # Twitter ego network (81,306 nodes, symmetrized to undirected)
-│   │
-│   ├── cora_ml/                        # Generated data output (created by generate_*_data.py)
-│   │   ├── graph_data.npz             # Static graph: edge_index, ic_probs, lt_weights, node_feats
-│   │   ├── samples_im_ic_k10.npz     # IM samples: seed_sets, spreads, cascade_data
-│   │   ├── samples_cnd_k10.npz       # CND samples: removal_sets, connectivity_vecs
-│   │   ├── samples_sl_ic_k5.npz      # SL samples: seed_sets, snapshots, observe_times
-│   │   └── metadata.json              # Dataset statistics and generation config
-│   └── <dataset>/                      # Same structure for jazz/, netscience/, power_grid/, etc.
-│
+│   ├── generate_im_data.py          # IM data generation
+│   ├── generate_cnd_data.py         # CND data generation
+│   ├── generate_sl_data.py          # SL data generation
+│   ├── diffusion.py                 # IC/LT diffusion simulators
+│   ├── connectivity.py              # Graph connectivity analysis
+│   ├── graph_utils.py               # Graph utilities
+│   └── datasets/                    # Dataset loaders (cora_ml, jazz, etc.)
 ├── World_Model/
-│   ├── train.py                        # Main training script (Phase 1 joint training + Phase 2 latent optimization)
-│   ├── utils.py                        # Data loaders, adjacency processing, evaluation functions
-│   ├── model/
-│   │   ├── vae.py                      # Encoder, Decoder, VAEModel
-│   │   └── graph_transformer.py        # GraphTransformerLayer, GraphTransformerForwardModel
-│   └── checkpoints/                    # Saved .pt model checkpoints and results .txt files
-│
-└── Baselines/
-    └── DeepIM/                         # Reference implementation (DeepIM, ICML 2023)
-        ├── genim.py                    # Data generation for DeepIM
-        ├── data/
-        │   └── sparsegraph.py          # Sparse graph utilities
-        └── main/
-            ├── utils.py                # Training utilities
-            └── model/                  # GAT, GIN, MLP architectures
-                ├── dataloader.py
-                ├── gat.py
-                ├── gin_parser.py
-                ├── graphcnn.py
-                ├── mlp.py
-                └── model.py
+│   ├── train.py                     # Main training script (forward models)
+│   ├── train_vae.py                 # Legacy VAE+GT joint training
+│   ├── utils.py                     # Data loading, evaluation, adj processing
+│   └── model/
+│       ├── graph_transformer.py     # Graph Transformer forward model
+│       ├── gcn.py                   # GCN forward model
+│       ├── gat.py                   # GATv2 forward model
+│       ├── graphsage.py             # GraphSAGE forward model
+│       ├── gcnii.py                 # GCNII forward model
+│       ├── model_utils.py           # Shared utilities (degree encoding)
+│       └── vae.py                   # VAE encoder/decoder (used by train_vae.py)
+├── Baselines/
+│   └── DeepIM/                      # DeepIM baseline implementation
+└── requirements.txt
 ```
