@@ -28,6 +28,9 @@ __pycache__/
 *.pkl
 *.SG
 
+# Action-conditioned world-model generated data
+Data/action_conditioned_wm/output/
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
