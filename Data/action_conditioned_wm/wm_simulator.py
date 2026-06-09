@@ -136,7 +136,7 @@ class Simulator:
         )  # Snapsot previous active nodes before actions
 
         self.apply_actions(bag)  # Apply the actions # exogenous effect
-        self.model.iteration()  # Run one diffusion iteration (endogenous dynamics)
+        self.model.iteration()  # Run one diffusion iteration (endogenous diffusion dynamics)
 
         active = self._active_nodes()
 

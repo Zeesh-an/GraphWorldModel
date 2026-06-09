@@ -168,7 +168,8 @@ def make_real_bundle_from_arrays(
 def make_real_bundle(
     dataset: str, prob_model: str = "weighted", uniform_p: float = 0.1
 ) -> GraphBundle:
-    """Download (if needed) + load a real dataset, then build a GraphBundle.
+    """
+    Download (if needed) + load a real dataset, then build a GraphBundle.
 
     The loader is imported lazily so unit tests need no network access.
     """

@@ -1,4 +1,5 @@
-"""Action policy: the 6 classical IM seed selectors (each episode's t=0 seed
+"""
+Action policy: the 6 classical IM seed selectors (each episode's t=0 seed
 set), an NDlib Monte-Carlo spread oracle used by CELF / local-search, plus
 intermediate-step action injection and counterfactual candidate generation.
 """
@@ -170,7 +171,7 @@ def sample_injection(
     p_remove: float,
 ) -> list[ActionOp]:
     """
-    NULL with prob (1-p_inject), else add_seed (random susceptible) or
+    NULL (no action, just diffusion dynamics) with prob (1 - p_inject), else add_seed (random susceptible) or
     remove_node (random active), mixed by p_add:p_remove.
     """
     if rng.random() >= p_inject:

@@ -29,7 +29,8 @@ def _load_records(out_dir: Path) -> list:
 
     if not files:
         raise ValueError(f"no transitions_*.jsonl files found under {out_dir}")
-    records: list[dict[str, object]] = []
+
+    records = []
     for fp in files:
         for line in fp.read_text().strip().splitlines():
             if line:
@@ -44,10 +45,10 @@ def _action_key(action: list) -> tuple:
 
 def compute_checks(out_dir: Path) -> dict:
     records = _load_records(out_dir)
-    rewards = np.array([r["reward"] for r in records], dtype=float)
+    rewards = np.array([record["reward"] for record in records], dtype=float)
 
     # main-branch monotonicity: next infected_count >= infected_count
-    main = [r for r in records if r["branch"] == "main"]
+    main = [record for record in records if record["branch"] == "main"]
     monotone = sum(
         1
         for r in main
@@ -57,12 +58,18 @@ def compute_checks(out_dir: Path) -> dict:
 
     # action sensitivity: group by (graph, episode, t, state.infected), count
     # groups where differing actions produce differing next_states.
-    groups: dict[tuple, list[dict]] = defaultdict(list)
-    for r in records:
-        key = (r["graph_id"], r["episode_id"], r["t"], tuple(r["state"]["infected"]))
-        groups[key].append(r)
+    groups = defaultdict(list)
+    for record in records:
+        key = (
+            record["graph_id"],
+            record["episode_id"],
+            record["t"],
+            tuple(record["state"]["infected"]),
+        )
+        groups[key].append(record)
 
     sensitivity_pairs = 0
+
     for recs in groups.values():
         if len(recs) < 2:
             continue
@@ -80,15 +87,19 @@ def compute_checks(out_dir: Path) -> dict:
     # per-algorithm mean final spread (terminal infected_count, main branch) —
     # reported (not strictly asserted) so the ranking random < degree/pagerank
     # < celf/local_search can be eyeballed without MC-flaky test failures.
-    ep_final: dict[tuple, int] = {}
-    ep_algo: dict[tuple, str] = {}
+    ep_final = {}
+    ep_algo = {}
+
     for r in main:
         ek = (r["graph_id"], r["episode_id"])
         ep_algo[ek] = r["algorithm"]
         ep_final[ek] = max(ep_final.get(ek, 0), r["next_state"]["infected_count"])
-    algo_spreads: dict[str, list[int]] = defaultdict(list)
+
+    algo_spreads = defaultdict(list)
+
     for ek, fin in ep_final.items():
         algo_spreads[ep_algo[ek]].append(fin)
+
     per_algorithm_final_spread = {
         a: float(np.mean(v)) for a, v in sorted(algo_spreads.items())
     }
@@ -107,11 +118,13 @@ def compute_checks(out_dir: Path) -> dict:
 
 
 if __name__ == "__main__":
-    p = argparse.ArgumentParser(description="Validate generated WM transition data")
-    p.add_argument(
+    parser = argparse.ArgumentParser(
+        description="Validate generated WM transition data"
+    )
+    parser.add_argument(
         "--dir", required=True, help="output dir produced by generate_wm_data"
     )
-    args = p.parse_args()
+    args = parser.parse_args()
 
     checks = compute_checks(Path(args.dir))
     print(json.dumps(checks, indent=2))

@@ -342,46 +342,52 @@ def run_generation(config: GenConfig) -> dict[str, object]:
 
 
 def parse_args() -> GenConfig:
-    p = argparse.ArgumentParser(description="Generate action-conditioned WM (IM) data")
-    p.add_argument(
+    parser = argparse.ArgumentParser(
+        description="Generate action-conditioned WM (IM) data"
+    )
+    parser.add_argument(
         "--dataset",
         default="cora_ml",
         choices=list(REAL_DIRECTED) + list(SYNTHETIC_FAMILIES),
     )
-    p.add_argument("--num-graphs", type=int, default=1)
-    p.add_argument("--syn-nodes", type=int, default=100)
-    p.add_argument("--er-p", type=float, default=0.05)
-    p.add_argument("--ba-m", type=int, default=3)
-    p.add_argument("--ws-k", type=int, default=6)
-    p.add_argument("--ws-p", type=float, default=0.1)
-    p.add_argument("--models", nargs="+", default=["IC", "LT"], choices=["IC", "LT"])
-    p.add_argument("--prob-model", default="weighted", choices=["weighted", "uniform"])
-    p.add_argument("--uniform-p", type=float, default=0.1)
-    p.add_argument("--budget", type=int, default=5)
-    p.add_argument("--budget-pct", type=float, default=None)
-    p.add_argument(
+    parser.add_argument("--num-graphs", type=int, default=1)
+    parser.add_argument("--syn-nodes", type=int, default=100)
+    parser.add_argument("--er-p", type=float, default=0.05)
+    parser.add_argument("--ba-m", type=int, default=3)
+    parser.add_argument("--ws-k", type=int, default=6)
+    parser.add_argument("--ws-p", type=float, default=0.1)
+    parser.add_argument(
+        "--models", nargs="+", default=["IC", "LT"], choices=["IC", "LT"]
+    )
+    parser.add_argument(
+        "--prob-model", default="weighted", choices=["weighted", "uniform"]
+    )
+    parser.add_argument("--uniform-p", type=float, default=0.1)
+    parser.add_argument("--budget", type=int, default=5)
+    parser.add_argument("--budget-pct", type=float, default=None)
+    parser.add_argument(
         "--algorithms",
         nargs="+",
         default=list(SPINE_ALGORITHMS),
         choices=list(SPINE_ALGORITHMS),
     )
-    p.add_argument("--rollouts", type=int, default=10)
-    p.add_argument("--horizon", type=int, default=10)
-    p.add_argument("--inject-p", type=float, default=0.3)
-    p.add_argument("--p-add", type=float, default=0.5)
-    p.add_argument("--p-remove", type=float, default=0.5)
-    p.add_argument("--cf-prob", type=float, default=0.2)
-    p.add_argument("--cf-branches", type=int, default=2)
-    p.add_argument("--split", type=float, nargs=3, default=[0.7, 0.15, 0.15])
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--out-dir", default=None)
-    p.add_argument(
+    parser.add_argument("--rollouts", type=int, default=10)
+    parser.add_argument("--horizon", type=int, default=10)
+    parser.add_argument("--inject-p", type=float, default=0.3)
+    parser.add_argument("--p-add", type=float, default=0.5)
+    parser.add_argument("--p-remove", type=float, default=0.5)
+    parser.add_argument("--cf-prob", type=float, default=0.2)
+    parser.add_argument("--cf-branches", type=int, default=2)
+    parser.add_argument("--split", type=float, nargs=3, default=[0.7, 0.15, 0.15])
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--out-dir", default=None)
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="tiny end-to-end run (er-40, 1 graph, 2 rollouts, horizon 4)",
     )
 
-    args = p.parse_args()
+    args = parser.parse_args()
     if args.out_dir is None:
         args.out_dir = str(_PKG_DIR / "output" / args.dataset)
     if args.smoke:
