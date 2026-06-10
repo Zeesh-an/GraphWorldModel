@@ -50,37 +50,41 @@ All models use degree-based sinusoidal positional encoding (can be disabled with
 
 ### Step 1 — Generate Data
 
+> These diffusion-only generators are the **legacy** pipeline, archived under
+> `data/old/`. The current action-conditioned pipeline is
+> `data/generate_wm_data.py` (see [data/README.md](data/README.md)).
+
 ```bash
 # Influence Maximization (Cora-ML, IC model, k=10, 1000 samples)
-python Data/generate_im_data.py -d cora_ml --k 10 --samples 1000
+python data/old/generate_im_data.py -d cora_ml --k 10 --samples 1000
 
 # Critical Node Detection (Jazz, k=10, 500 samples)
-python Data/generate_cnd_data.py -d jazz --k 10 --samples 500
+python data/old/generate_cnd_data.py -d jazz --k 10 --samples 500
 
 # Source Localization (Power Grid, IC model, k=5, 1000 samples)
-python Data/generate_sl_data.py -d power_grid --k 5 --samples 1000
+python data/old/generate_sl_data.py -d power_grid --k 5 --samples 1000
 ```
 
 ### Step 2 — Train Forward Model + Inverse Optimization
 
 ```bash
 # IM on Cora-ML with GraphSAGE
-python World_Model/train.py --task IM -d cora_ml -dm IC --k 10 \
+python world_model/train.py --task IM -d cora_ml -dm IC --k 10 \
     --model sage --sage-hidden 128 --sage-layers 3 \
     --epochs 600 --opt-iters 500 --lr 1e-4 --lr-z 1e-2 \
-    --npz-dir Data/cora_ml
+    --npz-dir data/cora_ml
 
 # CND on Jazz with GCN
-python World_Model/train.py --task CND -d jazz --k 10 \
+python world_model/train.py --task CND -d jazz --k 10 \
     --model gcn --gcn-hidden 64 --gcn-layers 3 \
     --epochs 600 --opt-iters 300 \
-    --npz-dir Data/jazz
+    --npz-dir data/jazz
 
 # SL on Power Grid with Graph Transformer
-python World_Model/train.py --task SL -d power_grid -dm IC --k 5 \
+python world_model/train.py --task SL -d power_grid -dm IC --k 5 \
     --model gt --gt-d-model 64 --gt-heads 4 --gt-layers 3 --gt-ffn 128 \
     --epochs 600 --opt-iters 300 \
-    --npz-dir Data/power_grid
+    --npz-dir data/power_grid
 ```
 
 ### Key Training Flags
@@ -184,15 +188,21 @@ Rather than allowing unrestricted code execution, the agent operates over a stru
 
 ```
 GraphWorldModel/
-├── Data/
-│   ├── generate_im_data.py          # IM data generation
-│   ├── generate_cnd_data.py         # CND data generation
-│   ├── generate_sl_data.py          # SL data generation
-│   ├── diffusion.py                 # IC/LT diffusion simulators
-│   ├── connectivity.py              # Graph connectivity analysis
-│   ├── graph_utils.py               # Graph utilities
-│   └── datasets/                    # Dataset loaders (cora_ml, jazz, etc.)
-├── World_Model/
+├── data/
+│   ├── generate_wm_data.py          # action-conditioned WM data generator (current)
+│   ├── validate_wm_data.py          # gate-check harness for generated data
+│   ├── wm_simulator.py              # NDlib stepwise IC/LT sim + State/ActionOp
+│   ├── wm_graphs.py                 # graph providers (real + synthetic)
+│   ├── wm_actions.py                # spine seed selectors + action injection
+│   ├── graph_utils.py               # Graph utilities (shared)
+│   ├── datasets/                    # Dataset loaders (cora_ml, jazz, etc.)
+│   └── old/                         # legacy diffusion-only pipeline (archived)
+│       ├── generate_im_data.py      # IM data generation
+│       ├── generate_cnd_data.py     # CND data generation
+│       ├── generate_sl_data.py      # SL data generation
+│       ├── diffusion.py             # IC/LT diffusion simulators
+│       └── connectivity.py          # Graph connectivity analysis
+├── world_model/
 │   ├── train.py                     # Main training script (forward models)
 │   ├── train_vae.py                 # Legacy VAE+GT joint training
 │   ├── utils.py                     # Data loading, evaluation, adj processing
@@ -204,7 +214,7 @@ GraphWorldModel/
 │       ├── gcnii.py                 # GCNII forward model
 │       ├── model_utils.py           # Shared utilities (degree encoding)
 │       └── vae.py                   # VAE encoder/decoder (used by train_vae.py)
-├── Baselines/
+├── baselines/
 │   └── DeepIM/                      # DeepIM baseline implementation
 └── requirements.txt
 ```

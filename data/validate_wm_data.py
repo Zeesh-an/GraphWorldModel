@@ -6,7 +6,7 @@ Reproduces gate checks on a produced dataset directory:
     - Main-branch monotone active-count growth,
     - Action sensitivity (same state_t, different action -> different next_state).
 
-python Data/action_conditioned_wm/validate_wm_data.py --dir <output_dir>
+python data/validate_wm_data.py --dir <output_dir>
 """
 
 import argparse
@@ -15,13 +15,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 import numpy as np
-
-# sys.path bootstrap so flat imports and sibling reuse resolve when run as a script
-_PKG_DIR = Path(__file__).resolve().parent
-_DATA_DIR = _PKG_DIR.parent
-for _p in (str(_PKG_DIR), str(_DATA_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 
 def _load_records(out_dir: Path) -> list:

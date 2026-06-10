@@ -9,7 +9,7 @@ docs/
 CLAUDE.md
 
 # Research notes
-ResearchNotes/
+research_notes/
 
 # Python
 __pycache__/
@@ -29,7 +29,7 @@ __pycache__/
 *.SG
 
 # Action-conditioned world-model generated data
-Data/action_conditioned_wm/output/
+data/output/
 
 # Jupyter
 .ipynb_checkpoints/

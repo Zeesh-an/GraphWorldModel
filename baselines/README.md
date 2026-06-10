@@ -1,6 +1,6 @@
 # Baselines
 
-Reference implementations from prior work, used for comparison against models in `World_Model/`.
+Reference implementations from prior work, used for comparison against models in `world_model/`.
 
 ---
 
@@ -19,7 +19,7 @@ VAE + SpGAT approach for influence maximization. Two-phase training:
 ### Run
 
 ```bash
-cd Baselines/DeepIM
+cd baselines/DeepIM
 python genim.py -d cora_ml -dm IC -sp 1
 ```
 
@@ -45,6 +45,6 @@ Each file contains:
 
 ## Adding a New Baseline
 
-1. Clone the repo into a new subfolder under `Baselines/`
-2. Remove its `.git` directory: `rm -rf Baselines/<name>/.git`
+1. Clone the repo into a new subfolder under `baselines/`
+2. Remove its `.git` directory: `rm -rf baselines/<name>/.git`
 3. Add a brief entry to this README

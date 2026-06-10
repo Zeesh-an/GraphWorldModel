@@ -23,11 +23,11 @@ Phase 2 (--opt-iters, default 300):
 
 Usage
 -----
-    python World_Model/train.py --task IM -d cora_ml -dm IC --k 30 --k-pct 1 \
+    python world_model/train_vae.py --task IM -d cora_ml -dm IC --k 30 --k-pct 1 \
         --hidden-dim 512 --latent-dim 256 \
         --gt-d-model 64 --gt-heads 4 --gt-layers 3 --gt-ffn 128 \
         --epochs 600 --opt-iters 500 --lr 1e-4 --lr-z 1e-3 \
-        --npz-dir Data/cora_ml
+        --npz-dir data/cora_ml
 """
 
 import argparse
@@ -152,17 +152,17 @@ def parse_args():
     # Data paths
     p.add_argument(
         "--npz-dir",
-        default=str(ROOT / "Data" / "cora_ml"),
+        default=str(ROOT / "data" / "cora_ml"),
         help="Path to generated .npz data directory",
     )
     p.add_argument(
         "--sg-dir",
-        default=str(ROOT / "Baselines" / "DeepIM" / "data"),
+        default=str(ROOT / "baselines" / "DeepIM" / "data"),
         help="Path to baseline .SG data directory (fallback)",
     )
     p.add_argument(
         "--ckpt-dir",
-        default=str(ROOT / "World_Model" / "checkpoints"),
+        default=str(ROOT / "world_model" / "checkpoints"),
         help="Directory to save checkpoints",
     )
 

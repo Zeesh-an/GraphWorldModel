@@ -22,24 +22,24 @@ See the design spec:
 source .venv/bin/activate
 
 # Diffusion-only (no actions) — the default when --action-ops is omitted
-python Data/action_conditioned_wm/generate_wm_data.py --dataset ba --num-graphs 1
+python data/generate_wm_data.py --dataset ba --num-graphs 1
 
 # Node action interventions
-python Data/action_conditioned_wm/generate_wm_data.py --dataset ba --num-graphs 1 \
+python data/generate_wm_data.py --dataset ba --num-graphs 1 \
     --action-ops add_node remove_node
 
 # Edge action interventions
-python Data/action_conditioned_wm/generate_wm_data.py --dataset ba --num-graphs 1 \
+python data/generate_wm_data.py --dataset ba --num-graphs 1 \
     --action-ops add_edge remove_edge set_edge_weight
 
 # Real dataset (downloads on first use)
-python Data/action_conditioned_wm/generate_wm_data.py --dataset jazz --action-ops add_node remove_node
+python data/generate_wm_data.py --dataset jazz --action-ops add_node remove_node
 
 # Tiny end-to-end check
-python Data/action_conditioned_wm/generate_wm_data.py --smoke --out-dir /tmp/wm_smoke
+python data/generate_wm_data.py --smoke --out-dir /tmp/wm_smoke
 
 # Validate a produced dataset (gate checks)
-python Data/action_conditioned_wm/validate_wm_data.py --dir Data/action_conditioned_wm/output/ba
+python data/validate_wm_data.py --dir data/output/ba
 ```
 
 ## Output (`output/<dataset>/`)
@@ -73,11 +73,11 @@ Edge ops carry the second endpoint as `"destination"` and, for `add_edge` /
 
 ## Datasets
 
-- **Real** (downloaded via `Data/datasets/`): `cora_ml, digg, twitter, jazz,
+- **Real** (downloaded via `data/datasets/`): `cora_ml, digg, twitter, jazz,
 netscience, power_grid, nethept`.
 - **Synthetic**: `er, ba, ws, karate`.
 
-Run `python Data/action_conditioned_wm/generate_wm_data.py --help` for all flags
+Run `python data/generate_wm_data.py --help` for all flags
 (`--models`, `--prob-model`, `--budget`, `--rollouts`, `--horizon`, `--inject-p`,
 `--action-ops`, `--weight-lo`, `--weight-hi`, `--cf-prob`, `--split`, `--seed`,
 synthetic params, ...).

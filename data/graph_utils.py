@@ -1,6 +1,5 @@
 """
 Shared graph utilities for data generation
-==========================================
 
 Common graph preprocessing functions used across inverse graph problem data generators.
 """

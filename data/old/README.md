@@ -1,6 +1,9 @@
-# Data
+# Data (legacy / archived)
 
-Data generation pipelines for each graph inverse problem task.
+Legacy diffusion-only data generation pipelines for each graph inverse problem
+task. **Archived** — superseded by the action-conditioned generator in
+`data/generate_wm_data.py`. These scripts import `graph_utils`/`datasets` from the
+parent `data/` directory, so run them with `data/` on `PYTHONPATH`.
 Each task has its own generator script that produces standardised `.npz` files.
 
 ---
@@ -19,7 +22,7 @@ IC and LT diffusion on the Cora-ML citation graph.
 source .venv/bin/activate
 
 # Standard run (downloads Cora-ML automatically on first use)
-python Data/generate_im_data.py --samples 1000 --k 10 --mc-runs 100 --models IC LT
+PYTHONPATH=data python data/old/generate_im_data.py --samples 1000 --k 10 --mc-runs 100 --models IC LT
 ```
 
 ### Arguments
@@ -31,12 +34,12 @@ python Data/generate_im_data.py --samples 1000 --k 10 --mc-runs 100 --models IC 
 | `--mc-runs`   | 100          | Monte Carlo runs per sample (for spread estimation) |
 | `--models`    | IC LT        | Diffusion models: `IC`, `LT`                        |
 | `--max-steps` | 50           | Max cascade propagation timesteps                   |
-| `--out-dir`   | Data/cora_ml | Output directory                                    |
+| `--out-dir`   | data/cora_ml | Output directory                                    |
 
 ### Output files
 
 ```
-Data/cora_ml/
+data/cora_ml/
 ├── cora_ml.npz          # raw download (auto)
 ├── graph_data.npz       # processed graph
 ├── samples_ic.npz       # IC simulation samples
@@ -69,10 +72,10 @@ Data/cora_ml/
 
 ```python
 from pathlib import Path
-from Data.generate_im_data import load_graph, load_samples
+from generate_im_data import load_graph, load_samples  # run from data/old/ with data/ on PYTHONPATH
 
-graph  = load_graph(Path("Data/cora_ml"))
-seeds, spreads, stds, cascades = load_samples(Path("Data/cora_ml"), model="IC")
+graph  = load_graph(Path("data/cora_ml"))
+seeds, spreads, stds, cascades = load_samples(Path("data/cora_ml"), model="IC")
 
 # cascades[i] → (T_i, N) bool  — activated nodes at each timestep
 ```

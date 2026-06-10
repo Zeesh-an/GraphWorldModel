@@ -2,26 +2,26 @@
 Orchestrator: generate action-conditioned (G, s_t, a_t, s_{t + 1}, R)
 transition data for IM and write it as JSONL + a graph store
 
-python Data/action_conditioned_wm/generate_wm_data.py \
+python data/generate_wm_data.py \
     --dataset er --num-graphs 1 --syn-nodes 100 --er-p 0.05 \
     --models IC LT --prob-model weighted --budget 5 \
     --algorithms random degree pagerank betweenness celf local_search \
     --rollouts 10 --horizon 10 --cf-prob 0.2 --cf-branches 2 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir Data/action_conditioned_wm/output/er_diffusion
+    --out-dir data/output/er_diffusion
 
 # Setting 2 — node actions
-python Data/action_conditioned_wm/generate_wm_data.py \
+python data/generate_wm_data.py \
     --dataset er --num-graphs 1 --syn-nodes 100 --er-p 0.05 \
     --models IC LT --prob-model weighted --budget 5 \
     --algorithms random degree pagerank betweenness celf local_search \
     --rollouts 10 --horizon 10 --cf-prob 0.2 --cf-branches 2 \
     --action-ops add_node remove_node --inject-p 0.3 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir Data/action_conditioned_wm/output/er_node
+    --out-dir data/output/er_node
 
 # Setting 3 — edge actions
-python Data/action_conditioned_wm/generate_wm_data.py \
+python data/generate_wm_data.py \
     --dataset er --num-graphs 1 --syn-nodes 100 --er-p 0.05 \
     --models IC LT --prob-model weighted --budget 5 \
     --algorithms random degree pagerank betweenness celf local_search \
@@ -29,7 +29,7 @@ python Data/action_conditioned_wm/generate_wm_data.py \
     --action-ops add_edge remove_edge set_edge_weight \
     --inject-p 0.3 --weight-lo 0.0 --weight-hi 1.0 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir Data/action_conditioned_wm/output/er_edge
+    --out-dir data/output/er_edge
 """
 
 import argparse
@@ -39,13 +39,6 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
-
-# sys.path bootstrap so flat imports and sibling reuse resolve when run as a script
-_PKG_DIR = Path(__file__).resolve().parent
-_DATA_DIR = _PKG_DIR.parent
-for _p in (str(_PKG_DIR), str(_DATA_DIR)):
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
 
 from wm_actions import (
     SPINE_ALGORITHMS,
@@ -425,7 +418,7 @@ def parse_args() -> GenConfig:
 
     args = parser.parse_args()
     if args.out_dir is None:
-        args.out_dir = str(_PKG_DIR / "output" / args.dataset)
+        args.out_dir = str(Path(__file__).resolve().parent / "output" / args.dataset)
     if args.smoke:
         args.dataset, args.num_graphs, args.syn_nodes, args.er_p = "er", 1, 40, 0.1
         args.rollouts, args.horizon = 2, 4
