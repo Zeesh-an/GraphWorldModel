@@ -29,13 +29,14 @@ def estimate_spread(
     rng: np.random.Generator,
 ) -> float:
     """
-    Mean final activated-node count over ``mc_runs`` rollouts: seed at t=0,
-    then NULL actions until the frontier dies or ``horizon`` is reached.
+    Mean final activated-node count over mc_runs rollouts: seed at t=0,
+    then NULL actions until the frontier dies or horizon is reached.
     """
     if not seeds:
         return 0.0
 
-    seed_bag = [ActionOp("add_seed", int(v)) for v in seeds]
+    # Seed nodes are initialized as add_node actions on the seed node set
+    seed_bag = [ActionOp("add_node", int(v)) for v in seeds]
     totals = []
 
     for run in range(mc_runs):
@@ -162,36 +163,102 @@ def select_seeds(
     raise ValueError(f"Unknown algorithm {algorithm}; choose from {SPINE_ALGORITHMS}")
 
 
-def sample_injection(
+def _random_edge(
+    graph: nx.Graph | nx.DiGraph, rng: np.random.Generator
+) -> tuple | None:
+    edges = list(graph.edges())
+
+    if not edges:
+        return None
+    u, v = edges[int(rng.integers(len(edges)))]
+
+    return int(u), int(v)
+
+
+def _random_non_edge(
+    graph: nx.Graph | nx.DiGraph, rng: np.random.Generator
+) -> tuple | None:
+    # A few tries to land a missing edge
+    # The graphs are sparse so this almost always hits
+    for _ in range(10):
+        u, v = int(rng.integers(graph.number_of_nodes())), int(
+            rng.integers(graph.number_of_nodes())
+        )
+
+        if u != v and not graph.has_edge(u, v):
+            return u, v
+
+    return None
+
+
+def _build_action(
+    op: str,
     state: State,
-    n_nodes: int,
+    graph: nx.Graph | nx.DiGraph,
     rng: np.random.Generator,
-    p_inject: float,
-    p_add: float,
-    p_remove: float,
+    weight_range: tuple,
 ) -> list[ActionOp]:
-    """
-    NULL (no action, just diffusion dynamics) with prob (1 - p_inject), else add_seed (random susceptible) or
-    remove_node (random active), mixed by p_add:p_remove.
-    """
-    if rng.random() >= p_inject:
-        return []
-
-    # Get the action to inject at an intermediate step
+    """One injected action of type op with a randomly chosen valid target."""
     infected = set(state.infected)
-    susceptible = [v for v in range(n_nodes) if v not in infected]
-    active = list(state.frontier) if state.frontier else list(state.infected)
-    do_add = (
-        rng.random() < (p_add / (p_add + p_remove)) if (p_add + p_remove) > 0 else True
-    )
 
-    if do_add and susceptible:
-        return [ActionOp("add_seed", int(rng.choice(susceptible)))]
-
-    if not do_add and active:
-        return [ActionOp("remove_node", int(rng.choice(active)))]
+    if op == "add_node":
+        # Build an action that randomly adds a susceptible node
+        susceptible = [v for v in range(graph.number_of_nodes()) if v not in infected]
+        if susceptible:
+            return [ActionOp("add_node", int(rng.choice(susceptible)))]
+    elif op == "remove_node":
+        # Build an action that randomly removes an infected/frontier node
+        active = list(state.frontier) if state.frontier else list(state.infected)
+        if active:
+            return [ActionOp("remove_node", int(rng.choice(active)))]
+    elif op == "add_edge":
+        # Build an action that randomly adds an edge where there previously was not one
+        edge = _random_non_edge(graph, rng)
+        if edge is not None:
+            return [
+                ActionOp(
+                    "add_edge", edge[0], edge[1], float(rng.uniform(*weight_range))
+                )
+            ]
+    elif op == "remove_edge":
+        # Build an action that randomly removes an edge
+        edge = _random_edge(graph, rng)
+        if edge is not None:
+            return [ActionOp("remove_edge", edge[0], edge[1])]
+    elif op == "set_edge_weight":
+        # Build an action that randomly modifies a pre-existing edge weight
+        edge = _random_edge(graph, rng)
+        if edge is not None:
+            return [
+                ActionOp(
+                    "set_edge_weight",
+                    edge[0],
+                    edge[1],
+                    float(rng.uniform(*weight_range)),
+                )
+            ]
 
     return []
+
+
+def sample_injection(
+    state: State,
+    graph: nx.Graph | nx.DiGraph,
+    rng: np.random.Generator,
+    p_inject: float,
+    action_ops: list[str],
+    weight_range: tuple[float, float],
+) -> list[ActionOp]:
+    """
+    NULL (no action, just diffusion dynamics) with prob (1 - p_inject), else a
+    single op drawn uniformly from action_ops. Empty action_ops => always NULL.
+    """
+    if not action_ops or rng.random() >= p_inject:
+        return []
+
+    # Pick one enabled op uniformly, then a random valid target from the live graph
+    op = action_ops[int(rng.integers(len(action_ops)))]
+    return _build_action(op, state, graph, rng, weight_range)
 
 
 def counterfactual_actions(
@@ -200,25 +267,32 @@ def counterfactual_actions(
     main_bag: list[ActionOp],
     n: int,
     rng: np.random.Generator,
+    action_ops: list[str],
 ) -> list[list[ActionOp]]:
     """
-    Up to n action bags distinct from ``main_bag`` and each other
-    (pool: NULL, a random add_seed, a random remove_node).
+    Up to n action bags distinct from main_bag and each other. Forks cover
+    node ops only (NULL, a random add_node, a random remove_node) so the
+    snapshot/restore branch never has to undo an edge mutation.
     """
     infected = set(state.infected)
     susceptible = [v for v in range(n_nodes) if v not in infected]
     active = list(state.frontier) if state.frontier else list(state.infected)
 
-    def key(bag: list[ActionOp]) -> tuple[tuple[str, int], ...]:
-        return tuple(sorted((a.op, a.target) for a in bag))
+    def key(bag: list[ActionOp]) -> tuple:
+        return tuple(
+            sorted(
+                (a.op, a.target, a.destination if a.destination is not None else -1)
+                for a in bag
+            )
+        )
 
     seen = {key(main_bag)}
     pool = [[]]
 
-    if susceptible:
-        pool.append([ActionOp("add_seed", int(rng.choice(susceptible)))])
+    if "add_node" in action_ops and susceptible:
+        pool.append([ActionOp("add_node", int(rng.choice(susceptible)))])
 
-    if active:
+    if "remove_node" in action_ops and active:
         pool.append([ActionOp("remove_node", int(rng.choice(active)))])
 
     out = []

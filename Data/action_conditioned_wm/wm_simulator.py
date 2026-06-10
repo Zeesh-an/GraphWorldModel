@@ -13,16 +13,32 @@ import numpy as np
 import ndlib.models.ModelConfig as mc
 import ndlib.models.epidemics as ep  # IC, LT
 
-VALID_OPS = ("add_seed", "remove_node")
+VALID_ACTION_OPS = (
+    "add_node",
+    "remove_node",
+    "add_edge",
+    "remove_edge",
+    "set_edge_weight",
+)
 
 
 @dataclass
 class ActionOp:
-    op: str  # VALID_OPS
-    target: int  # Target node ID
+    op: str  # VALID_ACTION_OPS
+    target: int  # Target node ID (edge source u for edge operations)
+    destination: int | None = None  # Edge destination v (edge operations only)
+    weight: float | None = None  # Edge weight (add_edge / set_edge_weight)
 
     def to_dict(self) -> dict:
-        return {"op": self.op, "target": int(self.target)}
+        action_dict = {"op": self.op, "target": int(self.target)}
+
+        if self.destination is not None:
+            action_dict["destination"] = int(self.destination)
+
+        if self.weight is not None:
+            action_dict["weight"] = float(self.weight)
+
+        return action_dict
 
 
 @dataclass
@@ -77,7 +93,8 @@ class Simulator:
                 config.add_edge_configuration("threshold", (u, v), float(p))
         else:
             # Linear Threshold (LT)
-            model = ep.ThresholdModel(self.graph, seed=self.seed)
+            # Copy so edge actions mutate this episode's graph, not the shared bundle
+            model = ep.ThresholdModel(self.graph.copy(), seed=self.seed)
 
             if lt_thresholds is None:
                 lt_thresholds = {
@@ -118,7 +135,7 @@ class Simulator:
 
     def apply_actions(self, bag: list[ActionOp]) -> None:
         for action in bag:
-            if action.op == "add_seed":
+            if action.op == "add_node":
                 # Set status to 1 (the node becomes an active spreader, and next iteration it spreads)
                 self.model.status[int(action.target)] = 1
             elif action.op == "remove_node":
@@ -128,6 +145,30 @@ class Simulator:
                 self.model.status[int(action.target)] = (
                     2 if self.model_name == "IC" else 0
                 )
+            elif action.op == "add_edge":
+                # New edge u -> v: diffusion can traverse it from the next iteration onwards
+                u, v = int(action.target), int(action.destination)
+                self.model.graph.add_edges(u, [v])
+
+                if self.model_name == "IC":
+                    # IC needs a per-edge transmission probability (the edge threshold)
+                    self.model.params["edges"]["threshold"][(u, v)] = float(
+                        action.weight
+                    )
+            elif action.op == "remove_edge":
+                # Drop the edge u -> v so diffusion can no longer traverse it
+                u, v = int(action.target), int(action.destination)
+                self.model.graph.remove_edges(u, [v])
+
+                if self.model_name == "IC":
+                    self.model.params["edges"]["threshold"].pop((u, v), None)
+            elif action.op == "set_edge_weight":
+                # Perturb the edge's transmission probability (IC only because LT ignores edge weights)
+                if self.model_name == "IC":
+                    u, v = int(action.target), int(action.destination)
+                    self.model.params["edges"]["threshold"][(u, v)] = float(
+                        action.weight
+                    )
 
     def advance(self, bag: list[ActionOp]) -> State:
         # s_{t + 1} = T_endo(T_exo(s_t, a_t))

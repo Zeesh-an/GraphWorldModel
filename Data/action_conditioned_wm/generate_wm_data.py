@@ -2,7 +2,34 @@
 Orchestrator: generate action-conditioned (G, s_t, a_t, s_{t + 1}, R)
 transition data for IM and write it as JSONL + a graph store
 
-python Data/action_conditioned_wm/generate_wm_data.py --dataset ba --num-graphs 5
+python Data/action_conditioned_wm/generate_wm_data.py \
+    --dataset er --num-graphs 1 --syn-nodes 100 --er-p 0.05 \
+    --models IC LT --prob-model weighted --budget 5 \
+    --algorithms random degree pagerank betweenness celf local_search \
+    --rollouts 10 --horizon 10 --cf-prob 0.2 --cf-branches 2 \
+    --split 0.7 0.15 0.15 --seed 42 \
+    --out-dir Data/action_conditioned_wm/output/er_diffusion
+
+# Setting 2 — node actions
+python Data/action_conditioned_wm/generate_wm_data.py \
+    --dataset er --num-graphs 1 --syn-nodes 100 --er-p 0.05 \
+    --models IC LT --prob-model weighted --budget 5 \
+    --algorithms random degree pagerank betweenness celf local_search \
+    --rollouts 10 --horizon 10 --cf-prob 0.2 --cf-branches 2 \
+    --action-ops add_node remove_node --inject-p 0.3 \
+    --split 0.7 0.15 0.15 --seed 42 \
+    --out-dir Data/action_conditioned_wm/output/er_node
+
+# Setting 3 — edge actions
+python Data/action_conditioned_wm/generate_wm_data.py \
+    --dataset er --num-graphs 1 --syn-nodes 100 --er-p 0.05 \
+    --models IC LT --prob-model weighted --budget 5 \
+    --algorithms random degree pagerank betweenness celf local_search \
+    --rollouts 10 --horizon 10 --cf-prob 0.2 --cf-branches 2 \
+    --action-ops add_edge remove_edge set_edge_weight \
+    --inject-p 0.3 --weight-lo 0.0 --weight-hi 1.0 \
+    --split 0.7 0.15 0.15 --seed 42 \
+    --out-dir Data/action_conditioned_wm/output/er_edge
 """
 
 import argparse
@@ -32,7 +59,7 @@ from wm_graphs import (
     make_real_bundle,
     make_synthetic_bundle,
 )
-from wm_simulator import ActionOp, Simulator, State
+from wm_simulator import VALID_ACTION_OPS, ActionOp, Simulator, State
 
 SYNTHETIC_FAMILIES = ("er", "ba", "ws", "karate")
 
@@ -148,8 +175,9 @@ class GenConfig:
     rollouts: int
     horizon: int
     inject_p: float
-    p_add: float
-    p_remove: float
+    action_ops: list[str]
+    weight_lo: float
+    weight_hi: float
     cf_prob: float
     cf_branches: int
     split: tuple[float, float, float]
@@ -222,7 +250,7 @@ def _episode_transitions(
     sim.reset(model)
 
     s_t = State(infected=[], frontier=[])
-    seed_bag = [ActionOp("add_seed", v) for v in seeds]
+    seed_bag = [ActionOp("add_node", v) for v in seeds]
 
     # Timestep loop
     for t in range(config.horizon + 1):
@@ -232,11 +260,11 @@ def _episode_transitions(
             if t == 0
             else sample_injection(
                 s_t,
-                n_nodes=bundle.nx_graph.number_of_nodes(),
+                graph=sim.model.graph.graph,
                 rng=inj_rng,
                 p_inject=config.inject_p,
-                p_add=config.p_add,
-                p_remove=config.p_remove,
+                action_ops=config.action_ops,
+                weight_range=(config.weight_lo, config.weight_hi),
             )
         )
 
@@ -250,6 +278,7 @@ def _episode_transitions(
                     main_bag=action,
                     n=config.cf_branches,
                     rng=inj_rng,
+                    action_ops=config.action_ops,
                 )
             ):
                 sim.restore(snap)
@@ -374,8 +403,15 @@ def parse_args() -> GenConfig:
     parser.add_argument("--rollouts", type=int, default=10)
     parser.add_argument("--horizon", type=int, default=10)
     parser.add_argument("--inject-p", type=float, default=0.3)
-    parser.add_argument("--p-add", type=float, default=0.5)
-    parser.add_argument("--p-remove", type=float, default=0.5)
+    parser.add_argument(
+        "--action-ops",
+        nargs="*",
+        default=[],
+        choices=list(VALID_ACTION_OPS),
+        help="ops to inject; empty = diffusion-only (no action interventions)",
+    )
+    parser.add_argument("--weight-lo", type=float, default=0.0)
+    parser.add_argument("--weight-hi", type=float, default=1.0)
     parser.add_argument("--cf-prob", type=float, default=0.2)
     parser.add_argument("--cf-branches", type=int, default=2)
     parser.add_argument("--split", type=float, nargs=3, default=[0.7, 0.15, 0.15])
@@ -394,6 +430,7 @@ def parse_args() -> GenConfig:
         args.dataset, args.num_graphs, args.syn_nodes, args.er_p = "er", 1, 40, 0.1
         args.rollouts, args.horizon = 2, 4
         args.algorithms = ["random", "degree"]
+        args.action_ops = list(VALID_ACTION_OPS)
 
     return GenConfig(
         dataset=args.dataset,
@@ -412,8 +449,9 @@ def parse_args() -> GenConfig:
         rollouts=args.rollouts,
         horizon=args.horizon,
         inject_p=args.inject_p,
-        p_add=args.p_add,
-        p_remove=args.p_remove,
+        action_ops=args.action_ops,
+        weight_lo=args.weight_lo,
+        weight_hi=args.weight_hi,
         cf_prob=args.cf_prob,
         cf_branches=args.cf_branches,
         split=tuple(args.split),

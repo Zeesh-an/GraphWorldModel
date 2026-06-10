@@ -107,7 +107,7 @@ def make_synthetic_bundle(
     prob_model: str = "weighted",
     uniform_p: float = 0.1,
 ) -> GraphBundle:
-    """Generate one synthetic graph instance (``index`` is folded into the seed)."""
+    """Generate one synthetic graph instance index is folded into the seed)."""
     inst_seed = seed + index
 
     if family == "er":

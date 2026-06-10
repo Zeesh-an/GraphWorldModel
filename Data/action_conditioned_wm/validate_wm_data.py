@@ -40,7 +40,9 @@ def _load_records(out_dir: Path) -> list:
 
 
 def _action_key(action: list) -> tuple:
-    return tuple(sorted((a["op"], a["target"]) for a in action))
+    return tuple(
+        sorted((a["op"], a["target"], a.get("destination", -1)) for a in action)
+    )
 
 
 def compute_checks(out_dir: Path) -> dict:
