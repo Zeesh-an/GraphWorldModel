@@ -34,7 +34,6 @@ python data/generate_wm_data.py \
 
 import argparse
 import json
-import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path

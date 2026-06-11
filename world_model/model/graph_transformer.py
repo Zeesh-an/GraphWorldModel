@@ -1,6 +1,5 @@
 """
 Graph Transformer — Forward Diffusion Model
-============================================
 
 Replaces the SpGAT in DeepIM with a proper Graph Transformer.
 
@@ -21,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .model_utils import degree_encoding
+from model_utils import degree_encoding
 
 
 # Graph Transformer Layer
@@ -77,10 +76,16 @@ class GraphTransformerLayer(nn.Module):
         for m in [self.Wq, self.Wk, self.Wv, self.Wo]:
             nn.init.xavier_uniform_(m.weight)
 
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """
         x: (N, d_model)
         edge_index: (2, E) long — [src, dst]
+        edge_weight: (E,) float edge weights added as log-bias to attention scores, or None for unweighted
         returns: (N, d_model)
         """
         N = x.shape[0]
@@ -104,6 +109,9 @@ class GraphTransformerLayer(nn.Module):
         V_e = V[src]  # (E, H, d_k)
 
         scores = (Q_e * K_e).sum(dim=-1) / math.sqrt(self.d_k)  # (E, H)
+
+        if edge_weight is not None:
+            scores = scores + torch.log(edge_weight.clamp(min=1e-9)).unsqueeze(1)
 
         # Compute softmax over incoming edges per node per head
         # Use scatter softmax: subtract max per (dst, head) for stability
@@ -232,3 +240,51 @@ class GraphTransformerForwardModel(nn.Module):
         # out = F.elu(self.output_proj(x))  # (N, 1)
 
         return out
+
+
+class GraphTransformerEncoder(nn.Module):
+    """
+    Graph Transformer encoder that maps an explicit node feature matrix X to (N, hidden_dim) embeddings.
+    Used by the action-conditioned world model as the graph backbone.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_dim: int = 64,
+        n_layers: int = 3,
+        n_heads: int = 4,
+        ffn_dim: int = 128,
+        dropout: float = 0.1,
+        **_
+    ) -> None:
+        super().__init__()
+        self.input_proj = nn.Linear(in_channels, hidden_dim)
+        self.layers = nn.ModuleList(
+            [
+                GraphTransformerLayer(hidden_dim, n_heads, ffn_dim, dropout)
+                for _ in range(n_layers)
+            ]
+        )
+        self.norm = nn.LayerNorm(hidden_dim)
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(
+        self, X: torch.Tensor, graph
+    ) -> (
+        torch.Tensor
+    ):  # graph: GraphInput (duck-typed; avoids model/ -> wm_data coupling)
+        """
+        X: (N, in_channels) node feature matrix
+        graph: GraphInput — uses graph.edge_index (2, E) and graph.edge_weight (E,)
+        returns: (N, hidden_dim) node embeddings
+        """
+        h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
+        for layer in self.layers:
+            h = layer(h, graph.edge_index, graph.edge_weight)  # shape: (N, hidden_dim)
+
+        return self.norm(h)  # shape: (N, hidden_dim)

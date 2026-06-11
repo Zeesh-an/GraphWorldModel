@@ -1,6 +1,5 @@
 """
 Cora-ML Dataset Loader
-======================
 
 Downloads and loads the Cora-ML citation network.
 
@@ -18,7 +17,6 @@ import urllib.request
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
-
 
 CORA_ML_URL = "https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz"
 DATA_DIR = Path(__file__).resolve().parent.parent / "cora_ml"

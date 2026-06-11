@@ -1,6 +1,5 @@
 """
 NetHEPT Dataset Loader
-======================
 
 Downloads and loads the NetHEPT high-energy physics theory citation network.
 
@@ -19,7 +18,6 @@ import urllib.request
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
-
 
 NETHEPT_GRAPH_URL = (
     "https://raw.githubusercontent.com/SparklyYS/Simultaneous-IMM/"
@@ -113,15 +111,15 @@ def load_nethept(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
     in_degrees = np.array(adj.sum(axis=0)).flatten()
     out_degrees = np.array(adj.sum(axis=1)).flatten()
     total_degrees = in_degrees + out_degrees
-    node_feats = np.log1p(total_degrees).reshape(-1, 1).astype(np.float32)  # shape: (N, 1)
+    node_feats = (
+        np.log1p(total_degrees).reshape(-1, 1).astype(np.float32)
+    )  # shape: (N, 1)
 
     # Placeholder labels
     node_labels = np.zeros(N, dtype=np.int32)
 
     print(f"[✓] NetHEPT loaded: {N} nodes, {adj.nnz} directed edges")
-    print(
-        f"    In-degree  — avg: {in_degrees.mean():.1f}, max: {in_degrees.max():.0f}"
-    )
+    print(f"    In-degree  — avg: {in_degrees.mean():.1f}, max: {in_degrees.max():.0f}")
     print(
         f"    Out-degree — avg: {out_degrees.mean():.1f}, max: {out_degrees.max():.0f}"
     )

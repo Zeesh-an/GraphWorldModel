@@ -1,6 +1,5 @@
 """
 Critical Node Detection Data Generation
-=========================================
 
 Generates training/eval data for CND models on a chosen graph dataset.
 

@@ -1,6 +1,5 @@
 """
 GraphSAGE Forward Model
-========================
 
 GraphSAGE with mean aggregator adapted to the forward diffusion task.
 Uses the concat variant:
@@ -19,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .model_utils import degree_encoding
+from model_utils import degree_encoding
 
 
 class GraphSAGELayer(nn.Module):
@@ -35,16 +34,23 @@ class GraphSAGELayer(nn.Module):
 
     def __init__(self, hidden_dim: int, dropout: float) -> None:
         super().__init__()
+
         self.hidden_dim = hidden_dim
 
         self.norm = nn.LayerNorm(hidden_dim)
         self.linear = nn.Linear(in_features=2 * hidden_dim, out_features=hidden_dim)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """
         x: (N, hidden_dim)
         edge_index: (2, E) long — [src, dst] with self-loops already removed
+        edge_weight: (E,) float edge weights, or None for unweighted mean
         returns: (N, hidden_dim)
         """
         N, H = x.shape[0], self.hidden_dim
@@ -53,15 +59,18 @@ class GraphSAGELayer(nn.Module):
         # Pre-norm
         h = self.norm(x)  # shape: (N, H)
 
-        # Neighbor mean aggregation via scatter_add / degree
+        # Weighted neighbor mean aggregation via scatter_add / weighted degree
+        w = (
+            torch.ones(src.shape[0], device=x.device, dtype=h.dtype)
+            if edge_weight is None
+            else edge_weight.to(h.dtype)
+        )
         h_neigh = torch.zeros(N, H, device=x.device, dtype=h.dtype)
-        h_neigh.scatter_add_(0, dst.unsqueeze(1).expand(-1, H), h[src])  # shape: (N, H)
-
-        # Per-node in-degree over self-loop-free edges
+        h_neigh.scatter_add_(0, dst.unsqueeze(1).expand(-1, H), h[src] * w.unsqueeze(1))
         deg = torch.zeros(N, device=x.device, dtype=h.dtype)
-        deg.scatter_add_(0, dst, torch.ones_like(dst, dtype=h.dtype))
+        deg.scatter_add_(0, dst, w)
         # Prevent division-by-zero for isolated nodes (deg=0 → mean=0)
-        deg_safe = deg.clamp(min=1.0).unsqueeze(dim=-1)  # shape: (N, 1)
+        deg_safe = deg.clamp(min=1e-9).unsqueeze(dim=-1)  # shape: (N, 1)
         h_neigh = h_neigh / deg_safe  # shape: (N, H)
 
         # Concat self and neighbor mean, project back to H
@@ -91,6 +100,7 @@ class GraphSAGEForwardModel(nn.Module):
         use_pe: bool = True,
     ) -> None:
         super().__init__()
+
         self.hidden_dim = hidden_dim
         self.use_pe = use_pe
 
@@ -153,3 +163,52 @@ class GraphSAGEForwardModel(nn.Module):
 
         out = F.sigmoid(self.output_proj(x))  # shape: (N, 1)
         return out
+
+
+class GraphSAGEEncoder(nn.Module):
+    """
+    GraphSAGE encoder that maps an explicit node feature matrix X to (N, hidden_dim) embeddings.
+    Used by the action-conditioned world model as the graph backbone.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_dim: int = 64,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+        **_
+    ) -> None:
+        super().__init__()
+
+        self.input_proj = nn.Linear(in_channels, hidden_dim)
+        self.layers = nn.ModuleList(
+            [GraphSAGELayer(hidden_dim, dropout) for _ in range(n_layers)]
+        )
+        self.norm = nn.LayerNorm(hidden_dim)
+
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(
+        self, X: torch.Tensor, graph
+    ) -> (
+        torch.Tensor
+    ):  # graph: GraphInput (duck-typed; avoids model/ -> wm_data coupling)
+        """
+        X: (N, in_channels) node feature matrix
+        graph: GraphInput — uses graph.edge_index (2, E) and graph.edge_weight (E,)
+        returns: (N, hidden_dim) node embeddings
+        """
+        # Strip self-loops so the neighbor mean excludes self (self enters via concat)
+        ei, w = graph.edge_index, graph.edge_weight
+        mask = ei[0] != ei[1]
+        ei, w = ei[:, mask], w[mask]
+        h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
+        for layer in self.layers:
+            h = layer(h, ei, w)  # shape: (N, hidden_dim)
+
+        return self.norm(h)  # shape: (N, hidden_dim)

@@ -1,6 +1,5 @@
 """
 GCN Forward Model
-==================
 
 Classical GCN adapted to the forward diffusion task.
 Interface matches GraphTransformerForwardModel:
@@ -28,6 +27,7 @@ class GCNLayer(nn.Module):
 
     def __init__(self, hidden_dim: int, dropout: float) -> None:
         super().__init__()
+
         self.norm = nn.LayerNorm(hidden_dim)
         self.linear = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
         self.dropout = nn.Dropout(p=dropout)
@@ -60,6 +60,7 @@ class GCNForwardModel(nn.Module):
         use_pe: bool = True,
     ) -> None:
         super().__init__()
+
         self.hidden_dim = hidden_dim
         self.use_pe = use_pe
 
@@ -108,3 +109,48 @@ class GCNForwardModel(nn.Module):
 
         out = F.sigmoid(self.output_proj(x))  # (N, 1)
         return out
+
+
+class GCNEncoder(nn.Module):
+    """
+    GCN encoder that maps an explicit node feature matrix X to (N, hidden_dim) embeddings.
+    Used by the action-conditioned world model as the graph backbone.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_dim: int = 64,
+        n_layers: int = 3,
+        dropout: float = 0.1,
+        **_
+    ) -> None:
+        super().__init__()
+
+        self.input_proj = nn.Linear(in_channels, hidden_dim)
+        self.layers = nn.ModuleList(
+            [GCNLayer(hidden_dim, dropout) for _ in range(n_layers)]
+        )
+        self.norm = nn.LayerNorm(hidden_dim)
+
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(
+        self, X: torch.Tensor, graph
+    ) -> (
+        torch.Tensor
+    ):  # graph: GraphInput (duck-typed; avoids model/ -> wm_data coupling)
+        """
+        X: (N, in_channels) node feature matrix
+        graph: GraphInput — uses graph.adj_norm (sparse COO, normalized)
+        returns: (N, hidden_dim) node embeddings
+        """
+        h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
+        for layer in self.layers:
+            h = layer(h, graph.adj_norm)  # shape: (N, hidden_dim)
+
+        return self.norm(h)  # shape: (N, hidden_dim)

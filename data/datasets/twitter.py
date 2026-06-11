@@ -1,6 +1,5 @@
 """
 Twitter Dataset Loader
-======================
 
 Downloads and loads the SNAP ego-Twitter social network.
 
@@ -18,7 +17,6 @@ import urllib.request
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
-
 
 TWITTER_URL = "https://snap.stanford.edu/data/twitter_combined.txt.gz"
 DATA_DIR = Path(__file__).resolve().parent.parent / "twitter"

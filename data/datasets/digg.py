@@ -1,6 +1,5 @@
 """
 Digg Dataset Loader
-===================
 
 Downloads and loads the Digg social network.
 
@@ -18,7 +17,6 @@ import urllib.request
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
-
 
 DIGG_URL = "https://datasets.syr.edu/uploads/1296588940/Digg-dataset.zip"
 DATA_DIR = Path(__file__).resolve().parent.parent / "digg"

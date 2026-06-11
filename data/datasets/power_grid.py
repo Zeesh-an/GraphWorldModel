@@ -1,6 +1,5 @@
 """
 Power Grid Dataset Loader
-=========================
 
 Downloads and loads the US Western States power grid network.
 
@@ -19,7 +18,6 @@ import urllib.request
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
-
 
 POWER_GRID_URL = "https://nrvis.com/download/data/misc/opsahl-powergrid.zip"
 DATA_DIR = Path(__file__).resolve().parent.parent / "power_grid"

@@ -1,6 +1,5 @@
 """
 Influence Maximization Data Generation
-=======================================
 
 Generates training/eval data for IM models on a chosen graph dataset.
 

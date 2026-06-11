@@ -11,7 +11,6 @@ python data/validate_wm_data.py --dir <output_dir>
 
 import argparse
 import json
-import sys
 from collections import defaultdict
 from pathlib import Path
 import numpy as np

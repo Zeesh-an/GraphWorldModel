@@ -1,6 +1,5 @@
 """
 Jazz Musicians Dataset Loader
-==============================
 
 Downloads and loads the Jazz musicians collaboration network.
 
@@ -19,7 +18,6 @@ import urllib.request
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
-
 
 JAZZ_URL = "https://nrvis.com/download/data/misc/arenas-jazz.zip"
 DATA_DIR = Path(__file__).resolve().parent.parent / "jazz"

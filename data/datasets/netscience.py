@@ -1,6 +1,5 @@
 """
 NetScience Dataset Loader
-=========================
 
 Downloads and loads the Network Science coauthorship network.
 
@@ -20,7 +19,6 @@ import urllib.request
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
-
 
 NETSCIENCE_URL = "https://networks.skewed.de/net/netscience/files/netscience.csv.zip"
 DATA_DIR = Path(__file__).resolve().parent.parent / "netscience"
@@ -49,7 +47,9 @@ def download_netscience() -> Path:
     return DATA_DIR
 
 
-def load_netscience(data_path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
+def load_netscience(
+    data_path: Path,
+) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
     """
     Load NetScience coauthorship network. Edges are 0-indexed CSV with columns
     (source, target, value). The value (edge weight) is discarded.

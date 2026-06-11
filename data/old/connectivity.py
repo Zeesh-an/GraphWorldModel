@@ -1,6 +1,5 @@
 """
 Connectivity Simulations
-=====================
 
 Deterministic node removal and residual connectivity.
 Used for data generation and evaluation across CND tasks.

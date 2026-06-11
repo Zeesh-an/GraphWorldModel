@@ -1,6 +1,5 @@
 """
 GAT Forward Model (GATv2)
-==========================
 
 GATv2 adapted to the forward diffusion task.
 Fixes the static-attention limitation of the original GAT by applying
@@ -34,7 +33,9 @@ class GATLayer(nn.Module):
 
     def __init__(self, hidden_dim: int, n_heads: int, dropout: float) -> None:
         super().__init__()
+
         assert hidden_dim % n_heads == 0, "hidden_dim must be divisible by n_heads"
+
         self.hidden_dim = hidden_dim
         self.n_heads = n_heads
         self.d_head = hidden_dim // n_heads
@@ -63,12 +64,19 @@ class GATLayer(nn.Module):
     def _reset_parameters(self) -> None:
         for m in [self.W_l, self.W_r, self.out_proj]:
             nn.init.xavier_uniform_(m.weight)
+
         nn.init.xavier_uniform_(self.a)
 
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """
         x: (N, hidden_dim)
         edge_index: (2, E) long — [src, dst]
+        edge_weight: (E,) float edge weights added as log-bias to attention scores, or None for unweighted
         returns: (N, hidden_dim)
         """
         N = x.shape[0]
@@ -86,6 +94,9 @@ class GATLayer(nn.Module):
         z_edge = z_l[dst] + z_r[src]  # (E, n_heads, d_head)
         z_edge = self.leaky_relu(z_edge)
         scores = (z_edge * self.a.unsqueeze(0)).sum(dim=-1)  # (E, n_heads)
+
+        if edge_weight is not None:
+            scores = scores + torch.log(edge_weight.clamp(min=1e-9)).unsqueeze(1)
 
         # Scatter softmax over incoming edges per dst, per head
         scores_max = torch.full((N, self.n_heads), float("-inf"), device=x.device)
@@ -139,7 +150,9 @@ class GATForwardModel(nn.Module):
         use_pe: bool = True,
     ) -> None:
         super().__init__()
+
         assert hidden_dim % n_heads == 0, "hidden_dim must be divisible by n_heads"
+
         self.hidden_dim = hidden_dim
         self.use_pe = use_pe
 
@@ -197,3 +210,49 @@ class GATForwardModel(nn.Module):
 
         out = F.sigmoid(self.output_proj(x))  # (N, 1)
         return out
+
+
+class GATEncoder(nn.Module):
+    """
+    GATv2 encoder that maps an explicit node feature matrix X to (N, hidden_dim) embeddings.
+    Used by the action-conditioned world model as the graph backbone.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_dim: int = 64,
+        n_layers: int = 3,
+        n_heads: int = 4,
+        dropout: float = 0.1,
+        **_
+    ) -> None:
+        super().__init__()
+
+        self.input_proj = nn.Linear(in_channels, hidden_dim)
+        self.layers = nn.ModuleList(
+            [GATLayer(hidden_dim, n_heads, dropout) for _ in range(n_layers)]
+        )
+        self.norm = nn.LayerNorm(hidden_dim)
+
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(
+        self, X: torch.Tensor, graph
+    ) -> (
+        torch.Tensor
+    ):  # graph: GraphInput (duck-typed; avoids model/ -> wm_data coupling)
+        """
+        X: (N, in_channels) node feature matrix
+        graph: GraphInput — uses graph.edge_index (2, E) and graph.edge_weight (E,)
+        returns: (N, hidden_dim) node embeddings
+        """
+        h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
+        for layer in self.layers:
+            h = layer(h, graph.edge_index, graph.edge_weight)  # shape: (N, hidden_dim)
+
+        return self.norm(h)  # shape: (N, hidden_dim)

@@ -1,6 +1,5 @@
 """
 Diffusion Simulations
-=====================
 
 Independent Cascade (IC) and Linear Threshold (LT) diffusion models.
 Used for data generation and evaluation across IM, source localization, and cascade reconstruction tasks.

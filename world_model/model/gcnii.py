@@ -1,6 +1,5 @@
 """
 GCNII Forward Model
-====================
 
 GCNII adapted to the forward diffusion task.
 
@@ -19,7 +18,6 @@ Interface matches GraphTransformerForwardModel:
 """
 
 import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -42,6 +40,7 @@ class GCNIILayer(nn.Module):
         dropout: float,
     ) -> None:
         super().__init__()
+
         self.alpha = alpha
         # Layer indices are 1-based in the paper: β_l = log(λ/l + 1)
         self.beta = math.log(lamda / (layer_idx + 1) + 1.0)
@@ -96,6 +95,7 @@ class GCNIIForwardModel(nn.Module):
         use_pe: bool = True,
     ) -> None:
         super().__init__()
+
         self.hidden_dim = hidden_dim
         self.use_pe = use_pe
 
@@ -154,3 +154,54 @@ class GCNIIForwardModel(nn.Module):
 
         out = F.sigmoid(self.output_proj(h))  # shape: (N, 1)
         return out
+
+
+class GCNIIEncoder(nn.Module):
+    """
+    GCNII encoder that maps an explicit node feature matrix X to (N, hidden_dim) embeddings.
+    Used by the action-conditioned world model as the graph backbone.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        hidden_dim: int = 64,
+        n_layers: int = 8,
+        alpha: float = 0.1,
+        lamda: float = 0.5,
+        dropout: float = 0.1,
+        **_
+    ) -> None:
+        super().__init__()
+
+        self.input_proj = nn.Linear(in_channels, hidden_dim)
+        self.layers = nn.ModuleList(
+            [
+                GCNIILayer(hidden_dim, alpha, lamda, layer_idx=i + 1, dropout=dropout)
+                for i in range(n_layers)
+            ]
+        )
+        self.norm = nn.LayerNorm(hidden_dim)
+
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
+
+    def forward(
+        self, X: torch.Tensor, graph
+    ) -> (
+        torch.Tensor
+    ):  # graph: GraphInput (duck-typed; avoids model/ -> wm_data coupling)
+        """
+        X: (N, in_channels) node feature matrix
+        graph: GraphInput — uses graph.adj_norm (sparse COO, normalized)
+        returns: (N, hidden_dim) node embeddings
+        """
+        h0 = F.relu(self.input_proj(X))  # shape: (N, hidden_dim)
+        h = h0
+        for layer in self.layers:
+            h = layer(h, h0, graph.adj_norm)  # shape: (N, hidden_dim)
+
+        return self.norm(h)  # shape: (N, hidden_dim)

@@ -1,35 +1,31 @@
 """
-Forward Graph Model — Inverse Graph Problem Training
+Graph Transformer — Inverse Graph Problem Training
 
-Models:
-    GT — Graph Transformer (scatter-softmax attention, scale-invariant)
-    GCN — GCN with pre-norm residual blocks
-    GAT — GATv2 with scatter-softmax multi-head attention
-    SAGE — GraphSAGE with mean aggregator
-    GCNII — GCNII with initial residual + identity mapping
+Supports three tasks:
+    IM  — Influence Maximization (select seeds to maximize spread)
+    CND — Critical Node Detection (select nodes to maximize disruption / minimize connectivity)
+    SL  — Source Localization (infer which sources caused an observed infection snapshot)
 
-Tasks:
-    IM — Influence Maximization (select seeds to maximize spread)
-    CND — Critical Node Detection (select nodes to maximize disruption)
-    SL — Source Localization (infer sources from observed infection snapshot)
+All share the same architecture (VAE + Graph Transformer) with different
+Phase 2 objectives:
+    IM:  MSE(y_hat, ones)  — maximize spread
+    CND: MSE(y_hat, zeros) — minimize residual connectivity
+    SL:  MSE(y_hat, observed_snapshot) — match predicted activation to observation
 
-Phase 1 (--epochs, default 600):
-    Supervised training of the forward model against ground-truth (x, y) pairs.
-    Loss = MSE(y_hat, y)
+Phase 1 (--epochs,  default 600):
+    Train VAE (Encoder + Decoder) + GraphTransformerForwardModel jointly.
+    Loss = BCE(x_hat, x) + MSE(y_hat, y)
 
 Phase 2 (--opt-iters, default 300):
-    Freeze forward model. Optimize logits directly via backprop, where
-    x_hat = sigmoid(logits). Pick top-k nodes from x_hat as the predicted node set.
-    Phase 2 targets differ by task:
-        IM: MSE(y_hat, ones) — maximize spread
-        CND: MSE(y_hat, zeros) — minimize residual connectivity
-        SL: MSE(y_hat, observed_snapshot) — match predicted activation to observation
+    Freeze both models. Optimize latent z directly via backprop.
+    Pick top-k nodes from x_hat as the predicted node set.
 
 Usage
 -----
-    python world_model/train.py --task IM -d cora_ml -dm IC --k 10 --k-pct 1 \\
-        --model gcn --gcn-hidden 64 --gcn-layers 3 \\
-        --epochs 600 --opt-iters 300 --lr 1e-4 --lr-z 1e-3 \\
+    python world_model/train_vae.py --task IM -d cora_ml -dm IC --k 30 --k-pct 1 \
+        --hidden-dim 512 --latent-dim 256 \
+        --gt-d-model 64 --gt-heads 4 --gt-layers 3 --gt-ffn 128 \
+        --epochs 600 --opt-iters 500 --lr 1e-4 --lr-z 1e-3 \
         --npz-dir data/cora_ml
 """
 
@@ -39,25 +35,26 @@ from tqdm.auto import tqdm
 from pathlib import Path
 
 import numpy as np
+import scipy.sparse as sp
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from sklearn.metrics import precision_score, recall_score
 from torch.optim import Adam
 from torch.utils.data import DataLoader, random_split
 
 # Local Imports
-ROOT = Path(__file__).resolve().parent.parent
-THIS_DIR = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(THIS_DIR))
+ROOT = Path(__file__).resolve().parent.parent.parent  # project root
+WM_DIR = Path(__file__).resolve().parent.parent  # world_model/ (for `from model.x`)
+THIS_DIR = Path(__file__).resolve().parent  # world_model/old/ (for `from utils`)
+for _p in (str(ROOT), str(WM_DIR), str(THIS_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
+from model.vae import Encoder, Decoder, VAEModel
 from model.graph_transformer import GraphTransformerForwardModel
-from model.gcn import GCNForwardModel
-from model.gat import GATForwardModel
-from model.graphsage import GraphSAGEForwardModel
-from model.gcnii import GCNIIForwardModel
 from utils import (
     load_data,
+    InverseProblemDataset,
     adj_process,
     top_sampling_init_indices,
     diffusion_evaluation,
@@ -66,9 +63,10 @@ from utils import (
 )
 
 
+# CLI (same flags as baseline genim.py)
 def parse_args():
     p = argparse.ArgumentParser(
-        description="Forward Graph Model Training — Inverse Graph Problems"
+        description="Graph Transformer — Inverse Graph Problems"
     )
 
     p.add_argument(
@@ -122,100 +120,35 @@ def parse_args():
     )
 
     # Training hyperparameters
+    p.add_argument(
+        "--pretrain-epochs",
+        default=0,
+        type=int,
+        help="Phase 0 VAE-only reconstruction pretrain epochs (0 = skip)",
+    )
+    p.add_argument(
+        "--pretrain-lr",
+        default=1e-4,
+        type=float,
+        help="Phase 0 VAE-only pretrain learning rate",
+    )
     p.add_argument("--epochs", default=600, type=int, help="Phase 1 training epochs")
     p.add_argument(
-        "--opt-iters", default=300, type=int, help="Phase 2 logit optimization iters"
+        "--opt-iters", default=300, type=int, help="Phase 2 latent optimization iters"
     )
     p.add_argument("--lr", default=1e-4, type=float)
     p.add_argument(
-        "--lr-z",
-        default=1e-4,
-        type=float,
-        help="Phase 2 logit optimization learning rate",
-    )
-    p.add_argument(
-        "--l0-weight",
-        default=1.0,
-        type=float,
-        help="Phase 2 L0/L1 sparsity weight on x_hat. Higher values pull x_hat "
-        "toward the sparse regime the forward model was trained on. Try 50-500 "
-        "if Phase 2 PredSpread stays stuck near 0.",
+        "--lr-z", default=1e-4, type=float, help="Phase 2 latent z learning rate"
     )
 
-    # Model selection
-    p.add_argument(
-        "--model",
-        default="gt",
-        choices=["gt", "gcn", "gat", "sage", "gcnii"],
-        help="Forward model architecture",
-    )
-
-    # Graph Transformer (GT) hyperparameters
+    # Model dims
+    p.add_argument("--hidden-dim", default=1024, type=int)
+    p.add_argument("--latent-dim", default=512, type=int)
     p.add_argument("--gt-d-model", default=64, type=int, help="GT hidden dim")
     p.add_argument("--gt-heads", default=4, type=int, help="GT attention heads")
     p.add_argument("--gt-layers", default=3, type=int, help="Number of GT layers")
     p.add_argument("--gt-ffn", default=128, type=int, help="GT FFN hidden dim")
     p.add_argument("--gt-dropout", default=0.1, type=float)
-
-    # GCN hyperparameters
-    p.add_argument("--gcn-hidden", default=64, type=int, help="GCN hidden dim")
-    p.add_argument("--gcn-layers", default=3, type=int, help="Number of GCN layers")
-    p.add_argument("--gcn-dropout", default=0.1, type=float)
-    p.add_argument(
-        "--gcn-no-pe",
-        action="store_true",
-        help="Disable degree positional encoding in GCN input",
-    )
-
-    # GAT hyperparameters
-    p.add_argument("--gat-hidden", default=64, type=int, help="GAT hidden dim")
-    p.add_argument("--gat-heads", default=4, type=int, help="GAT attention heads")
-    p.add_argument("--gat-layers", default=3, type=int, help="Number of GAT layers")
-    p.add_argument("--gat-dropout", default=0.1, type=float)
-    p.add_argument(
-        "--gat-no-pe",
-        action="store_true",
-        help="Disable degree positional encoding in GAT input",
-    )
-
-    # GraphSAGE hyperparameters
-    p.add_argument("--sage-hidden", default=64, type=int, help="GraphSAGE hidden dim")
-    p.add_argument(
-        "--sage-layers", default=3, type=int, help="Number of GraphSAGE layers"
-    )
-    p.add_argument("--sage-dropout", default=0.1, type=float)
-    p.add_argument(
-        "--sage-no-pe",
-        action="store_true",
-        help="Disable degree positional encoding in GraphSAGE input",
-    )
-
-    # GCNII hyperparameters
-    p.add_argument("--gcnii-hidden", default=64, type=int, help="GCNII hidden dim")
-    p.add_argument(
-        "--gcnii-layers",
-        default=8,
-        type=int,
-        help="Number of GCNII layers (GCNII is designed for depth)",
-    )
-    p.add_argument(
-        "--gcnii-alpha",
-        default=0.1,
-        type=float,
-        help="GCNII initial-residual strength (α)",
-    )
-    p.add_argument(
-        "--gcnii-lamda",
-        default=0.5,
-        type=float,
-        help="GCNII identity-mapping decay hyperparameter (λ)",
-    )
-    p.add_argument("--gcnii-dropout", default=0.1, type=float)
-    p.add_argument(
-        "--gcnii-no-pe",
-        action="store_true",
-        help="Disable degree positional encoding in GCNII input",
-    )
 
     # Data paths
     p.add_argument(
@@ -238,64 +171,26 @@ def parse_args():
     return p.parse_args()
 
 
-def build_forward_model(args: argparse.Namespace) -> nn.Module:
-    if args.model == "gt":
-        return GraphTransformerForwardModel(
-            d_model=args.gt_d_model,
-            n_heads=args.gt_heads,
-            n_layers=args.gt_layers,
-            ffn_dim=args.gt_ffn,
-            dropout=args.gt_dropout,
-        )
-    if args.model == "gcn":
-        return GCNForwardModel(
-            hidden_dim=args.gcn_hidden,
-            n_layers=args.gcn_layers,
-            dropout=args.gcn_dropout,
-            use_pe=not args.gcn_no_pe,
-        )
-    if args.model == "gat":
-        return GATForwardModel(
-            hidden_dim=args.gat_hidden,
-            n_heads=args.gat_heads,
-            n_layers=args.gat_layers,
-            dropout=args.gat_dropout,
-            use_pe=not args.gat_no_pe,
-        )
-    if args.model == "sage":
-        return GraphSAGEForwardModel(
-            hidden_dim=args.sage_hidden,
-            n_layers=args.sage_layers,
-            dropout=args.sage_dropout,
-            use_pe=not args.sage_no_pe,
-        )
-    if args.model == "gcnii":
-        return GCNIIForwardModel(
-            hidden_dim=args.gcnii_hidden,
-            n_layers=args.gcnii_layers,
-            alpha=args.gcnii_alpha,
-            lamda=args.gcnii_lamda,
-            dropout=args.gcnii_dropout,
-            use_pe=not args.gcnii_no_pe,
-        )
-    raise ValueError(f"Unknown --model: {args.model}")
-
-
-def loss_phase_1(y: torch.Tensor, y_hat: torch.Tensor) -> torch.Tensor:
+def loss_phase_1(x, x_hat, y, y_hat):
     """
-    Forward prediction loss = MSE(y_hat, y) — how well the forward model predicts the outcome
+    Joint VAE + forward model loss.
 
-    Argument order mirrors loss_phase_2 (target first, prediction second).
+    reproduction_loss = BCE(x_hat, x) — how well VAE reconstructs seed
+    forward_loss = MSE(y_hat, y) — how well GT predicts influence
+
+    total_loss = reproduction_loss + forward_loss
     """
-    return F.mse_loss(y_hat, y, reduction="sum")
+
+    # Measures how well the VAE reconstructs the seed vector
+    reproduction_loss = F.binary_cross_entropy(x_hat, x, reduction="sum")
+
+    # Measures how well the Graph Transformer predicts the influence vector
+    forward_loss = F.mse_loss(y_hat, y, reduction="sum")
+
+    return reproduction_loss + forward_loss, reproduction_loss, forward_loss
 
 
-def loss_phase_2(
-    y_true: torch.Tensor,
-    y_hat: torch.Tensor,
-    x_hat: torch.Tensor,
-    l0_weight: float = 1.0,
-) -> tuple[torch.Tensor, torch.Tensor]:
+def loss_phase_2(y_true, y_hat, x_hat):
     """
     Latent optimization loss.
     forward_loss = MSE(y_hat, y_true) — push toward target state
@@ -304,18 +199,16 @@ def loss_phase_2(
         For SL:  y_true = observed_snapshot (match predicted activation to observation)
 
     L0_loss = L1 sparsity on x_hat — keep node set small
-        Scaled by l0_weight to pull x_hat into the sparse regime the forward
-        model was trained on (binary k-hot vectors).
 
-    loss = forward_loss + l0_weight * L0_loss
+    loss = forward_loss + L0_loss
     """
 
     forward_loss = F.mse_loss(y_hat, y_true)
 
-    # L1 sparsity penalty on x_hat — sum(|x_hat|) / N
+    # L0 sparsity penalty to encourage the decoded seed vector to be sparse — sum(|x_hat|) / N
     L0_loss = torch.sum(torch.abs(x_hat)) / x_hat.shape[1]
 
-    return forward_loss + l0_weight * L0_loss, L0_loss
+    return forward_loss + L0_loss, L0_loss
 
 
 def main():
@@ -366,7 +259,14 @@ def main():
     adj_t = adj_process(adj).to(device)
 
     # Dataset / loaders (same split logic as baseline)
-    batch_size = 2 if args.dataset == "random5" else 16
+    if args.dataset == "random5":
+        batch_size = 2
+        hidden_dim = 4096
+        latent_dim = 1024
+    else:
+        batch_size = 16
+        hidden_dim = args.hidden_dim
+        latent_dim = args.latent_dim
 
     # Train-test (90% - 10%) data split
     n_test = min(batch_size, len(inverse_pairs) // 10)
@@ -379,22 +279,104 @@ def main():
     )
     test_dataloader = DataLoader(test_set, batch_size=1, shuffle=False, pin_memory=True)
 
-    # Forward model (VAE-free)
-    forward_model = build_forward_model(args).to(device)
+    # Models
+    encoder = Encoder(input_dim=N, hidden_dim=hidden_dim, latent_dim=latent_dim)
+    decoder = Decoder(
+        input_dim=latent_dim, latent_dim=latent_dim, hidden_dim=hidden_dim, output_dim=N
+    )
 
-    num_params = sum(param.numel() for param in forward_model.parameters())
-    print(f"[model] {args.model.upper()} params={num_params:,}")
+    vae_model = VAEModel(encoder=encoder, decoder=decoder).to(device)
+    forward_model = GraphTransformerForwardModel(
+        d_model=args.gt_d_model,
+        n_heads=args.gt_heads,
+        n_layers=args.gt_layers,
+        ffn_dim=args.gt_ffn,
+        dropout=args.gt_dropout,
+    ).to(device)
 
-    optimizer = Adam(forward_model.parameters(), lr=args.lr)
+    num_vae_params = sum(param.numel() for param in vae_model.parameters())
+    num_gt_params = sum(param.numel() for param in forward_model.parameters())
+    print(f"[model] VAE params={num_vae_params:,}  |  GT params={num_gt_params:,}")
+
+    optimizer = Adam(
+        [{"params": vae_model.parameters()}, {"params": forward_model.parameters()}],
+        lr=args.lr,
+    )
 
     node_budget = args.node_budget
 
-    # PHASE 1 — Forward-model training
+    # PHASE 0 — VAE-only reconstruction pretraining
+    if args.pretrain_epochs > 0:
+        print(f"\n{'='*60}")
+        print(f" Phase 0 — VAE-only reconstruction pretrain")
+        print(
+            f" Epochs: {args.pretrain_epochs}  |  lr: {args.pretrain_lr}  |  batch: {batch_size}"
+        )
+        print(f"{'='*60}")
+
+        vae_optimizer = Adam(vae_model.parameters(), lr=args.pretrain_lr)
+        vae_model.train()
+        forward_model.eval()
+
+        pretrain_progress_bar = tqdm(
+            range(1, args.pretrain_epochs + 1),
+            desc=f"Phase 0 — VAE pretrain",
+        )
+
+        for epoch in pretrain_progress_bar:
+            recon_loss_ep = 0.0
+            precision_re_ep = 0.0
+            recall_re_ep = 0.0
+            n_seen = 0
+
+            for data_pair in train_dataloader:
+                x = data_pair[:, :, 0].float().to(device)  # (B, N)
+                B = x.shape[0]
+
+                vae_optimizer.zero_grad()
+                batch_loss = torch.tensor(0.0, device=device)
+
+                for i in range(B):
+                    x_i = x[i]  # (N,)
+                    x_hat = vae_model(x_i.unsqueeze(0))  # (1, N)
+
+                    recon = F.binary_cross_entropy(
+                        x_hat, x_i.unsqueeze(0), reduction="sum"
+                    )
+                    batch_loss += recon
+                    recon_loss_ep += recon.item()
+
+                    # Monitor collapse: precision/recall of reconstruction
+                    x_pred_np = (x_hat.detach().cpu().numpy() > 0.01).astype(float)
+                    x_true_np = x_i.unsqueeze(0).cpu().numpy()
+                    precision_re_ep += precision_score(
+                        x_true_np[0], x_pred_np[0], zero_division=0
+                    )
+                    recall_re_ep += recall_score(
+                        x_true_np[0], x_pred_np[0], zero_division=0
+                    )
+
+                batch_loss = batch_loss / B
+                batch_loss.backward()
+                vae_optimizer.step()
+                n_seen += B
+
+            avg = lambda v: v / max(n_seen, 1)
+            pretrain_progress_bar.set_postfix(
+                recon=f"{avg(recon_loss_ep):.4f}",
+                prec=f"{avg(precision_re_ep):.4f}",
+                rec=f"{avg(recall_re_ep):.4f}",
+            )
+
+        print(f"[✓] Phase 0 done. Final recon loss={avg(recon_loss_ep):.4f}")
+
+    # PHASE 1 — Joint training
     print(f"\n{'='*60}")
-    print(f" Phase 1 — {args.model.upper()} forward-model training ({args.task})")
+    print(f" Phase 1 — Joint VAE + Graph Transformer training ({args.task})")
     print(f" Epochs: {args.epochs}  |  batch: {batch_size}")
     print(f"{'='*60}")
 
+    vae_model.train()
     forward_model.train()
     best_loss = float("inf")
 
@@ -404,13 +386,17 @@ def main():
 
     for epoch in epoch_progress_bar:
         total_loss_ep = 0.0
+        forward_loss_ep = 0.0
+        recon_loss_ep = 0.0
+        precision_re_ep = 0.0
+        recall_re_ep = 0.0
         n_seen = 0
 
         for data_pair in train_dataloader:
             # data_pair: (B, N, 2)
-            x = data_pair[:, :, 0].float().to(device)  # action vectors
-            y = data_pair[:, :, 1].float().to(device)  # outcome vectors
-            B = x.shape[0]
+            x = data_pair[:, :, 0].float().to(device)  # seed vectors
+            y = data_pair[:, :, 1].float().to(device)  # influence vectors
+            B = x.shape[0]  # batch size
 
             optimizer.zero_grad()
             batch_loss = torch.tensor(0.0, device=device)
@@ -419,37 +405,71 @@ def main():
                 x_i = x[i]  # (N,)
                 y_i = y[i]  # (N,)
 
-                # Ground-truth x straight into the forward model (no VAE)
-                y_hat = forward_model(x_i.unsqueeze(-1), adj_t).squeeze(-1)  # (N,)
+                x_hat = vae_model(x_i.unsqueeze(0))  # (1, N)
 
-                loss_i = loss_phase_1(y_i.unsqueeze(0), y_hat.unsqueeze(0))
-                batch_loss += loss_i
+                # Forward model: (N, 1) → (N, 1)
+                y_hat = forward_model(x_hat.squeeze(0).unsqueeze(-1), adj_t).squeeze(
+                    -1
+                )  # (N,)
+
+                # BCE(x_hat, x) + MSE(y_hat, y)
+                total, recon, forw = loss_phase_1(
+                    x_i.unsqueeze(0),
+                    x_hat,
+                    y_i.unsqueeze(0),
+                    y_hat.unsqueeze(0),
+                )
+                batch_loss += total
+
+                # Reconstruction metrics
+                x_pred_np = x_hat.detach().cpu().numpy()
+                x_pred_np = (x_pred_np > 0.01).astype(float)
+                x_true_np = x_i.unsqueeze(0).cpu().numpy()
+
+                precision_re_ep += precision_score(
+                    x_true_np[0], x_pred_np[0], zero_division=0
+                )
+                recall_re_ep += recall_score(
+                    x_true_np[0], x_pred_np[0], zero_division=0
+                )
+
+                forward_loss_ep += forw.item()
+                recon_loss_ep += recon.item()
 
             total_loss_ep += batch_loss.item()
             batch_loss = batch_loss / B
+
             batch_loss.backward()
             optimizer.step()
 
+            # Clamp Graph Transformer forward mdoel params >= 0  (mirrors baseline's clamp for SpGAT)
+            # for p in forward_model.parameters():
+            #     p.data.clamp_(min=0)
+
             n_seen += B
 
-        avg_loss = total_loss_ep / max(n_seen, 1)
-        epoch_progress_bar.set_postfix(loss=f"{avg_loss:.4f}")
+        avg = lambda v: v / max(n_seen, 1)
+
+        epoch_progress_bar.set_postfix(
+            loss=f"{avg(total_loss_ep):.4f}",
+            recon=f"{avg(recon_loss_ep):.4f}",
+            fwd=f"{avg(forward_loss_ep):.4f}",
+            prec=f"{avg(precision_re_ep):.4f}",
+            rec=f"{avg(recall_re_ep):.4f}",
+        )
 
         # Checkpoint the best model
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        if avg(total_loss_ep) < best_loss:
+            best_loss = avg(total_loss_ep)
             ckpt_suffix = (
                 f"{args.task}_{args.diffusion_model}" if uses_diffusion else "CND"
             )
-            ckpt = (
-                ckpt_dir
-                / f"best_{args.dataset}_{ckpt_suffix}_{args.model}_k{node_budget}.pt"
-            )
+            ckpt = ckpt_dir / f"best_{args.dataset}_{ckpt_suffix}_k{node_budget}.pt"
 
             torch.save(
                 {
                     "epoch": epoch,
-                    "model_type": args.model,
+                    "vae": vae_model.state_dict(),
                     "forward_model": forward_model.state_dict(),
                     "loss": best_loss,
                     "args": vars(args),
@@ -460,29 +480,38 @@ def main():
     print(f"\n[✓] Phase 1 done. Best loss={best_loss:.4f}")
     print(f"[✓] Checkpoint saved → {ckpt}")
 
-    # PHASE 2 — Direct logit optimization (VAE-free)
+    # PHASE 2 — Latent optimization
     print(f"\n{'='*60}")
-    print(f" Phase 2 — Direct logit optimization ({args.opt_iters} iters)")
+    print(f" Phase 2 — Latent z optimization ({args.opt_iters} iters)")
     print(f"{'='*60}")
 
-    # Freeze the forward model
+    # Freeze both models to prevent weight updates
+    for p in vae_model.parameters():
+        p.requires_grad = False
+
     for p in forward_model.parameters():
         p.requires_grad = False
+
+    vae_model.eval()
     forward_model.eval()
 
-    # Initialize logits from the mean of top-performing training samples.
+    # Initialize z from the top-performing training samples' encodings
     # IM / SL: highest channel 1 sum (top-spreading samples)
     # CND: lowest channel 1 sum (most-destructive samples)
     init_idx = top_sampling_init_indices(
         inverse_pairs, frac=0.1, largest=(args.task != "CND")
     )
 
-    x_mean = inverse_pairs[init_idx, :, 0].float().mean(dim=0)  # (N,) in [0, 1]
-    x_mean = x_mean.clamp(min=0.01, max=0.99)
-    logits = torch.log(x_mean / (1.0 - x_mean)).unsqueeze(0).to(device)  # (1, N)
-    logits = logits.detach().requires_grad_(True)
+    z_hat = torch.zeros(1, latent_dim, device=device)
+    with torch.no_grad():
+        for i in init_idx:
+            vec_i = inverse_pairs[i, :, 0].float().unsqueeze(0).to(device)
+            z_hat += encoder(vec_i)
 
-    print(f"[phase2] Initialized logits from top-{len(init_idx)} samples")
+    z_hat = z_hat / len(init_idx)
+    z_hat = z_hat.detach().requires_grad_(True)
+
+    print(f"[phase2] Initialized z from top-{len(init_idx)} samples")
 
     # Set the y_target per task
     if args.task == "SL":
@@ -520,27 +549,29 @@ def main():
             f"[phase2] Removal budget (k) = {node_budget}  ({node_budget / N * 100:.2f}% of N={N})"
         )
 
-    z_optimizer = Adam([logits], lr=args.lr_z)
+    z_optimizer = Adam([z_hat], lr=args.lr_z)
 
-    # Direct optimization of continuous action vector x_hat = sigmoid(logits).
-    # Backprop flows: loss -> y_hat -> forward_model -> x_hat -> logits.
+    # Optimization iterations for inverse graph optimization of latent optimal seed node vector z_hat
+    # The smooth and continuous latent vector z_hat is optimized rather than directly optimizing the binary, sparse seed node vector because optimization works better on the smooth vector
     metric_labels = {"SL": "PredMatch", "IM": "PredSpread", "CND": "PredConn"}
     optimization_progress_bar = tqdm(
-        range(1, args.opt_iters + 1),
-        desc=f"Phase 2 — {args.task} logit optimization",
+        range(1, args.opt_iters + 1), desc=f"Phase 2 — {args.task} latent optimization"
     )
 
     for i in optimization_progress_bar:
-        x_hat = torch.sigmoid(logits)  # (1, N)
+        # Decode the current z_hat through VAE decoder
+        x_hat = vae_model.decoder(z_hat)  # (1, N)
 
+        # Pass the decoded vector through the forward Graph Transformer to predict influence/connectivity y_hat
         y_hat = (
             forward_model(x_hat.squeeze(0).unsqueeze(-1), adj_t)
             .squeeze(-1)
             .unsqueeze(0)
         )  # (1, N)
 
-        loss, L0 = loss_phase_2(y_target, y_hat, x_hat, l0_weight=args.l0_weight)
+        loss, L0 = loss_phase_2(y_target, y_hat, x_hat)
 
+        # Perform backpropagation (∂L/z_hat) and gradient descent to optimize and update z_hat
         z_optimizer.zero_grad()
         loss.backward()
         z_optimizer.step()
@@ -553,7 +584,8 @@ def main():
 
     # Extract the final optimal node set for the inverse graph problem
     with torch.no_grad():
-        x_final = torch.sigmoid(logits)  # (1, N)
+        # Decode the optimized z_hat to get x_final of probabilities
+        x_final = vae_model.decoder(z_hat)
 
     # Get the optimal node set, by choosing the top-K best nodes by probability
     top_k = x_final.topk(node_budget, dim=1)

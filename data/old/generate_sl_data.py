@@ -1,6 +1,5 @@
 """
 Source Localization Data Generation
-====================================
 
 Generates training/eval data for Source Localization (SL) models on a chosen graph dataset.
 

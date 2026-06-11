@@ -2,12 +2,11 @@ import math
 import torch
 
 
-# Fixed, degree-based Positional Encoding
 def degree_encoding(
     adj: torch.Tensor, d_model: int, device: torch.device
 ) -> torch.Tensor:
     """
-    Simple degree-based positional encoding.
+    Simple, fixed degree-based positional encodings.
     Encodes log(1 + degree) projected to d_model dims via a fixed sinusoidal scheme.
 
     adj: sparse COO (N, N) or dense (N, N)

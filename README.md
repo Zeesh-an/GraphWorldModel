@@ -67,21 +67,26 @@ python data/old/generate_sl_data.py -d power_grid --k 5 --samples 1000
 
 ### Step 2 — Train Forward Model + Inverse Optimization
 
+> The seed→final commands below are the **legacy** forward-model training, now under
+> `world_model/old/`. The current path is the **action-conditioned world model**:
+> `python world_model/train_wm.py --data-dir data/output/<setting> --diffusion-model IC --model gcn --plan-demo`
+> (see the design spec in `docs/superpowers/specs/`).
+
 ```bash
 # IM on Cora-ML with GraphSAGE
-python world_model/train.py --task IM -d cora_ml -dm IC --k 10 \
+python world_model/old/train.py --task IM -d cora_ml -dm IC --k 10 \
     --model sage --sage-hidden 128 --sage-layers 3 \
     --epochs 600 --opt-iters 500 --lr 1e-4 --lr-z 1e-2 \
     --npz-dir data/cora_ml
 
 # CND on Jazz with GCN
-python world_model/train.py --task CND -d jazz --k 10 \
+python world_model/old/train.py --task CND -d jazz --k 10 \
     --model gcn --gcn-hidden 64 --gcn-layers 3 \
     --epochs 600 --opt-iters 300 \
     --npz-dir data/jazz
 
 # SL on Power Grid with Graph Transformer
-python world_model/train.py --task SL -d power_grid -dm IC --k 5 \
+python world_model/old/train.py --task SL -d power_grid -dm IC --k 5 \
     --model gt --gt-d-model 64 --gt-heads 4 --gt-layers 3 --gt-ffn 128 \
     --epochs 600 --opt-iters 300 \
     --npz-dir data/power_grid
@@ -203,17 +208,25 @@ GraphWorldModel/
 │       ├── diffusion.py             # IC/LT diffusion simulators
 │       └── connectivity.py          # Graph connectivity analysis
 ├── world_model/
-│   ├── train.py                     # Main training script (forward models)
-│   ├── train_vae.py                 # Legacy VAE+GT joint training
-│   ├── utils.py                     # Data loading, evaluation, adj processing
-│   └── model/
-│       ├── graph_transformer.py     # Graph Transformer forward model
-│       ├── gcn.py                   # GCN forward model
-│       ├── gat.py                   # GATv2 forward model
-│       ├── graphsage.py             # GraphSAGE forward model
-│       ├── gcnii.py                 # GCNII forward model
-│       ├── model_utils.py           # Shared utilities (degree encoding)
-│       └── vae.py                   # VAE encoder/decoder (used by train_vae.py)
+│   ├── train_wm.py                  # Action-conditioned WM training (current)
+│   ├── wm_model.py                  # WorldModel + backbone registry
+│   ├── wm_data.py                   # Transition dataset + adjacency
+│   ├── wm_metrics.py                # Metric suite (F1, Success, Sensitivity, Regret)
+│   ├── wm_eval.py                   # Evaluation + rollout + planning demo
+│   ├── run_ablation.sh              # Ablation experiment harness
+│   ├── compare_runs.py              # Ablation result aggregation
+│   ├── model/
+│   │   ├── graph_transformer.py     # Graph Transformer forward model
+│   │   ├── gcn.py                   # GCN forward model
+│   │   ├── gat.py                   # GATv2 forward model
+│   │   ├── graphsage.py             # GraphSAGE forward model
+│   │   ├── gcnii.py                 # GCNII forward model
+│   │   ├── model_utils.py           # Shared utilities (degree encoding)
+│   │   └── vae.py                   # VAE encoder/decoder (used by train_vae.py)
+│   └── old/
+│       ├── train.py                 # Legacy forward-model training
+│       ├── train_vae.py             # Legacy VAE+GT joint training
+│       └── utils.py                 # Legacy data loading & evaluation
 ├── baselines/
 │   └── DeepIM/                      # DeepIM baseline implementation
 └── requirements.txt
