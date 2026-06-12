@@ -42,8 +42,8 @@ class GCNIILayer(nn.Module):
         super().__init__()
 
         self.alpha = alpha
-        # Layer indices are 1-based in the paper: β_l = log(λ/l + 1)
-        self.beta = math.log(lamda / (layer_idx + 1) + 1.0)
+        # Layer indices are 1-based in the paper: β_l = log(λ/l + 1) (layer_idx is l)
+        self.beta = math.log(lamda / layer_idx + 1.0)
 
         self.W = nn.Linear(in_features=hidden_dim, out_features=hidden_dim, bias=False)
         self.dropout = nn.Dropout(p=dropout)

@@ -1,6 +1,10 @@
 """One-step eval, action-specific metrics, free-running rollout, planning."""
 
+import json
+import sys
+from pathlib import Path
 from collections import defaultdict
+import networkx as nx
 import numpy as np
 import torch
 
@@ -9,10 +13,18 @@ from wm_data import (
     collate_transitions,
     build_features,
     build_graph_input,
+    reconstruct_episode_adjacency,
+    edges_to_arrays,
     CH_INFECTED,
     CH_FRONTIER,
 )
 from wm_metrics import score_predictions, persistence_baseline, binary_f1
+
+_ROOT_DIR = str(Path(__file__).resolve().parent.parent)
+if _ROOT_DIR not in sys.path:
+    sys.path.insert(0, _ROOT_DIR)
+
+from data.wm_simulator import Simulator, ActionOp
 
 
 @torch.inference_mode()
@@ -28,13 +40,13 @@ def evaluate_one_step(
 
     Aggregates the full metric suite (score_predictions), action-specific metrics
     (Add-Seed Success, Remove-Frontier Success), action sensitivity (how much the
-    model output changes under counterfactual actions at the same state), and the
-    persistence baseline.
+    model output changes under counterfactual actions at the same state), and the persistence baseline.
     """
     model.eval()
     P_inf, P_fr, Y_inf, Y_fr, I_t, F_t = [], [], [], [], [], []
+
     # sens[state_key][action_key] = tuple of per-node predicted infected probabilities
-    sens: dict[tuple, dict[tuple, tuple]] = defaultdict(dict)
+    sens = defaultdict(dict)
     add_hits = add_tot = rem_hits = rem_tot = 0
 
     for i in range(len(dataset)):
@@ -43,16 +55,21 @@ def evaluate_one_step(
         logits = model(batch["X"], batch["graph"])  # (N, 2)
         prob = torch.sigmoid(logits).cpu().numpy()
         pi = (prob[:, 0] > threshold).astype(np.float32)
-        pf = (prob[:, 1] > threshold).astype(np.float32)
-        yi = item["y_inf"].numpy()
-        yf = item["y_fr"].numpy()
-        it = item["X"][:, CH_INFECTED].numpy()
-        ft = item["X"][:, CH_FRONTIER].numpy()
         P_inf.append(pi)
+
+        pf = (prob[:, 1] > threshold).astype(np.float32)
         P_fr.append(pf)
+
+        yi = item["y_inf"].numpy()
         Y_inf.append(yi)
+
+        yf = item["y_fr"].numpy()
         Y_fr.append(yf)
+
+        it = item["X"][:, CH_INFECTED].numpy()
         I_t.append(it)
+
+        ft = item["X"][:, CH_FRONTIER].numpy()
         F_t.append(ft)
 
         r = item["record"]
@@ -64,7 +81,7 @@ def evaluate_one_step(
                 rem_tot += 1
                 rem_hits += int(pf[int(op["target"])] == 0)
 
-        # Group main + cf transitions by (graph, episode, t, state) for sensitivity.
+        # Group main and cf transitions by (graph, episode, t, state) for sensitivity
         skey = (r["graph_id"], r["episode_id"], r["t"], tuple(r["state"]["infected"]))
         akey = tuple(
             sorted(
@@ -75,13 +92,13 @@ def evaluate_one_step(
         sens[skey][akey] = tuple(pi.tolist())
 
     cat = lambda xs: np.concatenate(xs) if xs else np.zeros(0)
-    out: dict[str, float] = score_predictions(
+    out = score_predictions(
         cat(P_inf), cat(P_fr), cat(Y_inf), cat(Y_fr), cat(I_t), cat(F_t)
     )
     out["add_seed_success"] = add_hits / add_tot if add_tot else float("nan")
     out["remove_frontier_success"] = rem_hits / rem_tot if rem_tot else float("nan")
 
-    # Action sensitivity: mean number of distinct output tuples per (state, multiple actions) group.
+    # Action sensitivity: mean number of distinct output tuples per (state, multiple actions) group
     diffs = [len(set(d.values())) - 1 for d in sens.values() if len(d) >= 2]
     out["action_sensitivity"] = float(np.mean(diffs)) if diffs else 0.0
 
@@ -99,48 +116,43 @@ def rollout_episodes(
     split: str = "test",
     threshold: float = 0.5,
 ) -> dict[str, float]:
-    """Feed the model its own thresholded prediction + recorded action; compare to truth.
+    """
+    Feed the model its own thresholded prediction + recorded action; compare to truth.
 
     For each episode (main branch only), the model is initialised with the true state
-    at t=0 and then fed its own binary output at each subsequent step.  The recorded
-    (ground-truth) action is applied at every step so the model sees the correct
-    intervention signal.  Three metrics are reported:
+    at t = 0 and then fed its own binary output at each subsequent step.  The recorded
+    (ground-truth) action is applied at every step so the model sees the correct intervention signal.
 
-    - rollout_newinf_f1   : per-step F1 on newly infected nodes only (susceptible mask)
-    - rollout_count_mae   : per-step |predicted count - true count| of infected nodes
-    - rollout_final_f1    : F1 between rolled-out final state and true final state
+    Three metrics are reported:
+    - rollout_newinf_f1: per-step F1 on newly infected nodes only (susceptible mask)
+    - rollout_count_mae: per-step |predicted count - true count| of infected nodes
+    - rollout_final_f1: F1 between rolled-out final state and true final state
     """
-    import json
-    from pathlib import Path
-    from wm_data import reconstruct_episode_adjacency, edges_to_arrays
-
     path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
     recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
 
     # Keep only main-branch records; group by (graph_id, episode_id).
-    by_ep: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    by_ep = defaultdict(list)
     for r in recs:
         if r["branch"] == "main":
             by_ep[(r["graph_id"], r["episode_id"])].append(r)
 
     model.eval()
-    per_step_f1: list[float] = []
-    count_mae: list[float] = []
-    final_f1: list[float] = []
+    per_step_f1, count_mae, final_f1 = [], [], []
 
     for (gid, _eid), ers in by_ep.items():
         ers.sort(key=lambda r: r["t"])
-        n: int = store[gid]["num_nodes"]
+        n = store[gid]["num_nodes"]
         adj_map = reconstruct_episode_adjacency(ers, store[gid]["base_edges"])
 
-        # Initialise the autoregressive state from the first recorded true state.
-        cur_inf: set[int] = set(ers[0]["state"]["infected"])
-        cur_fr: set[int] = set(ers[0]["state"]["frontier"])
+        # Initialise the autoregressive state from the first recorded true state
+        cur_inf = set(ers[0]["state"]["infected"])
+        cur_fr = set(ers[0]["state"]["frontier"])
 
         for r in ers:
             ei, w = edges_to_arrays(adj_map[(r["t"], "main")])
 
-            # Replace the record's state with the rolled-out state for feature building.
+            # Replace the record's state with the rolled-out state for feature building
             rolled = dict(r)
             rolled["state"] = {
                 "infected": sorted(cur_inf),
@@ -152,8 +164,8 @@ def rollout_episodes(
             prob = (
                 torch.sigmoid(model(torch.from_numpy(X).to(device), gi)).cpu().numpy()
             )
-            pi: np.ndarray = prob[:, 0] > threshold  # (N,) bool
-            pf: np.ndarray = prob[:, 1] > threshold  # (N,) bool
+            pi = prob[:, 0] > threshold  # (N,) bool
+            pf = prob[:, 1] > threshold  # (N,) bool
 
             # Ground-truth next state from the record.
             yi = np.zeros(n, dtype=np.float32)
@@ -161,8 +173,8 @@ def rollout_episodes(
             it = np.zeros(n, dtype=np.float32)
             it[r["state"]["infected"]] = 1.0
 
-            # New-infection F1: evaluate only on susceptible nodes (it == 0).
-            sus_mask: np.ndarray = it == 0
+            # New-infection F1: evaluate only on susceptible nodes (it == 0)
+            sus_mask = it == 0
             per_step_f1.append(binary_f1(pi & sus_mask, yi.astype(bool) & sus_mask))
             count_mae.append(abs(float(pi.sum()) - len(r["next_state"]["infected"])))
 
@@ -170,7 +182,7 @@ def rollout_episodes(
             cur_inf = set(int(v) for v in np.nonzero(pi)[0].tolist())
             cur_fr = set(int(v) for v in np.nonzero(pf)[0].tolist())
 
-        # Final-state F1 compares rolled-out endpoint to the true endpoint.
+        # Final-state F1 compares rolled-out endpoint to the true endpoint
         truth_final = np.zeros(n, dtype=np.float32)
         truth_final[ers[-1]["next_state"]["infected"]] = 1.0
         rolled_final = np.zeros(n, dtype=np.float32)
@@ -184,21 +196,8 @@ def rollout_episodes(
     }
 
 
-# Put the repo root on sys.path so the planning oracle imports as `data.wm_simulator`
-# (a package path that static analysis can resolve, and that works at runtime).
-import sys as _sys
-from pathlib import Path as _Path
-
-_ROOT_DIR = str(_Path(__file__).resolve().parent.parent)
-if _ROOT_DIR not in _sys.path:
-    _sys.path.insert(0, _ROOT_DIR)
-
-
 def rebuild_simulator(store_entry: dict, diffusion_model: str, seed: int = 0) -> object:
     """Reconstruct a data/wm_simulator.Simulator from a stored graph."""
-    import networkx as nx
-    from data.wm_simulator import Simulator
-
     ei = store_entry["edge_index"]
     ic = store_entry["ic_probs"]
     n = store_entry["num_nodes"]
@@ -211,6 +210,7 @@ def rebuild_simulator(store_entry: dict, diffusion_model: str, seed: int = 0) ->
     }
     sim = Simulator(g, ic_prob_map=ic_prob_map, seed=seed)
     sim.reset(diffusion_model)
+
     return sim
 
 
@@ -227,16 +227,16 @@ def planning_regret(
     threshold: float = 0.5,
 ) -> dict[str, float]:
     """One-step greedy: model picks argmax predicted spread; compare true spread to oracle."""
-    from data.wm_simulator import ActionOp
-
     rng = np.random.default_rng(seed)
     n = store_entry["num_nodes"]
     ei = store_entry["edge_index"]
     ic = store_entry["ic_probs"]
+
     gi = build_graph_input(ei, ic, n, diffusion_model, device)
     deg = np.zeros(n)
     np.add.at(deg, ei[0], 1)
     np.add.at(deg, ei[1], 1)
+
     model.eval()
     reg_model, reg_rand, reg_deg = [], [], []
 
@@ -246,19 +246,28 @@ def planning_regret(
             sim = rebuild_simulator(
                 store_entry, diffusion_model, seed=int(rng.integers(1 << 30))
             )
+
             for v in infected:
                 sim.model.status[v] = 1
+
             s2 = sim.advance(action)
             gains.append(len(s2.infected) - len(infected))
+
         return float(np.mean(gains))
 
     for _ in range(n_states):
         k = max(1, n // 20)
         infected = set(rng.choice(n, size=k, replace=False).tolist())
-        sus = [v for v in range(n) if v not in infected]
-        if not sus:
+        susceptible = [v for v in range(n) if v not in infected]
+
+        if not susceptible:
             continue
-        cands = list(rng.choice(sus, size=min(n_candidates, len(sus)), replace=False))
+
+        cands = list(
+            rng.choice(
+                susceptible, size=min(n_candidates, len(susceptible)), replace=False
+            )
+        )
         pred = []
         for v in cands:
             rec = {
@@ -270,7 +279,9 @@ def planning_regret(
             prob = (
                 torch.sigmoid(model(torch.from_numpy(X).to(device), gi)).cpu().numpy()
             )
-            pred.append(prob[:, 0].sum())
+            susceptible_mask = np.array([v not in infected for v in range(n)])
+            pred.append(prob[susceptible_mask, 0].sum())
+
         a_model = cands[int(np.argmax(pred))]
         a_rand = cands[int(rng.integers(len(cands)))]
         a_deg = cands[int(np.argmax([deg[v] for v in cands]))]
@@ -281,6 +292,7 @@ def planning_regret(
         reg_model.append(oracle - trues[a_model])
         reg_rand.append(oracle - trues[a_rand])
         reg_deg.append(oracle - trues[a_deg])
+
     return {
         "plan_regret_model": float(np.mean(reg_model)) if reg_model else 0.0,
         "plan_regret_random": float(np.mean(reg_rand)) if reg_rand else 0.0,

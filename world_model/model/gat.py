@@ -247,8 +247,15 @@ class GATEncoder(nn.Module):
         graph: GraphInput — uses graph.edge_index (2, E) and graph.edge_weight (E,)
         returns: (N, hidden_dim) node embeddings
         """
+        # Add self-loops so each node attends to itself (weight 1 -> neutral log-bias)
+        n = X.shape[0]
+        loop = torch.arange(n, device=X.device)
+        ei = torch.cat([graph.edge_index, torch.stack([loop, loop])], dim=1)
+        w = torch.cat(
+            [graph.edge_weight, torch.ones(n, device=X.device, dtype=graph.edge_weight.dtype)]
+        )
         h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
         for layer in self.layers:
-            h = layer(h, graph.edge_index, graph.edge_weight)  # shape: (N, hidden_dim)
+            h = layer(h, ei, w)  # shape: (N, hidden_dim)
 
         return self.norm(h)  # shape: (N, hidden_dim)

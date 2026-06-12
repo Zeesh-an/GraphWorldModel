@@ -1,11 +1,18 @@
 """
 Autoregressive action-conditioned world-model training (teacher-forced one-step).
 
-python world_model/train_wm.py --data-dir data/output/er_node --diffusion-model IC \
-    --model gcn --epochs 200 --lr 1e-3 --plan-demo
+python world_model/train_wm.py \
+    --data-dir data/output/er_node --diffusion-model IC \
+    --model gcn --hidden-dim 64 --n-layers 3 \
+    --epochs 300 --lr 1e-3 --weight-decay 5e-4 --batch-size 16 \
+    --pos-weight auto --patience 40 --seed 42 \
+    --device cuda --plan-demo \
+    --ckpt-dir world_model/checkpoints \
+    --results world_model/checkpoints/er_node_gcn_IC.json
 """
 
-import argparse, json
+import argparse
+import json
 from functools import partial
 from pathlib import Path
 import numpy as np
@@ -22,10 +29,12 @@ from wm_eval import evaluate_one_step, rollout_episodes, planning_regret
 def compute_pos_weight(
     dataset: TransitionDataset, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # Diffusion changes are sparse (few infected/frontier nodes per step), so a plain BCE would collapse to predict all zeros
     pos_i = tot = pos_f = 0
 
     for i in range(len(dataset)):
         it = dataset[i]
+
         tot += it["y_inf"].numel()
         pos_i += it["y_inf"].sum().item()
         pos_f += it["y_fr"].sum().item()
@@ -34,6 +43,7 @@ def compute_pos_weight(
     wf = (tot - pos_f) / max(pos_f, 1.0)
     clamp = lambda x: float(min(max(x, 1.0), 50.0))
 
+    # Passed into BCEWithLogitsLoss, it up-weights the rare positive class so the model is pushed to actually predict the new infections
     return torch.tensor([clamp(wi)], device=device), torch.tensor(
         [clamp(wf)], device=device
     )
@@ -73,17 +83,20 @@ if __name__ == "__main__":
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+
     device = torch.device(args.device)
-    dm = args.diffusion_model
+    diffusion_model = args.diffusion_model
 
-    train_ds = TransitionDataset(args.data_dir, dm, "train")
-    val_ds = TransitionDataset(args.data_dir, dm, "val")
-    test_ds = TransitionDataset(args.data_dir, dm, "test")
+    train_dataset = TransitionDataset(args.data_dir, diffusion_model, "train")
+    validation_dataset = TransitionDataset(args.data_dir, diffusion_model, "val")
+    test_dataset = TransitionDataset(args.data_dir, diffusion_model, "test")
 
-    collate = partial(collate_transitions, diffusion_model=dm, device=device)
+    collate_fn = partial(
+        collate_transitions, diffusion_model=diffusion_model, device=device
+    )
 
-    train_dl = DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True, collate_fn=collate
+    train_dataloader = DataLoader(
+        train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
 
     bb = {
@@ -102,12 +115,12 @@ if __name__ == "__main__":
         **bb,
     ).to(device)
 
-    opt = torch.optim.Adam(
-        model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    optimizer = torch.optim.Adam(
+        params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay
     )
 
     if args.pos_weight == "auto":
-        pw_i, pw_f = compute_pos_weight(train_ds, device)
+        pw_i, pw_f = compute_pos_weight(train_dataset, device)
     else:
         pw_i = pw_f = None
 
@@ -115,20 +128,27 @@ if __name__ == "__main__":
     loss_f = nn.BCEWithLogitsLoss(pos_weight=pw_f)
 
     Path(args.ckpt_dir).mkdir(parents=True, exist_ok=True)
-    ckpt = Path(args.ckpt_dir) / f"wm_{args.model}_{dm}.pt"
+    ckpt = Path(args.ckpt_dir) / f"wm_{args.model}_{diffusion_model}.pt"
     best, bad = -1.0, 0
 
-    for ep in range(args.epochs):
+    for epoch in range(args.epochs):
         model.train()
-        bar = tqdm(train_dl, desc=f"epoch {ep}")
-        for b in bar:
-            opt.zero_grad()
-            logits = model(b["X"], b["graph"])
-            loss = loss_i(logits[:, 0], b["y_inf"]) + loss_f(logits[:, 1], b["y_fr"])
+        progress_bar = tqdm(train_dataloader, desc=f"epoch {epoch}")
+
+        for batch in progress_bar:
+            optimizer.zero_grad()
+
+            logits = model(batch["X"], batch["graph"])
+            loss = loss_i(logits[:, 0], batch["y_inf"]) + loss_f(
+                logits[:, 1], batch["y_fr"]
+            )
+
             loss.backward()
-            opt.step()
-            bar.set_postfix(loss=f"{loss.item():.4f}")
-        val = evaluate_one_step(model, val_ds, dm, device)
+            optimizer.step()
+
+            progress_bar.set_postfix(loss=f"{loss.item():.4f}")
+
+        val = evaluate_one_step(model, validation_dataset, diffusion_model, device)
 
         if val["delta_f1"] > best:
             best, bad = val["delta_f1"], 0
@@ -136,25 +156,27 @@ if __name__ == "__main__":
         else:
             bad += 1
             if bad >= args.patience:
-                print(f"[early-stop] epoch {ep}, best val delta_f1={best:.4f}")
+                print(f"[early-stop] epoch {epoch}, best val delta_f1={best:.4f}")
                 break
 
     model.load_state_dict(torch.load(ckpt, map_location=device))
     results = {
         "config": vars(args),
-        "test": evaluate_one_step(model, test_ds, dm, device),
+        "test": evaluate_one_step(model, test_dataset, diffusion_model, device),
     }
     results["rollout"] = rollout_episodes(
-        model, args.data_dir, dm, train_ds.store, device, "test"
+        model, args.data_dir, diffusion_model, train_dataset.store, device, "test"
     )
 
     if args.plan_demo:
-        gid = next(iter(train_ds.store))
+        gid = next(iter(train_dataset.store))
         results["planning"] = planning_regret(
-            model, train_ds.store[gid], dm, device, seed=args.seed
+            model, train_dataset.store[gid], diffusion_model, device, seed=args.seed
         )
 
-    out = args.results or str(Path(args.ckpt_dir) / f"results_{args.model}_{dm}.json")
+    out = args.results or str(
+        Path(args.ckpt_dir) / f"results_{args.model}_{diffusion_model}.json"
+    )
     Path(out).write_text(json.dumps(results, indent=2, default=str))
 
     print(
