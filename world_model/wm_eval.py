@@ -23,7 +23,8 @@ def evaluate_one_step(
     device: torch.device,
     threshold: float = 0.5,
 ) -> dict[str, float]:
-    """Teacher-forced one-step evaluation over an entire dataset.
+    """
+    Teacher-forced one-step evaluation over an entire dataset.
 
     Aggregates the full metric suite (score_predictions), action-specific metrics
     (Add-Seed Success, Remove-Frontier Success), action sensitivity (how much the
@@ -111,7 +112,7 @@ def rollout_episodes(
     """
     import json
     from pathlib import Path
-    from wm_data import reconstruct_episode_adjacency, _edges_to_arrays
+    from wm_data import reconstruct_episode_adjacency, edges_to_arrays
 
     path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
     recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
@@ -137,7 +138,7 @@ def rollout_episodes(
         cur_fr: set[int] = set(ers[0]["state"]["frontier"])
 
         for r in ers:
-            ei, w = _edges_to_arrays(adj_map[(r["t"], "main")])
+            ei, w = edges_to_arrays(adj_map[(r["t"], "main")])
 
             # Replace the record's state with the rolled-out state for feature building.
             rolled = dict(r)

@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model_utils import degree_encoding
+from model.model_utils import degree_encoding
 
 
 # Graph Transformer Layer
@@ -273,11 +273,7 @@ class GraphTransformerEncoder(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-    def forward(
-        self, X: torch.Tensor, graph
-    ) -> (
-        torch.Tensor
-    ):  # graph: GraphInput (duck-typed; avoids model/ -> wm_data coupling)
+    def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
         X: (N, in_channels) node feature matrix
         graph: GraphInput — uses graph.edge_index (2, E) and graph.edge_weight (E,)

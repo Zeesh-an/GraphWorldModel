@@ -1,0 +1,45 @@
+{
+  "config": {
+    "data_dir": "/tmp/wm_smoke2",
+    "diffusion_model": "IC",
+    "model": "sage",
+    "hidden_dim": 16,
+    "n_layers": 2,
+    "n_heads": 4,
+    "ffn_dim": 128,
+    "gcnii_alpha": 0.1,
+    "gcnii_lamda": 0.5,
+    "dropout": 0.1,
+    "epochs": 1,
+    "lr": 0.001,
+    "weight_decay": 0.0005,
+    "batch_size": 16,
+    "pos_weight": "auto",
+    "patience": 1,
+    "seed": 42,
+    "device": "cpu",
+    "ckpt_dir": "/Users/rishabalagharu/Documents/Coding/Machine Learning/zhou-lab-emory/GraphWorldModel/world_model/checkpoints",
+    "results": null,
+    "plan_demo": false
+  },
+  "test": {
+    "infected_acc": 0.9114583333333334,
+    "frontier_acc": 0.5864583333333333,
+    "new_infection_f1": 0.0,
+    "delta_f1": 0.0,
+    "add_seed_success": 0.0,
+    "remove_frontier_success": 0.6666666666666666,
+    "action_sensitivity": 0.0,
+    "persistence": {
+      "infected_acc": 0.9208333333333333,
+      "frontier_acc": 0.8677083333333333,
+      "new_infection_f1": 0.0,
+      "delta_f1": 0.0
+    }
+  },
+  "rollout": {
+    "rollout_newinf_f1": 0.07068452380952381,
+    "rollout_count_mae": 16.083333333333332,
+    "rollout_final_f1": 0.4433970856102003
+  }
+}

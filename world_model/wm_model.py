@@ -1,4 +1,4 @@
-"""Plug-and-play action-conditioned world model: encoder backbone + 2-logit head."""
+"""Action-conditioned world model: encoder backbone and 2-logit head."""
 
 import torch
 import torch.nn as nn
@@ -35,6 +35,7 @@ class WorldModel(nn.Module):
                 f"unknown backbone {backbone}; choose from {list(BACKBONES)}"
             )
 
+        # Encoder produces (N, hidden_dim) node embeddings
         self.encoder = BACKBONES[backbone](
             in_channels=in_channels,
             hidden_dim=hidden_dim,
@@ -42,14 +43,17 @@ class WorldModel(nn.Module):
             dropout=dropout,
             **bb,
         )
+
+        # Lienar head maps each node's embedding to 2 logits: [next_infected_logit, next_frontier_logit]
         self.head = nn.Linear(
-            hidden_dim, 2
+            in_features=hidden_dim, out_features=2
         )  # [next_infected_logit, next_frontier_logit]
 
         nn.init.xavier_uniform_(self.head.weight)
         nn.init.zeros_(self.head.bias)
 
-    def forward(
-        self, X: torch.Tensor, graph
-    ) -> torch.Tensor:  # graph: GraphInput (duck-typed)
+    def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
+        # X = (N, 6) node features, including the state, actions, degree, etc
+        # graph = the GraphInput, with adjacency matrix and edge_index/weights
+
         return self.head(self.encoder(X, graph))  # (N, 2) raw logits

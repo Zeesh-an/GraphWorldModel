@@ -112,7 +112,7 @@ class Simulator:
         self.model = model
         self.model.iteration()  # First iteration is a no-op (no diffusion)
 
-    def _active_nodes(self) -> set[int]:
+    def active_nodes(self) -> set[int]:
         if self.model_name == "IC":
             # IC: 0 = Susceptible, 1 = Infected (currently infectious), 2 = Removed (already spread, spent)
             # Active: 1, 2
@@ -124,7 +124,7 @@ class Simulator:
 
     def current_state(self) -> State:
         # IC frontier = status-1 spreaders; LT's "newly flipped" delta is only available via advance()
-        active = self._active_nodes()
+        active = self.active_nodes()
 
         if self.model_name == "IC":
             frontier = {int(n) for n, s in self.model.status.items() if s == 1}
@@ -173,13 +173,13 @@ class Simulator:
     def advance(self, bag: list[ActionOp]) -> State:
         # s_{t + 1} = T_endo(T_exo(s_t, a_t))
         prev_active = (
-            self._active_nodes()
+            self.active_nodes()
         )  # Snapsot previous active nodes before actions
 
         self.apply_actions(bag)  # Apply the actions (exogenous effect)
         self.model.iteration()  # Run one diffusion iteration (endogenous diffusion dynamics)
 
-        active = self._active_nodes()
+        active = self.active_nodes()
 
         if self.model_name == "IC":
             # IC frontier = status = 1 nodes
