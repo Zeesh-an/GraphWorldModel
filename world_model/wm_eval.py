@@ -298,3 +298,52 @@ def planning_regret(
         "plan_regret_random": float(np.mean(reg_rand)) if reg_rand else 0.0,
         "plan_regret_degree": float(np.mean(reg_deg)) if reg_deg else 0.0,
     }
+
+
+@torch.inference_mode()
+def planning_regret_multi(
+    model: torch.nn.Module,
+    store: dict[str, dict],
+    diffusion_model: str,
+    device: torch.device,
+    n_graphs: int = 5,
+    n_states: int = 20,
+    n_candidates: int = 20,
+    mc: int = 8,
+    seed: int = 0,
+    threshold: float = 0.5,
+) -> dict[str, float]:
+    """
+    Average planning regret over the first n_graphs graphs in the store.
+
+    Single-graph planning regret ties across backbones because the per-graph
+    argmax choice is coarse (most models pick the same candidate). Averaging over
+    several graphs — each with its own seed offset so the sampled states differ —
+    gives the metric real resolution, plus a cross-graph std as an error bar.
+    """
+    gids = list(store)[:n_graphs]
+    if not gids:
+        raise ValueError("planning_regret_multi: empty graph store")
+
+    per_graph = [
+        planning_regret(
+            model,
+            store[gid],
+            diffusion_model,
+            device,
+            n_states=n_states,
+            n_candidates=n_candidates,
+            mc=mc,
+            seed=seed + i,
+            threshold=threshold,
+        )
+        for i, gid in enumerate(gids)
+    ]
+
+    out = {"plan_n_graphs": float(len(per_graph))}
+    for key in ("plan_regret_model", "plan_regret_random", "plan_regret_degree"):
+        vals = np.array([pg[key] for pg in per_graph], dtype=np.float64)
+        out[key] = float(vals.mean())
+        out[f"{key}_std"] = float(vals.std())
+
+    return out

@@ -24,7 +24,7 @@ from tqdm.auto import tqdm
 
 from wm_data import TransitionDataset, collate_transitions, IN_CHANNELS
 from wm_model import WorldModel, BACKBONES
-from wm_eval import evaluate_one_step, rollout_episodes, planning_regret
+from wm_eval import evaluate_one_step, rollout_episodes, planning_regret_multi
 
 
 def compute_pos_weight(
@@ -79,6 +79,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--results", default=None)
     parser.add_argument("--plan-demo", action="store_true")
+    parser.add_argument("--plan-graphs", type=int, default=5)
     parser.add_argument("--rollout-threshold", type=float, default=0.5)
 
     args = parser.parse_args()
@@ -177,9 +178,13 @@ if __name__ == "__main__":
     )
 
     if args.plan_demo:
-        gid = next(iter(train_dataset.store))
-        results["planning"] = planning_regret(
-            model, train_dataset.store[gid], diffusion_model, device, seed=args.seed
+        results["planning"] = planning_regret_multi(
+            model,
+            train_dataset.store,
+            diffusion_model,
+            device,
+            n_graphs=args.plan_graphs,
+            seed=args.seed,
         )
 
     out = args.results or str(
