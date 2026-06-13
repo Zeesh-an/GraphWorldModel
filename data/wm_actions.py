@@ -105,7 +105,9 @@ def select_seeds(
         candidates = list(range(graph.number_of_nodes()))
 
         for _ in range(k):
-            best_v, best_gain = None, -1.0
+            # -inf so the highest-gain candidate is always chosen, even when MC noise
+            # makes every marginal gain negative (otherwise best_v can stay None).
+            best_v, best_gain = None, float("-inf")
             for v in candidates:
                 gain = (
                     estimate_spread(
