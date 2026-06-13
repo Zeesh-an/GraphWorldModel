@@ -7,6 +7,7 @@ python world_model/train_wm.py \
     --epochs 300 --lr 1e-3 --weight-decay 5e-4 --batch-size 16 \
     --pos-weight auto --patience 40 --seed 42 \
     --device cuda --plan-demo \
+    --rollout-threshold 0.5 \
     --ckpt-dir world_model/checkpoints \
     --results world_model/checkpoints/er_node_gcn_IC.json
 """
