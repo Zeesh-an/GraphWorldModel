@@ -78,6 +78,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--results", default=None)
     parser.add_argument("--plan-demo", action="store_true")
+    parser.add_argument("--rollout-threshold", type=float, default=0.5)
 
     args = parser.parse_args()
 
@@ -165,7 +166,13 @@ if __name__ == "__main__":
         "test": evaluate_one_step(model, test_dataset, diffusion_model, device),
     }
     results["rollout"] = rollout_episodes(
-        model, args.data_dir, diffusion_model, train_dataset.store, device, "test"
+        model,
+        args.data_dir,
+        diffusion_model,
+        train_dataset.store,
+        device,
+        "test",
+        threshold=args.rollout_threshold,
     )
 
     if args.plan_demo:
