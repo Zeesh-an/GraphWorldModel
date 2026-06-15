@@ -18,7 +18,7 @@ from wm_data import (
     CH_INFECTED,
     CH_FRONTIER,
 )
-from wm_metrics import score_predictions, persistence_baseline, binary_f1
+from wm_metrics import score_predictions, persistence_baseline, binary_f1, brier_score
 
 _ROOT_DIR = str(Path(__file__).resolve().parent.parent)
 if _ROOT_DIR not in sys.path:
@@ -43,7 +43,7 @@ def evaluate_one_step(
     model output changes under counterfactual actions at the same state), and the persistence baseline.
     """
     model.eval()
-    P_inf, P_fr, Y_inf, Y_fr, I_t, F_t = [], [], [], [], [], []
+    P_inf, P_fr, PR_inf, PR_fr, Y_inf, Y_fr, I_t, F_t = [], [], [], [], [], [], [], []
 
     # sens[state_key][action_key] = tuple of per-node predicted infected probabilities
     sens = defaultdict(dict)
@@ -56,9 +56,11 @@ def evaluate_one_step(
         prob = torch.sigmoid(logits).cpu().numpy()
         pi = (prob[:, 0] > threshold).astype(np.float32)
         P_inf.append(pi)
+        PR_inf.append(prob[:, 0])
 
         pf = (prob[:, 1] > threshold).astype(np.float32)
         P_fr.append(pf)
+        PR_fr.append(prob[:, 1])
 
         yi = item["y_inf"].numpy()
         Y_inf.append(yi)
@@ -92,9 +94,14 @@ def evaluate_one_step(
         sens[skey][akey] = tuple(pi.tolist())
 
     cat = lambda xs: np.concatenate(xs) if xs else np.zeros(0)
-    out = score_predictions(
-        cat(P_inf), cat(P_fr), cat(Y_inf), cat(Y_fr), cat(I_t), cat(F_t)
-    )
+
+    # Targets are soft marginals: threshold at 0.5 for the binary F1/accuracy suite,
+    # keep the raw probabilities + soft targets for Brier (calibration vs the marginal).
+    Yi, Yf, It, Ft = cat(Y_inf), cat(Y_fr), cat(I_t), cat(F_t)
+    Yi_bin = (Yi > 0.5).astype(np.float32)
+    Yf_bin = (Yf > 0.5).astype(np.float32)
+
+    out = score_predictions(cat(P_inf), cat(P_fr), Yi_bin, Yf_bin, It, Ft)
     out["add_seed_success"] = add_hits / add_tot if add_tot else float("nan")
     out["remove_frontier_success"] = rem_hits / rem_tot if rem_tot else float("nan")
 
@@ -102,7 +109,12 @@ def evaluate_one_step(
     diffs = [len(set(d.values())) - 1 for d in sens.values() if len(d) >= 2]
     out["action_sensitivity"] = float(np.mean(diffs)) if diffs else 0.0
 
-    out["persistence"] = persistence_baseline(cat(Y_inf), cat(Y_fr), cat(I_t), cat(F_t))
+    out["brier_infected"] = brier_score(cat(PR_inf), Yi)
+    out["brier_frontier"] = brier_score(cat(PR_fr), Yf)
+
+    out["persistence"] = persistence_baseline(Yi_bin, Yf_bin, It, Ft)
+    out["persistence"]["brier_infected"] = brier_score(It, Yi)
+    out["persistence"]["brier_frontier"] = brier_score(Ft, Yf)
     return out
 
 

@@ -17,9 +17,42 @@ import json
 from pathlib import Path
 import torch
 
-from wm_data import load_graph_store
+from wm_data import load_graph_store, IN_CHANNELS
+from wm_model import WorldModel
 from wm_eval import planning_regret_multi
-from sweep_rollout import load_trained_model
+
+
+def load_trained_model(config: dict, device: torch.device) -> torch.nn.Module:
+    """Rebuild the WorldModel from a saved run config and load its checkpoint."""
+    bb = {
+        "n_heads": config["n_heads"],
+        "ffn_dim": config["ffn_dim"],
+        "alpha": config["gcnii_alpha"],
+        "lamda": config["gcnii_lamda"],
+    }
+    model = WorldModel(
+        config["model"],
+        in_channels=IN_CHANNELS,
+        hidden_dim=config["hidden_dim"],
+        n_layers=config["n_layers"],
+        dropout=config["dropout"],
+        **bb,
+    ).to(device)
+
+    # train_wm.py saves to <ckpt_dir>/wm_<model>_<dm>.pt
+    ckpt = (
+        Path(config["ckpt_dir"])
+        / f"wm_{config['model']}_{config['diffusion_model']}.pt"
+    )
+    if not ckpt.exists():
+        raise FileNotFoundError(
+            f"checkpoint not found: {ckpt} (derived from model={config['model']}, "
+            f"diffusion_model={config['diffusion_model']}, ckpt_dir={config['ckpt_dir']})"
+        )
+
+    model.load_state_dict(torch.load(ckpt, map_location=device))
+    return model
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

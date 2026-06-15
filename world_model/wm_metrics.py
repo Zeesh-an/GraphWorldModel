@@ -48,6 +48,14 @@ def accuracy(pred: np.ndarray, target: np.ndarray) -> float:
     return float((pred.astype(bool) == target.astype(bool)).mean())
 
 
+def brier_score(prob: np.ndarray, target: np.ndarray) -> float:
+    # Mean squared error between predicted probability and the (soft) target marginal — lower = better calibrated
+    if prob.size == 0:
+        return 0.0
+
+    return float(np.mean((prob.astype(np.float64) - target.astype(np.float64)) ** 2))
+
+
 def score_predictions(
     pred_inf: np.ndarray,
     pred_fr: np.ndarray,

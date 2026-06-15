@@ -190,6 +190,52 @@ class Simulator:
 
         return State(infected=sorted(active), frontier=sorted(frontier))
 
+    def advance_marginal(
+        self, bag: list[ActionOp], n_mc: int
+    ) -> tuple[State, dict[int, float], dict[int, float]]:
+        """
+        Estimate the one-step marginals by Monte Carlo.
+
+        T_exo (the action) is deterministic, so it is applied once; only T_endo
+        (the diffusion iteration) is stochastic, so it is sampled n_mc times from
+        the post-action state. Returns one realized draw — left in the model so
+        the trajectory continues from a valid sample — plus sparse {node: prob}
+        marginals for next-step infected and frontier. LT is deterministic, so a
+        single draw suffices there.
+        """
+        assert n_mc >= 1, "n_mc must be >= 1"
+
+        prev_active = self.active_nodes()
+        self.apply_actions(bag)  # T_exo once; edge/graph mutations persist across draws
+        post_action = self.snapshot()  # status after the action, before diffusion
+
+        draws = n_mc if self.model_name == "IC" else 1
+        inf_counts: dict[int, int] = {}
+        fr_counts: dict[int, int] = {}
+        last_state = None
+
+        for _ in range(draws):
+            self.restore(post_action)  # restores status only -> a fresh stochastic draw
+            self.model.iteration()
+
+            active = self.active_nodes()
+            if self.model_name == "IC":
+                frontier = {int(n) for n, s in self.model.status.items() if s == 1}
+            else:
+                frontier = active - prev_active
+
+            for v in active:
+                inf_counts[v] = inf_counts.get(v, 0) + 1
+            for v in frontier:
+                fr_counts[v] = fr_counts.get(v, 0) + 1
+
+            last_state = State(infected=sorted(active), frontier=sorted(frontier))
+
+        inf_marg = {int(v): c / draws for v, c in inf_counts.items()}
+        fr_marg = {int(v): c / draws for v, c in fr_counts.items()}
+
+        return last_state, inf_marg, fr_marg
+
     def snapshot(self) -> tuple[dict, int]:
         return (dict(self.model.status), int(self.model.actual_iteration))
 

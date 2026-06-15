@@ -7,7 +7,7 @@ python data/generate_wm_data.py \
     --models IC LT --prob-model weighted --budget 5 \
     --algorithms random degree pagerank betweenness celf local_search \
     --rollouts 10 --horizon 10 --cf-prob 0.2 --cf-branches 2 \
-    --split 0.7 0.15 0.15 --seed 42 \
+    --split 0.7 0.15 0.15 --seed 42 --mc-marginals 30 \
     --out-dir data/output/er_diffusion
 
 # Setting 2 — node actions
@@ -17,7 +17,7 @@ python data/generate_wm_data.py \
     --algorithms random degree pagerank betweenness celf local_search \
     --rollouts 10 --horizon 10 --cf-prob 0.2 --cf-branches 2 \
     --action-ops add_node remove_node --inject-p 0.3 \
-    --split 0.7 0.15 0.15 --seed 42 \
+    --split 0.7 0.15 0.15 --seed 42 --mc-marginals 30 \
     --out-dir data/output/er_node
 
 # Setting 3 — edge actions
@@ -28,7 +28,7 @@ python data/generate_wm_data.py \
     --rollouts 10 --horizon 10 --cf-prob 0.2 --cf-branches 2 \
     --action-ops add_edge remove_edge set_edge_weight \
     --inject-p 0.3 --weight-lo 0.0 --weight-hi 1.0 \
-    --split 0.7 0.15 0.15 --seed 42 \
+    --split 0.7 0.15 0.15 --seed 42 --mc-marginals 30 \
     --out-dir data/output/er_edge
 """
 
@@ -68,9 +68,11 @@ def build_record(
     action: list[ActionOp],
     next_state: State,
     reward: float,
+    next_marginal_infected: dict[int, float] | None = None,
+    next_marginal_frontier: dict[int, float] | None = None,
 ) -> dict:
     """Build one transition record for the JSONL sotrage."""
-    return {
+    record = {
         "graph_id": graph_id,
         "diffusion_model": diffusion_model,
         "episode_id": episode_id,
@@ -82,6 +84,17 @@ def build_record(
         "next_state": next_state.to_dict(),
         "reward": float(reward),
     }
+
+    # Sparse {node: prob} soft targets (string keys for JSON); absent => legacy binary
+    if next_marginal_infected is not None:
+        record["next_marginal_infected"] = {
+            str(v): round(p, 6) for v, p in next_marginal_infected.items()
+        }
+        record["next_marginal_frontier"] = {
+            str(v): round(p, 6) for v, p in (next_marginal_frontier or {}).items()
+        }
+
+    return record
 
 
 class GraphStore:
@@ -174,6 +187,7 @@ class GenConfig:
     cf_branches: int
     split: tuple[float, float, float]
     seed: int
+    mc_marginals: int
     out_dir: str
     ba_m: int = 3
     ws_k: int = 6
@@ -274,7 +288,9 @@ def _episode_transitions(
                 )
             ):
                 sim.restore(snap)
-                s_cf = sim.advance(cf_bag)
+                s_cf, cf_inf_marg, cf_fr_marg = sim.advance_marginal(
+                    cf_bag, config.mc_marginals
+                )
                 writer.write(
                     build_record(
                         graph_id=bundle.graph_id,
@@ -287,6 +303,8 @@ def _episode_transitions(
                         action=cf_bag,
                         next_state=s_cf,
                         reward=float(len(s_cf.infected) - len(s_t.infected)),
+                        next_marginal_infected=cf_inf_marg,
+                        next_marginal_frontier=cf_fr_marg,
                     ),
                     model=model,
                     split=split,
@@ -295,7 +313,7 @@ def _episode_transitions(
 
         # In the main transition, apply the real action, advance one step, and write the (s_t, action, s_next) record
         # The reward is the spread gain (the increase in activated-node count this step)
-        s_next = sim.advance(action)
+        s_next, inf_marg, fr_marg = sim.advance_marginal(action, config.mc_marginals)
         writer.write(
             build_record(
                 graph_id=bundle.graph_id,
@@ -308,6 +326,8 @@ def _episode_transitions(
                 action=action,
                 next_state=s_next,
                 reward=float(len(s_next.infected) - len(s_t.infected)),
+                next_marginal_infected=inf_marg,
+                next_marginal_frontier=fr_marg,
             ),
             model=model,
             split=split,
@@ -408,6 +428,12 @@ def parse_args() -> GenConfig:
     parser.add_argument("--cf-branches", type=int, default=2)
     parser.add_argument("--split", type=float, nargs=3, default=[0.7, 0.15, 0.15])
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--mc-marginals",
+        type=int,
+        default=30,
+        help="MC draws per step to estimate soft next-step marginal targets (1 = legacy single-draw binary target)",
+    )
     parser.add_argument("--out-dir", default=None)
     parser.add_argument(
         "--smoke",
@@ -423,6 +449,7 @@ def parse_args() -> GenConfig:
         args.rollouts, args.horizon = 2, 4
         args.algorithms = ["random", "degree"]
         args.action_ops = list(VALID_ACTION_OPS)
+        args.mc_marginals = 4
 
     return GenConfig(
         dataset=args.dataset,
@@ -448,6 +475,7 @@ def parse_args() -> GenConfig:
         cf_branches=args.cf_branches,
         split=tuple(args.split),
         seed=args.seed,
+        mc_marginals=args.mc_marginals,
         out_dir=args.out_dir,
     )
 

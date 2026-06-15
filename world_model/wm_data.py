@@ -168,12 +168,22 @@ def build_features(
 
     nxt = record["next_state"]
 
-    # Build the ground-truth next state s_{t + 1} the model is trying to predict
+    # Build the ground-truth next state s_{t + 1} the model is trying to predict.
+    # Targets are soft one-step marginals when present (MC-estimated in data gen);
+    # otherwise fall back to the single-draw binary next-state (legacy datasets).
     y_inf = np.zeros(num_nodes, dtype=np.float32)
-    y_inf[np.asarray(nxt["infected"], dtype=np.int64)] = 1.0
-
     y_fr = np.zeros(num_nodes, dtype=np.float32)
-    y_fr[np.asarray(nxt["frontier"], dtype=np.int64)] = 1.0
+    inf_marg = record.get("next_marginal_infected")
+    fr_marg = record.get("next_marginal_frontier")
+
+    if inf_marg is not None:
+        for v, p in inf_marg.items():
+            y_inf[int(v)] = p
+        for v, p in fr_marg.items():
+            y_fr[int(v)] = p
+    else:
+        y_inf[np.asarray(nxt["infected"], dtype=np.int64)] = 1.0
+        y_fr[np.asarray(nxt["frontier"], dtype=np.int64)] = 1.0
 
     # X: (N, 6) - node is infected/frontier at timestep t - (CH_INFECTED, CH_FRONTIER, CH_DEGREE, CH_ADD, CH_REMOVE, CH_EDGE)
     # y_inf: (N) - node is infected at timestep t + 1
