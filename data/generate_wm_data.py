@@ -188,6 +188,8 @@ class GenConfig:
     split: tuple[float, float, float]
     seed: int
     mc_marginals: int
+    perturb_prob: float
+    perturb_frac: float
     out_dir: str
     ba_m: int = 3
     ws_k: int = 6
@@ -310,6 +312,54 @@ def _episode_transitions(
                     split=split,
                 )
             sim.restore(snap)
+
+        # DAgger augmentation (train split only): from a state perturbed toward the
+        # model's over-prediction drift, record the CORRECT one-step marginal (NULL
+        # action) so the model learns bounded dynamics on the saturated states it
+        # visits during free-running rollout. Train-only keeps val/test clean.
+        if (
+            t > 0
+            and split == "train"
+            and config.perturb_prob > 0
+            and inj_rng.random() < config.perturb_prob
+        ):
+            n_nodes = bundle.nx_graph.number_of_nodes()
+            infected_now = set(s_t.infected)
+            susceptible = [v for v in range(n_nodes) if v not in infected_now]
+            n_pert = int(
+                round(len(susceptible) * inj_rng.uniform(0.0, config.perturb_frac))
+            )
+
+            if n_pert > 0:
+                snap = sim.snapshot()
+                perturb_nodes = {
+                    int(v)
+                    for v in inj_rng.choice(susceptible, size=n_pert, replace=False)
+                }
+                sim.set_extra_active(perturb_nodes)
+                s_pert = sim.current_state()
+                s_next_p, inf_marg_p, fr_marg_p = sim.advance_marginal(
+                    [], config.mc_marginals
+                )
+                writer.write(
+                    build_record(
+                        graph_id=bundle.graph_id,
+                        diffusion_model=model,
+                        episode_id=episode_id,
+                        algorithm=algorithm,
+                        branch="perturb",
+                        t=t,
+                        state=s_pert,
+                        action=[],
+                        next_state=s_next_p,
+                        reward=float(len(s_next_p.infected) - len(s_pert.infected)),
+                        next_marginal_infected=inf_marg_p,
+                        next_marginal_frontier=fr_marg_p,
+                    ),
+                    model=model,
+                    split=split,
+                )
+                sim.restore(snap)
 
         # In the main transition, apply the real action, advance one step, and write the (s_t, action, s_next) record
         # The reward is the spread gain (the increase in activated-node count this step)
@@ -434,6 +484,18 @@ def parse_args() -> GenConfig:
         default=30,
         help="MC draws per step to estimate soft next-step marginal targets (1 = legacy single-draw binary target)",
     )
+    parser.add_argument(
+        "--perturb-prob",
+        type=float,
+        default=0.0,
+        help="prob per step of adding a DAgger perturbation transition (train split only); 0 = off",
+    )
+    parser.add_argument(
+        "--perturb-frac",
+        type=float,
+        default=0.3,
+        help="max fraction of susceptible nodes flipped active when building a perturbed (drifted) state",
+    )
     parser.add_argument("--out-dir", default=None)
     parser.add_argument(
         "--smoke",
@@ -450,6 +512,7 @@ def parse_args() -> GenConfig:
         args.algorithms = ["random", "degree"]
         args.action_ops = list(VALID_ACTION_OPS)
         args.mc_marginals = 4
+        args.perturb_prob = 0.5
 
     return GenConfig(
         dataset=args.dataset,
@@ -476,6 +539,8 @@ def parse_args() -> GenConfig:
         split=tuple(args.split),
         seed=args.seed,
         mc_marginals=args.mc_marginals,
+        perturb_prob=args.perturb_prob,
+        perturb_frac=args.perturb_frac,
         out_dir=args.out_dir,
     )
 
