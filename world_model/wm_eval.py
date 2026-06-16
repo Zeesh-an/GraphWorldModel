@@ -7,6 +7,7 @@ from collections import defaultdict
 import networkx as nx
 import numpy as np
 import torch
+from scipy.stats import wasserstein_distance
 
 from wm_data import (
     TransitionDataset,
@@ -205,6 +206,129 @@ def rollout_episodes(
         "rollout_newinf_f1": float(np.mean(per_step_f1)) if per_step_f1 else 0.0,
         "rollout_count_mae": float(np.mean(count_mae)) if count_mae else 0.0,
         "rollout_final_f1": float(np.mean(final_f1)) if final_f1 else 0.0,
+    }
+
+
+def _action_bag(action_dicts: list[dict]) -> list[ActionOp]:
+    """Rebuild an ActionOp bag from a record's serialized action list."""
+    return [
+        ActionOp(
+            op=op["op"],
+            target=int(op["target"]),
+            destination=op.get("destination"),
+            weight=op.get("weight"),
+        )
+        for op in action_dicts
+    ]
+
+
+@torch.inference_mode()
+def rollout_ensemble(
+    model: torch.nn.Module,
+    out_dir: str,
+    diffusion_model: str,
+    store: dict[str, dict],
+    device: torch.device,
+    split: str = "test",
+    n_samples: int = 20,
+    max_episodes: int = 50,
+    seed: int = 0,
+) -> dict[str, float]:
+    """
+    Stochastic ensemble rollout (Lever 1): treat the world model as a stochastic
+    simulator. At each step SAMPLE the next state from the predicted marginals
+    (instead of thresholding at 0.5) and roll n_samples trajectories; compare the
+    model's marginal/count distribution to the TRUE simulator's MC trajectory under
+    the same recorded action sequence. Isolates the threshold->sample hypothesis:
+    thresholding a monotone cascade over-commits every >0.5 node and must saturate;
+    sampling commits only the predicted fraction.
+
+    Meaningful for IC (stochastic). LT thresholds are not stored, so the true LT
+    re-run draws fresh thresholds and the comparison is not faithful there.
+
+    Metrics:
+    - ens_marg_mae:   mean |model marginal - true marginal| over nodes and steps
+    - ens_count_w1:   mean per-step Wasserstein-1 between model and true infected-count distributions
+    - ens_count_bias: mean per-step (E[model count] - E[true count]); ~0 = unbiased, >0 = still over-predicting
+    - ens_final_count_model / ens_final_count_true: mean final infected counts
+    """
+    rng = np.random.default_rng(seed)
+    path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
+    recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+
+    by_ep = defaultdict(list)
+    for r in recs:
+        if r["branch"] == "main":
+            by_ep[(r["graph_id"], r["episode_id"])].append(r)
+
+    ep_keys = list(by_ep)
+    if max_episodes and len(ep_keys) > max_episodes:
+        ep_keys = [ep_keys[i] for i in rng.choice(len(ep_keys), size=max_episodes, replace=False)]
+
+    model.eval()
+    marg_mae, count_w1, count_bias = [], [], []
+    final_model_counts, final_true_counts = [], []
+
+    for gid, eid in ep_keys:
+        ers = sorted(by_ep[(gid, eid)], key=lambda r: r["t"])
+        n = store[gid]["num_nodes"]
+        adj_map = reconstruct_episode_adjacency(ers, store[gid]["base_edges"])
+        T = len(ers)
+
+        # True ensemble: n_samples simulator rollouts under the recorded action sequence.
+        true_inf = np.zeros((n_samples, T, n), dtype=np.float32)
+        for s in range(n_samples):
+            sim = rebuild_simulator(
+                store[gid], diffusion_model, seed=int(rng.integers(1 << 30))
+            )
+            for ti, r in enumerate(ers):
+                st = sim.advance(_action_bag(r["action"]))
+                true_inf[s, ti, np.asarray(st.infected, dtype=np.int64)] = 1.0
+
+        # Model ensemble: n_samples sampled rollouts (mirror rollout_episodes, but sample).
+        model_inf = np.zeros((n_samples, T, n), dtype=np.float32)
+        for s in range(n_samples):
+            cur_inf = set(ers[0]["state"]["infected"])
+            cur_fr = set(ers[0]["state"]["frontier"])
+
+            for ti, r in enumerate(ers):
+                ei, w = edges_to_arrays(adj_map[(r["t"], "main")])
+                rolled = dict(r)
+                rolled["state"] = {"infected": sorted(cur_inf), "frontier": sorted(cur_fr)}
+                X, _, _ = build_features(rolled, ei, n)
+                gi = build_graph_input(ei, w, n, diffusion_model, device)
+
+                prob = (
+                    torch.sigmoid(model(torch.from_numpy(X).to(device), gi)).cpu().numpy()
+                )
+                draw_inf = rng.random(n) < prob[:, 0]
+                draw_fr = rng.random(n) < prob[:, 1]
+                model_inf[s, ti, np.nonzero(draw_inf)[0]] = 1.0
+
+                cur_inf = set(np.nonzero(draw_inf)[0].tolist())
+                cur_fr = set(np.nonzero(draw_fr)[0].tolist())
+
+        model_marg = model_inf.mean(axis=0)  # (T, n) per-node infection frequency
+        true_marg = true_inf.mean(axis=0)  # (T, n)
+        marg_mae.append(float(np.abs(model_marg - true_marg).mean()))
+
+        model_counts = model_inf.sum(axis=2)  # (n_samples, T)
+        true_counts = true_inf.sum(axis=2)
+        for ti in range(T):
+            count_w1.append(wasserstein_distance(model_counts[:, ti], true_counts[:, ti]))
+            count_bias.append(float(model_counts[:, ti].mean() - true_counts[:, ti].mean()))
+
+        final_model_counts.append(float(model_counts[:, -1].mean()))
+        final_true_counts.append(float(true_counts[:, -1].mean()))
+
+    return {
+        "ens_marg_mae": float(np.mean(marg_mae)) if marg_mae else 0.0,
+        "ens_count_w1": float(np.mean(count_w1)) if count_w1 else 0.0,
+        "ens_count_bias": float(np.mean(count_bias)) if count_bias else 0.0,
+        "ens_final_count_model": float(np.mean(final_model_counts)) if final_model_counts else 0.0,
+        "ens_final_count_true": float(np.mean(final_true_counts)) if final_true_counts else 0.0,
+        "ens_n_samples": float(n_samples),
+        "ens_n_episodes": float(len(ep_keys)),
     }
 
 
