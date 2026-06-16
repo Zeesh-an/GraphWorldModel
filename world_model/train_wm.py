@@ -57,6 +57,7 @@ if __name__ == "__main__":
     parser.add_argument("--data-dir", required=True)
     parser.add_argument("--diffusion-model", default="IC", choices=["IC", "LT"])
     parser.add_argument("--model", default="gcn", choices=list(BACKBONES))
+    parser.add_argument("--head", default="linear", choices=["linear", "structured"])
     parser.add_argument("--hidden-dim", type=int, default=64)
     parser.add_argument("--n-layers", type=int, default=3)
     parser.add_argument("--n-heads", type=int, default=4)
@@ -115,6 +116,7 @@ if __name__ == "__main__":
         hidden_dim=args.hidden_dim,
         n_layers=args.n_layers,
         dropout=args.dropout,
+        head_type=args.head,
         **bb,
     ).to(device)
 

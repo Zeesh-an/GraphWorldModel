@@ -36,6 +36,7 @@ def load_trained_model(config: dict, device: torch.device) -> torch.nn.Module:
         hidden_dim=config["hidden_dim"],
         n_layers=config["n_layers"],
         dropout=config["dropout"],
+        head_type=config.get("head", "linear"),
         **bb,
     ).to(device)
 
