@@ -7,7 +7,6 @@ python world_model/train_wm.py \
     --epochs 300 --lr 1e-3 --weight-decay 5e-4 --batch-size 16 \
     --pos-weight auto --patience 40 --seed 42 \
     --device cuda --plan-demo \
-    --rollout-threshold 0.5 \
     --ckpt-dir world_model/checkpoints \
     --results world_model/checkpoints/er_node_gcn_IC.json
 """
@@ -24,7 +23,7 @@ from tqdm.auto import tqdm
 
 from wm_data import TransitionDataset, collate_transitions, IN_CHANNELS
 from wm_model import WorldModel, BACKBONES
-from wm_eval import evaluate_one_step, rollout_episodes, planning_regret_multi
+from wm_eval import evaluate_one_step, rollout_ensemble, planning_regret_multi
 
 
 def compute_pos_weight(
@@ -81,7 +80,6 @@ if __name__ == "__main__":
     parser.add_argument("--results", default=None)
     parser.add_argument("--plan-demo", action="store_true")
     parser.add_argument("--plan-graphs", type=int, default=5)
-    parser.add_argument("--rollout-threshold", type=float, default=0.5)
 
     args = parser.parse_args()
 
@@ -169,14 +167,14 @@ if __name__ == "__main__":
         "config": vars(args),
         "test": evaluate_one_step(model, test_dataset, diffusion_model, device),
     }
-    results["rollout"] = rollout_episodes(
+    results["rollout"] = rollout_ensemble(
         model,
         args.data_dir,
         diffusion_model,
         train_dataset.store,
         device,
         "test",
-        threshold=args.rollout_threshold,
+        seed=args.seed,
     )
 
     if args.plan_demo:
