@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from wm_data import CH_INFECTED, CH_FRONTIER, CH_ADD, CH_REMOVE
 from model.gcn import GCNEncoder
@@ -94,6 +95,71 @@ class ICTransmissionHead(nn.Module):
         return torch.log(probs) - torch.log1p(-probs)  # -> logits (sigmoid recovers probs)
 
 
+class LTThresholdHead(nn.Module):
+    """
+    Structured Linear-Threshold head (Lever 3 for LT): a susceptible node activates
+    when the fraction of its active in-neighbors crosses its threshold. LT thresholds
+    are hidden and drawn per episode (not stored), so the head predicts the activation
+    probability as a learned monotone function of the active-neighbor fraction f_v:
+
+        f_v       = (active in-neighbor weight) / (total in-neighbor weight)
+        p_new(v)  = [f_v > 0] * sigmoid(tau * (f_v - theta_hat_v))
+        theta_hat = sigmoid(Linear(h_v))   (per-node threshold proxy)
+        tau       = softplus(scalar)       (learned sharpness)
+        y_inf(v)  = active_v + (1 - active_v) * p_new(v)
+        y_fr(v)   = (1 - active_v) * p_new(v)               (newly activated)
+
+    The f_v>0 gate gives the same self-terminating bound as the IC head (no active
+    neighbors -> no activation), so the rollout cannot saturate. Returns LOGITS (N, 2).
+
+    Note: LT dynamics are deterministic given the (hidden, random) thresholds, so the
+    best a state-only model can do is the threshold marginal P(activate | f_v); one-step
+    metrics will be looser than IC, but the rollout marginal (vs the true sim re-drawing
+    thresholds) is a fair comparison.
+    """
+
+    def __init__(self, hidden_dim: int) -> None:
+        super().__init__()
+        self.theta = nn.Linear(hidden_dim, 1)  # per-node threshold proxy
+        self.log_tau = nn.Parameter(torch.zeros(1))  # softplus -> sharpness > 0
+
+        nn.init.xavier_uniform_(self.theta.weight)
+        nn.init.zeros_(self.theta.bias)
+
+    def forward(self, h: torch.Tensor, X: torch.Tensor, graph) -> torch.Tensor:
+        n = h.shape[0]
+
+        # Apply the exogenous action (T_exo): add_node -> active; remove_node -> susceptible
+        # (LT remove resets the node to status 0, so it can re-activate).
+        active = torch.clamp(X[:, CH_INFECTED] + X[:, CH_ADD], max=1.0) * (
+            1.0 - X[:, CH_REMOVE]
+        )  # shape: (N,)
+
+        ei, ew = graph.edge_index, graph.edge_weight
+
+        if ei.numel() == 0:
+            f = torch.zeros(n, device=h.device)
+        else:
+            src, dst = ei[0], ei[1]
+            num = torch.zeros(n, device=h.device).scatter_add_(
+                0, dst, active[src] * ew
+            )  # active in-neighbor weight, shape: (N,)
+            den = torch.zeros(n, device=h.device).scatter_add_(0, dst, ew)  # total in-weight
+            f = num / den.clamp(min=1e-6)  # active-neighbor fraction, shape: (N,)
+
+        theta_hat = torch.sigmoid(self.theta(h).squeeze(dim=-1))  # shape: (N,) in [0, 1]
+        tau = F.softplus(self.log_tau)  # scalar > 0
+        gate = (f > 0).to(f.dtype)  # structural self-termination: no active neighbor -> no activation
+        p_new = gate * torch.sigmoid(tau * (f - theta_hat))  # shape: (N,)
+
+        p_newly = (1.0 - active) * p_new  # susceptibles only
+        y_inf = active + p_newly
+        y_fr = p_newly  # newly activated = new frontier
+
+        probs = torch.stack([y_inf, y_fr], dim=1).clamp(1e-6, 1.0 - 1e-6)  # (N, 2)
+        return torch.log(probs) - torch.log1p(-probs)  # -> logits
+
+
 class WorldModel(nn.Module):
     def __init__(
         self,
@@ -103,6 +169,7 @@ class WorldModel(nn.Module):
         n_layers: int = 3,
         dropout: float = 0.1,
         head_type: str = "linear",
+        diffusion_model: str = "IC",
         **bb,
     ) -> None:
         super().__init__()
@@ -123,11 +190,16 @@ class WorldModel(nn.Module):
             **bb,
         )
 
-        if head_type in ("structured", "structured_oracle"):
-            # Structured IC head: predict per-edge transmission, derive next-state marginals
-            self.head = ICTransmissionHead(
-                hidden_dim, oracle=(head_type == "structured_oracle")
+        if head_type == "structured":
+            # Structured head matched to the dynamics: IC transmission or LT threshold
+            self.head = (
+                LTThresholdHead(hidden_dim)
+                if diffusion_model == "LT"
+                else ICTransmissionHead(hidden_dim)
             )
+        elif head_type == "structured_oracle":
+            # Oracle is IC-only (LT thresholds are not stored, so no oracle there)
+            self.head = ICTransmissionHead(hidden_dim, oracle=True)
         elif head_type == "linear":
             # Free head: each node embedding -> 2 logits [next_infected, next_frontier]
             self.head = nn.Linear(in_features=hidden_dim, out_features=2)

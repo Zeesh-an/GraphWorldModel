@@ -37,6 +37,7 @@ def load_trained_model(config: dict, device: torch.device) -> torch.nn.Module:
         n_layers=config["n_layers"],
         dropout=config["dropout"],
         head_type=config.get("head", "linear"),
+        diffusion_model=config["diffusion_model"],
         **bb,
     ).to(device)
 

@@ -115,6 +115,7 @@ if __name__ == "__main__":
         n_layers=args.n_layers,
         dropout=args.dropout,
         head_type=args.head,
+        diffusion_model=diffusion_model,
         **bb,
     ).to(device)
 
