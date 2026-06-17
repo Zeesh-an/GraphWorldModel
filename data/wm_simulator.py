@@ -236,28 +236,6 @@ class Simulator:
 
         return last_state, inf_marg, fr_marg
 
-    def set_extra_active(self, nodes: set[int]) -> None:
-        # Mark extra nodes as active spreaders (status 1) to simulate the world
-        # model's over-prediction drift, for building perturbed DAgger states.
-        # status 1 = infectious spreader (IC) / infected (LT).
-        for v in nodes:
-            self.model.status[int(v)] = 1
-
-    def set_state(self, infected: set[int], frontier: set[int]) -> None:
-        # Seed the model at an arbitrary diffusion state (for DAgger relabeling):
-        # frontier -> 1 (spreader), infected-not-frontier -> 2 (IC, spent) / 1 (LT),
-        # everything else -> 0 (susceptible).
-        infected = set(int(v) for v in infected)
-        frontier = set(int(v) for v in frontier)
-
-        for node in self.model.status:
-            if node in frontier:
-                self.model.status[node] = 1
-            elif node in infected:
-                self.model.status[node] = 2 if self.model_name == "IC" else 1
-            else:
-                self.model.status[node] = 0
-
     def snapshot(self) -> tuple[dict, int]:
         return (dict(self.model.status), int(self.model.actual_iteration))
 

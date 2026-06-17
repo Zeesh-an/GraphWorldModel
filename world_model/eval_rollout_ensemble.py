@@ -8,7 +8,7 @@ simulator's MC trajectory under the same recorded actions. Tests whether the
 rollout saturation is mostly a thresholding artifact.
 
 python world_model/eval_rollout_ensemble.py \
-    --results world_model/checkpoints/ba20_marg_perturb_full_sage_IC.json \
+    --results world_model/checkpoints/ba20_marg_sage_IC_structured.json \
     --n-samples 20 --max-episodes 50 --device cpu
 """
 
