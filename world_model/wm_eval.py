@@ -410,6 +410,8 @@ def planning_regret(
                 "state": {"infected": sorted(infected), "frontier": sorted(infected)},
                 "action": [{"op": "add_node", "target": int(v)}],
                 "next_state": {"infected": [], "frontier": []},
+                "next_marginal_infected": {},  # y is unused here (only X is read)
+                "next_marginal_frontier": {},
             }
             X, _, _ = build_features(rec, ei, n)
             prob = (

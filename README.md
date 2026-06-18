@@ -213,8 +213,6 @@ GraphWorldModel/
 │   ├── wm_data.py                   # Transition dataset + adjacency
 │   ├── wm_metrics.py                # Metric suite (F1, Success, Sensitivity, Regret)
 │   ├── wm_eval.py                   # Evaluation + rollout + planning demo
-│   ├── run_ablation.sh              # Ablation experiment harness
-│   ├── compare_runs.py              # Ablation result aggregation
 │   ├── model/
 │   │   ├── graph_transformer.py     # Graph Transformer forward model
 │   │   ├── gcn.py                   # GCN forward model

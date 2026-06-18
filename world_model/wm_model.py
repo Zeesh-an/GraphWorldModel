@@ -22,19 +22,19 @@ BACKBONES = {
 
 class ICTransmissionHead(nn.Module):
     """
-    Structured IC head (Lever 3): predict a per-edge transmission propensity q(u->v)
+    Structured IC head: predict a per-edge transmission propensity q(u -> v)
     and DERIVE the next-state marginals with the true IC form, instead of predicting
     node states directly. Locality + monotonicity are baked in, so a free-running
     rollout cannot saturate spuriously: a susceptible node with no active in-neighbor
     has p_new = 0, and the frontier self-terminates as the cascade runs.
 
-        q_uv     = sigmoid(MLP([h_u, h_v, w_uv]))        (oracle: q_uv = w_uv)
-        t_uv     = q_uv * frontier_u                     (only active sources transmit)
-        p_new(v) = 1 - prod_{u->v} (1 - t_uv)            (IC infection form)
-        y_inf(v) = infected_v + (1 - infected_v) * p_new(v)   (monotone)
-        y_fr(v)  = (1 - infected_v) * p_new(v)               (new frontier = newly infected)
+    q_uv     = sigmoid(MLP([h_u, h_v, w_uv]))        (oracle: q_uv = w_uv)
+    t_uv     = q_uv * frontier_u                     (only active sources transmit)
+    p_new(v) = 1 - prod_{u->v} (1 - t_uv)            (IC infection form)
+    y_inf(v) = infected_v + (1 - infected_v) * p_new(v)   (monotone)
+    y_fr(v)  = (1 - infected_v) * p_new(v)               (new frontier = newly infected)
 
-    Returns LOGITS (N, 2) so training (BCEWithLogits) and eval (sigmoid) are unchanged.
+    Returns logits (N, 2) so training (BCEWithLogits) and eval (sigmoid) are unchanged.
     """
 
     def __init__(self, hidden_dim: int, oracle: bool = False) -> None:
@@ -48,9 +48,11 @@ class ICTransmissionHead(nn.Module):
                 nn.GELU(),
                 nn.Linear(hidden_dim, 1),
             )
+
             for m in self.modules():
                 if isinstance(m, nn.Linear):
                     nn.init.xavier_uniform_(m.weight)
+
                     if m.bias is not None:
                         nn.init.zeros_(m.bias)
 
@@ -92,7 +94,9 @@ class ICTransmissionHead(nn.Module):
         y_fr = p_newly  # new frontier = newly infected
 
         probs = torch.stack([y_inf, y_fr], dim=1).clamp(1e-6, 1.0 - 1e-6)  # (N, 2)
-        return torch.log(probs) - torch.log1p(-probs)  # -> logits (sigmoid recovers probs)
+        return torch.log(probs) - torch.log1p(
+            -probs
+        )  # -> logits (sigmoid recovers probs)
 
 
 class LTThresholdHead(nn.Module):
@@ -102,14 +106,14 @@ class LTThresholdHead(nn.Module):
     are hidden and drawn per episode (not stored), so the head predicts the activation
     probability as a learned monotone function of the active-neighbor fraction f_v:
 
-        f_v       = (active in-neighbor weight) / (total in-neighbor weight)
-        p_new(v)  = [f_v > 0] * sigmoid(tau * (f_v - theta_hat_v))
-        theta_hat = sigmoid(Linear(h_v))   (per-node threshold proxy)
-        tau       = softplus(scalar)       (learned sharpness)
-        y_inf(v)  = active_v + (1 - active_v) * p_new(v)
-        y_fr(v)   = (1 - active_v) * p_new(v)               (newly activated)
+    f_v       = (active in-neighbor weight) / (total in-neighbor weight)
+    p_new(v)  = [f_v > 0] * sigmoid(tau * (f_v - theta_hat_v))
+    theta_hat = sigmoid(Linear(h_v))        (per-node threshold proxy)
+    tau       = softplus(scalar)            (learned sharpness)
+    y_inf(v)  = active_v + (1 - active_v) * p_new(v)
+    y_fr(v)   = (1 - active_v) * p_new(v)   (newly activated)
 
-    The f_v>0 gate gives the same self-terminating bound as the IC head (no active
+    The f_v > 0 gate gives the same self-terminating bound as the IC head (no active
     neighbors -> no activation), so the rollout cannot saturate. Returns LOGITS (N, 2).
 
     Note: LT dynamics are deterministic given the (hidden, random) thresholds, so the
@@ -144,12 +148,18 @@ class LTThresholdHead(nn.Module):
             num = torch.zeros(n, device=h.device).scatter_add_(
                 0, dst, active[src] * ew
             )  # active in-neighbor weight, shape: (N,)
-            den = torch.zeros(n, device=h.device).scatter_add_(0, dst, ew)  # total in-weight
+            den = torch.zeros(n, device=h.device).scatter_add_(
+                0, dst, ew
+            )  # total in-weight
             f = num / den.clamp(min=1e-6)  # active-neighbor fraction, shape: (N,)
 
-        theta_hat = torch.sigmoid(self.theta(h).squeeze(dim=-1))  # shape: (N,) in [0, 1]
+        theta_hat = torch.sigmoid(
+            self.theta(h).squeeze(dim=-1)
+        )  # shape: (N,) in [0, 1]
         tau = F.softplus(self.log_tau)  # scalar > 0
-        gate = (f > 0).to(f.dtype)  # structural self-termination: no active neighbor -> no activation
+        gate = (f > 0).to(
+            f.dtype
+        )  # structural self-termination: no active neighbor -> no activation
         p_new = gate * torch.sigmoid(tau * (f - theta_hat))  # shape: (N,)
 
         p_newly = (1.0 - active) * p_new  # susceptibles only

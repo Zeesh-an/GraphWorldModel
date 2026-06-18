@@ -191,31 +191,28 @@ class Simulator:
         return State(infected=sorted(active), frontier=sorted(frontier))
 
     def advance_marginal(
-        self, bag: list[ActionOp], n_mc: int
-    ) -> tuple[State, dict[int, float], dict[int, float]]:
-        """
-        Estimate the one-step marginals by Monte Carlo.
+        self, bag: list[ActionOp], num_mc: int
+    ) -> tuple[State, dict, dict]:
+        # Esimate the one-step marginals by Monte Carlo - s_{t + 1} = T_endo(T_exo(s_t, a_t))
+        assert num_mc >= 1, "num_mc must be >= 1"
 
-        T_exo (the action) is deterministic, so it is applied once; only T_endo
-        (the diffusion iteration) is stochastic, so it is sampled n_mc times from
-        the post-action state. Returns one realized draw — left in the model so
-        the trajectory continues from a valid sample — plus sparse {node: prob}
-        marginals for next-step infected and frontier. LT is deterministic, so a
-        single draw suffices there.
-        """
-        assert n_mc >= 1, "n_mc must be >= 1"
-
+        # T_exo (action) is deterministic, so it is applied once
         prev_active = self.active_nodes()
-        self.apply_actions(bag)  # T_exo once; edge/graph mutations persist across draws
+        self.apply_actions(bag)  # edge/graph mutations persist across draws
         post_action = self.snapshot()  # status after the action, before diffusion
 
-        draws = n_mc if self.model_name == "IC" else 1
-        inf_counts: dict[int, int] = {}
-        fr_counts: dict[int, int] = {}
+        # IC is stochastic, while LT is deterministic, so only 1 run is needed for LT
+        draws = num_mc if self.model_name == "IC" else 1
+        inf_counts = {}
+        fr_counts = {}
         last_state = None
 
+        # T_endo (diffusion iteration) is stochastic (for IC), so it is sampled using Monte Carlo simulations from the post-action state
         for _ in range(draws):
-            self.restore(post_action)  # restores status only -> a fresh stochastic draw
+            # Each iteration is an independent stochastic draw from the same starting state
+
+            # Restores status only for a fresh stochastic draw
+            self.restore(post_action)
             self.model.iteration()
 
             active = self.active_nodes()
@@ -226,11 +223,13 @@ class Simulator:
 
             for v in active:
                 inf_counts[v] = inf_counts.get(v, 0) + 1
+
             for v in frontier:
                 fr_counts[v] = fr_counts.get(v, 0) + 1
 
             last_state = State(infected=sorted(active), frontier=sorted(frontier))
 
+        # Averaging across Monte Carlo runs turns the target into the true probability
         inf_marg = {int(v): c / draws for v, c in inf_counts.items()}
         fr_marg = {int(v): c / draws for v, c in fr_counts.items()}
 

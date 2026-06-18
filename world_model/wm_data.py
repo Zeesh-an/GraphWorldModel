@@ -152,9 +152,11 @@ def build_features(
 
     # degree = log1p(total degree in A_t); input_proj + LayerNorm handle scaling.
     deg = np.zeros(num_nodes, dtype=np.float32)
+
     if edge_index.size:
         np.add.at(deg, edge_index[0], 1.0)
         np.add.at(deg, edge_index[1], 1.0)
+
     X[:, CH_DEGREE] = np.log1p(deg)
 
     for op in record["action"]:
@@ -166,24 +168,25 @@ def build_features(
             X[int(op["target"]), CH_EDGE] = 1.0
             X[int(op["destination"]), CH_EDGE] = 1.0
 
-    nxt = record["next_state"]
-
-    # Build the ground-truth next state s_{t + 1} the model is trying to predict.
-    # Targets are soft one-step marginals when present (MC-estimated in data gen);
-    # otherwise fall back to the single-draw binary next-state (legacy datasets).
-    y_inf = np.zeros(num_nodes, dtype=np.float32)
-    y_fr = np.zeros(num_nodes, dtype=np.float32)
+    # Build the ground-truth next state s_{t + 1} the model is trying to predict,
+    # as soft one-step marginals (MC-estimated in data gen via --mc-marginals).
     inf_marg = record.get("next_marginal_infected")
     fr_marg = record.get("next_marginal_frontier")
+    if inf_marg is None or fr_marg is None:
+        raise KeyError(
+            "build_features requires soft marginal targets (next_marginal_infected / "
+            "next_marginal_frontier); regenerate the dataset with "
+            "data/generate_wm_data.py --mc-marginals >= 1"
+        )
 
-    if inf_marg is not None:
-        for v, p in inf_marg.items():
-            y_inf[int(v)] = p
-        for v, p in fr_marg.items():
-            y_fr[int(v)] = p
-    else:
-        y_inf[np.asarray(nxt["infected"], dtype=np.int64)] = 1.0
-        y_fr[np.asarray(nxt["frontier"], dtype=np.int64)] = 1.0
+    y_inf = np.zeros(num_nodes, dtype=np.float32)
+    y_fr = np.zeros(num_nodes, dtype=np.float32)
+
+    for v, p in inf_marg.items():
+        y_inf[int(v)] = p
+
+    for v, p in fr_marg.items():
+        y_fr[int(v)] = p
 
     # X: (N, 6) - node is infected/frontier at timestep t - (CH_INFECTED, CH_FRONTIER, CH_DEGREE, CH_ADD, CH_REMOVE, CH_EDGE)
     # y_inf: (N) - node is infected at timestep t + 1
