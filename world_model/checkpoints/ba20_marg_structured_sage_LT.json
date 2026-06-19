@@ -1,0 +1,64 @@
+{
+  "config": {
+    "data_dir": "data/output/ba20_marg_structured",
+    "diffusion_model": "LT",
+    "model": "sage",
+    "head": "structured",
+    "hidden_dim": 64,
+    "n_layers": 3,
+    "n_heads": 4,
+    "ffn_dim": 128,
+    "gcnii_alpha": 0.1,
+    "gcnii_lamda": 0.5,
+    "dropout": 0.1,
+    "epochs": 400,
+    "lr": 0.001,
+    "weight_decay": 0.0005,
+    "batch_size": 32,
+    "pos_weight": "off",
+    "patience": 50,
+    "seed": 42,
+    "device": "cuda",
+    "ckpt_dir": "world_model/checkpoints",
+    "results": "world_model/checkpoints/ba20_marg_structured_sage_LT.json",
+    "plan_demo": true,
+    "plan_graphs": 5
+  },
+  "test": {
+    "infected_acc": 0.9539946380697051,
+    "frontier_acc": 0.9479691689008043,
+    "new_infection_f1": 0.5431813548956989,
+    "delta_f1": 0.5386476676972711,
+    "add_seed_success": 1.0,
+    "remove_frontier_success": 0.6382978723404256,
+    "action_sensitivity": 1.618320610687023,
+    "brier_infected": 0.031955177069197274,
+    "brier_frontier": 0.0383199120912955,
+    "persistence": {
+      "infected_acc": 0.9417493297587132,
+      "frontier_acc": 0.8733646112600536,
+      "new_infection_f1": 0.0,
+      "delta_f1": 0.0,
+      "brier_infected": 0.05825067024128686,
+      "brier_frontier": 0.12663538873994637
+    }
+  },
+  "rollout": {
+    "ens_marg_mae": 0.10553834326565266,
+    "ens_count_w1": 5.042005076142132,
+    "ens_count_bias": -1.4313451215095327,
+    "ens_final_count_model": 47.250000133514405,
+    "ens_final_count_true": 46.18,
+    "ens_n_samples": 20.0,
+    "ens_n_episodes": 50.0
+  },
+  "planning": {
+    "plan_n_graphs": 5.0,
+    "plan_regret_model": 0.19624999999999998,
+    "plan_regret_model_std": 0.13821405500165315,
+    "plan_regret_random": 3.36625,
+    "plan_regret_random_std": 0.8182355253837368,
+    "plan_regret_degree": 0.27125,
+    "plan_regret_degree_std": 0.19719121430733164
+  }
+}
