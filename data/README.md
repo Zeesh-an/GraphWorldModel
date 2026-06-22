@@ -1,20 +1,31 @@
 # Action-Conditioned World-Model Data (Influence Maximization)
 
-Generates `(G, s_t, a_t, s_{t + 1}, R)` transition data for training a graph
-**world model** on IM diffusion dynamics under node- and edge-level interventions.
+Generates `(G, s_t, a_t, s_{t+1}, R)` transition data for training a graph
+**world model** on diffusion dynamics under node- and edge-level interventions.
+The world model learns the one-step transition `f(G, s_t, a_t) → s_{t+1}`; this
+package produces the supervised `(input, target)` pairs it is trained on.
 
-- **State** `s_t = (infected, frontier)` — infected = ever-activated; frontier =
-  newly-activated-this-step (IC: status-1 spreaders; LT: the fresh wave).
+- **Graph** `G` — a directed/undirected graph with per-edge IC transmission
+  probabilities (`ic_probs`) and LT weights (`lt_weights`), saved once per graph.
+- **State** `s_t = (infected, frontier)` — `infected` = every node ever activated;
+  `frontier` = the nodes that activated *this step* (IC: the status-1 spreaders;
+  LT: the fresh wave that flipped this iteration).
 - **Action** `a_t` — a bag of node/edge ops: `add_node`, `remove_node`,
   `add_edge`, `remove_edge`, `set_edge_weight` (empty bag = `NULL`). Which ops are
   used is set by `--action-ops`; omitting it generates diffusion-only data.
-- **Reward** `R` — spread gain (Δ activated-node count).
+- **Next state** `s_{t+1}` — the realized next state, **plus** soft Monte-Carlo
+  marginals `P(infected)` / `P(frontier)` per node (`--mc-marginals`), which are
+  the actual training targets.
+- **Reward** `R` — spread gain (Δ activated-node count this step).
 
-Backbone: **NDlib** IC/LT driven stepwise with mid-rollout `status` / edge mutation.
-Per-episode rollouts come from classical IM "spine" seed selectors plus
-random + counterfactual action injection (same-state/different-action coverage).
+Backbone simulator: **NDlib** IC/LT driven one step at a time, with mid-rollout
+`status` mutation (node ops) and live edge mutation (edge ops). Per-episode
+rollouts come from classical IM "spine" seed selectors plus random and
+counterfactual action injection (same-state / different-action coverage).
 See the design spec:
 `docs/superpowers/specs/2026-06-09-action-conditioned-wm-im-data-gen-design.md`.
+
+---
 
 ## Quick start
 
@@ -32,6 +43,11 @@ python data/generate_wm_data.py --dataset ba --num-graphs 1 \
 python data/generate_wm_data.py --dataset ba --num-graphs 1 \
     --action-ops add_edge remove_edge set_edge_weight
 
+# Multi-graph synthetic set (trustworthy ranking) — 20 BA graphs, both dynamics
+python data/generate_wm_data.py --dataset ba --num-graphs 20 \
+    --action-ops add_node remove_node --models IC LT \
+    --out-dir data/output/ba20_marg_structured
+
 # Real dataset (downloads on first use)
 python data/generate_wm_data.py --dataset jazz --action-ops add_node remove_node
 
@@ -42,12 +58,114 @@ python data/generate_wm_data.py --smoke --out-dir /tmp/wm_smoke
 python data/validate_wm_data.py --dir data/output/ba
 ```
 
+---
+
+## The generation pipeline, end to end
+
+`generate_wm_data.py::run_generation` is the orchestrator. The flow:
+
+```
+for each graph G in the dataset:                 # _iter_bundles
+    save G once to graphs/<graph_id>.npz         # GraphStore.save
+    k = resolve seed budget (--budget / --budget-pct)
+    for model in {IC, LT}:                        # --models
+        for algorithm in spine selectors:        # --algorithms
+            for rollout in range(--rollouts):     # independent episodes
+                split = assign train/val/test     # --split, RNG draw
+                run one episode -> write transitions   # _episode_transitions
+write graphs_index.json + metadata.json
+```
+
+### 1. Build the graph (`wm_graphs.py`)
+
+`make_synthetic_bundle` / `make_real_bundle` produce a `GraphBundle`:
+
+| Field          | Shape / type            | Meaning                                                            |
+| -------------- | ----------------------- | ----------------------------------------------------------------- |
+| `nx_graph`     | networkx graph          | the structure (directed for citations, undirected otherwise)      |
+| `edge_index`   | `(2, E)` int32          | `[src, dst]` arcs in COO form                                     |
+| `ic_probs`     | `(E,)` float32          | per-edge IC transmission probability `p(u→v)`                    |
+| `lt_weights`   | `(E,)` float32          | per-edge LT influence weight (`= ic_probs`)                       |
+| `node_feats`   | `(N, F)` float32        | node features; synthetic graphs use `log1p(degree)` (`F=1`)       |
+| `node_labels`  | `(N,)` int32            | class labels (real datasets) or zeros                             |
+| `ic_prob_map`  | `dict[(u,v)→p]`         | edge→prob map the simulator configures NDlib with                |
+
+Edge probabilities come from `graph_utils.build_edge_index`: by default the
+**weighted cascade** model `p(u→v) = 1 / in_degree(v)` (high-in-degree nodes are
+harder to activate per-edge). `--prob-model uniform` replaces this with a constant
+`--uniform-p` on every edge. LT weights are a copy of the IC probs (they already
+satisfy the LT requirement that incoming weights sum to ≤ 1 per node).
+
+### 2. Pick the t=0 seed set (`wm_actions.py::select_seeds`)
+
+Each episode commits a seed set chosen by one of the six **spine algorithms**
+(`SPINE_ALGORITHMS`). These span the cheap-but-weak to expensive-but-strong range
+so the dataset covers a spectrum of seed qualities:
+
+| Algorithm      | How it picks k seeds                                                                 |
+| -------------- | ----------------------------------------------------------------------------------- |
+| `random`       | k distinct uniform-random nodes                                                      |
+| `degree`       | top-k by (out-)degree                                                                |
+| `pagerank`     | top-k by PageRank (random-walk importance)                                           |
+| `betweenness`  | top-k by betweenness centrality (nodes on many shortest paths)                       |
+| `celf`         | greedy marginal-gain: add the node that most increases MC-estimated spread, ×k       |
+| `local_search` | start from `degree`, then 1-swap seeds while estimated spread improves (≤ 3 rounds)  |
+
+`celf` and `local_search` call `estimate_spread`, an NDlib Monte-Carlo spread
+oracle (seed → diffuse to horizon, average final infected count over `mc_runs`).
+
+### 3. Roll the episode forward (`generate_wm_data.py::_episode_transitions`)
+
+A fresh `Simulator` is reset for the chosen dynamics, then stepped over
+`--horizon + 1` timesteps:
+
+- **t = 0** the action *is* the seed commit: `add_node` ops for every seed node.
+- **t > 0** an action is sampled by `sample_injection`: with probability
+  `1 - --inject-p` it is `NULL` (pure diffusion); otherwise one op is drawn
+  uniformly from `--action-ops` with a random valid target on the live graph.
+- The cascade is advanced one step (`Simulator.advance_marginal`) and the
+  `(s_t, a_t, s_{t+1}, R)` record is written to the **main** branch.
+- The loop stops early once the cascade is dead (no frontier) and no action is
+  pending.
+
+### 4. Counterfactual forks (same state, different action)
+
+At intermediate steps, with probability `--cf-prob`, the simulator is
+snapshotted and `--cf-branches` alternative action bags (drawn by
+`counterfactual_actions`, restricted to node ops so the snapshot never has to
+undo an edge mutation) are each applied from the *same* `s_t`. Each fork is
+written as a `cf_i` branch. This gives the trainer matched `(s_t, a, s_{t+1})` vs
+`(s_t, a', s'_{t+1})` pairs — the only signal that forces the model to be
+*action-conditioned* rather than state-autoregressive, and the basis of the
+**action-sensitivity** eval metric.
+
+### 5. Monte-Carlo soft marginals (`Simulator.advance_marginal`)
+
+The single realized `s_{t+1}` is one Bernoulli draw from a stochastic process
+(for IC). Training on that single draw caps one-step accuracy at the label noise
+floor. Instead, `advance_marginal`:
+
+1. applies the action once (the exogenous transition `T_exo` is deterministic),
+2. snapshots the post-action status,
+3. runs `--mc-marginals` independent diffusion draws (restoring status between
+   draws), and
+4. averages each node's activation frequency into a probability.
+
+The result is the **true one-step marginal** `P(node infected at t+1)` and
+`P(node in frontier at t+1)`, stored sparsely as `{node: prob}`. IC uses all
+`--mc-marginals` draws (stochastic); LT uses a single draw (deterministic given
+its hidden thresholds). These soft marginals are the world model's regression
+targets and are **required** by the training pipeline (`--mc-marginals >= 1`,
+default 30).
+
+---
+
 ## Output (`output/<dataset>/`)
 
 | File                                            | Contents                                                               |
 | ----------------------------------------------- | ---------------------------------------------------------------------- |
 | `graphs/<graph_id>.npz`                         | one graph: `edge_index, ic_probs, lt_weights, node_feats, node_labels` |
-| `graphs_index.json`                             | `graph_id` → metadata (type, directed, n_nodes, n_edges, ...)          |
+| `graphs_index.json`                             | `graph_id` → metadata (type, directed, n_nodes, n_edges, …)            |
 | `transitions_<IC\|LT>_<train\|val\|test>.jsonl` | one transition record per line                                         |
 | `metadata.json`                                 | full generation config + episode count                                 |
 
@@ -61,30 +179,30 @@ Each transition row (JSONL):
   "state":      {"infected": [...], "frontier": [...], "infected_count": 6, "frontier_count": 2},
   "action":     [{"op": "add_node", "target": 17}],
   "next_state": {"infected": [...], "frontier": [...], "infected_count": 9, "frontier_count": 2},
-  "reward": 3.0
+  "reward": 3.0,
+  "next_marginal_infected": {"4": 1.0, "9": 0.83, "12": 0.4, ...},
+  "next_marginal_frontier": {"12": 0.4, "20": 0.27, ...}
 }
 ```
 
-`branch` is `"main"` for the executed trajectory or `"cf_i"` for counterfactual
-forks (same `t`/`state`, different `action`). An empty `action` list is `NULL`.
-Edge ops carry the second endpoint as `"destination"` and, for `add_edge` /
-`set_edge_weight`, a `"weight"` (the IC transmission probability), e.g.
-`{"op": "set_edge_weight", "target": 4, "destination": 11, "weight": 0.62}`.
-
-## Datasets
-
-- **Real** (downloaded via `data/datasets/`): `cora_ml, digg, twitter, jazz,
-netscience, power_grid, nethept`.
-- **Synthetic**: `er, ba, ws, karate`.
-
-Run `python data/generate_wm_data.py --help` for all flags
-(`--models`, `--prob-model`, `--budget`, `--rollouts`, `--horizon`, `--inject-p`,
-`--action-ops`, `--weight-lo`, `--weight-hi`, `--cf-prob`, `--split`, `--seed`,
-synthetic params, ...).
+- `branch` is `"main"` for the executed trajectory or `"cf_i"` for counterfactual
+  forks (same `t` / `state`, different `action`).
+- An empty `action` list is `NULL`.
+- Edge ops carry the second endpoint as `"destination"` and, for `add_edge` /
+  `set_edge_weight`, a `"weight"` (the IC transmission probability), e.g.
+  `{"op": "set_edge_weight", "target": 4, "destination": 11, "weight": 0.62}`.
+- `next_marginal_infected` / `next_marginal_frontier` are sparse `{node: prob}`
+  maps (string keys, rounded to 6 dp) — the soft MC targets. They are present
+  whenever `--mc-marginals >= 1` (the default).
 
 ---
 
 ## The 5 action ops (identical set for every dataset)
+
+The action space is unified across tasks: every action is `(op, target,
+[destination], [weight])`. `target` is the node (or edge source `u`);
+`destination` is the edge sink `v`; `weight` is the IC transmission probability
+for the edge.
 
 | op                | fields in the record                | IC effect                                    | LT effect                              |
 | ----------------- | ----------------------------------- | -------------------------------------------- | -------------------------------------- |
@@ -94,30 +212,73 @@ synthetic params, ...).
 | `remove_edge`     | `target=u, destination=v`           | remove arc u→v                               | remove edge structurally               |
 | `set_edge_weight` | `target=u, destination=v, weight=w` | set arc u→v transmission p=`w`               | **no-op** (LT ignores edge weights)    |
 
-The three settings are just which ops you pass to `--action-ops`:
+The three data "settings" are just which ops you pass to `--action-ops`:
 
 - **Setting 1 (diffusion-only):** omit `--action-ops`
 - **Setting 2 (node):** `--action-ops add_node remove_node`
 - **Setting 3 (edge):** `--action-ops add_edge remove_edge set_edge_weight`
 
+How these become model inputs is documented in
+[`world_model/README.md`](../world_model/README.md): node ops set the `act_add` /
+`act_remove` input channels, and edge ops set the `act_edge_endpoint` channel and
+mutate the per-episode adjacency.
+
+---
+
+## Diffusion dynamics
+
+| Model  | Determinism                       | Per-step rule                                                                    |
+| ------ | --------------------------------- | ------------------------------------------------------------------------------- |
+| **IC** | stochastic                        | each newly infected `u` gets one try to infect each out-neighbor `v` with prob `p(u→v)`; success → `v` infected. Monotone (no node ever de-activates). Status: 0 Susceptible, 1 Infected (spreader, this step), 2 Removed (spent). |
+| **LT** | deterministic given thresholds    | `v` activates when the summed weight of its active in-neighbors ≥ its threshold `θ_v`. Thresholds are drawn `U(0,1)` per node **per episode and not stored**, so from a state-only view LT looks stochastic. |
+
+This determinism difference is why IC averages over `--mc-marginals` draws while
+LT uses a single draw, and why the world model uses a different structured head
+per dynamics (see `world_model/README.md`).
+
+---
+
 ## Customizable probabilities / knobs
 
 | Flag                              | Default       | What it controls                                                                                         |
 | --------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------- |
-| `--prob-model {weighted,uniform}` | `weighted`    | IC transmission prob: `weighted` = 1/in_degree(v) (weighted cascade); `uniform` = constant `--uniform-p` |
-| `--uniform-p`                     | `0.1`         | the constant IC prob (and LT edge weight) when `--prob-model uniform`                                    |
+| `--dataset`                       | `cora_ml`     | real (`cora_ml, digg, twitter, jazz, netscience, power_grid, nethept`) or synthetic (`er, ba, ws, karate`) |
+| `--num-graphs`                    | `1`           | number of synthetic graph instances (folded into the seed)                                               |
+| `--syn-nodes`                     | `100`         | nodes per synthetic graph                                                                                |
+| `--models`                        | `IC LT`       | which dynamics to generate transitions for                                                               |
+| `--prob-model {weighted,uniform}` | `weighted`    | IC prob: `weighted` = 1/in_degree(v); `uniform` = constant `--uniform-p`                                 |
+| `--uniform-p`                     | `0.1`         | the constant IC prob (and LT weight) when `--prob-model uniform`                                         |
+| `--budget` / `--budget-pct`       | `5` / `None`  | seed-set size k (pct overrides absolute)                                                                 |
+| `--algorithms`                    | all 6 spine   | which seed selectors to roll out                                                                         |
+| `--rollouts` / `--horizon`        | `10` / `10`   | episodes per (graph, model, algo) / max timesteps                                                        |
 | `--inject-p`                      | `0.3`         | P(an intermediate step injects an action at all vs NULL)                                                 |
-| `--weight-lo` / `--weight-hi`     | `0.0` / `1.0` | range for `add_edge`/`set_edge_weight` weights, sampled U(lo,hi)                                         |
+| `--action-ops`                    | `[]`          | which ops to inject; empty = diffusion-only                                                              |
+| `--weight-lo` / `--weight-hi`     | `0.0` / `1.0` | range for `add_edge`/`set_edge_weight` weights, sampled `U(lo, hi)`                                      |
 | `--cf-prob`                       | `0.2`         | P(spawn counterfactual forks at a step)                                                                  |
 | `--cf-branches`                   | `2`           | # alternate-action branches per fork                                                                     |
-| `--er-p`                          | `0.05`        | ER edge probability (G(n,p)) — structural                                                                |
-| `--ws-p`                          | `0.1`         | WS rewire probability (structural)                                                                       |
+| `--mc-marginals`                  | `30`          | MC draws per step to estimate soft next-step marginal targets (1 = single-draw binary target)           |
+| `--split`                         | `0.7 0.15 0.15` | train / val / test episode split probabilities                                                         |
+| `--er-p`                          | `0.05`        | ER edge probability G(n, p) — structural                                                                 |
 | `--ba-m`                          | `3`           | BA attachment count (not a prob)                                                                         |
-| `--budget` / `--budget-pct`       | `5` / `None`  | seed-set size k (pct overrides absolute)                                                                 |
-| `--rollouts` / `--horizon`        | `10` / `10`   | episodes per (graph,model,algo) / max timesteps                                                          |
-| `--seed`                          | `42`          | master RNG (graph + selection + injection all derive from it)                                            |
+| `--ws-k` / `--ws-p`               | `6` / `0.1`   | WS ring degree / rewire probability (structural)                                                         |
+| `--seed`                          | `42`          | master RNG (graph + selection + injection + sim all derive from it)                                      |
 
-> LT node thresholds are drawn U(0,1) per node internally — no CLI flag.
+> LT node thresholds are drawn `U(0, 1)` per node internally — no CLI flag, and
+> they are not stored (the world model must learn the threshold *marginal*).
+
+---
+
+## Validation (`validate_wm_data.py`)
+
+`python data/validate_wm_data.py --dir <output_dir>` runs post-hoc gate checks on
+a produced dataset and prints a JSON summary:
+
+| Check                         | What it confirms                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| reward spread                 | rewards are not collapsed to a constant (mean/std/min/max)                   |
+| `main_monotone_ratio`         | main-branch `infected_count` is non-decreasing step to step (IC sanity)     |
+| `action_sensitivity_pairs`    | groups where same `(graph, episode, t, state)` + different action → different `next_state` (counterfactual coverage is real) |
+| `per_algorithm_final_spread`  | mean terminal spread per spine algorithm (eyeball `random < degree/pagerank < celf/local_search`) |
 
 ---
 
@@ -125,8 +286,11 @@ The three settings are just which ops you pass to `--action-ops`:
 
 | Module                | Responsibility                                                                               |
 | --------------------- | -------------------------------------------------------------------------------------------- |
-| `wm_graphs.py`        | graph providers (real + synthetic) + edge probabilities                                      |
-| `wm_simulator.py`     | `State`/`ActionOp` types + NDlib stepwise IC/LT sim with action injection + snapshot/restore |
-| `wm_actions.py`       | spine seed selectors + injection schedule + counterfactual candidates                        |
-| `generate_wm_data.py` | graph store + JSONL transition writer + CLI orchestrator                                     |
-| `validate_wm_data.py` | post-hoc gate-check harness                                                                  |
+| `wm_graphs.py`        | graph providers (real + synthetic) + edge probabilities → `GraphBundle`                       |
+| `wm_simulator.py`     | `State` / `ActionOp` types + NDlib stepwise IC/LT sim with action injection, `advance_marginal`, snapshot/restore |
+| `wm_actions.py`       | spine seed selectors + MC spread oracle + injection schedule + counterfactual candidates      |
+| `graph_utils.py`      | adjacency → `edge_index` + IC/LT edge probabilities (shared)                                  |
+| `generate_wm_data.py` | graph store + JSONL transition writer + CLI orchestrator                                      |
+| `validate_wm_data.py` | post-hoc gate-check harness                                                                   |
+| `datasets/`           | per-dataset download + load helpers (lazy-imported by `wm_graphs.py`)                         |
+| `old/`                | **legacy** diffusion-only CND/IM/SL generators (archived; superseded by `generate_wm_data.py`) |
