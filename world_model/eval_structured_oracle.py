@@ -12,25 +12,55 @@ python world_model/eval_structured_oracle.py \
 import argparse
 import torch
 
-from wm_data import load_graph_store, IN_CHANNELS
-from wm_model import WorldModel
-from wm_eval import rollout_ensemble
+from world_model.wm_data import in_channels, load_graph_store
+from world_model.wm_eval import rollout_ensemble
+from world_model.wm_model import WorldModel
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Oracle structured rollout (q = true edge prob) — validates the IC structural form"
     )
-    parser.add_argument("--data-dir", required=True)
-    parser.add_argument("--diffusion-model", default="IC", choices=["IC", "LT"])
-    parser.add_argument("--model", default="sage", help="encoder backbone (ignored by the oracle head)")
-    parser.add_argument("--hidden-dim", type=int, default=64)
-    parser.add_argument("--n-layers", type=int, default=3)
-    parser.add_argument("--n-samples", type=int, default=20)
-    parser.add_argument("--max-episodes", type=int, default=50)
-    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
-        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+        "--data-dir",
+        type=str,
+        required=True,
+        help="generated dataset directory (default: required).",
+    )
+    parser.add_argument(
+        "--diffusion-model",
+        type=str,
+        default="IC",
+        choices=["IC", "LT"],
+        help="diffusion dynamics (default: IC).",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="sage",
+        help="encoder backbone ignored by oracle head (default: sage).",
+    )
+    parser.add_argument(
+        "--hidden-dim", type=int, default=64, help="hidden dimension (default: 64)."
+    )
+    parser.add_argument(
+        "--n-layers", type=int, default=3, help="number of encoder layers (default: 3)."
+    )
+    parser.add_argument(
+        "--n-samples",
+        type=int,
+        default=20,
+        help="sampled rollouts per episode (default: 20).",
+    )
+    parser.add_argument(
+        "--max-episodes",
+        type=int,
+        default=50,
+        help="maximum episodes to evaluate (default: 50).",
+    )
+    parser.add_argument("--seed", type=int, default=0, help="random seed (default: 0).")
+    parser.add_argument(
+        "--device", type=str, default="cpu", help="torch device string (default: cpu)."
     )
     args = parser.parse_args()
 
@@ -44,7 +74,7 @@ if __name__ == "__main__":
 
     model = WorldModel(
         args.model,
-        in_channels=IN_CHANNELS,
+        in_channels=in_channels,
         hidden_dim=args.hidden_dim,
         n_layers=args.n_layers,
         head_type="structured_oracle",
@@ -68,4 +98,6 @@ if __name__ == "__main__":
         f"count_w1={ens['ens_count_w1']:.3f}  count_bias={ens['ens_count_bias']:.3f}  "
         f"model_cnt={ens['ens_final_count_model']:.2f}  true_cnt={ens['ens_final_count_true']:.2f}"
     )
-    print("(expect count_bias ~ 0 and model_cnt ~ true_cnt if the structural form is correct)")
+    print(
+        "(expect count_bias ~ 0 and model_cnt ~ true_cnt if the structural form is correct)"
+    )

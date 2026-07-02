@@ -653,7 +653,7 @@ def community_celf(
 
 
 # Registry the library API + README enumerate.
-ALGORITHMS = {
+algorithms = {
     # degree
     "high_degree": high_degree,
     "weighted_degree": weighted_degree,

@@ -14,12 +14,13 @@ python world_model/eval_planning.py \
 
 import argparse
 import json
+import os
 from pathlib import Path
 import torch
 
-from wm_data import load_graph_store, IN_CHANNELS
-from wm_model import WorldModel
-from wm_eval import planning_regret_multi
+from world_model.wm_data import in_channels, load_graph_store
+from world_model.wm_eval import planning_regret_multi
+from world_model.wm_model import WorldModel
 
 
 def load_trained_model(config: dict, device: torch.device) -> torch.nn.Module:
@@ -32,7 +33,7 @@ def load_trained_model(config: dict, device: torch.device) -> torch.nn.Module:
     }
     model = WorldModel(
         config["model"],
-        in_channels=IN_CHANNELS,
+        in_channels=in_channels,
         hidden_dim=config["hidden_dim"],
         n_layers=config["n_layers"],
         dropout=config["dropout"],
@@ -62,14 +63,22 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--results",
+        type=str,
         nargs="+",
         required=True,
-        help="results JSONs written by train_wm.py",
+        help="results JSONs written by train_wm.py (default: required).",
     )
-    parser.add_argument("--plan-graphs", type=int, default=5)
-    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+        "--plan-graphs",
+        type=int,
+        default=5,
+        help="graphs to average for planning regret (default: 5).",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="random seed (default: 42)."
+    )
+    parser.add_argument(
+        "--device", type=str, default="cpu", help="torch device string (default: cpu)."
     )
     args = parser.parse_args()
 
@@ -93,6 +102,7 @@ if __name__ == "__main__":
 
         # Replace only the planning block; keep test + rollout intact.
         results["planning"] = planning
+        os.makedirs(Path(path).parent, exist_ok=True)
         Path(path).write_text(json.dumps(results, indent=2, default=str))
 
         run = Path(path).stem

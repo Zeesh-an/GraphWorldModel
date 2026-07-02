@@ -14,24 +14,25 @@ Original paper: A. McCallum et al., "Automating the Construction of
 """
 
 import urllib.request
+import os
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
 
-CORA_ML_URL = "https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz"
-DATA_DIR = Path(__file__).resolve().parent.parent / "cora_ml"
+cora_ml_url = "https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz"
+data_dir = Path(__file__).resolve().parent.parent / "cora_ml"
 
 
 def download_cora_ml() -> Path:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    dest = DATA_DIR / "cora_ml.npz"
+    os.makedirs(data_dir, exist_ok=True)
+    dest = data_dir / "cora_ml.npz"
 
     if dest.exists():
         print(f"[✓] Cora-ML already downloaded at {dest}")
         return dest
 
-    print(f"[↓] Downloading Cora-ML from {CORA_ML_URL} ...")
-    urllib.request.urlretrieve(CORA_ML_URL, dest)
+    print(f"[↓] Downloading Cora-ML from {cora_ml_url} ...")
+    urllib.request.urlretrieve(cora_ml_url, dest)
     print(f"[✓] Saved to {dest}")
 
     return dest

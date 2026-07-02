@@ -180,8 +180,7 @@ def save_samples(
     )
 
     print(
-        f"[✓] Saved CND samples -> {out_path}  "
-        f"({out_path.stat().st_size / 1e6:.1f} MB)"
+        f"[✓] Saved CND samples -> {out_path}  ({out_path.stat().st_size / 1e6:.1f} MB)"
     )
 
     return out_path
@@ -227,9 +226,9 @@ def print_dataset_stats(
 
     avg_conn_density = connectivity_vecs.sum(axis=1).mean() / remaining
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Dataset stats [CND — {dataset}]")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
     print(f"  Samples           : {S}")
     print(f"  Removal size (k)  : {k}")
     print(f"  Nodes (N)         : {N}")
@@ -248,7 +247,7 @@ def print_dataset_stats(
         f"  Pairwise conn     : {pairwise_conn.mean():.0f} +/- {pairwise_conn.std():.0f}"
     )
     print(f"                      range [{pairwise_conn.min()}, {pairwise_conn.max()}]")
-    print(f"  Avg largest CC %  : {avg_conn_density*100:.1f}% of remaining nodes")
+    print(f"  Avg largest CC %  : {avg_conn_density * 100:.1f}% of remaining nodes")
 
 
 def load_dataset(dataset: str) -> tuple:
@@ -395,8 +394,8 @@ def main() -> None:
         dataset=args.dataset,
     )
 
-    metadata[f"n_components_mean"] = float(n_components.mean())
-    metadata[f"largest_cc_sizes_mean"] = float(largest_cc_sizes.mean())
+    metadata["n_components_mean"] = float(n_components.mean())
+    metadata["largest_cc_sizes_mean"] = float(largest_cc_sizes.mean())
 
     # Save metadata
     meta_path = out_dir / "metadata_cnd.json"

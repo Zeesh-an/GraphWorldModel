@@ -1,7 +1,7 @@
 from coding_agent.types import GraphInfo, TaskSpec
 from coding_agent.tools.library_api import build_api_reference
 
-_COMMON_RULES = """\
+common_rules = """\
 You are designing an Influence Maximization algorithm as an executable Python script.
 
 OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else.
@@ -20,8 +20,8 @@ ACTION RULES:
 - You may also use remove_node / add_edge / remove_edge / set_edge_weight to steer the cascade.
 """
 
-SYSTEM_PROMPTS = {
-    "one_shot": _COMMON_RULES
+system_prompts = {
+    "one_shot": common_rules
     + """\
 
 METHOD: ONE-SHOT SUPER-ALGORITHM.
@@ -31,7 +31,7 @@ This is your whole multi-timestep plan, decided up front. Classical algorithms o
 fill element 0 (the seed set) and leave the rest empty — go beyond that: schedule
 interventions across t0..tT to maximize final spread.
 """,
-    "per_step": _COMMON_RULES
+    "per_step": common_rules
     + """\
 
 METHOD: PER-STEP POLICY.
@@ -39,7 +39,7 @@ Implement `act(self, state, g, t) -> list[Action]`.
 You are called once per timestep with the CURRENT state; return that step's action bag.
 React to which nodes are infected/frontier right now.
 """,
-    "windowed": _COMMON_RULES
+    "windowed": common_rules
     + """\
 
 METHOD: WINDOWED ONLINE ALGORITHM.

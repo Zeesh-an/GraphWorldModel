@@ -256,9 +256,9 @@ def print_dataset_stats(
     S, k = seed_sets.shape
     N = snapshots.shape[1]
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Dataset stats [SL — {model}]")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
     print(f"  Samples          : {S}")
     print(f"  Source size (k)  : {k}")
     print(f"  Nodes (N)        : {N}")
@@ -271,7 +271,9 @@ def print_dataset_stats(
     )
     print(f"  Snapshot spread  : {spreads.mean():.1f} +/- {spreads.std():.1f}")
     print(f"                     range [{spreads.min()}, {spreads.max()}]")
-    print(f"  Avg density      : {spreads.mean()/N*100:.1f}% of graph observed active")
+    print(
+        f"  Avg density      : {spreads.mean() / N * 100:.1f}% of graph observed active"
+    )
 
 
 def load_dataset(dataset: str) -> tuple:

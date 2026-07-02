@@ -13,8 +13,8 @@ import torch
 from torch.utils.data import Dataset
 
 # Per-node input channels
-IN_CHANNELS = 6
-CH_INFECTED, CH_FRONTIER, CH_DEGREE, CH_ADD, CH_REMOVE, CH_EDGE = range(6)
+in_channels = 6
+ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge = range(6)
 
 # X has shape (N, 6), with one row per node (N = nodes in the graph) and one column per feature channel
 # ┌─────┬─────────────┬────────────────────────────────────────────────────────────────────────────────────┬──────────────────┬───────────────────────────────────────────┐
@@ -84,7 +84,7 @@ def build_graph_input(
     return GraphInput(num_nodes=num_nodes, adj_norm=adj, edge_index=ei, edge_weight=w)
 
 
-EDGE_OPS = ("add_edge", "remove_edge", "set_edge_weight")
+edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 
 
 def apply_edge_ops(edges: dict, action: list[dict]) -> dict:
@@ -111,7 +111,7 @@ def reconstruct_episode_adjacency(
     through t inclusive); cf transitions branch from the PRE-step graph (cumulative
     edge ops through t-1). Node-only / diffusion-only episodes return base for all.
     """
-    has_edge_ops = any(op["op"] in EDGE_OPS for r in records for op in r["action"])
+    has_edge_ops = any(op["op"] in edge_ops for r in records for op in r["action"])
     out = {}
 
     if not has_edge_ops:
@@ -144,11 +144,11 @@ def build_features(
     num_nodes: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (X (N, 6) float32, y_inf (N) float32, y_fr (N) float32)."""
-    X = np.zeros((num_nodes, IN_CHANNELS), dtype=np.float32)
+    X = np.zeros((num_nodes, in_channels), dtype=np.float32)
 
     state = record["state"]
-    X[np.asarray(state["infected"], dtype=np.int64), CH_INFECTED] = 1.0
-    X[np.asarray(state["frontier"], dtype=np.int64), CH_FRONTIER] = 1.0
+    X[np.asarray(state["infected"], dtype=np.int64), ch_infected] = 1.0
+    X[np.asarray(state["frontier"], dtype=np.int64), ch_frontier] = 1.0
 
     # degree = log1p(total degree in A_t); input_proj + LayerNorm handle scaling.
     deg = np.zeros(num_nodes, dtype=np.float32)
@@ -157,16 +157,16 @@ def build_features(
         np.add.at(deg, edge_index[0], 1.0)
         np.add.at(deg, edge_index[1], 1.0)
 
-    X[:, CH_DEGREE] = np.log1p(deg)
+    X[:, ch_degree] = np.log1p(deg)
 
     for op in record["action"]:
         if op["op"] == "add_node":
-            X[int(op["target"]), CH_ADD] = 1.0
+            X[int(op["target"]), ch_add] = 1.0
         elif op["op"] == "remove_node":
-            X[int(op["target"]), CH_REMOVE] = 1.0
-        elif op["op"] in EDGE_OPS:
-            X[int(op["target"]), CH_EDGE] = 1.0
-            X[int(op["destination"]), CH_EDGE] = 1.0
+            X[int(op["target"]), ch_remove] = 1.0
+        elif op["op"] in edge_ops:
+            X[int(op["target"]), ch_edge] = 1.0
+            X[int(op["destination"]), ch_edge] = 1.0
 
     # Build the ground-truth next state s_{t + 1} the model is trying to predict,
     # as soft one-step marginals (MC-estimated in data gen via --mc-marginals).

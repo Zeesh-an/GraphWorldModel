@@ -2,7 +2,7 @@
 
 from coding_agent.agent import CodingAgent
 from coding_agent.executor import build_strategy
-from coding_agent.prompts import SYSTEM_PROMPTS, build_user_prompt
+from coding_agent.prompts import build_user_prompt, system_prompts
 from coding_agent.types import Action, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
 
@@ -13,7 +13,7 @@ class WindowedOnline:
     def optimize(
         self, agent: CodingAgent, env, task: TaskSpec, g: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
-        system = SYSTEM_PROMPTS["windowed"]
+        system = system_prompts["windowed"]
         user = build_user_prompt("windowed", task, g)
         strat = build_strategy(agent.generate(system, user))  # designed ONCE
         window_len = max(1, (task.horizon + 1) // self.windows)

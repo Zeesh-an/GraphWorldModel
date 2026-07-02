@@ -13,7 +13,7 @@ import numpy as np
 import ndlib.models.ModelConfig as mc
 import ndlib.models.epidemics as ep  # IC, LT
 
-VALID_ACTION_OPS = (
+valid_action_ops = (
     "add_node",
     "remove_node",
     "add_edge",
@@ -24,7 +24,7 @@ VALID_ACTION_OPS = (
 
 @dataclass
 class ActionOp:
-    op: str  # VALID_ACTION_OPS
+    op: str  # valid_action_ops
     target: int  # Target node ID (edge source u for edge operations)
     destination: int | None = None  # Edge destination v (edge operations only)
     weight: float | None = None  # Edge weight (add_edge / set_edge_weight)

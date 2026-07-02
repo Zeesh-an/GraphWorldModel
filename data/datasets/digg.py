@@ -14,36 +14,37 @@ Source: https://datasets.syr.edu/datasets/Digg.html
 import csv
 import zipfile
 import urllib.request
+import os
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
 
-DIGG_URL = "https://datasets.syr.edu/uploads/1296588940/Digg-dataset.zip"
-DATA_DIR = Path(__file__).resolve().parent.parent / "digg"
+digg_url = "https://datasets.syr.edu/uploads/1296588940/Digg-dataset.zip"
+data_dir = Path(__file__).resolve().parent.parent / "digg"
 
 
 def download_digg() -> Path:
     """Download and extract Digg dataset if not already present."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    zip_path = DATA_DIR / "Digg-dataset.zip"
-    nodes_path = DATA_DIR / "Digg-dataset" / "data" / "nodes.csv"
+    os.makedirs(data_dir, exist_ok=True)
+    zip_path = data_dir / "Digg-dataset.zip"
+    nodes_path = data_dir / "Digg-dataset" / "data" / "nodes.csv"
 
     if nodes_path.exists():
-        print(f"[✓] Digg already downloaded at {DATA_DIR}")
-        return DATA_DIR / "Digg-dataset" / "data"
+        print(f"[✓] Digg already downloaded at {data_dir}")
+        return data_dir / "Digg-dataset" / "data"
 
     if not zip_path.exists():
-        print(f"[↓] Downloading Digg from {DIGG_URL} ...")
-        urllib.request.urlretrieve(DIGG_URL, zip_path)
+        print(f"[↓] Downloading Digg from {digg_url} ...")
+        urllib.request.urlretrieve(digg_url, zip_path)
         print(f"[✓] Saved to {zip_path}")
 
     print("[↓] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(DATA_DIR)
+        zf.extractall(data_dir)
 
-    print(f"[✓] Extracted to {DATA_DIR / 'Digg-dataset'}")
+    print(f"[✓] Extracted to {data_dir / 'Digg-dataset'}")
 
-    return DATA_DIR / "Digg-dataset" / "data"
+    return data_dir / "Digg-dataset" / "data"
 
 
 def load_digg(data_path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:

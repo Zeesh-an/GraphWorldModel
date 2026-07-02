@@ -15,37 +15,38 @@ Original paper: Wei Chen et al., "Efficient Influence Maximization
 """
 
 import urllib.request
+import os
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
 
-NETHEPT_GRAPH_URL = (
+nethept_graph_url = (
     "https://raw.githubusercontent.com/SparklyYS/Simultaneous-IMM/"
     "master/nethept/graph.txt"
 )
-NETHEPT_ATTR_URL = (
+nethept_attr_url = (
     "https://raw.githubusercontent.com/SparklyYS/Simultaneous-IMM/"
     "master/nethept/attribute.txt"
 )
-DATA_DIR = Path(__file__).resolve().parent.parent / "nethept"
+data_dir = Path(__file__).resolve().parent.parent / "nethept"
 
 
 def download_nethept() -> Path:
     """Download NetHEPT edge list if not already present."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    graph_path = DATA_DIR / "graph.txt"
-    attr_path = DATA_DIR / "attribute.txt"
+    os.makedirs(data_dir, exist_ok=True)
+    graph_path = data_dir / "graph.txt"
+    attr_path = data_dir / "attribute.txt"
 
     if graph_path.exists():
         print(f"[✓] NetHEPT already downloaded at {graph_path}")
         return graph_path
 
-    print(f"[↓] Downloading NetHEPT edge list ...")
-    urllib.request.urlretrieve(NETHEPT_GRAPH_URL, graph_path)
+    print("[↓] Downloading NetHEPT edge list ...")
+    urllib.request.urlretrieve(nethept_graph_url, graph_path)
     print(f"[✓] Saved edge list to {graph_path}")
 
-    print(f"[↓] Downloading NetHEPT attributes ...")
-    urllib.request.urlretrieve(NETHEPT_ATTR_URL, attr_path)
+    print("[↓] Downloading NetHEPT attributes ...")
+    urllib.request.urlretrieve(nethept_attr_url, attr_path)
     print(f"[✓] Saved attributes to {attr_path}")
 
     return graph_path

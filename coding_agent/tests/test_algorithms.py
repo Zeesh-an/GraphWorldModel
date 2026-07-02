@@ -13,10 +13,10 @@ def _hub_graph() -> GraphInfo:
     return GraphInfo(num_nodes=6, edge_index=ei, ic_probs=ic, directed=True)
 
 
-@pytest.mark.parametrize("name", list(A.ALGORITHMS.keys()))
+@pytest.mark.parametrize("name", list(A.algorithms.keys()))
 def test_algo_returns_k_valid_distinct_seeds(name):
     g = _hub_graph()
-    seeds = A.ALGORITHMS[name](g, budget=3, diffusion_model="IC")
+    seeds = A.algorithms[name](g, budget=3, diffusion_model="IC")
     assert len(seeds) == 3, name
     assert len(set(seeds)) == 3, name
     assert all(0 <= s < g.num_nodes for s in seeds), name

@@ -22,5 +22,6 @@ def test_agent_uses_injected_provider():
     class Fake:
         def complete(self, system, user):
             return "```python\nclass S(Strategy):\n    pass\n```"
+
     agent = CodingAgent(Fake())
     assert "class S(Strategy)" in agent.generate("s", "u")

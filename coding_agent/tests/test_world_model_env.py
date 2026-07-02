@@ -1,15 +1,10 @@
-import sys
-from pathlib import Path
-
 import numpy as np
 import torch
 
-_REPO = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(_REPO / "world_model"))
-
-from coding_agent.types import GraphInfo, Action
 from coding_agent.envs.world_model_env import WorldModelEnvironment
-from wm_model import WorldModel  # noqa: E402
+from coding_agent.types import Action, GraphInfo
+from world_model.wm_data import in_channels
+from world_model.wm_model import WorldModel
 
 
 def _hub() -> GraphInfo:
@@ -24,8 +19,14 @@ def test_wm_env_rollout_shapes_and_seed_effect():
     torch.manual_seed(0)
     g = _hub()
     # Untrained structured IC model: structural head still activates the seeded node.
-    model = WorldModel("sage", in_channels=6, hidden_dim=16, n_layers=2,
-                       head_type="structured", diffusion_model="IC")
+    model = WorldModel(
+        "sage",
+        in_channels=in_channels,
+        hidden_dim=16,
+        n_layers=2,
+        head_type="structured",
+        diffusion_model="IC",
+    )
     env = WorldModelEnvironment(model, g, "IC", device="cpu", n_samples=8)
 
     def action_fn(state, t):
@@ -33,4 +34,6 @@ def test_wm_env_rollout_shapes_and_seed_effect():
 
     tr = env.rollout(action_fn, horizon=4, budget=1)
     assert len(tr.infected_counts) >= 1
-    assert tr.reward >= 1.0  # the seeded hub is infected (T_exo baked into structured head)
+    assert (
+        tr.reward >= 1.0
+    )  # the seeded hub is infected (T_exo baked into structured head)

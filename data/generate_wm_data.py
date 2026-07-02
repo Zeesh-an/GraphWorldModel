@@ -5,26 +5,27 @@ transition data for IM and write it as JSONL + a graph store
 
 import argparse
 import json
+import os
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
 
-from wm_actions import (
-    SPINE_ALGORITHMS,
+from data.wm_actions import (
     counterfactual_actions,
     sample_injection,
     select_seeds,
+    spine_algorithms,
 )
-from wm_graphs import (
-    REAL_DIRECTED,
+from data.wm_graphs import (
     GraphBundle,
     make_real_bundle,
     make_synthetic_bundle,
+    real_directed,
 )
-from wm_simulator import VALID_ACTION_OPS, ActionOp, Simulator, State
+from data.wm_simulator import ActionOp, Simulator, State, valid_action_ops
 
-SYNTHETIC_FAMILIES = ("er", "ba", "ws", "karate")
+synthetic_families = ("er", "ba", "ws", "karate")
 
 
 # Storage
@@ -74,7 +75,7 @@ class GraphStore:
     def __init__(self, out_dir: Path) -> None:
         self.out_dir = Path(out_dir)
         self.graphs_dir = self.out_dir / "graphs"
-        self.graphs_dir.mkdir(parents=True, exist_ok=True)
+        os.makedirs(self.graphs_dir, exist_ok=True)
         self._index = {}
 
     def save(self, bundle: GraphBundle) -> None:
@@ -107,7 +108,7 @@ class TransitionWriter:
 
     def __init__(self, out_dir: Path) -> None:
         self.out_dir = Path(out_dir)
-        self.out_dir.mkdir(parents=True, exist_ok=True)
+        os.makedirs(self.out_dir, exist_ok=True)
         self._handles = {}
 
     def write(self, rec: dict, model: str, split: str) -> None:
@@ -166,7 +167,7 @@ class GenConfig:
 
 
 def _iter_bundles(config: GenConfig) -> Iterator[GraphBundle]:
-    if config.dataset in SYNTHETIC_FAMILIES:
+    if config.dataset in synthetic_families:
         for i in range(config.num_graphs):
             yield make_synthetic_bundle(
                 config.dataset,
@@ -313,7 +314,7 @@ def _episode_transitions(
 
 def run_generation(config: GenConfig) -> dict[str, object]:
     out_dir = Path(config.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
     gs = GraphStore(out_dir)
     base_rng = np.random.default_rng(config.seed)
 
@@ -359,67 +360,176 @@ def parse_args() -> GenConfig:
     )
     parser.add_argument(
         "--dataset",
+        type=str,
         default="cora_ml",
-        choices=list(REAL_DIRECTED) + list(SYNTHETIC_FAMILIES),
-    )
-    parser.add_argument("--num-graphs", type=int, default=1)
-    parser.add_argument("--syn-nodes", type=int, default=100)
-    parser.add_argument("--er-p", type=float, default=0.05)
-    parser.add_argument("--ba-m", type=int, default=3)
-    parser.add_argument("--ws-k", type=int, default=6)
-    parser.add_argument("--ws-p", type=float, default=0.1)
-    parser.add_argument(
-        "--models", nargs="+", default=["IC", "LT"], choices=["IC", "LT"]
+        choices=list(real_directed) + list(synthetic_families),
+        help="dataset name (default: cora_ml).",
     )
     parser.add_argument(
-        "--prob-model", default="weighted", choices=["weighted", "uniform"]
+        "--num-graphs",
+        type=int,
+        default=1,
+        help="number of synthetic graph instances (default: 1).",
     )
-    parser.add_argument("--uniform-p", type=float, default=0.1)
-    parser.add_argument("--budget", type=int, default=5)
-    parser.add_argument("--budget-pct", type=float, default=None)
+    parser.add_argument(
+        "--syn-nodes",
+        type=int,
+        default=100,
+        help="nodes per synthetic graph (default: 100).",
+    )
+    parser.add_argument(
+        "--er-p",
+        type=float,
+        default=0.05,
+        help="ER edge probability (default: 0.05).",
+    )
+    parser.add_argument(
+        "--ba-m",
+        type=int,
+        default=3,
+        help="BA attachment count (default: 3).",
+    )
+    parser.add_argument(
+        "--ws-k",
+        type=int,
+        default=6,
+        help="WS ring degree (default: 6).",
+    )
+    parser.add_argument(
+        "--ws-p",
+        type=float,
+        default=0.1,
+        help="WS rewire probability (default: 0.1).",
+    )
+    parser.add_argument(
+        "--models",
+        type=str,
+        nargs="+",
+        default=["IC", "LT"],
+        choices=["IC", "LT"],
+        help="diffusion models to generate (default: IC LT).",
+    )
+    parser.add_argument(
+        "--prob-model",
+        type=str,
+        default="weighted",
+        choices=["weighted", "uniform"],
+        help="edge probability model (default: weighted).",
+    )
+    parser.add_argument(
+        "--uniform-p",
+        type=float,
+        default=0.1,
+        help="uniform IC probability when --prob-model uniform (default: 0.1).",
+    )
+    parser.add_argument(
+        "--budget",
+        type=int,
+        default=5,
+        help="absolute seed budget (default: 5).",
+    )
+    parser.add_argument(
+        "--budget-pct",
+        type=float,
+        default=None,
+        help="seed budget as percent of nodes (default: None).",
+    )
     parser.add_argument(
         "--algorithms",
+        type=str,
         nargs="+",
-        default=list(SPINE_ALGORITHMS),
-        choices=list(SPINE_ALGORITHMS),
+        default=list(spine_algorithms),
+        choices=list(spine_algorithms),
+        help="spine seed selectors to roll out (default: all spine algorithms).",
     )
-    parser.add_argument("--rollouts", type=int, default=10)
-    parser.add_argument("--horizon", type=int, default=10)
-    parser.add_argument("--inject-p", type=float, default=0.3)
+    parser.add_argument(
+        "--rollouts",
+        type=int,
+        default=10,
+        help="episodes per graph/model/algorithm (default: 10).",
+    )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=10,
+        help="maximum timesteps per episode (default: 10).",
+    )
+    parser.add_argument(
+        "--inject-p",
+        type=float,
+        default=0.3,
+        help="probability of intermediate action injection (default: 0.3).",
+    )
     parser.add_argument(
         "--action-ops",
+        type=str,
         nargs="*",
         default=[],
-        choices=list(VALID_ACTION_OPS),
-        help="ops to inject; empty = diffusion-only (no action interventions)",
+        choices=list(valid_action_ops),
+        help="ops to inject; empty = diffusion-only (default: []).",
     )
-    parser.add_argument("--weight-lo", type=float, default=0.0)
-    parser.add_argument("--weight-hi", type=float, default=1.0)
-    parser.add_argument("--cf-prob", type=float, default=0.2)
-    parser.add_argument("--cf-branches", type=int, default=2)
-    parser.add_argument("--split", type=float, nargs=3, default=[0.7, 0.15, 0.15])
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--weight-lo",
+        type=float,
+        default=0.0,
+        help="minimum sampled edge weight (default: 0.0).",
+    )
+    parser.add_argument(
+        "--weight-hi",
+        type=float,
+        default=1.0,
+        help="maximum sampled edge weight (default: 1.0).",
+    )
+    parser.add_argument(
+        "--cf-prob",
+        type=float,
+        default=0.2,
+        help="counterfactual fork probability (default: 0.2).",
+    )
+    parser.add_argument(
+        "--cf-branches",
+        type=int,
+        default=2,
+        help="counterfactual branches per fork (default: 2).",
+    )
+    parser.add_argument(
+        "--split",
+        type=float,
+        nargs=3,
+        default=[0.7, 0.15, 0.15],
+        help="train/val/test split probabilities (default: 0.7 0.15 0.15).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="master random seed (default: 42).",
+    )
     parser.add_argument(
         "--mc-marginals",
         type=int,
         default=30,
-        help="MC draws per step to estimate soft next-step marginal targets (1 = legacy single-draw binary target)",
+        help="MC draws per step for soft next-step marginal targets (default: 30).",
     )
-    parser.add_argument("--out-dir", default=None)
+    parser.add_argument(
+        "--out-dir", type=str, default=None, help="output directory (default: None)."
+    )
     parser.add_argument(
         "--smoke",
         action="store_true",
-        help="tiny end-to-end run (er-40, 1 graph, 2 rollouts, horizon 4)",
+        help="tiny end-to-end run (er-40, 1 graph, 2 rollouts, horizon 4) (default: False).",
     )
 
     args = parser.parse_args()
+
     if args.out_dir is None:
         args.out_dir = str(Path(__file__).resolve().parent / "output" / args.dataset)
+
     if args.smoke:
         args.dataset, args.num_graphs, args.syn_nodes, args.er_p = "er", 1, 40, 0.1
         args.rollouts, args.horizon = 2, 4
         args.algorithms = ["random", "degree"]
-        args.action_ops = list(VALID_ACTION_OPS)
+        args.action_ops = list(valid_action_ops)
         args.mc_marginals = 4
 
     return GenConfig(

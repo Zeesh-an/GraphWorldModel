@@ -1,5 +1,5 @@
 import numpy as np
-from coding_agent.types import Action, State, GraphInfo, TaskSpec, Trajectory
+from coding_agent.types import Action, GraphInfo, State, Trajectory
 
 
 def _triangle() -> GraphInfo:
@@ -36,5 +36,7 @@ def test_action_and_state_reexport():
 
 
 def test_trajectory_fields():
-    tr = Trajectory(states=[State([], [])], actions=[[]], reward=4.0, infected_counts=[0.0])
+    tr = Trajectory(
+        states=[State([], [])], actions=[[]], reward=4.0, infected_counts=[0.0]
+    )
     assert tr.reward == 4.0 and tr.cost == {}

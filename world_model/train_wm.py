@@ -13,6 +13,7 @@ python world_model/train_wm.py \
 
 import argparse
 import json
+import os
 from functools import partial
 from pathlib import Path
 import numpy as np
@@ -21,9 +22,17 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from wm_data import TransitionDataset, collate_transitions, IN_CHANNELS
-from wm_model import WorldModel, BACKBONES
-from wm_eval import evaluate_one_step, rollout_ensemble, planning_regret_multi
+from world_model.wm_data import TransitionDataset, collate_transitions, in_channels
+from world_model.wm_model import WorldModel, backbones
+from world_model.wm_eval import (
+    evaluate_one_step,
+    planning_regret_multi,
+    rollout_ensemble,
+)
+
+
+def _clamp_pos_weight(x: float) -> float:
+    return float(min(max(x, 1.0), 50.0))
 
 
 def compute_pos_weight(
@@ -41,11 +50,9 @@ def compute_pos_weight(
 
     wi = (tot - pos_i) / max(pos_i, 1.0)
     wf = (tot - pos_f) / max(pos_f, 1.0)
-    clamp = lambda x: float(min(max(x, 1.0), 50.0))
-
     # Passed into BCEWithLogitsLoss, it up-weights the rare positive class so the model is pushed to actually predict the new infections
-    return torch.tensor([clamp(wi)], device=device), torch.tensor(
-        [clamp(wf)], device=device
+    return torch.tensor([_clamp_pos_weight(wi)], device=device), torch.tensor(
+        [_clamp_pos_weight(wf)], device=device
     )
 
 
@@ -53,33 +60,126 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Action-conditioned world-model training"
     )
-    parser.add_argument("--data-dir", required=True)
-    parser.add_argument("--diffusion-model", default="IC", choices=["IC", "LT"])
-    parser.add_argument("--model", default="gcn", choices=list(BACKBONES))
-    parser.add_argument("--head", default="linear", choices=["linear", "structured"])
-    parser.add_argument("--hidden-dim", type=int, default=64)
-    parser.add_argument("--n-layers", type=int, default=3)
-    parser.add_argument("--n-heads", type=int, default=4)
-    parser.add_argument("--ffn-dim", type=int, default=128)
-    parser.add_argument("--gcnii-alpha", type=float, default=0.1)
-    parser.add_argument("--gcnii-lamda", type=float, default=0.5)
-    parser.add_argument("--dropout", type=float, default=0.1)
-    parser.add_argument("--epochs", type=int, default=200)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=5e-4)
-    parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--pos-weight", default="auto", choices=["auto", "off"])
-    parser.add_argument("--patience", type=int, default=30)
-    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
-        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+        "--data-dir",
+        type=str,
+        required=True,
+        help="generated dataset directory (default: required).",
     )
     parser.add_argument(
-        "--ckpt-dir", default=str(Path(__file__).resolve().parent / "checkpoints")
+        "--diffusion-model",
+        type=str,
+        default="IC",
+        choices=["IC", "LT"],
+        help="diffusion model to train on (default: IC).",
     )
-    parser.add_argument("--results", default=None)
-    parser.add_argument("--plan-demo", action="store_true")
-    parser.add_argument("--plan-graphs", type=int, default=5)
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="gcn",
+        choices=list(backbones),
+        help="encoder backbone (default: gcn).",
+    )
+    parser.add_argument(
+        "--head",
+        type=str,
+        default="linear",
+        choices=["linear", "structured"],
+        help="output head type (default: linear).",
+    )
+    parser.add_argument(
+        "--hidden-dim", type=int, default=64, help="hidden dimension (default: 64)."
+    )
+    parser.add_argument(
+        "--n-layers", type=int, default=3, help="number of encoder layers (default: 3)."
+    )
+    parser.add_argument(
+        "--n-heads",
+        type=int,
+        default=4,
+        help="attention heads for GAT/GT (default: 4).",
+    )
+    parser.add_argument(
+        "--ffn-dim",
+        type=int,
+        default=128,
+        help="transformer feed-forward dimension (default: 128).",
+    )
+    parser.add_argument(
+        "--gcnii-alpha",
+        type=float,
+        default=0.1,
+        help="GCNII initial residual alpha (default: 0.1).",
+    )
+    parser.add_argument(
+        "--gcnii-lamda",
+        type=float,
+        default=0.5,
+        help="GCNII identity mapping lambda (default: 0.5).",
+    )
+    parser.add_argument(
+        "--dropout", type=float, default=0.1, help="dropout probability (default: 0.1)."
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=200,
+        help="maximum training epochs (default: 200).",
+    )
+    parser.add_argument(
+        "--lr", type=float, default=1e-3, help="Adam learning rate (default: 1e-3)."
+    )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=5e-4,
+        help="Adam weight decay (default: 5e-4).",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="transition batch size (default: 16).",
+    )
+    parser.add_argument(
+        "--pos-weight",
+        type=str,
+        default="auto",
+        choices=["auto", "off"],
+        help="positive-class weighting mode (default: auto).",
+    )
+    parser.add_argument(
+        "--patience",
+        type=int,
+        default=30,
+        help="early-stop patience in epochs (default: 30).",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42, help="random seed (default: 42)."
+    )
+    parser.add_argument(
+        "--device", type=str, default="cpu", help="torch device string (default: cpu)."
+    )
+    parser.add_argument(
+        "--ckpt-dir",
+        type=str,
+        default=str(Path(__file__).resolve().parent / "checkpoints"),
+        help="checkpoint directory (default: world_model/checkpoints).",
+    )
+    parser.add_argument(
+        "--results", type=str, default=None, help="results JSON path (default: None)."
+    )
+    parser.add_argument(
+        "--plan-demo",
+        action="store_true",
+        help="run planning demo after training (default: False).",
+    )
+    parser.add_argument(
+        "--plan-graphs",
+        type=int,
+        default=5,
+        help="graphs used for planning demo (default: 5).",
+    )
 
     args = parser.parse_args()
 
@@ -110,7 +210,7 @@ if __name__ == "__main__":
 
     model = WorldModel(
         args.model,
-        in_channels=IN_CHANNELS,
+        in_channels=in_channels,
         hidden_dim=args.hidden_dim,
         n_layers=args.n_layers,
         dropout=args.dropout,
@@ -131,7 +231,7 @@ if __name__ == "__main__":
     loss_i = nn.BCEWithLogitsLoss(pos_weight=pw_i)
     loss_f = nn.BCEWithLogitsLoss(pos_weight=pw_f)
 
-    Path(args.ckpt_dir).mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.ckpt_dir, exist_ok=True)
     ckpt = Path(args.ckpt_dir) / f"wm_{args.model}_{diffusion_model}.pt"
     best, bad = -1.0, 0
 
@@ -150,7 +250,8 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
 
-            progress_bar.set_postfix(loss=f"{loss.item():.4f}")
+            loss_value = loss.item()
+            progress_bar.set_postfix(loss=f"{loss_value:.6f}")
 
         val = evaluate_one_step(model, validation_dataset, diffusion_model, device)
 
@@ -191,6 +292,7 @@ if __name__ == "__main__":
     out = args.results or str(
         Path(args.ckpt_dir) / f"results_{args.model}_{diffusion_model}.json"
     )
+    os.makedirs(Path(out).parent, exist_ok=True)
     Path(out).write_text(json.dumps(results, indent=2, default=str))
 
     print(

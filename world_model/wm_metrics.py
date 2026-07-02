@@ -27,7 +27,7 @@ def new_infection_f1(
     infected_t: np.ndarray,
 ) -> float:
     # Restrict to nodes that were susceptible (not yet infected) at time t, and then predict the binary F1
-    susceptible = infected_t.astype(bool) == False
+    susceptible = ~infected_t.astype(bool)
     return binary_f1(
         pred_inf.astype(bool) & susceptible, y_inf.astype(bool) & susceptible
     )

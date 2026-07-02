@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.model_utils import degree_encoding
+from world_model.model.model_utils import degree_encoding
 
 
 class GCNIILayer(nn.Module):
@@ -152,7 +152,7 @@ class GCNIIForwardModel(nn.Module):
         for layer in self.layers:
             h = layer(h, h0, adj)  # shape: (N, H)
 
-        out = F.sigmoid(self.output_proj(h))  # shape: (N, 1)
+        out = torch.sigmoid(self.output_proj(h))  # shape: (N, 1)
         return out
 
 
@@ -170,7 +170,7 @@ class GCNIIEncoder(nn.Module):
         alpha: float = 0.1,
         lamda: float = 0.5,
         dropout: float = 0.1,
-        **_
+        **_,
     ) -> None:
         super().__init__()
 

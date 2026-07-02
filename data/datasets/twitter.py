@@ -14,27 +14,28 @@ Source: https://snap.stanford.edu/data/ego-Twitter.html
 
 import gzip
 import urllib.request
+import os
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
 
-TWITTER_URL = "https://snap.stanford.edu/data/twitter_combined.txt.gz"
-DATA_DIR = Path(__file__).resolve().parent.parent / "twitter"
+twitter_url = "https://snap.stanford.edu/data/twitter_combined.txt.gz"
+data_dir = Path(__file__).resolve().parent.parent / "twitter"
 
 
 def download_twitter() -> Path:
     """Download and extract Twitter edge list if not already present."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    gz_path = DATA_DIR / "twitter_combined.txt.gz"
-    txt_path = DATA_DIR / "twitter_combined.txt"
+    os.makedirs(data_dir, exist_ok=True)
+    gz_path = data_dir / "twitter_combined.txt.gz"
+    txt_path = data_dir / "twitter_combined.txt"
 
     if txt_path.exists():
         print(f"[✓] Twitter already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading Twitter from {TWITTER_URL} ...")
-        urllib.request.urlretrieve(TWITTER_URL, gz_path)
+        print(f"[↓] Downloading Twitter from {twitter_url} ...")
+        urllib.request.urlretrieve(twitter_url, gz_path)
         print(f"[✓] Saved to {gz_path}")
 
     print("[↓] Extracting ...")

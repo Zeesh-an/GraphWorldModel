@@ -10,10 +10,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from coding_agent.agent import CodingAgent, TODOProvider
-from coding_agent.config import ExperimentConfig
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
@@ -21,8 +23,28 @@ from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
 from coding_agent.types import GraphInfo, TaskSpec
 
-WORLD_MODEL = "world_model"
-MONTE_CARLO = "monte_carlo"
+world_model = "world_model"
+monte_carlo = "monte_carlo"
+
+
+@dataclass
+class ExperimentConfig:
+    method: str = "one_shot"  # one_shot | per_step | windowed
+    evaluator: str = "world_model"  # world_model | monte_carlo
+    diffusion_model: str = "IC"  # IC | LT
+    budget: int = 5
+    horizon: int = 10
+    windows: int = 3
+    outer_iters: int = 3
+    mc_runs: int = 30
+    n_samples: int = 20
+    seed: int = 42
+    device: str = "cpu"
+    data_dir: str | None = None  # world_model.wm_data graph store dir
+    graph_id: str | None = None  # which graph in the store (default: first)
+    wm_results_json: str | None = None  # train_wm.py results JSON (for the WM env)
+    compare: bool = False  # also evaluate the winning strategy on the MC baseline
+    out_json: str | None = None
 
 
 class _CannedProvider:
@@ -47,21 +69,21 @@ def build_method(name: str) -> OuterLoopMethod:
 
 def _load_graph(cfg: ExperimentConfig) -> GraphInfo:
     if cfg.data_dir is None:
-        raise ValueError("config.data_dir is required unless a graph is passed directly")
-    import sys
+        raise ValueError(
+            "config.data_dir is required unless a graph is passed directly"
+        )
 
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "world_model"))
-    from wm_data import load_graph_store
+    from world_model.wm_data import load_graph_store
 
     store = load_graph_store(cfg.data_dir)
     gid = cfg.graph_id or next(iter(store))
     return GraphInfo.from_store_entry(store[gid])
 
 
-def _build_env(cfg: ExperimentConfig, g: GraphInfo):
-    if cfg.evaluator == MONTE_CARLO:
+def _build_env(cfg: ExperimentConfig, g: GraphInfo) -> object:
+    if cfg.evaluator == monte_carlo:
         return MonteCarloEnvironment(g, cfg.diffusion_model, mc_runs=cfg.mc_runs)
-    if cfg.evaluator == WORLD_MODEL:
+    if cfg.evaluator == world_model:
         from coding_agent.envs.world_model_env import WorldModelEnvironment
 
         if cfg.wm_results_json is None:
@@ -70,6 +92,14 @@ def _build_env(cfg: ExperimentConfig, g: GraphInfo):
             cfg.wm_results_json, g, device=cfg.device, n_samples=cfg.n_samples
         )
     raise ValueError(f"unknown evaluator {cfg.evaluator!r}")
+
+
+def _planned_action(plan: list[list], state: object, t: int) -> list:
+    return plan[t] if plan and t < len(plan) else []
+
+
+def _strategy_action(strategy: object, graph: GraphInfo, state: object, t: int) -> list:
+    return strategy.act(state, graph, t)
 
 
 def run_experiment(
@@ -100,49 +130,131 @@ def run_experiment(
         "cost": trajectory.cost,
     }
 
-    if cfg.compare and cfg.evaluator == WORLD_MODEL:
+    if cfg.compare and cfg.evaluator == world_model:
         mc_env = MonteCarloEnvironment(g, cfg.diffusion_model, mc_runs=cfg.mc_runs)
-        plan = strategy.plan_horizon(g, cfg.budget, cfg.horizon) \
-            if hasattr(strategy, "plan_horizon") else None
+        plan = (
+            strategy.plan_horizon(g, cfg.budget, cfg.horizon)
+            if hasattr(strategy, "plan_horizon")
+            else None
+        )
         action_fn = (
-            (lambda s, t, _p=plan: _p[t] if _p and t < len(_p) else [])
+            partial(_planned_action, plan)
             if plan is not None
-            else (lambda s, t: strategy.act(s, g, t))
+            else partial(_strategy_action, strategy, g)
         )
         mc_tr = mc_env.rollout(action_fn, cfg.horizon, cfg.budget)
         result["mc_reward"] = mc_tr.reward
         result["wm_minus_mc"] = trajectory.reward - mc_tr.reward
 
     if cfg.out_json:
+        os.makedirs(Path(cfg.out_json).parent, exist_ok=True)
         Path(cfg.out_json).write_text(json.dumps(result, indent=2, default=str))
     return result
 
 
 def _parse_args() -> ExperimentConfig:
-    p = argparse.ArgumentParser(description="Coding-agent outer loop over the world model")
-    p.add_argument("--method", default="one_shot", choices=["one_shot", "per_step", "windowed"])
-    p.add_argument("--evaluator", default="world_model", choices=["world_model", "monte_carlo"])
-    p.add_argument("--diffusion-model", default="IC", choices=["IC", "LT"])
-    p.add_argument("--budget", type=int, default=5)
-    p.add_argument("--horizon", type=int, default=10)
-    p.add_argument("--windows", type=int, default=3)
-    p.add_argument("--outer-iters", type=int, default=3)
-    p.add_argument("--mc-runs", type=int, default=30)
-    p.add_argument("--n-samples", type=int, default=20)
-    p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--device", default="cpu")
-    p.add_argument("--data-dir", default=None)
-    p.add_argument("--graph-id", default=None)
-    p.add_argument("--wm-results-json", default=None)
-    p.add_argument("--compare", action="store_true")
-    p.add_argument("--out-json", default=None)
+    p = argparse.ArgumentParser(
+        description="Coding-agent outer loop over the world model"
+    )
+    p.add_argument(
+        "--method",
+        type=str,
+        default="one_shot",
+        choices=["one_shot", "per_step", "windowed"],
+        help="outer-loop method (default: one_shot).",
+    )
+    p.add_argument(
+        "--evaluator",
+        type=str,
+        default="world_model",
+        choices=["world_model", "monte_carlo"],
+        help="inner-loop evaluator (default: world_model).",
+    )
+    p.add_argument(
+        "--diffusion-model",
+        type=str,
+        default="IC",
+        choices=["IC", "LT"],
+        help="diffusion dynamics (default: IC).",
+    )
+    p.add_argument(
+        "--budget", type=int, default=5, help="seed/action budget (default: 5)."
+    )
+    p.add_argument(
+        "--horizon", type=int, default=10, help="rollout horizon (default: 10)."
+    )
+    p.add_argument(
+        "--windows",
+        type=int,
+        default=3,
+        help="number of windows for windowed method (default: 3).",
+    )
+    p.add_argument(
+        "--outer-iters",
+        type=int,
+        default=3,
+        help="outer refinement iterations (default: 3).",
+    )
+    p.add_argument(
+        "--mc-runs",
+        type=int,
+        default=30,
+        help="Monte Carlo simulator runs (default: 30).",
+    )
+    p.add_argument(
+        "--n-samples",
+        type=int,
+        default=20,
+        help="world-model rollout samples (default: 20).",
+    )
+    p.add_argument("--seed", type=int, default=42, help="random seed (default: 42).")
+    p.add_argument(
+        "--device", type=str, default="cpu", help="torch device string (default: cpu)."
+    )
+    p.add_argument(
+        "--data-dir",
+        type=str,
+        default=None,
+        help="generated data directory (default: None).",
+    )
+    p.add_argument(
+        "--graph-id",
+        type=str,
+        default=None,
+        help="graph id inside the graph store (default: None).",
+    )
+    p.add_argument(
+        "--wm-results-json",
+        type=str,
+        default=None,
+        help="world-model results JSON path (default: None).",
+    )
+    p.add_argument(
+        "--compare",
+        action="store_true",
+        help="also evaluate the final strategy on Monte Carlo (default: False).",
+    )
+    p.add_argument(
+        "--out-json", type=str, default=None, help="output JSON path (default: None)."
+    )
     a = p.parse_args()
     return ExperimentConfig(
-        method=a.method, evaluator=a.evaluator, diffusion_model=a.diffusion_model,
-        budget=a.budget, horizon=a.horizon, windows=a.windows, outer_iters=a.outer_iters,
-        mc_runs=a.mc_runs, n_samples=a.n_samples, seed=a.seed, device=a.device,
-        data_dir=a.data_dir, graph_id=a.graph_id, wm_results_json=a.wm_results_json,
-        compare=a.compare, out_json=a.out_json,
+        method=a.method,
+        evaluator=a.evaluator,
+        diffusion_model=a.diffusion_model,
+        budget=a.budget,
+        horizon=a.horizon,
+        windows=a.windows,
+        outer_iters=a.outer_iters,
+        mc_runs=a.mc_runs,
+        n_samples=a.n_samples,
+        seed=a.seed,
+        device=a.device,
+        data_dir=a.data_dir,
+        graph_id=a.graph_id,
+        wm_results_json=a.wm_results_json,
+        compare=a.compare,
+        out_json=a.out_json,
     )
 
 

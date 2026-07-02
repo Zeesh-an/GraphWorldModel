@@ -265,16 +265,16 @@ def print_dataset_stats(seed_sets, spreads, spread_stds, cascades, model):
     N = cascades[0].shape[1]
     avg_T = np.mean([c.shape[0] for c in cascades])
 
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Dataset stats [{model}]")
-    print(f"{'='*50}")
+    print(f"{'=' * 50}")
     print(f"  Samples        : {S}")
     print(f"  Seed size (k)  : {k}")
     print(f"  Nodes (N)      : {N}")
     print(f"  Spread mean    : {spreads.mean():.1f} ± {spreads.std():.1f}")
     print(f"  Spread range   : [{spreads.min():.0f}, {spreads.max():.0f}]")
     print(f"  Avg cascade len: {avg_T:.1f} timesteps")
-    print(f"  Avg density    : {spreads.mean()/N*100:.1f}% of graph reached")
+    print(f"  Avg density    : {spreads.mean() / N * 100:.1f}% of graph reached")
 
 
 def load_dataset(dataset: str) -> tuple:

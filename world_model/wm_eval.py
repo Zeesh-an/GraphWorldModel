@@ -1,7 +1,6 @@
 """One-step eval, action-specific metrics, free-running rollout, planning."""
 
 import json
-import sys
 from pathlib import Path
 from collections import defaultdict
 import networkx as nx
@@ -9,23 +8,28 @@ import numpy as np
 import torch
 from scipy.stats import wasserstein_distance
 
-from wm_data import (
+from world_model.wm_data import (
     TransitionDataset,
-    collate_transitions,
     build_features,
     build_graph_input,
-    reconstruct_episode_adjacency,
+    ch_frontier,
+    ch_infected,
+    collate_transitions,
     edges_to_arrays,
-    CH_INFECTED,
-    CH_FRONTIER,
+    reconstruct_episode_adjacency,
 )
-from wm_metrics import score_predictions, persistence_baseline, binary_f1, brier_score
+from world_model.wm_metrics import (
+    binary_f1,
+    brier_score,
+    persistence_baseline,
+    score_predictions,
+)
 
-_ROOT_DIR = str(Path(__file__).resolve().parent.parent)
-if _ROOT_DIR not in sys.path:
-    sys.path.insert(0, _ROOT_DIR)
+from data.wm_simulator import ActionOp, Simulator
 
-from data.wm_simulator import Simulator, ActionOp
+
+def _cat_arrays(xs: list[np.ndarray]) -> np.ndarray:
+    return np.concatenate(xs) if xs else np.zeros(0)
 
 
 @torch.inference_mode()
@@ -69,10 +73,10 @@ def evaluate_one_step(
         yf = item["y_fr"].numpy()
         Y_fr.append(yf)
 
-        it = item["X"][:, CH_INFECTED].numpy()
+        it = item["X"][:, ch_infected].numpy()
         I_t.append(it)
 
-        ft = item["X"][:, CH_FRONTIER].numpy()
+        ft = item["X"][:, ch_frontier].numpy()
         F_t.append(ft)
 
         r = item["record"]
@@ -94,15 +98,20 @@ def evaluate_one_step(
         )
         sens[skey][akey] = tuple(pi.tolist())
 
-    cat = lambda xs: np.concatenate(xs) if xs else np.zeros(0)
-
     # Targets are soft marginals: threshold at 0.5 for the binary F1/accuracy suite,
     # keep the raw probabilities + soft targets for Brier (calibration vs the marginal).
-    Yi, Yf, It, Ft = cat(Y_inf), cat(Y_fr), cat(I_t), cat(F_t)
+    Yi, Yf, It, Ft = (
+        _cat_arrays(Y_inf),
+        _cat_arrays(Y_fr),
+        _cat_arrays(I_t),
+        _cat_arrays(F_t),
+    )
     Yi_bin = (Yi > 0.5).astype(np.float32)
     Yf_bin = (Yf > 0.5).astype(np.float32)
 
-    out = score_predictions(cat(P_inf), cat(P_fr), Yi_bin, Yf_bin, It, Ft)
+    out = score_predictions(
+        _cat_arrays(P_inf), _cat_arrays(P_fr), Yi_bin, Yf_bin, It, Ft
+    )
     out["add_seed_success"] = add_hits / add_tot if add_tot else float("nan")
     out["remove_frontier_success"] = rem_hits / rem_tot if rem_tot else float("nan")
 
@@ -110,8 +119,8 @@ def evaluate_one_step(
     diffs = [len(set(d.values())) - 1 for d in sens.values() if len(d) >= 2]
     out["action_sensitivity"] = float(np.mean(diffs)) if diffs else 0.0
 
-    out["brier_infected"] = brier_score(cat(PR_inf), Yi)
-    out["brier_frontier"] = brier_score(cat(PR_fr), Yf)
+    out["brier_infected"] = brier_score(_cat_arrays(PR_inf), Yi)
+    out["brier_frontier"] = brier_score(_cat_arrays(PR_fr), Yf)
 
     out["persistence"] = persistence_baseline(Yi_bin, Yf_bin, It, Ft)
     out["persistence"]["brier_infected"] = brier_score(It, Yi)
@@ -142,7 +151,7 @@ def rollout_episodes(
     - rollout_final_f1: F1 between rolled-out final state and true final state
     """
     path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
-    recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    recs = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
     # Keep only main-branch records; group by (graph_id, episode_id).
     by_ep = defaultdict(list)
@@ -254,7 +263,7 @@ def rollout_ensemble(
     """
     rng = np.random.default_rng(seed)
     path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
-    recs = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    recs = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
     by_ep = defaultdict(list)
     for r in recs:
@@ -263,7 +272,10 @@ def rollout_ensemble(
 
     ep_keys = list(by_ep)
     if max_episodes and len(ep_keys) > max_episodes:
-        ep_keys = [ep_keys[i] for i in rng.choice(len(ep_keys), size=max_episodes, replace=False)]
+        ep_keys = [
+            ep_keys[i]
+            for i in rng.choice(len(ep_keys), size=max_episodes, replace=False)
+        ]
 
     model.eval()
     marg_mae, count_w1, count_bias = [], [], []
@@ -294,12 +306,17 @@ def rollout_ensemble(
             for ti, r in enumerate(ers):
                 ei, w = edges_to_arrays(adj_map[(r["t"], "main")])
                 rolled = dict(r)
-                rolled["state"] = {"infected": sorted(cur_inf), "frontier": sorted(cur_fr)}
+                rolled["state"] = {
+                    "infected": sorted(cur_inf),
+                    "frontier": sorted(cur_fr),
+                }
                 X, _, _ = build_features(rolled, ei, n)
                 gi = build_graph_input(ei, w, n, diffusion_model, device)
 
                 prob = (
-                    torch.sigmoid(model(torch.from_numpy(X).to(device), gi)).cpu().numpy()
+                    torch.sigmoid(model(torch.from_numpy(X).to(device), gi))
+                    .cpu()
+                    .numpy()
                 )
                 draw_inf = rng.random(n) < prob[:, 0]
                 draw_fr = rng.random(n) < prob[:, 1]
@@ -315,8 +332,12 @@ def rollout_ensemble(
         model_counts = model_inf.sum(axis=2)  # (n_samples, T)
         true_counts = true_inf.sum(axis=2)
         for ti in range(T):
-            count_w1.append(wasserstein_distance(model_counts[:, ti], true_counts[:, ti]))
-            count_bias.append(float(model_counts[:, ti].mean() - true_counts[:, ti].mean()))
+            count_w1.append(
+                wasserstein_distance(model_counts[:, ti], true_counts[:, ti])
+            )
+            count_bias.append(
+                float(model_counts[:, ti].mean() - true_counts[:, ti].mean())
+            )
 
         final_model_counts.append(float(model_counts[:, -1].mean()))
         final_true_counts.append(float(true_counts[:, -1].mean()))
@@ -325,8 +346,12 @@ def rollout_ensemble(
         "ens_marg_mae": float(np.mean(marg_mae)) if marg_mae else 0.0,
         "ens_count_w1": float(np.mean(count_w1)) if count_w1 else 0.0,
         "ens_count_bias": float(np.mean(count_bias)) if count_bias else 0.0,
-        "ens_final_count_model": float(np.mean(final_model_counts)) if final_model_counts else 0.0,
-        "ens_final_count_true": float(np.mean(final_true_counts)) if final_true_counts else 0.0,
+        "ens_final_count_model": float(np.mean(final_model_counts))
+        if final_model_counts
+        else 0.0,
+        "ens_final_count_true": float(np.mean(final_true_counts))
+        if final_true_counts
+        else 0.0,
         "ens_n_samples": float(n_samples),
         "ens_n_episodes": float(len(ep_keys)),
     }

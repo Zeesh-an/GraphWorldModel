@@ -18,7 +18,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.model_utils import degree_encoding
+from world_model.model.model_utils import degree_encoding
 
 
 class GraphSAGELayer(nn.Module):
@@ -161,7 +161,7 @@ class GraphSAGEForwardModel(nn.Module):
         for layer in self.layers:
             x = layer(x, edge_index)  # shape: (N, H)
 
-        out = F.sigmoid(self.output_proj(x))  # shape: (N, 1)
+        out = torch.sigmoid(self.output_proj(x))  # shape: (N, 1)
         return out
 
 
@@ -177,7 +177,7 @@ class GraphSAGEEncoder(nn.Module):
         hidden_dim: int = 64,
         n_layers: int = 3,
         dropout: float = 0.1,
-        **_
+        **_,
     ) -> None:
         super().__init__()
 

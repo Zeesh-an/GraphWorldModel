@@ -9,8 +9,9 @@ sandbox. Do not run untrusted scripts from outside the agent loop.
 
 import traceback
 
-from coding_agent.types import Action, GraphInfo, State, Strategy, VALID_ACTION_OPS
 from coding_agent.tools import algorithms, primitives
+from coding_agent.types import Action, GraphInfo, State, Strategy
+from data.wm_simulator import valid_action_ops
 
 
 class StrategyError(RuntimeError):
@@ -64,9 +65,9 @@ def validate_actions(bag: list, num_nodes: int, budget: int) -> None:
     """Raise StrategyError if an action bag references invalid nodes, uses an unknown op, or exceeds budget."""
     n_add = 0
     for a in bag:
-        if a.op not in VALID_ACTION_OPS:
+        if a.op not in valid_action_ops:
             raise StrategyError(
-                f"action op '{a.op}' is not valid; must be one of {VALID_ACTION_OPS}."
+                f"action op '{a.op}' is not valid; must be one of {valid_action_ops}."
             )
         if not (0 <= int(a.target) < num_nodes):
             raise StrategyError(

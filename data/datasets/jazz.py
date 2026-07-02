@@ -15,33 +15,34 @@ Original paper: Gleiser & Danon, "Community Structure in Jazz",
 
 import zipfile
 import urllib.request
+import os
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
 
-JAZZ_URL = "https://nrvis.com/download/data/misc/arenas-jazz.zip"
-DATA_DIR = Path(__file__).resolve().parent.parent / "jazz"
+jazz_url = "https://nrvis.com/download/data/misc/arenas-jazz.zip"
+data_dir = Path(__file__).resolve().parent.parent / "jazz"
 
 
 def download_jazz() -> Path:
     """Download and extract Jazz dataset if not already present."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    zip_path = DATA_DIR / "arenas-jazz.zip"
-    edges_path = DATA_DIR / "arenas-jazz.edges"
+    os.makedirs(data_dir, exist_ok=True)
+    zip_path = data_dir / "arenas-jazz.zip"
+    edges_path = data_dir / "arenas-jazz.edges"
 
     if edges_path.exists():
         print(f"[✓] Jazz already downloaded at {edges_path}")
         return edges_path
 
     if not zip_path.exists():
-        print(f"[↓] Downloading Jazz from {JAZZ_URL} ...")
-        urllib.request.urlretrieve(JAZZ_URL, zip_path)
+        print(f"[↓] Downloading Jazz from {jazz_url} ...")
+        urllib.request.urlretrieve(jazz_url, zip_path)
         print(f"[✓] Saved to {zip_path}")
 
     print("[↓] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(DATA_DIR)
-    print(f"[✓] Extracted to {DATA_DIR}")
+        zf.extractall(data_dir)
+    print(f"[✓] Extracted to {data_dir}")
 
     return edges_path
 

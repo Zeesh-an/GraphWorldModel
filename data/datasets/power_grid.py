@@ -15,33 +15,34 @@ Original paper: Watts & Strogatz, Nature 393, 440-442 (1998)
 
 import zipfile
 import urllib.request
+import os
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
 
-POWER_GRID_URL = "https://nrvis.com/download/data/misc/opsahl-powergrid.zip"
-DATA_DIR = Path(__file__).resolve().parent.parent / "power_grid"
+power_grid_url = "https://nrvis.com/download/data/misc/opsahl-powergrid.zip"
+data_dir = Path(__file__).resolve().parent.parent / "power_grid"
 
 
 def download_power_grid() -> Path:
     """Download and extract Power Grid dataset if not already present."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    zip_path = DATA_DIR / "opsahl-powergrid.zip"
-    edges_path = DATA_DIR / "opsahl-powergrid.edges"
+    os.makedirs(data_dir, exist_ok=True)
+    zip_path = data_dir / "opsahl-powergrid.zip"
+    edges_path = data_dir / "opsahl-powergrid.edges"
 
     if edges_path.exists():
         print(f"[✓] Power Grid already downloaded at {edges_path}")
         return edges_path
 
     if not zip_path.exists():
-        print(f"[↓] Downloading Power Grid from {POWER_GRID_URL} ...")
-        urllib.request.urlretrieve(POWER_GRID_URL, zip_path)
+        print(f"[↓] Downloading Power Grid from {power_grid_url} ...")
+        urllib.request.urlretrieve(power_grid_url, zip_path)
         print(f"[✓] Saved to {zip_path}")
 
     print("[↓] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(DATA_DIR)
-    print(f"[✓] Extracted to {DATA_DIR}")
+        zf.extractall(data_dir)
+    print(f"[✓] Extracted to {data_dir}")
 
     return edges_path
 

@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.model_utils import degree_encoding
+from world_model.model.model_utils import degree_encoding
 
 
 class GATLayer(nn.Module):
@@ -208,7 +208,7 @@ class GATForwardModel(nn.Module):
         for layer in self.layers:
             x = layer(x, edge_index)  # (N, hidden_dim)
 
-        out = F.sigmoid(self.output_proj(x))  # (N, 1)
+        out = torch.sigmoid(self.output_proj(x))  # (N, 1)
         return out
 
 
@@ -225,7 +225,7 @@ class GATEncoder(nn.Module):
         n_layers: int = 3,
         n_heads: int = 4,
         dropout: float = 0.1,
-        **_
+        **_,
     ) -> None:
         super().__init__()
 
@@ -252,7 +252,10 @@ class GATEncoder(nn.Module):
         loop = torch.arange(n, device=X.device)
         ei = torch.cat([graph.edge_index, torch.stack([loop, loop])], dim=1)
         w = torch.cat(
-            [graph.edge_weight, torch.ones(n, device=X.device, dtype=graph.edge_weight.dtype)]
+            [
+                graph.edge_weight,
+                torch.ones(n, device=X.device, dtype=graph.edge_weight.dtype),
+            ]
         )
         h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
         for layer in self.layers:

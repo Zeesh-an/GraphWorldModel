@@ -7,10 +7,10 @@ intermediate-step action injection and counterfactual candidate generation.
 import networkx as nx
 import numpy as np
 
-from wm_graphs import GraphBundle
-from wm_simulator import ActionOp, State, Simulator
+from data.wm_graphs import GraphBundle
+from data.wm_simulator import ActionOp, State, Simulator
 
-SPINE_ALGORITHMS = (
+spine_algorithms = (
     "random",
     "degree",
     "pagerank",
@@ -162,7 +162,7 @@ def select_seeds(
 
         return sorted(seeds)
 
-    raise ValueError(f"Unknown algorithm {algorithm}; choose from {SPINE_ALGORITHMS}")
+    raise ValueError(f"Unknown algorithm {algorithm}; choose from {spine_algorithms}")
 
 
 def _random_edge(
@@ -183,8 +183,9 @@ def _random_non_edge(
     # A few tries to land a missing edge
     # The graphs are sparse so this almost always hits
     for _ in range(10):
-        u, v = int(rng.integers(graph.number_of_nodes())), int(
-            rng.integers(graph.number_of_nodes())
+        u, v = (
+            int(rng.integers(graph.number_of_nodes())),
+            int(rng.integers(graph.number_of_nodes())),
         )
 
         if u != v and not graph.has_edge(u, v):

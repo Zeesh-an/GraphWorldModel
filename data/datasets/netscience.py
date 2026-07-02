@@ -16,35 +16,36 @@ Original paper: M. E. J. Newman, Phys. Rev. E 74, 036104 (2006)
 import csv
 import zipfile
 import urllib.request
+import os
 import numpy as np
 import scipy.sparse as sp
 from pathlib import Path
 
-NETSCIENCE_URL = "https://networks.skewed.de/net/netscience/files/netscience.csv.zip"
-DATA_DIR = Path(__file__).resolve().parent.parent / "netscience"
+netscience_url = "https://networks.skewed.de/net/netscience/files/netscience.csv.zip"
+data_dir = Path(__file__).resolve().parent.parent / "netscience"
 
 
 def download_netscience() -> Path:
     """Download and extract NetScience dataset if not already present."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    zip_path = DATA_DIR / "netscience.csv.zip"
-    edges_path = DATA_DIR / "edges.csv"
+    os.makedirs(data_dir, exist_ok=True)
+    zip_path = data_dir / "netscience.csv.zip"
+    edges_path = data_dir / "edges.csv"
 
     if edges_path.exists():
-        print(f"[✓] NetScience already downloaded at {DATA_DIR}")
-        return DATA_DIR
+        print(f"[✓] NetScience already downloaded at {data_dir}")
+        return data_dir
 
     if not zip_path.exists():
-        print(f"[↓] Downloading NetScience from {NETSCIENCE_URL} ...")
-        urllib.request.urlretrieve(NETSCIENCE_URL, zip_path)
+        print(f"[↓] Downloading NetScience from {netscience_url} ...")
+        urllib.request.urlretrieve(netscience_url, zip_path)
         print(f"[✓] Saved to {zip_path}")
 
     print("[↓] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(DATA_DIR)
-    print(f"[✓] Extracted to {DATA_DIR}")
+        zf.extractall(data_dir)
+    print(f"[✓] Extracted to {data_dir}")
 
-    return DATA_DIR
+    return data_dir
 
 
 def load_netscience(

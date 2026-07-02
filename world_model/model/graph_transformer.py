@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from model.model_utils import degree_encoding
+from world_model.model.model_utils import degree_encoding
 
 
 # Graph Transformer Layer
@@ -43,7 +43,9 @@ class GraphTransformerLayer(nn.Module):
     Pre-norm variant (norm before sublayer — more stable).
     """
 
-    def __init__(self, d_model: int, n_heads: int, ffn_dim: int, dropout: float = 0.1):
+    def __init__(
+        self, d_model: int, n_heads: int, ffn_dim: int, dropout: float = 0.1
+    ) -> None:
         super().__init__()
 
         assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
@@ -72,7 +74,7 @@ class GraphTransformerLayer(nn.Module):
 
         self._reset_parameters()
 
-    def _reset_parameters(self):
+    def _reset_parameters(self) -> None:
         for m in [self.Wq, self.Wk, self.Wv, self.Wo]:
             nn.init.xavier_uniform_(m.weight)
 
@@ -216,7 +218,6 @@ class GraphTransformerForwardModel(nn.Module):
         adj: sparse COO (N, N) or dense (N, N)
         returns: (N, 1) influence probabilities in [0, 1]
         """
-        N = seed_vec.shape[0]  # N = number of nodes
         device = seed_vec.device
 
         # Build edge_index from adj
@@ -236,7 +237,7 @@ class GraphTransformerForwardModel(nn.Module):
             x = layer(x, edge_index)
 
         # Output projection
-        out = F.sigmoid(self.output_proj(x))  # (N, 1)
+        out = torch.sigmoid(self.output_proj(x))  # (N, 1)
         # out = F.elu(self.output_proj(x))  # (N, 1)
 
         return out
@@ -256,7 +257,7 @@ class GraphTransformerEncoder(nn.Module):
         n_heads: int = 4,
         ffn_dim: int = 128,
         dropout: float = 0.1,
-        **_
+        **_,
     ) -> None:
         super().__init__()
         self.input_proj = nn.Linear(in_channels, hidden_dim)
@@ -284,7 +285,10 @@ class GraphTransformerEncoder(nn.Module):
         loop = torch.arange(n, device=X.device)
         ei = torch.cat([graph.edge_index, torch.stack([loop, loop])], dim=1)
         w = torch.cat(
-            [graph.edge_weight, torch.ones(n, device=X.device, dtype=graph.edge_weight.dtype)]
+            [
+                graph.edge_weight,
+                torch.ones(n, device=X.device, dtype=graph.edge_weight.dtype),
+            ]
         )
         h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
         for layer in self.layers:

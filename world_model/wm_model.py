@@ -4,14 +4,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from wm_data import CH_INFECTED, CH_FRONTIER, CH_ADD, CH_REMOVE
-from model.gcn import GCNEncoder
-from model.graphsage import GraphSAGEEncoder
-from model.gat import GATEncoder
-from model.graph_transformer import GraphTransformerEncoder
-from model.gcnii import GCNIIEncoder
+from world_model.wm_data import ch_add, ch_frontier, ch_infected, ch_remove
+from world_model.model.gcn import GCNEncoder
+from world_model.model.graphsage import GraphSAGEEncoder
+from world_model.model.gat import GATEncoder
+from world_model.model.graph_transformer import GraphTransformerEncoder
+from world_model.model.gcnii import GCNIIEncoder
 
-BACKBONES = {
+backbones = {
     "gcn": GCNEncoder,
     "sage": GraphSAGEEncoder,
     "gt": GraphTransformerEncoder,
@@ -62,9 +62,9 @@ class ICTransmissionHead(nn.Module):
         # Apply the exogenous action (T_exo) first: add_node -> infected + active spreader;
         # remove_node -> stays infected (IC) but drops out of the frontier. Edge actions
         # are already reflected in graph.edge_index / edge_weight.
-        infected = torch.clamp(X[:, CH_INFECTED] + X[:, CH_ADD], max=1.0)  # shape: (N,)
-        frontier = torch.clamp(X[:, CH_FRONTIER] + X[:, CH_ADD], max=1.0) * (
-            1.0 - X[:, CH_REMOVE]
+        infected = torch.clamp(X[:, ch_infected] + X[:, ch_add], max=1.0)  # shape: (N,)
+        frontier = torch.clamp(X[:, ch_frontier] + X[:, ch_add], max=1.0) * (
+            1.0 - X[:, ch_remove]
         )  # shape: (N,)
 
         ei, ew = graph.edge_index, graph.edge_weight
@@ -135,8 +135,8 @@ class LTThresholdHead(nn.Module):
 
         # Apply the exogenous action (T_exo): add_node -> active; remove_node -> susceptible
         # (LT remove resets the node to status 0, so it can re-activate).
-        active = torch.clamp(X[:, CH_INFECTED] + X[:, CH_ADD], max=1.0) * (
-            1.0 - X[:, CH_REMOVE]
+        active = torch.clamp(X[:, ch_infected] + X[:, ch_add], max=1.0) * (
+            1.0 - X[:, ch_remove]
         )  # shape: (N,)
 
         ei, ew = graph.edge_index, graph.edge_weight
@@ -180,19 +180,19 @@ class WorldModel(nn.Module):
         dropout: float = 0.1,
         head_type: str = "linear",
         diffusion_model: str = "IC",
-        **bb,
+        **bb: object,
     ) -> None:
         super().__init__()
 
-        if backbone not in BACKBONES:
+        if backbone not in backbones:
             raise ValueError(
-                f"unknown backbone {backbone}; choose from {list(BACKBONES)}"
+                f"unknown backbone {backbone}; choose from {list(backbones)}"
             )
 
         self.head_type = head_type
 
         # Encoder produces (N, hidden_dim) node embeddings
-        self.encoder = BACKBONES[backbone](
+        self.encoder = backbones[backbone](
             in_channels=in_channels,
             hidden_dim=hidden_dim,
             n_layers=n_layers,

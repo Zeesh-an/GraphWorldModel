@@ -116,7 +116,10 @@ if __name__ == "__main__":
         description="Validate generated WM transition data"
     )
     parser.add_argument(
-        "--dir", required=True, help="output dir produced by generate_wm_data"
+        "--dir",
+        type=str,
+        required=True,
+        help="output dir produced by generate_wm_data (default: required).",
     )
     args = parser.parse_args()
 

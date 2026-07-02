@@ -6,6 +6,7 @@ Common graph preprocessing functions used across inverse graph problem data gene
 
 import numpy as np
 import scipy.sparse as sp
+import os
 from pathlib import Path
 from collections import defaultdict
 
@@ -30,7 +31,6 @@ def build_edge_index(
     src = adj_coo.row.astype(np.int32)
     dst = adj_coo.col.astype(np.int32)
 
-    N = adj.shape[0]
     in_deg = np.array(adj.sum(axis=0)).flatten()  # (N,) in-degree
     in_deg = np.where(in_deg == 0, 1, in_deg)  # avoid divide-by-zero
 
@@ -84,7 +84,7 @@ def save_graph(
     node_feats: np.ndarray,
     node_labels: np.ndarray,
 ) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
+    os.makedirs(out_dir, exist_ok=True)
     out_path = out_dir / "graph_data.npz"
     np.savez_compressed(
         out_path,
@@ -99,7 +99,7 @@ def save_graph(
     return out_path
 
 
-def load_graph(data_dir: Path):
+def load_graph(data_dir: Path) -> dict:
     """Load graph data. Returns dict with numpy arrays."""
     d = np.load(data_dir / "graph_data.npz")
 

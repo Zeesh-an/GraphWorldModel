@@ -6,19 +6,29 @@ from __future__ import annotations
 
 import inspect
 
-from coding_agent.tools import algorithms as A
-from coding_agent.tools import primitives as P
+from coding_agent.tools import algorithms
+from coding_agent.tools import primitives
 
-ALGORITHM_NAMES = list(A.ALGORITHMS.keys())
+algorithm_names = list(algorithms.algorithms.keys())
 
 # Primitives we advertise to the agent (pure, safe to call).
-_PRIMITIVES = [
-    P.compute_degree, P.compute_out_degree, P.compute_weighted_degree,
-    P.get_top_degree_nodes, P.compute_pagerank, P.compute_centrality,
-    P.mc_simulate_spread, P.compute_marginal_gain, P.batch_reverse_sample,
-    P.ris_select, P.detect_communities, P.allocate_budget,
-    P.estimate_sample_size, P.sample_live_edge_graph, P.reachable_count,
-    P.path_influence_scores,
+primitives_list = [
+    primitives.compute_degree,
+    primitives.compute_out_degree,
+    primitives.compute_weighted_degree,
+    primitives.get_top_degree_nodes,
+    primitives.compute_pagerank,
+    primitives.compute_centrality,
+    primitives.mc_simulate_spread,
+    primitives.compute_marginal_gain,
+    primitives.batch_reverse_sample,
+    primitives.ris_select,
+    primitives.detect_communities,
+    primitives.allocate_budget,
+    primitives.estimate_sample_size,
+    primitives.sample_live_edge_graph,
+    primitives.reachable_count,
+    primitives.path_influence_scores,
 ]
 
 
@@ -31,8 +41,8 @@ def _sig_line(fn) -> str:
 
 def build_api_reference() -> str:
     """Return a formatted reference of named algorithms + primitives."""
-    algo_lines = [_sig_line(A.ALGORITHMS[name]) for name in ALGORITHM_NAMES]
-    prim_lines = [_sig_line(fn) for fn in _PRIMITIVES]
+    algo_lines = [_sig_line(algorithms.algorithms[name]) for name in algorithm_names]
+    prim_lines = [_sig_line(fn) for fn in primitives_list]
     return (
         "NAMED ALGORITHMS  (from coding_agent.tools.algorithms, imported as `algorithms`)\n"
         + "\n".join(algo_lines)

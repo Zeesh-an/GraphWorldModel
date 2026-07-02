@@ -11,9 +11,9 @@ import networkx as nx
 import numpy as np
 import scipy.sparse as sp
 
-from graph_utils import build_edge_index
+from data.graph_utils import build_edge_index
 
-REAL_DIRECTED = {
+real_directed = {
     "cora_ml": True,
     "digg": True,
     "twitter": True,
@@ -152,7 +152,7 @@ def make_real_bundle_from_arrays(
     uniform_p: float = 0.1,
 ) -> GraphBundle:
     """Build a GraphBundle from already-loaded dataset arrays (no download)."""
-    graph = adj_to_nx(adj, REAL_DIRECTED[dataset])
+    graph = adj_to_nx(adj, real_directed[dataset])
 
     return bundle_from_nx(
         dataset,

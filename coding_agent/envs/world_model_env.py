@@ -3,27 +3,22 @@ World-model environment: roll the trained transition model f_theta autoregressiv
 sampling the next state from its predicted marginals each step.
 """
 
-import sys
 from pathlib import Path
 import numpy as np
 import torch
-
-# world_model/ on path so its bare-name imports resolve.
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from world_model.wm_data import (
     apply_edge_ops,
     build_features,
     build_graph_input,
     edges_to_arrays,
+    in_channels,
 )
 from world_model.wm_model import WorldModel
 
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory
 
-_EDGE_OPS = ("add_edge", "remove_edge", "set_edge_weight")
+edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 
 
 class WorldModelEnvironment:
@@ -61,7 +56,7 @@ class WorldModelEnvironment:
         }
         model = WorldModel(
             cfg["model"],
-            in_channels=6,
+            in_channels=in_channels,
             hidden_dim=cfg["hidden_dim"],
             n_layers=cfg["n_layers"],
             dropout=cfg["dropout"],
@@ -96,7 +91,7 @@ class WorldModelEnvironment:
             actions.append(bag)
             # Apply edge ops to the running graph so the model sees the post-action graph.
             bag_dicts = [a.to_dict() for a in bag]
-            if any(d["op"] in _EDGE_OPS for d in bag_dicts):
+            if any(d["op"] in edge_ops for d in bag_dicts):
                 edges = apply_edge_ops(edges, bag_dicts)
             ei, w = edges_to_arrays(edges)
             record = {

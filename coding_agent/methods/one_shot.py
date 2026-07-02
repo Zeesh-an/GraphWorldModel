@@ -1,14 +1,20 @@
 """Method 1: one-shot super-algorithm with reward-driven skill refinement."""
 
+from functools import partial
+
 from coding_agent.agent import CodingAgent
 from coding_agent.executor import StrategyError, build_strategy, validate_actions
 from coding_agent.methods.base import summarize
 from coding_agent.prompts import (
-    SYSTEM_PROMPTS,
     build_feedback_prompt,
     build_user_prompt,
+    system_prompts,
 )
 from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
+
+
+def _planned_action(plan: list[list], state: object, t: int) -> list:
+    return plan[t] if t < len(plan) else []
 
 
 class OneShotSuperAlgorithm:
@@ -18,7 +24,7 @@ class OneShotSuperAlgorithm:
     def optimize(
         self, agent: CodingAgent, env, task: TaskSpec, g: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
-        system = SYSTEM_PROMPTS["one_shot"]
+        system = system_prompts["one_shot"]
         base_user = build_user_prompt("one_shot", task, g)
         user = base_user
         best: tuple[Strategy, Trajectory] | None = None
@@ -35,8 +41,8 @@ class OneShotSuperAlgorithm:
                     raise StrategyError(
                         f"plan adds {total_adds} seeds in total, exceeds budget {task.budget}"
                     )
-                # Default-arg capture avoids late-binding closure bug.
-                action_fn = lambda s, t, _p=plan: _p[t] if t < len(_p) else []
+                # Binding the plan once avoids a late-binding closure bug.
+                action_fn = partial(_planned_action, plan)
                 tr = env.rollout(action_fn, task.horizon, task.budget)
             except StrategyError as exc:
                 last_err = str(exc)

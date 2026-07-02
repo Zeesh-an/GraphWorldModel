@@ -1,5 +1,5 @@
 # coding_agent/tests/test_library_api.py
-from coding_agent.tools.library_api import build_api_reference, ALGORITHM_NAMES
+from coding_agent.tools.library_api import algorithm_names, build_api_reference
 
 
 def test_api_reference_lists_algorithms_and_primitives():
@@ -10,4 +10,4 @@ def test_api_reference_lists_algorithms_and_primitives():
 
 
 def test_algorithm_names_match_registry():
-    assert "celf" in ALGORITHM_NAMES and "high_degree" in ALGORITHM_NAMES
+    assert "celf" in algorithm_names and "high_degree" in algorithm_names

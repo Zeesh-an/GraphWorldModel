@@ -14,27 +14,50 @@ python world_model/eval_rollout_ensemble.py \
 
 import argparse
 import json
+import os
 from pathlib import Path
 import torch
 
-from wm_data import load_graph_store
-from wm_eval import rollout_ensemble
-from eval_planning import load_trained_model
-
+from world_model.eval_planning import load_trained_model
+from world_model.wm_data import load_graph_store
+from world_model.wm_eval import rollout_ensemble
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Sampled ensemble rollout vs true MC trajectory on a trained checkpoint (no retraining)"
     )
     parser.add_argument(
-        "--results", nargs="+", required=True, help="results JSONs written by train_wm.py"
+        "--results",
+        type=str,
+        nargs="+",
+        required=True,
+        help="results JSONs written by train_wm.py (default: required).",
     )
-    parser.add_argument("--n-samples", type=int, default=20)
-    parser.add_argument("--max-episodes", type=int, default=50)
-    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
-        "--device", default="cuda" if torch.cuda.is_available() else "cpu"
+        "--n-samples",
+        type=int,
+        default=20,
+        help="sampled rollouts per episode (default: 20).",
     )
+    parser.add_argument(
+        "--max-episodes",
+        type=int,
+        default=50,
+        help="maximum episodes to evaluate (default: 50).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=0,
+        help="random seed (default: 0).",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cpu",
+        help="torch device string (default: cpu).",
+    )
+
     args = parser.parse_args()
 
     device = torch.device(args.device)
@@ -61,6 +84,7 @@ if __name__ == "__main__":
         )
 
         results["rollout_ensemble"] = ens
+        os.makedirs(Path(path).parent, exist_ok=True)
         Path(path).write_text(json.dumps(results, indent=2, default=str))
 
         run = Path(path).stem

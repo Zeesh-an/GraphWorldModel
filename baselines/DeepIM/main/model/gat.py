@@ -1,7 +1,7 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 
 class GAT(nn.Module):
     def __init__(self, nfeat, nhid, nclass, dropout, alpha, nheads):
@@ -9,11 +9,16 @@ class GAT(nn.Module):
         super(GAT, self).__init__()
         self.dropout = dropout
 
-        self.attentions = [GraphAttentionLayer(nfeat, nhid, dropout=dropout, alpha=alpha, concat=True) for _ in range(nheads)]
+        self.attentions = [
+            GraphAttentionLayer(nfeat, nhid, dropout=dropout, alpha=alpha, concat=True)
+            for _ in range(nheads)
+        ]
         for i, attention in enumerate(self.attentions):
-            self.add_module('attention_{}'.format(i), attention)
+            self.add_module("attention_{}".format(i), attention)
 
-        self.out_att = GraphAttentionLayer(nhid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False)
+        self.out_att = GraphAttentionLayer(
+            nhid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False
+        )
 
     def forward(self, x, adj):
         x = F.dropout(x, self.dropout, training=self.training)
@@ -29,29 +34,28 @@ class SpGAT(nn.Module):
         super(SpGAT, self).__init__()
         self.dropout = dropout
 
-        self.attentions = [SpGraphAttentionLayer(nfeat, 
-                                                 nhid, 
-                                                 dropout=dropout, 
-                                                 alpha=alpha, 
-                                                 concat=True) for _ in range(nheads)]
-        
-        self.attentions1 = [SpGraphAttentionLayer(nhid * nheads, 
-                                                 nhid, 
-                                                 dropout=dropout, 
-                                                 alpha=alpha, 
-                                                 concat=True) for _ in range(nheads)]
-        for i, attention in enumerate(self.attentions):
-            self.add_module('attention_{}'.format(i), attention)
-            
-        for i, attention in enumerate(self.attentions1):
-            self.add_module('attention1_{}'.format(i), attention)
+        self.attentions = [
+            SpGraphAttentionLayer(
+                nfeat, nhid, dropout=dropout, alpha=alpha, concat=True
+            )
+            for _ in range(nheads)
+        ]
 
-        self.out_att = SpGraphAttentionLayer(nhid * nheads, 
-                                             nclass, 
-                                             dropout=dropout, 
-                                             alpha=alpha, 
-                                             concat=False)
-        
+        self.attentions1 = [
+            SpGraphAttentionLayer(
+                nhid * nheads, nhid, dropout=dropout, alpha=alpha, concat=True
+            )
+            for _ in range(nheads)
+        ]
+        for i, attention in enumerate(self.attentions):
+            self.add_module("attention_{}".format(i), attention)
+
+        for i, attention in enumerate(self.attentions1):
+            self.add_module("attention1_{}".format(i), attention)
+
+        self.out_att = SpGraphAttentionLayer(
+            nhid * nheads, nclass, dropout=dropout, alpha=alpha, concat=False
+        )
 
     def forward(self, x, adj):
         x = F.dropout(x, self.dropout, training=self.training)
@@ -65,6 +69,7 @@ class GraphAttentionLayer(nn.Module):
     """
     Simple GAT layer, similar to https://arxiv.org/abs/1710.10903
     """
+
     def __init__(self, in_features, out_features, dropout, alpha, concat=True):
         super(GraphAttentionLayer, self).__init__()
         self.dropout = dropout
@@ -75,16 +80,18 @@ class GraphAttentionLayer(nn.Module):
 
         self.W = nn.Parameter(torch.empty(size=(in_features, out_features)))
         nn.init.xavier_uniform_(self.W.data, gain=1.414)
-        self.a = nn.Parameter(torch.empty(size=(2*out_features, 1)))
+        self.a = nn.Parameter(torch.empty(size=(2 * out_features, 1)))
         nn.init.xavier_uniform_(self.a.data, gain=1.414)
 
         self.leakyrelu = nn.LeakyReLU(self.alpha)
 
     def forward(self, h, adj):
-        Wh = torch.mm(h, self.W) # h.shape: (N, in_features), Wh.shape: (N, out_features)
+        Wh = torch.mm(
+            h, self.W
+        )  # h.shape: (N, in_features), Wh.shape: (N, out_features)
         e = self._prepare_attentional_mechanism_input(Wh)
 
-        zero_vec = -9e15*torch.ones_like(e)
+        zero_vec = -9e15 * torch.ones_like(e)
         attention = torch.where(adj > 0, e, zero_vec)
         attention = F.softmax(attention, dim=1)
         attention = F.dropout(attention, self.dropout, training=self.training)
@@ -100,21 +107,29 @@ class GraphAttentionLayer(nn.Module):
         # self.a.shape (2 * out_feature, 1)
         # Wh1&2.shape (N, 1)
         # e.shape (N, N)
-        Wh1 = torch.matmul(Wh, self.a[:self.out_features, :])
-        Wh2 = torch.matmul(Wh, self.a[self.out_features:, :])
+        Wh1 = torch.matmul(Wh, self.a[: self.out_features, :])
+        Wh2 = torch.matmul(Wh, self.a[self.out_features :, :])
         # broadcast add
         e = Wh1 + Wh2.T
         return self.leakyrelu(e)
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
-    
-    
+        return (
+            self.__class__.__name__
+            + " ("
+            + str(self.in_features)
+            + " -> "
+            + str(self.out_features)
+            + ")"
+        )
+
+
 class SpecialSpmmFunction(torch.autograd.Function):
     """Special function for only sparse region backpropataion layer."""
+
     @staticmethod
     def forward(ctx, indices, values, shape, b):
-        assert indices.requires_grad == False
+        assert not indices.requires_grad
         a = torch.sparse_coo_tensor(indices, values, shape)
         ctx.save_for_backward(a, b)
         ctx.N = shape[0]
@@ -137,7 +152,7 @@ class SpecialSpmm(nn.Module):
     def forward(self, indices, values, shape, b):
         return SpecialSpmmFunction.apply(indices, values, shape, b)
 
-    
+
 class SpGraphAttentionLayer(nn.Module):
     """
     Sparse version GAT layer, similar to https://arxiv.org/abs/1710.10903
@@ -152,8 +167,8 @@ class SpGraphAttentionLayer(nn.Module):
 
         self.W = nn.Parameter(torch.zeros(size=(in_features, out_features)))
         nn.init.xavier_normal_(self.W.data, gain=1.414)
-                
-        self.a = nn.Parameter(torch.zeros(size=(1, 2*out_features)))
+
+        self.a = nn.Parameter(torch.zeros(size=(1, 2 * out_features)))
         nn.init.xavier_normal_(self.a.data, gain=1.414)
 
         self.dropout = nn.Dropout(dropout)
@@ -161,7 +176,7 @@ class SpGraphAttentionLayer(nn.Module):
         self.special_spmm = SpecialSpmm()
 
     def forward(self, input, adj):
-        dv = 'cuda' if input.is_cuda else 'cpu'
+        dv = "cuda" if input.is_cuda else "cpu"
 
         N = input.size()[0]
         if adj.layout == torch.sparse_coo:
@@ -181,7 +196,9 @@ class SpGraphAttentionLayer(nn.Module):
         assert not torch.isnan(edge_e).any()
         # edge_e: E
 
-        e_rowsum = self.special_spmm(edge, edge_e, torch.Size([N, N]), torch.ones(size=(N,1), device=dv))
+        e_rowsum = self.special_spmm(
+            edge, edge_e, torch.Size([N, N]), torch.ones(size=(N, 1), device=dv)
+        )
         # e_rowsum: N x 1
 
         edge_e = self.dropout(edge_e)
@@ -190,7 +207,7 @@ class SpGraphAttentionLayer(nn.Module):
         h_prime = self.special_spmm(edge, edge_e, torch.Size([N, N]), h)
         assert not torch.isnan(h_prime).any()
         # h_prime: N x out
-        
+
         h_prime = h_prime.div(e_rowsum)
         # h_prime: N x out
         assert not torch.isnan(h_prime).any()
@@ -203,4 +220,11 @@ class SpGraphAttentionLayer(nn.Module):
             return h_prime
 
     def __repr__(self):
-        return self.__class__.__name__ + ' (' + str(self.in_features) + ' -> ' + str(self.out_features) + ')'
+        return (
+            self.__class__.__name__
+            + " ("
+            + str(self.in_features)
+            + " -> "
+            + str(self.out_features)
+            + ")"
+        )

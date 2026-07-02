@@ -5,18 +5,13 @@ Reuses the canonical Action/State value types from the data simulator so the
 strategies, environments, and the trained world model all speak the same action vocabulary.
 """
 
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Callable, Protocol
 import numpy as np
 
-# Put the repo root on sys.path so `data.wm_simulator` imports cleanly.
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 from data.wm_simulator import ActionOp, State
+
+Action = ActionOp
 
 # action_fn(state, t) -> action bag for timestep t
 ActionFn = Callable[[State, int], list[ActionOp]]

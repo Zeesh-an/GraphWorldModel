@@ -1,7 +1,7 @@
 # coding_agent/tests/test_prompts.py
 import numpy as np
-from coding_agent.types import GraphInfo, TaskSpec, State
 from coding_agent import prompts
+from coding_agent.types import GraphInfo, TaskSpec
 
 
 def _g():
@@ -11,8 +11,8 @@ def _g():
 
 def test_system_prompts_exist_per_method():
     for m in ("one_shot", "per_step", "windowed"):
-        assert m in prompts.SYSTEM_PROMPTS
-        assert "Strategy" in prompts.SYSTEM_PROMPTS[m]
+        assert m in prompts.system_prompts
+        assert "Strategy" in prompts.system_prompts[m]
 
 
 def test_user_prompt_includes_graph_and_api():

@@ -34,7 +34,7 @@ Agent (LLM, TODO) → Python Strategy script → graph actions per t → Environ
 
 ```bash
 # Monte-Carlo baseline, canned strategy (no model needed) — via Python:
-python -c "from coding_agent.run import run_experiment; from coding_agent.config import ExperimentConfig; ..."
+python -c "from coding_agent.run import ExperimentConfig, run_experiment; ..."
 
 # World-model inner loop on a trained checkpoint:
 python -m coding_agent.run \

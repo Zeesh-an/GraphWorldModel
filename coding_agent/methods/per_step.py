@@ -2,7 +2,7 @@
 
 from coding_agent.agent import CodingAgent
 from coding_agent.executor import StrategyError, build_strategy
-from coding_agent.prompts import SYSTEM_PROMPTS, build_user_prompt
+from coding_agent.prompts import build_user_prompt, system_prompts
 from coding_agent.types import Action, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
 
@@ -10,7 +10,7 @@ class PerStepReprompt:
     def optimize(
         self, agent: CodingAgent, env, task: TaskSpec, g: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
-        system = SYSTEM_PROMPTS["per_step"]
+        system = system_prompts["per_step"]
         last_strat: Strategy | None = None
 
         def action_fn(state: State, t: int) -> list[Action]:
