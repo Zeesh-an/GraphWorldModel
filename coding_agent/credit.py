@@ -14,44 +14,46 @@ from functools import partial
 from coding_agent.types import Action, State
 
 
-def _planned_action(plan: list[list[Action]], state: State, t: int) -> list[Action]:
-    return plan[t] if t < len(plan) else []
+def planned_action(
+    plan: list[list[Action]], state: State, timestep: int
+) -> list[Action]:
+    return plan[timestep] if timestep < len(plan) else []
 
 
 def counterfactual_credit(
-    env: object,
+    environment: object,
     plan: list[list[Action]],
     horizon: int,
     budget: int,
     seed: int = 0,
 ) -> tuple[float, list[dict]]:
     """Return (base_reward, one credit entry per action in the plan)."""
-    base = env.rollout(
-        partial(_planned_action, plan), horizon, budget, seed=seed
+    base_reward = environment.rollout(
+        partial(planned_action, plan), horizon, budget, seed=seed
     ).reward
 
     entries = []
-    for t, bag in enumerate(plan[: horizon + 1]):
-        for i, action in enumerate(bag):
+    for timestep, bag in enumerate(plan[: horizon + 1]):
+        for action_index, action in enumerate(bag):
             # Same plan minus exactly this one action (bags shallow-copied so the
             # original plan is untouched).
-            ablated = [list(b) for b in plan]
-            del ablated[t][i]
-            r = env.rollout(
-                partial(_planned_action, ablated), horizon, budget, seed=seed
+            ablated = [list(action_bag) for action_bag in plan]
+            del ablated[timestep][action_index]
+            ablated_reward = environment.rollout(
+                partial(planned_action, ablated), horizon, budget, seed=seed
             ).reward
 
             entry = {
-                "t": int(t),
+                "t": int(timestep),
                 "op": action.op,
                 "target": int(action.target),
-                "delta": round(base - r, 3),
+                "delta": round(base_reward - ablated_reward, 3),
             }
             if action.destination is not None:
                 entry["destination"] = int(action.destination)
             entries.append(entry)
 
-    return base, entries
+    return base_reward, entries
 
 
 def format_credit_report(base_reward: float, entries: list[dict]) -> str:
@@ -62,10 +64,11 @@ def format_credit_report(base_reward: float, entries: list[dict]) -> str:
         f"Per-action counterfactual credit (base spread {base_reward:.2f}; "
         "delta = spread lost if that single action is removed; ~0 = wasted budget):"
     ]
-    for e in entries:
-        dest = f"->{e['destination']}" if "destination" in e else ""
+    for entry in entries:
+        destination = f"->{entry['destination']}" if "destination" in entry else ""
         lines.append(
-            f"  t={e['t']}: {e['op']}({e['target']}{dest})  delta={e['delta']:+.2f}"
+            f"  t={entry['t']}: {entry['op']}({entry['target']}{destination})  "
+            f"delta={entry['delta']:+.2f}"
         )
 
     return "\n".join(lines)

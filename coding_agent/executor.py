@@ -32,48 +32,53 @@ def _namespace() -> dict:
 
 
 def build_strategy(script: str) -> Strategy:
-    ns = _namespace()
+    namespace = _namespace()
     try:
         compiled = compile(script, "<agent_strategy>", "exec")
-        exec(compiled, ns)  # noqa: S102 — scaffold; see module docstring
-    except SyntaxError as exc:
-        raise StrategyError(f"SyntaxError in generated script: {exc}") from exc
-    except Exception as exc:  # noqa: BLE001 — surface any exec error to the agent
+        exec(compiled, namespace)  # noqa: S102 — scaffold; see module docstring
+    except SyntaxError as error:
+        raise StrategyError(f"SyntaxError in generated script: {error}") from error
+    except Exception as error:  # noqa: BLE001 — surface any exec error to the agent
         raise StrategyError(
-            f"Error executing generated script: {exc}\n{traceback.format_exc()}"
-        ) from exc
+            f"Error executing generated script: {error}\n{traceback.format_exc()}"
+        ) from error
 
     candidates = [
-        obj
-        for name, obj in ns.items()
-        if isinstance(obj, type)
+        value
+        for name, value in namespace.items()
+        if isinstance(value, type)
         and name != "Strategy"
-        and (hasattr(obj, "plan_horizon") or hasattr(obj, "act"))
+        and (hasattr(value, "plan_horizon") or hasattr(value, "act"))
     ]
     if not candidates:
         raise StrategyError(
             "No Strategy subclass with plan_horizon()/act() found in the script."
         )
-    strategy_cls = candidates[-1]
+
+    strategy_class = candidates[-1]
     try:
-        return strategy_cls()  # type: ignore[call-arg]
-    except Exception as exc:  # noqa: BLE001
-        raise StrategyError(f"Could not instantiate Strategy: {exc}") from exc
+        return strategy_class()  # type: ignore[call-arg]
+    except Exception as error:  # noqa: BLE001
+        raise StrategyError(f"Could not instantiate Strategy: {error}") from error
 
 
 def validate_actions(bag: list, num_nodes: int, budget: int) -> None:
     """Raise StrategyError if an action bag references invalid nodes, uses an unknown op, or exceeds budget."""
-    n_add = 0
-    for a in bag:
-        if a.op not in valid_action_ops:
+    num_adds = 0
+    for action in bag:
+        if action.op not in valid_action_ops:
             raise StrategyError(
-                f"action op '{a.op}' is not valid; must be one of {valid_action_ops}."
+                f"action op '{action.op}' is not valid; "
+                f"must be one of {valid_action_ops}."
             )
-        if not (0 <= int(a.target) < num_nodes):
+        if not (0 <= int(action.target) < num_nodes):
             raise StrategyError(
-                f"action targets node {a.target} out of range [0,{num_nodes})."
+                f"action targets node {action.target} out of range [0,{num_nodes})."
             )
-        if a.op == "add_node":
-            n_add += 1
-    if n_add > budget:
-        raise StrategyError(f"action bag adds {n_add} seeds, exceeds budget {budget}.")
+        if action.op == "add_node":
+            num_adds += 1
+
+    if num_adds > budget:
+        raise StrategyError(
+            f"action bag adds {num_adds} seeds, exceeds budget {budget}."
+        )

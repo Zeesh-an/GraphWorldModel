@@ -3,7 +3,11 @@
 from functools import partial
 
 from coding_agent.agent import CodingAgent
-from coding_agent.credit import counterfactual_credit, format_credit_report
+from coding_agent.credit import (
+    counterfactual_credit,
+    format_credit_report,
+    planned_action,
+)
 from coding_agent.executor import StrategyError, build_strategy, validate_actions
 from coding_agent.methods.base import summarize
 from coding_agent.prompts import (
@@ -14,67 +18,71 @@ from coding_agent.prompts import (
 from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
 
 
-def _planned_action(plan: list[list], state: object, t: int) -> list:
-    return plan[t] if t < len(plan) else []
-
-
 class OneShotSuperAlgorithm:
     def __init__(self, outer_iters: int = 3, credit: bool = False) -> None:
         self.outer_iters = outer_iters
         self.credit = credit
 
     def optimize(
-        self, agent: CodingAgent, env, task: TaskSpec, g: GraphInfo
+        self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
         system = system_prompts["one_shot"]
-        base_user = build_user_prompt("one_shot", task, g)
+        base_user = build_user_prompt("one_shot", task, graph)
         user = base_user
-        best: tuple[Strategy, Trajectory] | None = None
-        last_err: str | None = None
+        best = None
+        last_error = None
+
         for _ in range(self.outer_iters):
             try:
-                strat = build_strategy(agent.generate(system, user))
-                plan = strat.plan_horizon(g, task.budget, task.horizon)
+                strategy = build_strategy(agent.generate(system, user))
+                plan = strategy.plan_horizon(graph, task.budget, task.horizon)
                 total_adds = 0
 
                 for bag in plan:
-                    validate_actions(bag, g.num_nodes, task.budget)
-                    total_adds += sum(1 for a in bag if a.op == "add_node")
+                    validate_actions(bag, graph.num_nodes, task.budget)
+                    total_adds += sum(1 for action in bag if action.op == "add_node")
 
                 if total_adds > task.budget:
                     raise StrategyError(
-                        f"plan adds {total_adds} seeds in total, exceeds budget {task.budget}"
+                        f"plan adds {total_adds} seeds in total, "
+                        f"exceeds budget {task.budget}"
                     )
 
                 # Binding the plan once avoids a late-binding closure bug.
-                action_fn = partial(_planned_action, plan)
-                tr = env.rollout(action_fn, task.horizon, task.budget)
-            except StrategyError as exc:
-                last_err = str(exc)
+                action_fn = partial(planned_action, plan)
+                trajectory = environment.rollout(action_fn, task.horizon, task.budget)
+            except StrategyError as error:
+                last_error = str(error)
                 user = (
                     base_user
                     + "\n\n"
-                    + build_feedback_prompt(0.0, "script failed", error=last_err)
+                    + build_feedback_prompt(0.0, "script failed", error=last_error)
                 )
                 continue
-            if best is None or tr.reward > best[1].reward:
-                best = (strat, tr)
 
-            # Optional per-action counterfactual credit: costs one extra rollout per action, but turns the scalar reward into causal feedback
+            if best is None or trajectory.reward > best[1].reward:
+                best = (strategy, trajectory)
+
+            # Optional per-action counterfactual credit: costs one extra rollout per
+            # action, but turns the scalar reward into causal feedback.
             report = None
             if self.credit:
-                base, entries = counterfactual_credit(
-                    env, plan, task.horizon, task.budget
+                base_reward, entries = counterfactual_credit(
+                    environment, plan, task.horizon, task.budget
                 )
-                report = format_credit_report(base, entries)
+                report = format_credit_report(base_reward, entries)
 
             user = (
                 base_user
                 + "\n\n"
-                + build_feedback_prompt(tr.reward, summarize(tr), credit_report=report)
+                + build_feedback_prompt(
+                    trajectory.reward, summarize(trajectory), credit_report=report
+                )
             )
+
         if best is None:
             raise StrategyError(
-                f"all {self.outer_iters} attempts failed; last error: {last_err}"
+                f"all {self.outer_iters} attempts failed; last error: {last_error}"
             )
+
         return best

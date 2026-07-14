@@ -11,11 +11,11 @@ AVAILABLE NAMES (already imported into your script's namespace — do NOT import
 - `Action(op, target, destination=None, weight=None)` : a graph action. Ops:
     add_node, remove_node, add_edge, remove_edge, set_edge_weight.
 - `State` : has .infected (list[int]) and .frontier (list[int]).
-- `GraphInfo` : .num_nodes, .out_neighbors(v), .in_neighbors(v), .degree(v), .edge_index, .ic_probs.
+- `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node), .degree(node), .edge_index, .ic_probs.
 - `algorithms` and `primitives` modules (API below).
 
 ACTION RULES:
-- A seed is Action("add_node", v). Emit at most `budget` add_node actions in total.
+- A seed is Action("add_node", node). Emit at most `budget` add_node actions in total.
 - Node ids must be in [0, num_nodes).
 - You may also use remove_node / add_edge / remove_edge / set_edge_weight to steer the cascade.
 """
@@ -25,7 +25,7 @@ system_prompts = {
     + """\
 
 METHOD: ONE-SHOT SUPER-ALGORITHM.
-Implement `plan_horizon(self, g, budget, horizon) -> list[list[Action]]`.
+Implement `plan_horizon(self, graph, budget, horizon) -> list[list[Action]]`.
 Return a list of length (horizon+1): element t is the action bag applied at timestep t.
 This is your whole multi-timestep plan, decided up front. Classical algorithms only
 fill element 0 (the seed set) and leave the rest empty — go beyond that: schedule
@@ -35,7 +35,7 @@ interventions across t0..tT to maximize final spread.
     + """\
 
 METHOD: PER-STEP POLICY.
-Implement `act(self, state, g, t) -> list[Action]`.
+Implement `act(self, state, graph, timestep) -> list[Action]`.
 You are called once per timestep with the CURRENT state; return that step's action bag.
 React to which nodes are infected/frontier right now.
 """,
@@ -43,8 +43,8 @@ React to which nodes are infected/frontier right now.
     + """\
 
 METHOD: WINDOWED ONLINE ALGORITHM.
-Implement `act(self, state, g, t) -> list[Action]`.
-You are called once per time WINDOW with the current state and the window index t.
+Implement `act(self, state, graph, timestep) -> list[Action]`.
+You are called once per time WINDOW with the current state and the window index.
 Treat each call as solving a fresh IM sub-problem on the current state; you may reuse a
 classical algorithm (e.g. `algorithms.celf`) within each window.
 Note: for this windowed method the budget applies PER window call (you are invoked once per window).
@@ -52,7 +52,7 @@ Note: for this windowed method the budget applies PER window call (you are invok
 }
 
 
-def build_user_prompt(method: str, task: TaskSpec, g: GraphInfo) -> str:
+def build_user_prompt(method: str, task: TaskSpec, graph: GraphInfo) -> str:
     return f"""\
 TASK: {task.task} — {task.objective}
 diffusion_model = {task.diffusion_model}
@@ -60,9 +60,9 @@ budget = {task.budget}   (max seeds total)
 horizon = {task.horizon} (timesteps)
 
 GRAPH:
-num_nodes = {g.num_nodes}
-num_edges = {g.edge_index.shape[1]}
-directed = {g.directed}
+num_nodes = {graph.num_nodes}
+num_edges = {graph.edge_index.shape[1]}
+directed = {graph.directed}
 
 LIBRARY API:
 {build_api_reference()}
@@ -76,9 +76,9 @@ def build_feedback_prompt(
     error: str | None = None,
     credit_report: str | None = None,
 ) -> str:
-    err = f"\nThe previous script raised an error:\n{error}\n" if error else ""
-    credit = f"\n{credit_report}\n" if credit_report else ""
+    error_text = f"\nThe previous script raised an error:\n{error}\n" if error else ""
+    credit_text = f"\n{credit_report}\n" if credit_report else ""
     return f"""\
 Your previous strategy achieved final spread (reward) = {reward}.
-Trajectory summary: {summary}{err}{credit}
+Trajectory summary: {summary}{error_text}{credit_text}
 Revise the Strategy to increase final spread. Reply with one ```python block."""

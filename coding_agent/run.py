@@ -14,7 +14,7 @@ from functools import partial
 from pathlib import Path
 
 from coding_agent.agent import CodingAgent, TODOProvider
-from coding_agent.credit import counterfactual_credit
+from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
@@ -67,97 +67,112 @@ def build_method(name: str) -> OuterLoopMethod:
     raise ValueError(f"unknown method {name!r}; choose one_shot|per_step|windowed")
 
 
-def _load_graph(cfg: ExperimentConfig) -> GraphInfo:
-    if cfg.data_dir is None:
+def _load_graph(config: ExperimentConfig) -> GraphInfo:
+    if config.data_dir is None:
         raise ValueError(
             "config.data_dir is required unless a graph is passed directly"
         )
 
     from world_model.wm_data import load_graph_store
 
-    store = load_graph_store(cfg.data_dir)
-    gid = cfg.graph_id or next(iter(store))
-    return GraphInfo.from_store_entry(store[gid])
+    store = load_graph_store(config.data_dir)
+    graph_id = config.graph_id or next(iter(store))
+    return GraphInfo.from_store_entry(store[graph_id])
 
 
-def _build_env(cfg: ExperimentConfig, g: GraphInfo) -> object:
-    if cfg.evaluator == monte_carlo:
-        return MonteCarloEnvironment(g, cfg.diffusion_model, mc_runs=cfg.mc_runs)
-    if cfg.evaluator == world_model:
+def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
+    if config.evaluator == monte_carlo:
+        return MonteCarloEnvironment(
+            graph, config.diffusion_model, mc_runs=config.mc_runs
+        )
+    if config.evaluator == world_model:
         from coding_agent.envs.world_model_env import WorldModelEnvironment
 
-        if cfg.wm_results_json is None:
+        if config.wm_results_json is None:
             raise ValueError("evaluator=world_model requires config.wm_results_json")
         return WorldModelEnvironment.from_results_json(
-            cfg.wm_results_json, g, device=cfg.device, n_samples=cfg.n_samples
+            config.wm_results_json,
+            graph,
+            device=config.device,
+            n_samples=config.n_samples,
         )
-    raise ValueError(f"unknown evaluator {cfg.evaluator!r}")
+    raise ValueError(f"unknown evaluator {config.evaluator!r}")
 
 
-def _planned_action(plan: list[list], state: object, t: int) -> list:
-    return plan[t] if plan and t < len(plan) else []
-
-
-def _strategy_action(strategy: object, graph: GraphInfo, state: object, t: int) -> list:
-    return strategy.act(state, graph, t)
+def _strategy_action(
+    strategy: object, graph: GraphInfo, state: object, timestep: int
+) -> list:
+    return strategy.act(state, graph, timestep)
 
 
 def run_experiment(
-    cfg: ExperimentConfig,
+    config: ExperimentConfig,
     graph: GraphInfo | None = None,
     canned_script: str | None = None,
 ) -> dict:
-    g = graph if graph is not None else _load_graph(cfg)
-    env = _build_env(cfg, g)
+    if graph is None:
+        graph = _load_graph(config)
+
+    environment = _build_environment(config, graph)
     provider = _CannedProvider(canned_script) if canned_script else TODOProvider()
     agent = CodingAgent(provider)
     task = TaskSpec(
-        diffusion_model=cfg.diffusion_model, budget=cfg.budget, horizon=cfg.horizon
+        diffusion_model=config.diffusion_model,
+        budget=config.budget,
+        horizon=config.horizon,
     )
-    method = build_method(cfg.method)
-    if cfg.method == "windowed":
-        method = WindowedOnline(windows=cfg.windows)
-    if cfg.method == "one_shot":
-        method = OneShotSuperAlgorithm(outer_iters=cfg.outer_iters, credit=cfg.credit)
 
-    strategy, trajectory = method.optimize(agent, env, task, g)
+    method = build_method(config.method)
+    if config.method == "windowed":
+        method = WindowedOnline(windows=config.windows)
+    if config.method == "one_shot":
+        method = OneShotSuperAlgorithm(
+            outer_iters=config.outer_iters, credit=config.credit
+        )
+
+    strategy, trajectory = method.optimize(agent, environment, task, graph)
 
     result = {
-        "method": cfg.method,
-        "evaluator": cfg.evaluator,
+        "method": config.method,
+        "evaluator": config.evaluator,
         "reward": trajectory.reward,
         "summary": summarize(trajectory),
         "cost": trajectory.cost,
     }
 
-    if cfg.credit:
+    if config.credit:
         # Credit of the executed action sequence; for state-dependent strategies
         # (per_step/windowed) the recorded bags are replayed as a fixed plan.
-        base, entries = counterfactual_credit(
-            env, trajectory.actions, cfg.horizon, cfg.budget
+        base_reward, entries = counterfactual_credit(
+            environment, trajectory.actions, config.horizon, config.budget
         )
-        result["credit_base_reward"] = base
+        result["credit_base_reward"] = base_reward
         result["credit"] = entries
 
-    if cfg.compare and cfg.evaluator == world_model:
-        mc_env = MonteCarloEnvironment(g, cfg.diffusion_model, mc_runs=cfg.mc_runs)
+    if config.compare and config.evaluator == world_model:
+        mc_environment = MonteCarloEnvironment(
+            graph, config.diffusion_model, mc_runs=config.mc_runs
+        )
         plan = (
-            strategy.plan_horizon(g, cfg.budget, cfg.horizon)
+            strategy.plan_horizon(graph, config.budget, config.horizon)
             if hasattr(strategy, "plan_horizon")
             else None
         )
         action_fn = (
-            partial(_planned_action, plan)
+            partial(planned_action, plan)
             if plan is not None
-            else partial(_strategy_action, strategy, g)
+            else partial(_strategy_action, strategy, graph)
         )
-        mc_tr = mc_env.rollout(action_fn, cfg.horizon, cfg.budget)
-        result["mc_reward"] = mc_tr.reward
-        result["wm_minus_mc"] = trajectory.reward - mc_tr.reward
+        mc_trajectory = mc_environment.rollout(
+            action_fn, config.horizon, config.budget
+        )
+        result["mc_reward"] = mc_trajectory.reward
+        result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward
 
-    if cfg.out_json:
-        os.makedirs(Path(cfg.out_json).parent, exist_ok=True)
-        Path(cfg.out_json).write_text(json.dumps(result, indent=2, default=str))
+    if config.out_json:
+        os.makedirs(Path(config.out_json).parent, exist_ok=True)
+        Path(config.out_json).write_text(json.dumps(result, indent=2, default=str))
+
     return result
 
 
@@ -281,5 +296,5 @@ def _parse_args() -> ExperimentConfig:
 
 
 if __name__ == "__main__":
-    cfg = _parse_args()
-    print(json.dumps(run_experiment(cfg), indent=2, default=str))
+    config = _parse_args()
+    print(json.dumps(run_experiment(config), indent=2, default=str))

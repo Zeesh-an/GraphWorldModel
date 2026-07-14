@@ -4,9 +4,9 @@ injected into the coding-agent prompts so the model sees the exact callable surf
 """
 
 import inspect
+from typing import Callable
 
-from coding_agent.tools import algorithms
-from coding_agent.tools import primitives
+from coding_agent.tools import algorithms, primitives
 
 algorithm_names = list(algorithms.algorithms.keys())
 
@@ -31,21 +31,22 @@ primitives_list = [
 ]
 
 
-def _sig_line(fn) -> str:
-    sig = inspect.signature(fn)
-    doc = (fn.__doc__ or "").strip().splitlines()
-    summary = doc[0] if doc else ""
-    return f"  {fn.__name__}{sig}\n      {summary}"
+def _signature_line(function: Callable) -> str:
+    signature = inspect.signature(function)
+    doc_lines = (function.__doc__ or "").strip().splitlines()
+    summary = doc_lines[0] if doc_lines else ""
+    return f"  {function.__name__}{signature}\n      {summary}"
 
 
 def build_api_reference() -> str:
-    """Return a formatted reference of named algorithms + primitives."""
-    algo_lines = [_sig_line(algorithms.algorithms[name]) for name in algorithm_names]
-    prim_lines = [_sig_line(fn) for fn in primitives_list]
+    algorithm_lines = [
+        _signature_line(algorithms.algorithms[name]) for name in algorithm_names
+    ]
+    primitive_lines = [_signature_line(function) for function in primitives_list]
 
     return (
         "NAMED ALGORITHMS  (from coding_agent.tools.algorithms, imported as `algorithms`)\n"
-        + "\n".join(algo_lines)
+        + "\n".join(algorithm_lines)
         + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as `primitives`)\n"
-        + "\n".join(prim_lines)
+        + "\n".join(primitive_lines)
     )

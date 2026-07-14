@@ -8,20 +8,22 @@ from coding_agent.types import Action, GraphInfo, State, Strategy, TaskSpec, Tra
 
 class PerStepReprompt:
     def optimize(
-        self, agent: CodingAgent, env, task: TaskSpec, g: GraphInfo
+        self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
         system = system_prompts["per_step"]
-        last_strat: Strategy | None = None
+        last_strategy = None
 
-        def action_fn(state: State, t: int) -> list[Action]:
-            nonlocal last_strat
-            user = build_user_prompt("per_step", task, g) + (
-                f"\n\nCURRENT STATE (t={t}): infected={state.infected}, frontier={state.frontier}"
+        def action_fn(state: State, timestep: int) -> list[Action]:
+            nonlocal last_strategy
+            user = build_user_prompt("per_step", task, graph) + (
+                f"\n\nCURRENT STATE (t={timestep}): "
+                f"infected={state.infected}, frontier={state.frontier}"
             )
-            last_strat = build_strategy(agent.generate(system, user))
-            return last_strat.act(state, g, t)
+            last_strategy = build_strategy(agent.generate(system, user))
+            return last_strategy.act(state, graph, timestep)
 
-        tr = env.rollout(action_fn, task.horizon, task.budget)
-        if last_strat is None:
+        trajectory = environment.rollout(action_fn, task.horizon, task.budget)
+        if last_strategy is None:
             raise StrategyError("per-step method produced no strategy")
-        return last_strat, tr
+
+        return last_strategy, trajectory

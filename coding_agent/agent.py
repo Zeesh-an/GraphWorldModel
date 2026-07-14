@@ -31,13 +31,13 @@ class TODOProvider:
 #     def complete(self, system: str, user: str) -> str: ...  # TODO
 
 
-_CODE_FENCE = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
+_code_fence = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
 
 
 def extract_code_block(text: str) -> str:
     """Pull the first fenced Python block; fall back to the stripped text."""
-    m = _CODE_FENCE.search(text)
-    return m.group(1).strip() if m else text.strip()
+    match = _code_fence.search(text)
+    return match.group(1).strip() if match else text.strip()
 
 
 class CodingAgent:

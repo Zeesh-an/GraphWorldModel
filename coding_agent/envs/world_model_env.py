@@ -3,6 +3,7 @@ World-model environment: roll the trained transition model f_theta autoregressiv
 sampling the next state from its predicted marginals each step.
 """
 
+import json
 from pathlib import Path
 import numpy as np
 import torch
@@ -15,7 +16,6 @@ from world_model.wm_data import (
     in_channels,
 )
 from world_model.wm_model import WorldModel
-
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
@@ -25,75 +25,90 @@ class WorldModelEnvironment:
     def __init__(
         self,
         model: torch.nn.Module,
-        g: GraphInfo,
+        graph: GraphInfo,
         diffusion_model: str,
         device: str = "cpu",
         n_samples: int = 20,
     ) -> None:
         self.model = model.to(device).eval()
-        self.g = g
+        self.graph = graph
         self.diffusion_model = diffusion_model
         self.device = torch.device(device)
         self.n_samples = n_samples
         self.base_edges = {
-            (int(g.edge_index[0, i]), int(g.edge_index[1, i])): float(g.ic_probs[i])
-            for i in range(g.edge_index.shape[1])
+            (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge])): float(
+                graph.ic_probs[edge]
+            )
+            for edge in range(graph.edge_index.shape[1])
         }
 
     @classmethod
     def from_results_json(
-        cls, results_json: str, g: GraphInfo, device: str = "cpu", n_samples: int = 20
+        cls,
+        results_json: str,
+        graph: GraphInfo,
+        device: str = "cpu",
+        n_samples: int = 20,
     ) -> "WorldModelEnvironment":
         """Rebuild a WorldModel from a train_wm.py results JSON config and load its checkpoint."""
-        import json
-
-        cfg = json.loads(Path(results_json).read_text())["config"]
-        bb = {
-            "n_heads": cfg["n_heads"],
-            "ffn_dim": cfg["ffn_dim"],
-            "alpha": cfg["gcnii_alpha"],
-            "lamda": cfg["gcnii_lamda"],
+        config = json.loads(Path(results_json).read_text())["config"]
+        backbone_kwargs = {
+            "n_heads": config["n_heads"],
+            "ffn_dim": config["ffn_dim"],
+            "alpha": config["gcnii_alpha"],
+            "lamda": config["gcnii_lamda"],
         }
         model = WorldModel(
-            cfg["model"],
+            config["model"],
             in_channels=in_channels,
-            hidden_dim=cfg["hidden_dim"],
-            n_layers=cfg["n_layers"],
-            dropout=cfg["dropout"],
-            head_type=cfg.get("head", "linear"),
-            diffusion_model=cfg["diffusion_model"],
-            **bb,
+            hidden_dim=config["hidden_dim"],
+            n_layers=config["n_layers"],
+            dropout=config["dropout"],
+            head_type=config.get("head", "linear"),
+            diffusion_model=config["diffusion_model"],
+            **backbone_kwargs,
         )
-        ckpt = Path(cfg["ckpt_dir"]) / f"wm_{cfg['model']}_{cfg['diffusion_model']}.pt"
+        checkpoint_path = (
+            Path(config["ckpt_dir"])
+            / f"wm_{config['model']}_{config['diffusion_model']}.pt"
+        )
 
-        if not ckpt.exists():
-            raise FileNotFoundError(f"world-model checkpoint not found: {ckpt}")
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(
+                f"world-model checkpoint not found: {checkpoint_path}"
+            )
 
-        model.load_state_dict(torch.load(ckpt, map_location=device, weights_only=True))
+        model.load_state_dict(
+            torch.load(checkpoint_path, map_location=device, weights_only=True)
+        )
 
-        return cls(model, g, cfg["diffusion_model"], device=device, n_samples=n_samples)
+        return cls(
+            model, graph, config["diffusion_model"], device=device, n_samples=n_samples
+        )
 
     @torch.inference_mode()
     def _single_rollout(
         self, action_fn: ActionFn, horizon: int, rng: np.random.Generator
-    ):
-        n = self.g.num_nodes
+    ) -> tuple[list[State], list[list], list[float]]:
+        num_nodes = self.graph.num_nodes
         edges = dict(self.base_edges)
-        infected: set[int] = set()
-        frontier: set[int] = set()
+        infected = set()
+        frontier = set()
         states = [State([], [])]
-        actions: list[list] = []
+        actions = []
         counts = [0.0]
 
-        for t in range(horizon + 1):
+        for timestep in range(horizon + 1):
             state = State(sorted(infected), sorted(frontier))
-            bag = action_fn(state, t)
+            bag = action_fn(state, timestep)
             actions.append(bag)
-            # Apply edge ops to the running graph so the model sees the post-action graph.
-            bag_dicts = [a.to_dict() for a in bag]
-            if any(d["op"] in edge_ops for d in bag_dicts):
+
+            # Apply edge ops so the model sees the post-action graph.
+            bag_dicts = [action.to_dict() for action in bag]
+            if any(action_dict["op"] in edge_ops for action_dict in bag_dicts):
                 edges = apply_edge_ops(edges, bag_dicts)
-            ei, w = edges_to_arrays(edges)
+
+            edge_index, edge_weights = edges_to_arrays(edges)
             record = {
                 "state": {"infected": sorted(infected), "frontier": sorted(frontier)},
                 "action": bag_dicts,
@@ -101,37 +116,45 @@ class WorldModelEnvironment:
                 "next_marginal_infected": {},
                 "next_marginal_frontier": {},
             }
-            X, _, _ = build_features(record, ei, n)
-            gi = build_graph_input(ei, w, n, self.diffusion_model, self.device)
-            prob = (
-                torch.sigmoid(self.model(torch.from_numpy(X).to(self.device), gi))
+            X, _, _ = build_features(record, edge_index, num_nodes)
+            graph_input = build_graph_input(
+                edge_index, edge_weights, num_nodes, self.diffusion_model, self.device
+            )
+            probabilities = (
+                torch.sigmoid(
+                    self.model(torch.from_numpy(X).to(self.device), graph_input)
+                )
                 .cpu()
                 .numpy()
-            )  # (N, 2)
-            draw_inf = rng.random(n) < prob[:, 0]
-            draw_fr = rng.random(n) < prob[:, 1]
-            infected = set(np.nonzero(draw_inf)[0].tolist())
-            frontier = set(np.nonzero(draw_fr)[0].tolist())
+            )  # shape: (N, 2)
+            infected_draw = rng.random(num_nodes) < probabilities[:, 0]
+            frontier_draw = rng.random(num_nodes) < probabilities[:, 1]
+            infected = set(np.nonzero(infected_draw)[0].tolist())
+            frontier = set(np.nonzero(frontier_draw)[0].tolist())
             states.append(State(sorted(infected), sorted(frontier)))
             counts.append(float(len(infected)))
-            if t > 0 and not frontier and not bag:
+            if timestep > 0 and not frontier and not bag:
                 break
+
         return states, actions, counts
 
     def rollout(
         self, action_fn: ActionFn, horizon: int, budget: int, seed: int = 0
     ) -> Trajectory:
         rng = np.random.default_rng(seed)
-        finals: list[float] = []
-        rep = None
-        for s in range(self.n_samples):
+        final_counts = []
+        representative = None
+
+        for sample in range(self.n_samples):
             states, actions, counts = self._single_rollout(action_fn, horizon, rng)
-            finals.append(counts[-1])
-            if s == 0:
-                rep = (states, actions, counts)
-        reward = float(np.mean(finals)) if finals else 0.0
-        states, actions, counts = rep  # type: ignore[misc]
+            final_counts.append(counts[-1])
+            if sample == 0:
+                representative = (states, actions, counts)
+
+        reward = float(np.mean(final_counts)) if final_counts else 0.0
+        states, actions, counts = representative  # type: ignore[misc]
         counts[-1] = reward
+
         return Trajectory(
             states=states,
             actions=actions,

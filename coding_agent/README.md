@@ -15,7 +15,7 @@ Agent (LLM, TODO) → Python Strategy script → graph actions per t → Environ
 ```
 
 - **Outer loop** (`methods/`): three interchangeable methods, all producing an
-  `action_fn(state, t) → list[Action]`.
+  `action_fn(state, timestep) → list[Action]`.
 - **Inner loop** (`envs/`): `WorldModelEnvironment` (default, fast) or
   `MonteCarloEnvironment` (NDlib ground truth) behind one `rollout()` interface.
 - **Agent** (`agent.py`): provider-agnostic; the concrete LLM call is the only TODO.

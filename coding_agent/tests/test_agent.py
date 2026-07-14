@@ -1,5 +1,5 @@
-# coding_agent/tests/test_agent.py
 import pytest
+
 from coding_agent.agent import CodingAgent, TODOProvider, extract_code_block
 
 
@@ -20,7 +20,7 @@ def test_todo_provider_raises():
 
 def test_agent_uses_injected_provider():
     class Fake:
-        def complete(self, system, user):
+        def complete(self, system: str, user: str) -> str:
             return "```python\nclass S(Strategy):\n    pass\n```"
 
     agent = CodingAgent(Fake())

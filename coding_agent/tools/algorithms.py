@@ -1,7 +1,7 @@
 """
 Named classical IM algorithms, composed from primitives.
 
-Every algorithm has the signature (g, budget, diffusion_model, **kw) -> list[int]
+Every algorithm has the signature (graph, budget, diffusion_model, **kw) -> list[int]
 and returns a seed set of size `budget`. These are the callable surface offered to
 the coding agent; it may call one directly or compose several across timesteps.
 """
@@ -10,55 +10,63 @@ import heapq
 import numpy as np
 
 from coding_agent.types import GraphInfo
-from coding_agent.tools import primitives as P
+from coding_agent.tools import primitives
+
+min_temperature = 1e-6
 
 
-def _top_k_by_score(score: np.ndarray, k: int) -> list[int]:
-    return [int(v) for v in np.argsort(-score)[:k]]
+def _top_k_by_score(scores: np.ndarray, count: int) -> list[int]:
+    return [int(node) for node in np.argsort(-scores)[:count]]
 
 
 def high_degree(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
     """Top-k highest total-degree nodes (Degree heuristic)."""
-    return P.get_top_degree_nodes(g, budget)
+    return primitives.get_top_degree_nodes(graph, budget)
 
 
 def weighted_degree(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
     """Top-k by summed outgoing IC transmission probability."""
-    return _top_k_by_score(P.compute_weighted_degree(g), budget)
+    return _top_k_by_score(primitives.compute_weighted_degree(graph), budget)
 
 
 def degree_discount(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
     """DegreeDiscount (Chen et al. 2009): discount a node's degree for already-chosen neighbors."""
-    deg = P.compute_degree(g).copy()
-    chosen: list[int] = []
-    discounted = deg.copy()
+    discounted = primitives.compute_degree(graph)
+    chosen = []
+
     for _ in range(budget):
-        v = int(
+        # -inf mask so an already-chosen node can never win argmax, however far
+        # the discounting pushes the remaining scores down.
+        node = int(
             np.argmax(
-                [discounted[i] if i not in chosen else -1 for i in range(g.num_nodes)]
+                [
+                    discounted[candidate] if candidate not in chosen else float("-inf")
+                    for candidate in range(graph.num_nodes)
+                ]
             )
         )
-        chosen.append(v)
-        for w in g.out_neighbors(v) + g.in_neighbors(v):
-            discounted[w] -= 1
+        chosen.append(node)
+        for neighbor in graph.out_neighbors(node) + graph.in_neighbors(node):
+            discounted[neighbor] -= 1
+
     return chosen
 
 
 def pagerank_seeds(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
     """Top-k PageRank nodes."""
-    return _top_k_by_score(P.compute_pagerank(g), budget)
+    return _top_k_by_score(primitives.compute_pagerank(graph), budget)
 
 
 def vanilla_greedy(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     mc_runs: int = 30,
@@ -66,23 +74,25 @@ def vanilla_greedy(
     **_,
 ) -> list[int]:
     """Greedy marginal-gain (Kempe et al. 2003)."""
-    seeds: list[int] = []
+    seeds = []
     for _ in range(budget):
-        best_v, best_gain = -1, float("-inf")
-        for v in range(g.num_nodes):
-            if v in seeds:
+        best_node, best_gain = -1, float("-inf")
+        for node in range(graph.num_nodes):
+            if node in seeds:
                 continue
-            gain = P.compute_marginal_gain(
-                g, seeds, v, diffusion_model, mc_runs, horizon
+            gain = primitives.compute_marginal_gain(
+                graph, seeds, node, diffusion_model, mc_runs, horizon
             )
             if gain > best_gain:
-                best_gain, best_v = gain, v
-        seeds.append(best_v)
+                best_gain, best_node = gain, node
+
+        seeds.append(best_node)
+
     return seeds
 
 
 def celf(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     mc_runs: int = 30,
@@ -90,66 +100,79 @@ def celf(
     **_,
 ) -> list[int]:
     """CELF (Leskovec et al. 2007): lazy-forward greedy with a max-heap of marginal gains."""
-    seeds: list[int] = []
-    heap: list[tuple[float, int, int]] = []  # (-gain, node, last_updated_round)
-    for v in range(g.num_nodes):
-        gain = P.mc_simulate_spread(g, [v], diffusion_model, mc_runs, horizon)
-        heapq.heappush(heap, (-gain, v, 0))
-    for rnd in range(1, budget + 1):
+    seeds = []
+    heap = []  # (-gain, node, last_updated_round)
+    for node in range(graph.num_nodes):
+        gain = primitives.mc_simulate_spread(
+            graph, [node], diffusion_model, mc_runs, horizon
+        )
+        heapq.heappush(heap, (-gain, node, 0))
+
+    for round_index in range(1, budget + 1):
         while True:
-            neg_gain, v, last = heapq.heappop(heap)
-            if last == rnd:
-                seeds.append(v)
+            _, node, last_updated = heapq.heappop(heap)
+            if last_updated == round_index:
+                seeds.append(node)
                 break
-            fresh = P.mc_simulate_spread(
-                g, seeds + [v], diffusion_model, mc_runs, horizon
-            ) - P.mc_simulate_spread(g, seeds, diffusion_model, mc_runs, horizon)
-            heapq.heappush(heap, (-fresh, v, rnd))
+
+            fresh_gain = primitives.mc_simulate_spread(
+                graph, seeds + [node], diffusion_model, mc_runs, horizon
+            ) - primitives.mc_simulate_spread(
+                graph, seeds, diffusion_model, mc_runs, horizon
+            )
+            heapq.heappush(heap, (-fresh_gain, node, round_index))
+
     return seeds
 
 
 def ris_basic(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     theta: int = 2000,
     **_,
 ) -> list[int]:
     """Basic Reverse Influence Sampling (Borgs et al. 2014). IC only."""
-    rr = P.batch_reverse_sample(g, theta=theta, seed=0)
-    seeds = P.ris_select(rr, budget, g.num_nodes)
-    # pad with degree if coverage ran out
+    rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=0)
+    seeds = primitives.ris_select(rr_sets, budget, graph.num_nodes)
+
+    # Pad with degree if coverage ran out.
     if len(seeds) < budget:
-        for v in P.get_top_degree_nodes(g, g.num_nodes):
-            if v not in seeds:
-                seeds.append(v)
+        for node in primitives.get_top_degree_nodes(graph, graph.num_nodes):
+            if node not in seeds:
+                seeds.append(node)
             if len(seeds) == budget:
                 break
+
     return seeds
 
 
 def community_im(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     **_,
 ) -> list[int]:
     """Community-IM: split budget across label-propagation communities, degree within each."""
-    comm = P.detect_communities(g)
-    alloc = P.allocate_budget(comm, budget)
-    members: dict[int, list[int]] = {}
-    for v, c in comm.items():
-        members.setdefault(c, []).append(v)
-    deg = P.compute_degree(g)
-    seeds: list[int] = []
-    for c, b in alloc.items():
-        ranked = sorted(members[c], key=lambda v: deg[v], reverse=True)
-        seeds.extend(ranked[:b])
+    communities = primitives.detect_communities(graph)
+    allocation = primitives.allocate_budget(communities, budget)
+    members = {}
+    for node, community_id in communities.items():
+        members.setdefault(community_id, []).append(node)
+
+    degrees = primitives.compute_degree(graph)
+    seeds = []
+    for community_id, community_budget in allocation.items():
+        ranked = sorted(
+            members[community_id], key=lambda node: degrees[node], reverse=True
+        )
+        seeds.extend(ranked[:community_budget])
+
     return seeds[:budget]
 
 
 def pagerank_greedy(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     pool: int = 30,
@@ -158,26 +181,32 @@ def pagerank_greedy(
     **_,
 ) -> list[int]:
     """Hybrid: narrow to top PageRank candidates, then greedy marginal-gain over them."""
-    candidates = _top_k_by_score(P.compute_pagerank(g), min(pool, g.num_nodes))
-    seeds: list[int] = []
+    candidates = _top_k_by_score(
+        primitives.compute_pagerank(graph), min(pool, graph.num_nodes)
+    )
+
+    seeds = []
     for _ in range(budget):
-        best_v, best_gain = -1, float("-inf")
-        for v in candidates:
-            if v in seeds:
+        best_node, best_gain = -1, float("-inf")
+        for node in candidates:
+            if node in seeds:
                 continue
-            gain = P.compute_marginal_gain(
-                g, seeds, v, diffusion_model, mc_runs, horizon
+            gain = primitives.compute_marginal_gain(
+                graph, seeds, node, diffusion_model, mc_runs, horizon
             )
             if gain > best_gain:
-                best_gain, best_v = gain, v
-        if best_v < 0:
+                best_gain, best_node = gain, node
+
+        if best_node < 0:
             break
-        seeds.append(best_v)
-    return _pad_seeds(seeds, g, budget)
+
+        seeds.append(best_node)
+
+    return _pad_seeds(seeds, graph, budget)
 
 
 def hill_climbing(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     mc_runs: int = 30,
@@ -186,57 +215,73 @@ def hill_climbing(
     **_,
 ) -> list[int]:
     """Local search: start from degree, 1-swap while spread improves."""
-    seeds = P.get_top_degree_nodes(g, budget)
-    best = P.mc_simulate_spread(g, seeds, diffusion_model, mc_runs, horizon)
+    seeds = primitives.get_top_degree_nodes(graph, budget)
+    best_spread = primitives.mc_simulate_spread(
+        graph, seeds, diffusion_model, mc_runs, horizon
+    )
+
     for _ in range(rounds):
         improved = False
-        for i in range(len(seeds)):
-            for v in range(g.num_nodes):
-                if v in seeds:
+        for position in range(len(seeds)):
+            for node in range(graph.num_nodes):
+                if node in seeds:
                     continue
                 trial = list(seeds)
-                trial[i] = v
-                sp = P.mc_simulate_spread(g, trial, diffusion_model, mc_runs, horizon)
-                if sp > best:
-                    best, seeds, improved = sp, trial, True
+                trial[position] = node
+                spread = primitives.mc_simulate_spread(
+                    graph, trial, diffusion_model, mc_runs, horizon
+                )
+                if spread > best_spread:
+                    best_spread, seeds, improved = spread, trial, True
                     break
             if improved:
                 break
         if not improved:
             break
+
     return seeds
 
 
-# --- shared selection helpers (used by several families) --------------------
-def _pad_seeds(seeds: list[int], g: GraphInfo, budget: int) -> list[int]:
+# Shared selection helpers (used by several families)
+def _pad_seeds(seeds: list[int], graph: GraphInfo, budget: int) -> list[int]:
     """Dedupe + pad to budget with high-degree fillers."""
-    out = list(dict.fromkeys(int(s) for s in seeds))
-    if len(out) < budget:
-        for v in P.get_top_degree_nodes(g, g.num_nodes):
-            if v not in out:
-                out.append(v)
-            if len(out) == budget:
+    padded = list(dict.fromkeys(int(seed) for seed in seeds))
+    if len(padded) < budget:
+        for node in primitives.get_top_degree_nodes(graph, graph.num_nodes):
+            if node not in padded:
+                padded.append(node)
+            if len(padded) == budget:
                 break
-    return out[:budget]
+
+    return padded[:budget]
 
 
-def _greedy_discount_select(g: GraphInfo, scores: np.ndarray, budget: int) -> list[int]:
-    """Pick top-k by score, halving an out-neighbor's score when its source is chosen."""
-    s = scores.astype(float).copy()
-    chosen: list[int] = []
+def _greedy_discount_select(
+    graph: GraphInfo, scores: np.ndarray, budget: int, discount: float = 0.5
+) -> list[int]:
+    """Pick top-k by score, discounting an out-neighbor's score when its source is chosen."""
+    discounted = scores.astype(float).copy()
+    chosen = []
+
     for _ in range(budget):
-        v = int(
-            np.argmax([s[i] if i not in chosen else -1e18 for i in range(g.num_nodes)])
+        node = int(
+            np.argmax(
+                [
+                    discounted[candidate] if candidate not in chosen else float("-inf")
+                    for candidate in range(graph.num_nodes)
+                ]
+            )
         )
-        chosen.append(v)
-        for w in g.out_neighbors(v):
-            s[w] *= 0.5
+        chosen.append(node)
+        for neighbor in graph.out_neighbors(node):
+            discounted[neighbor] *= discount
+
     return chosen
 
 
-# --- Greedy family (additions) ---------------------------------------------
+# Greedy family (additions)
 def celf_pp(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     mc_runs: int = 30,
@@ -244,115 +289,159 @@ def celf_pp(
     **_,
 ) -> list[int]:
     """CELF++ (Goyal et al. 2011): CELF with a secondary cache (simplified; selection = CELF)."""
-    seeds: list[int] = []
-    heap: list[tuple[float, int, int]] = []
-    for v in range(g.num_nodes):
-        gain = P.mc_simulate_spread(g, [v], diffusion_model, mc_runs, horizon)
-        heapq.heappush(heap, (-gain, v, 0))
-    for rnd in range(1, budget + 1):
+    seeds = []
+    heap = []
+    for node in range(graph.num_nodes):
+        gain = primitives.mc_simulate_spread(
+            graph, [node], diffusion_model, mc_runs, horizon
+        )
+        heapq.heappush(heap, (-gain, node, 0))
+
+    for round_index in range(1, budget + 1):
         while True:
-            neg_gain, v, last = heapq.heappop(heap)
-            if last == rnd:
-                seeds.append(v)
+            _, node, last_updated = heapq.heappop(heap)
+            if last_updated == round_index:
+                seeds.append(node)
                 break
-            fresh = P.mc_simulate_spread(
-                g, seeds + [v], diffusion_model, mc_runs, horizon
-            ) - P.mc_simulate_spread(g, seeds, diffusion_model, mc_runs, horizon)
-            heapq.heappush(heap, (-fresh, v, rnd))
+
+            fresh_gain = primitives.mc_simulate_spread(
+                graph, seeds + [node], diffusion_model, mc_runs, horizon
+            ) - primitives.mc_simulate_spread(
+                graph, seeds, diffusion_model, mc_runs, horizon
+            )
+            heapq.heappush(heap, (-fresh_gain, node, round_index))
+
     return seeds
 
 
 def adaptive_greedy(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     base_mc: int = 10,
     refine_mc: int = 40,
     horizon: int = 20,
+    refine_top: int = 5,
     **_,
 ) -> list[int]:
     """Adaptive Greedy: coarse MC to rank, refined MC on the top few (adaptive sample count)."""
-    seeds: list[int] = []
+    seeds = []
     for _ in range(budget):
         coarse = sorted(
             (
                 (
-                    P.compute_marginal_gain(
-                        g, seeds, v, diffusion_model, base_mc, horizon
+                    primitives.compute_marginal_gain(
+                        graph, seeds, node, diffusion_model, base_mc, horizon
                     ),
-                    v,
+                    node,
                 )
-                for v in range(g.num_nodes)
-                if v not in seeds
+                for node in range(graph.num_nodes)
+                if node not in seeds
             ),
             reverse=True,
         )
-        best_v, best_gain = coarse[0][1], float("-inf")
-        for _, v in coarse[:5]:
-            gain = P.compute_marginal_gain(
-                g, seeds, v, diffusion_model, refine_mc, horizon
+
+        best_node, best_gain = coarse[0][1], float("-inf")
+        for _, node in coarse[:refine_top]:
+            gain = primitives.compute_marginal_gain(
+                graph, seeds, node, diffusion_model, refine_mc, horizon
             )
             if gain > best_gain:
-                best_gain, best_v = gain, v
-        seeds.append(best_v)
+                best_gain, best_node = gain, node
+
+        seeds.append(best_node)
+
     return seeds
 
 
-# --- Centrality (additions) -------------------------------------------------
+# Centrality (additions)
 def eigenvector_seeds(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
     """Top-k eigenvector-centrality nodes."""
-    return _top_k_by_score(P.compute_centrality(g, "eigenvector"), budget)
+    return _top_k_by_score(primitives.compute_centrality(graph, "eigenvector"), budget)
 
 
 def closeness_seeds(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
     """Top-k closeness-centrality nodes."""
-    return _top_k_by_score(P.compute_centrality(g, "closeness"), budget)
+    return _top_k_by_score(primitives.compute_centrality(graph, "closeness"), budget)
 
 
-# --- RIS family (additions; IC) --------------------------------------------
+# RIS family (additions; IC)
 def tim(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", epsilon: float = 0.2, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    epsilon: float = 0.2,
+    **_,
 ) -> list[int]:
     """TIM/TIM+ (Tang et al. 2014): RIS with an estimated sample size."""
-    theta = P.estimate_sample_size(g, budget, epsilon=epsilon)
-    rr = P.batch_reverse_sample(g, theta=theta, seed=0)
-    return _pad_seeds(P.ris_select(rr, budget, g.num_nodes), g, budget)
+    theta = primitives.estimate_sample_size(graph, budget, epsilon=epsilon)
+    rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=0)
+
+    return _pad_seeds(
+        primitives.ris_select(rr_sets, budget, graph.num_nodes), graph, budget
+    )
 
 
 def imm(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", epsilon: float = 0.2, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    epsilon: float = 0.2,
+    **_,
 ) -> list[int]:
     """IMM (Tang et al. 2015): two-phase sample-size refinement over RIS (simplified)."""
-    theta0 = P.estimate_sample_size(g, budget, epsilon=epsilon * 2)
-    rr = P.batch_reverse_sample(g, theta=theta0, seed=0)
-    theta = max(theta0, P.estimate_sample_size(g, budget, epsilon=epsilon))
-    if theta > theta0:
-        rr = rr + P.batch_reverse_sample(g, theta=theta - theta0, seed=1)
-    return _pad_seeds(P.ris_select(rr, budget, g.num_nodes), g, budget)
+    initial_theta = primitives.estimate_sample_size(graph, budget, epsilon=epsilon * 2)
+    rr_sets = primitives.batch_reverse_sample(graph, theta=initial_theta, seed=0)
+
+    theta = max(
+        initial_theta, primitives.estimate_sample_size(graph, budget, epsilon=epsilon)
+    )
+    if theta > initial_theta:
+        rr_sets = rr_sets + primitives.batch_reverse_sample(
+            graph, theta=theta - initial_theta, seed=1
+        )
+
+    return _pad_seeds(
+        primitives.ris_select(rr_sets, budget, graph.num_nodes), graph, budget
+    )
 
 
-def ssa(g: GraphInfo, budget: int, diffusion_model: str = "IC", **_) -> list[int]:
+def ssa(
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    initial_theta: int = 500,
+    max_doublings: int = 4,
+    stability: float = 0.9,
+    **_,
+) -> list[int]:
     """SSA/D-SSA (Nguyen et al. 2016): doubling RIS until the top-k stabilizes (simplified)."""
-    theta = 500
-    rr = P.batch_reverse_sample(g, theta=theta, seed=0)
-    prev = set(P.ris_select(rr, budget, g.num_nodes))
-    for it in range(1, 5):
+    theta = initial_theta
+    rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=0)
+    previous = set(primitives.ris_select(rr_sets, budget, graph.num_nodes))
+
+    for iteration in range(1, max_doublings + 1):
         theta *= 2
-        rr = rr + P.batch_reverse_sample(g, theta=theta, seed=it)
-        cur = set(P.ris_select(rr, budget, g.num_nodes))
-        if len(cur & prev) >= max(1, int(0.9 * budget)):
-            prev = cur
+        rr_sets = rr_sets + primitives.batch_reverse_sample(
+            graph, theta=theta, seed=iteration
+        )
+        current = set(primitives.ris_select(rr_sets, budget, graph.num_nodes))
+
+        if len(current & previous) >= max(1, int(stability * budget)):
+            previous = current
             break
-        prev = cur
-    return _pad_seeds(sorted(prev), g, budget)
+
+        previous = current
+
+    return _pad_seeds(sorted(previous), graph, budget)
 
 
 def filtered_ris(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     theta: int = 2000,
@@ -360,243 +449,340 @@ def filtered_ris(
     **_,
 ) -> list[int]:
     """Filtered RIS: drop tiny RR sets before coverage selection."""
-    rr = [
-        s for s in P.batch_reverse_sample(g, theta=theta, seed=0) if len(s) >= min_size
+    rr_sets = [
+        rr_set
+        for rr_set in primitives.batch_reverse_sample(graph, theta=theta, seed=0)
+        if len(rr_set) >= min_size
     ]
-    if not rr:
-        rr = P.batch_reverse_sample(g, theta=theta, seed=0)
-    return _pad_seeds(P.ris_select(rr, budget, g.num_nodes), g, budget)
+    if not rr_sets:
+        rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=0)
+
+    return _pad_seeds(
+        primitives.ris_select(rr_sets, budget, graph.num_nodes), graph, budget
+    )
 
 
-# --- Path-based (simplified via truncated path-sum) ------------------------
+# Path-based (simplified via truncated path-sum)
 def sp1m(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", max_hops: int = 3, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    max_hops: int = 3,
+    **_,
 ) -> list[int]:
     """SP1M/SPM (Kimura & Saito 2006): top-k by shortest-path influence (truncated path-sum)."""
-    return _top_k_by_score(P.path_influence_scores(g, max_hops=max_hops), budget)
+    return _top_k_by_score(
+        primitives.path_influence_scores(graph, max_hops=max_hops), budget
+    )
 
 
 def mia_pmia(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", max_hops: int = 2, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    max_hops: int = 2,
+    **_,
 ) -> list[int]:
     """MIA/PMIA (Chen et al. 2010): local-influence-tree score (simplified), discounted selection."""
     return _greedy_discount_select(
-        g, P.path_influence_scores(g, max_hops=max_hops), budget
+        graph, primitives.path_influence_scores(graph, max_hops=max_hops), budget
     )
 
 
 def ldag(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", max_hops: int = 3, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    max_hops: int = 3,
+    **_,
 ) -> list[int]:
     """LDAG (Chen et al. 2010): local-DAG influence (simplified deeper path-sum), discounted selection."""
     return _greedy_discount_select(
-        g, P.path_influence_scores(g, max_hops=max_hops), budget
+        graph, primitives.path_influence_scores(graph, max_hops=max_hops), budget
     )
 
 
-# --- Sketch-based (over sampled live-edge graphs) --------------------------
+# Sketch-based (over sampled live-edge graphs)
 def static_greedy(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", snapshots: int = 20, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    snapshots: int = 20,
+    **_,
 ) -> list[int]:
     """StaticGreedy (Cheng et al. 2014): greedy over a fixed set of live-edge snapshots."""
     rng = np.random.default_rng(0)
-    graphs = [P.sample_live_edge_graph(g, rng) for _ in range(snapshots)]
-    seeds: list[int] = []
+    live_graphs = [
+        primitives.sample_live_edge_graph(graph, rng) for _ in range(snapshots)
+    ]
+
+    seeds = []
     for _ in range(budget):
-        best_v, best_gain = -1, -1.0
-        for v in range(g.num_nodes):
-            if v in seeds:
+        best_node, best_gain = -1, -1.0
+        for node in range(graph.num_nodes):
+            if node in seeds:
                 continue
             gain = float(
                 np.mean(
                     [
-                        P.reachable_count(lg, seeds + [v])
-                        - P.reachable_count(lg, seeds)
-                        for lg in graphs
+                        primitives.reachable_count(live_graph, seeds + [node])
+                        - primitives.reachable_count(live_graph, seeds)
+                        for live_graph in live_graphs
                     ]
                 )
             )
             if gain > best_gain:
-                best_gain, best_v = gain, v
-        seeds.append(best_v)
+                best_gain, best_node = gain, node
+
+        seeds.append(best_node)
+
     return seeds
 
 
 def skim(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", snapshots: int = 32, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    snapshots: int = 32,
+    **_,
 ) -> list[int]:
     """SKIM (Cohen et al. 2014): rank by average single-seed reachability over sketches (simplified)."""
     rng = np.random.default_rng(0)
-    graphs = [P.sample_live_edge_graph(g, rng) for _ in range(snapshots)]
-    score = np.array(
+    live_graphs = [
+        primitives.sample_live_edge_graph(graph, rng) for _ in range(snapshots)
+    ]
+    scores = np.array(
         [
-            float(np.mean([P.reachable_count(lg, [v]) for lg in graphs]))
-            for v in range(g.num_nodes)
+            float(
+                np.mean(
+                    [
+                        primitives.reachable_count(live_graph, [node])
+                        for live_graph in live_graphs
+                    ]
+                )
+            )
+            for node in range(graph.num_nodes)
         ]
     )
-    return _greedy_discount_select(g, score, budget)
+
+    return _greedy_discount_select(graph, scores, budget)
 
 
-# --- Community (additions) --------------------------------------------------
-def cofim(g: GraphInfo, budget: int, diffusion_model: str = "IC", **_) -> list[int]:
+# Community (additions)
+def cofim(
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+) -> list[int]:
     """CoFIM (Zhang et al. 2014): per-community budget + degree with cross-community bridge bonus."""
-    comm = P.detect_communities(g)
-    alloc = P.allocate_budget(comm, budget)
-    members: dict[int, list[int]] = {}
-    for v, c in comm.items():
-        members.setdefault(c, []).append(v)
-    deg = P.compute_degree(g)
+    communities = primitives.detect_communities(graph)
+    allocation = primitives.allocate_budget(communities, budget)
+    members = {}
+    for node, community_id in communities.items():
+        members.setdefault(community_id, []).append(node)
 
-    def bridge_score(v: int) -> float:
-        nb = g.out_neighbors(v) + g.in_neighbors(v)
-        return float(deg[v] + sum(1 for w in nb if comm[w] != comm[v]))
+    degrees = primitives.compute_degree(graph)
 
-    seeds: list[int] = []
-    for c, b in alloc.items():
-        seeds.extend(sorted(members[c], key=bridge_score, reverse=True)[:b])
-    return _pad_seeds(seeds, g, budget)
+    def bridge_score(node: int) -> float:
+        neighbors = graph.out_neighbors(node) + graph.in_neighbors(node)
+        cross_community = sum(
+            1 for neighbor in neighbors if communities[neighbor] != communities[node]
+        )
+        return float(degrees[node] + cross_community)
+
+    seeds = []
+    for community_id, community_budget in allocation.items():
+        seeds.extend(
+            sorted(members[community_id], key=bridge_score, reverse=True)[
+                :community_budget
+            ]
+        )
+
+    return _pad_seeds(seeds, graph, budget)
 
 
 def community_ris(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", theta: int = 2000, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    theta: int = 2000,
+    **_,
 ) -> list[int]:
     """Community-RIS hybrid: RR-set coverage selection restricted to per-community budgets."""
-    comm = P.detect_communities(g)
-    alloc = P.allocate_budget(comm, budget)
-    rr = P.batch_reverse_sample(g, theta=theta, seed=0)
-    members: dict[int, list[int]] = {}
-    for v, c in comm.items():
-        members.setdefault(c, []).append(v)
-    covers: dict[int, set[int]] = {v: set() for v in range(g.num_nodes)}
-    for idx, s in enumerate(rr):
-        for v in s:
-            covers[v].add(idx)
-    seeds: list[int] = []
-    covered: set[int] = set()
-    for c, b in alloc.items():
-        for _ in range(b):
-            best_v, best_gain = -1, -1
-            for v in members[c]:
-                if v in seeds:
+    communities = primitives.detect_communities(graph)
+    allocation = primitives.allocate_budget(communities, budget)
+    rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=0)
+
+    members = {}
+    for node, community_id in communities.items():
+        members.setdefault(community_id, []).append(node)
+
+    covers = {node: set() for node in range(graph.num_nodes)}
+    for rr_index, rr_set in enumerate(rr_sets):
+        for node in rr_set:
+            covers[node].add(rr_index)
+
+    seeds = []
+    covered = set()
+    for community_id, community_budget in allocation.items():
+        for _ in range(community_budget):
+            best_node, best_gain = -1, -1
+            for node in members[community_id]:
+                if node in seeds:
                     continue
-                gain = len(covers[v] - covered)
+                gain = len(covers[node] - covered)
                 if gain > best_gain:
-                    best_gain, best_v = gain, v
-            if best_v >= 0:
-                seeds.append(best_v)
-                covered |= covers[best_v]
-    return _pad_seeds(seeds, g, budget)
+                    best_gain, best_node = gain, node
+
+            if best_node >= 0:
+                seeds.append(best_node)
+                covered |= covers[best_node]
+
+    return _pad_seeds(seeds, graph, budget)
 
 
-# --- Metaheuristics (additions) --------------------------------------------
+# Metaheuristics (additions)
 def simulated_annealing(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     mc_runs: int = 20,
     horizon: int = 20,
     iters: int = 40,
+    cooling: float = 0.9,
     **_,
 ) -> list[int]:
     """Simulated annealing over seed sets (degree init, swap moves, geometric cooling)."""
     rng = np.random.default_rng(0)
-    seeds = P.get_top_degree_nodes(g, budget)
-    cur = best = P.mc_simulate_spread(g, seeds, diffusion_model, mc_runs, horizon)
+    seeds = primitives.get_top_degree_nodes(graph, budget)
+    current_spread = best_spread = primitives.mc_simulate_spread(
+        graph, seeds, diffusion_model, mc_runs, horizon
+    )
     best_seeds = list(seeds)
-    temp = 1.0
+    temperature = 1.0
+
     for _ in range(iters):
-        cands = [v for v in range(g.num_nodes) if v not in seeds]
-        if not cands:
+        candidates = [node for node in range(graph.num_nodes) if node not in seeds]
+        if not candidates:
             break
+
         trial = list(seeds)
-        trial[int(rng.integers(len(seeds)))] = int(rng.choice(cands))
-        sp = P.mc_simulate_spread(g, trial, diffusion_model, mc_runs, horizon)
-        if sp > cur or rng.random() < np.exp((sp - cur) / max(temp, 1e-6)):
-            seeds, cur = trial, sp
-            if sp > best:
-                best, best_seeds = sp, list(trial)
-        temp *= 0.9
+        trial[int(rng.integers(len(seeds)))] = int(rng.choice(candidates))
+        spread = primitives.mc_simulate_spread(
+            graph, trial, diffusion_model, mc_runs, horizon
+        )
+
+        if spread > current_spread or rng.random() < np.exp(
+            (spread - current_spread) / max(temperature, min_temperature)
+        ):
+            seeds, current_spread = trial, spread
+            if spread > best_spread:
+                best_spread, best_seeds = spread, list(trial)
+
+        temperature *= cooling
+
     return best_seeds
 
 
 def genetic_algorithm(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    pop: int = 8,
-    gens: int = 6,
+    population_size: int = 8,
+    generations: int = 6,
     mc_runs: int = 15,
     horizon: int = 20,
+    mutation_rate: float = 0.3,
     **_,
 ) -> list[int]:
     """Genetic algorithm over seed sets (degree-biased init, crossover + mutation, elitism)."""
     rng = np.random.default_rng(0)
-    pool = P.get_top_degree_nodes(g, min(g.num_nodes, max(budget * 4, 10)))
+    pool = primitives.get_top_degree_nodes(
+        graph, min(graph.num_nodes, max(budget * 4, 10))
+    )
 
     def fill(child: list[int]) -> list[int]:
         child = list(dict.fromkeys(child))
         while len(child) < budget:
-            v = int(rng.choice(pool))
-            if v not in child:
-                child.append(v)
+            node = int(rng.choice(pool))
+            if node not in child:
+                child.append(node)
         return child[:budget]
 
-    def fitness(ind: list[int]) -> float:
-        return P.mc_simulate_spread(g, list(ind), diffusion_model, mc_runs, horizon)
+    def fitness(individual: list[int]) -> float:
+        return primitives.mc_simulate_spread(
+            graph, list(individual), diffusion_model, mc_runs, horizon
+        )
 
     population = [
-        fill(list(rng.choice(pool, size=budget, replace=False))) for _ in range(pop)
+        fill(list(rng.choice(pool, size=budget, replace=False)))
+        for _ in range(population_size)
     ]
     scored = sorted(
-        ((fitness(i), i) for i in population), key=lambda x: x[0], reverse=True
+        ((fitness(individual), individual) for individual in population),
+        key=lambda pair: pair[0],
+        reverse=True,
     )
-    for _ in range(gens):
-        survivors = [i for _, i in scored[: max(2, pop // 2)]]
+
+    for _ in range(generations):
+        survivors = [
+            individual for _, individual in scored[: max(2, population_size // 2)]
+        ]
         children = []
-        while len(children) < pop - len(survivors):
-            a = survivors[int(rng.integers(len(survivors)))]
-            b = survivors[int(rng.integers(len(survivors)))]
+        while len(children) < population_size - len(survivors):
+            parent_a = survivors[int(rng.integers(len(survivors)))]
+            parent_b = survivors[int(rng.integers(len(survivors)))]
             cut = budget // 2
-            child = fill(a[:cut] + b[cut:])
-            if rng.random() < 0.3:
+            child = fill(parent_a[:cut] + parent_b[cut:])
+            if rng.random() < mutation_rate:
                 child[int(rng.integers(budget))] = int(rng.choice(pool))
                 child = fill(child)
             children.append(child)
+
         population = survivors + children
         scored = sorted(
-            ((fitness(i), i) for i in population), key=lambda x: x[0], reverse=True
+            ((fitness(individual), individual) for individual in population),
+            key=lambda pair: pair[0],
+            reverse=True,
         )
+
     return list(scored[0][1])
 
 
-# --- Hybrids (additions) ----------------------------------------------------
+# Hybrids (additions)
 def degree_ris_refine(
-    g: GraphInfo, budget: int, diffusion_model: str = "IC", theta: int = 2000, **_
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    theta: int = 2000,
+    **_,
 ) -> list[int]:
     """Degree init refined by RR-set coverage swaps (Degree + RIS)."""
-    seeds = P.get_top_degree_nodes(g, budget)
-    rr = P.batch_reverse_sample(g, theta=theta, seed=0)
-    covers: dict[int, set[int]] = {v: set() for v in range(g.num_nodes)}
-    for idx, s in enumerate(rr):
-        for v in s:
-            covers[v].add(idx)
-    covered: set[int] = set()
-    for v in seeds:
-        covered |= covers[v]
-    for i, s in enumerate(seeds):
-        rest = covered - covers[s]
-        for v in range(g.num_nodes):
-            if v in seeds:
+    seeds = primitives.get_top_degree_nodes(graph, budget)
+    rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=0)
+
+    covers = {node: set() for node in range(graph.num_nodes)}
+    for rr_index, rr_set in enumerate(rr_sets):
+        for node in rr_set:
+            covers[node].add(rr_index)
+
+    covered = set()
+    for seed in seeds:
+        covered |= covers[seed]
+
+    for position, seed in enumerate(seeds):
+        rest = covered - covers[seed]
+        for node in range(graph.num_nodes):
+            if node in seeds:
                 continue
-            if len(covers[v] - rest) > len(covers[s] - rest):
-                covered = rest | covers[v]
-                seeds[i] = v
+            if len(covers[node] - rest) > len(covers[seed] - rest):
+                covered = rest | covers[node]
+                seeds[position] = node
                 break
+
     return seeds
 
 
 def celf_local_search(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     mc_runs: int = 30,
@@ -604,23 +790,29 @@ def celf_local_search(
     **_,
 ) -> list[int]:
     """CELF seed set refined by 1-swap local search (CELF + LocalSearch)."""
-    seeds = celf(g, budget, diffusion_model, mc_runs, horizon)
-    best = P.mc_simulate_spread(g, seeds, diffusion_model, mc_runs, horizon)
-    for i in range(len(seeds)):
-        for v in range(g.num_nodes):
-            if v in seeds:
+    seeds = celf(graph, budget, diffusion_model, mc_runs, horizon)
+    best_spread = primitives.mc_simulate_spread(
+        graph, seeds, diffusion_model, mc_runs, horizon
+    )
+
+    for position in range(len(seeds)):
+        for node in range(graph.num_nodes):
+            if node in seeds:
                 continue
             trial = list(seeds)
-            trial[i] = v
-            sp = P.mc_simulate_spread(g, trial, diffusion_model, mc_runs, horizon)
-            if sp > best:
-                best, seeds = sp, trial
+            trial[position] = node
+            spread = primitives.mc_simulate_spread(
+                graph, trial, diffusion_model, mc_runs, horizon
+            )
+            if spread > best_spread:
+                best_spread, seeds = spread, trial
                 break
+
     return seeds
 
 
 def community_celf(
-    g: GraphInfo,
+    graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
     mc_runs: int = 20,
@@ -628,31 +820,35 @@ def community_celf(
     **_,
 ) -> list[int]:
     """Community-scoped marginal-gain greedy (no CELF lazy heap — simplified)."""
-    comm = P.detect_communities(g)
-    alloc = P.allocate_budget(comm, budget)
-    members: dict[int, list[int]] = {}
-    for v, c in comm.items():
-        members.setdefault(c, []).append(v)
-    seeds: list[int] = []
-    for c, b in alloc.items():
-        local: list[int] = []
-        for _ in range(b):
-            best_v, best_gain = -1, float("-inf")
-            for v in members[c]:
-                if v in local:
+    communities = primitives.detect_communities(graph)
+    allocation = primitives.allocate_budget(communities, budget)
+    members = {}
+    for node, community_id in communities.items():
+        members.setdefault(community_id, []).append(node)
+
+    seeds = []
+    for community_id, community_budget in allocation.items():
+        local_seeds = []
+        for _ in range(community_budget):
+            best_node, best_gain = -1, float("-inf")
+            for node in members[community_id]:
+                if node in local_seeds:
                     continue
-                gain = P.compute_marginal_gain(
-                    g, seeds + local, v, diffusion_model, mc_runs, horizon
+                gain = primitives.compute_marginal_gain(
+                    graph, seeds + local_seeds, node, diffusion_model, mc_runs, horizon
                 )
                 if gain > best_gain:
-                    best_gain, best_v = gain, v
-            if best_v >= 0:
-                local.append(best_v)
-        seeds.extend(local)
-    return _pad_seeds(seeds, g, budget)
+                    best_gain, best_node = gain, node
+
+            if best_node >= 0:
+                local_seeds.append(best_node)
+
+        seeds.extend(local_seeds)
+
+    return _pad_seeds(seeds, graph, budget)
 
 
-# Registry the library API + README enumerate.
+# Registry enumerated by the library API and README.
 algorithms = {
     # degree
     "high_degree": high_degree,

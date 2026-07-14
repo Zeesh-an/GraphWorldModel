@@ -7,125 +7,140 @@ NDlib simulator (data/wm_simulator.py) — i.e. the honest classical cost; the
 outer-loop Environment (envs/) is what the world model accelerates.
 """
 
+import math
 import networkx as nx
 import numpy as np
 
 from coding_agent.types import GraphInfo
 from data.wm_simulator import ActionOp, Simulator
 
+seed_upper_bound = 1 << 30
+convergence_tol = 1e-9
+norm_floor = 1e-12
+power_iterations = 100
 
-def build_simulator(g: GraphInfo, diffusion_model: str, seed: int = 0) -> Simulator:
-    """Construct an NDlib Simulator from a GraphInfo."""
-    graph = nx.DiGraph() if g.directed else nx.Graph()
-    graph.add_nodes_from(range(g.num_nodes))
+
+def build_simulator(
+    graph: GraphInfo, diffusion_model: str, seed: int = 0
+) -> Simulator:
+    nx_graph = nx.DiGraph() if graph.directed else nx.Graph()
+    nx_graph.add_nodes_from(range(graph.num_nodes))
     ic_prob_map = {}
 
-    for i in range(g.edge_index.shape[1]):
-        u, v = int(g.edge_index[0, i]), int(g.edge_index[1, i])
-        graph.add_edge(u, v)
-        ic_prob_map[(u, v)] = float(g.ic_probs[i])
+    for edge in range(graph.edge_index.shape[1]):
+        source = int(graph.edge_index[0, edge])
+        target = int(graph.edge_index[1, edge])
+        nx_graph.add_edge(source, target)
+        ic_prob_map[(source, target)] = float(graph.ic_probs[edge])
 
-    sim = Simulator(graph, ic_prob_map=ic_prob_map, seed=seed)
-    sim.reset(diffusion_model)
+    simulator = Simulator(nx_graph, ic_prob_map=ic_prob_map, seed=seed)
+    simulator.reset(diffusion_model)
 
-    return sim
+    return simulator
 
 
-# Scoring/Ranking
-def compute_degree(g: GraphInfo) -> np.ndarray:
+# Scoring / ranking
+def compute_degree(graph: GraphInfo) -> np.ndarray:
     """Total (in + out) degree per node, shape (N,)."""
-    deg = np.zeros(g.num_nodes, dtype=np.float64)
+    degrees = np.zeros(graph.num_nodes, dtype=np.float64)
 
-    np.add.at(deg, g.edge_index[0], 1.0)
-    np.add.at(deg, g.edge_index[1], 1.0)
+    np.add.at(degrees, graph.edge_index[0], 1.0)
+    np.add.at(degrees, graph.edge_index[1], 1.0)
 
-    return deg
-
-
-def compute_out_degree(g: GraphInfo) -> np.ndarray:
-    deg = np.zeros(g.num_nodes, dtype=np.float64)
-    np.add.at(deg, g.edge_index[0], 1.0)
-
-    return deg
+    return degrees
 
 
-def compute_weighted_degree(g: GraphInfo) -> np.ndarray:
+def compute_out_degree(graph: GraphInfo) -> np.ndarray:
+    out_degrees = np.zeros(graph.num_nodes, dtype=np.float64)
+    np.add.at(out_degrees, graph.edge_index[0], 1.0)
+
+    return out_degrees
+
+
+def compute_weighted_degree(graph: GraphInfo) -> np.ndarray:
     """Sum of outgoing IC transmission probabilities per node, shape (N,)."""
-    wd = np.zeros(g.num_nodes, dtype=np.float64)
-    np.add.at(wd, g.edge_index[0], g.ic_probs.astype(np.float64))
+    weighted_degrees = np.zeros(graph.num_nodes, dtype=np.float64)
+    np.add.at(weighted_degrees, graph.edge_index[0], graph.ic_probs.astype(np.float64))
 
-    return wd
+    return weighted_degrees
 
 
-def get_top_degree_nodes(g: GraphInfo, k: int) -> list[int]:
-    deg = compute_degree(g)
-    return [int(v) for v in np.argsort(-deg)[:k]]
+def get_top_degree_nodes(graph: GraphInfo, count: int) -> list[int]:
+    degrees = compute_degree(graph)
+    return [int(node) for node in np.argsort(-degrees)[:count]]
 
 
 def compute_pagerank(
-    g: GraphInfo, damping: float = 0.85, iters: int = 100
+    graph: GraphInfo, damping: float = 0.85, iters: int = 100
 ) -> np.ndarray:
     """Power-iteration PageRank over the directed graph, shape (N,)."""
-    n = g.num_nodes
-    out_deg = compute_out_degree(g)
-    out_deg_safe = np.where(out_deg == 0, 1.0, out_deg)
-    pr = np.full(n, 1.0 / n, dtype=np.float64)
-    src, dst = g.edge_index[0], g.edge_index[1]
+    num_nodes = graph.num_nodes
+    out_degrees = compute_out_degree(graph)
+    safe_out_degrees = np.where(out_degrees == 0, 1.0, out_degrees)
+    pagerank = np.full(num_nodes, 1.0 / num_nodes, dtype=np.float64)
+    sources, targets = graph.edge_index[0], graph.edge_index[1]
 
     for _ in range(iters):
-        contrib = pr[src] / out_deg_safe[src]
-        incoming = np.zeros(n, dtype=np.float64)
-        np.add.at(incoming, dst, contrib)
-        dangling = pr[out_deg == 0].sum()
-        pr_new = (1.0 - damping) / n + damping * (incoming + dangling / n)
-        if np.abs(pr_new - pr).sum() < 1e-9:
-            pr = pr_new
+        contributions = pagerank[sources] / safe_out_degrees[sources]
+        incoming = np.zeros(num_nodes, dtype=np.float64)
+        np.add.at(incoming, targets, contributions)
+        dangling = pagerank[out_degrees == 0].sum()
+        next_pagerank = (1.0 - damping) / num_nodes + damping * (
+            incoming + dangling / num_nodes
+        )
+
+        if np.abs(next_pagerank - pagerank).sum() < convergence_tol:
+            pagerank = next_pagerank
             break
 
-        pr = pr_new
+        pagerank = next_pagerank
 
-    return pr
+    return pagerank
 
 
-def compute_centrality(g: GraphInfo, kind: str = "eigenvector") -> np.ndarray:
+def compute_centrality(graph: GraphInfo, kind: str = "eigenvector") -> np.ndarray:
     """Eigenvector (power iteration) or closeness (BFS) centrality, shape (N,)."""
-    n = g.num_nodes
+    num_nodes = graph.num_nodes
+
     if kind == "eigenvector":
-        x = np.full(n, 1.0 / n, dtype=np.float64)
-        src, dst = g.edge_index[0], g.edge_index[1]
+        scores = np.full(num_nodes, 1.0 / num_nodes, dtype=np.float64)
+        sources, targets = graph.edge_index[0], graph.edge_index[1]
 
-        for _ in range(100):
-            nxt = np.zeros(n, dtype=np.float64)
-            np.add.at(nxt, dst, x[src])
-            norm = np.linalg.norm(nxt)
+        for _ in range(power_iterations):
+            next_scores = np.zeros(num_nodes, dtype=np.float64)
+            np.add.at(next_scores, targets, scores[sources])
+            norm = np.linalg.norm(next_scores)
 
-            if norm < 1e-12:
+            if norm < norm_floor:
                 break
 
-            nxt = nxt / norm
-            if np.abs(nxt - x).sum() < 1e-9:
-                x = nxt
+            next_scores = next_scores / norm
+            if np.abs(next_scores - scores).sum() < convergence_tol:
+                scores = next_scores
                 break
 
-            x = nxt
-        return x
+            scores = next_scores
+
+        return scores
 
     if kind == "closeness":
-        graph = nx.DiGraph() if g.directed else nx.Graph()
-        graph.add_nodes_from(range(n))
-        graph.add_edges_from(
-            (int(g.edge_index[0, i]), int(g.edge_index[1, i]))
-            for i in range(g.edge_index.shape[1])
+        nx_graph = nx.DiGraph() if graph.directed else nx.Graph()
+        nx_graph.add_nodes_from(range(num_nodes))
+        nx_graph.add_edges_from(
+            (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge]))
+            for edge in range(graph.edge_index.shape[1])
         )
-        cc = nx.closeness_centrality(graph)
-        return np.array([cc.get(v, 0.0) for v in range(n)], dtype=np.float64)
+        closeness = nx.closeness_centrality(nx_graph)
+        return np.array(
+            [closeness.get(node, 0.0) for node in range(num_nodes)], dtype=np.float64
+        )
 
     raise ValueError(f"unknown centrality kind {kind!r}; choose eigenvector|closeness")
 
 
-# Sampling/Estimation
+# Sampling / estimation
 def mc_simulate_spread(
-    g: GraphInfo,
+    graph: GraphInfo,
     seeds: list[int],
     diffusion_model: str,
     mc_runs: int = 50,
@@ -138,40 +153,48 @@ def mc_simulate_spread(
 
     rng = np.random.default_rng(seed)
     totals = []
-    seed_bag = [ActionOp("add_node", int(v)) for v in seeds]
+    seed_bag = [ActionOp("add_node", int(node)) for node in seeds]
 
     for _ in range(mc_runs):
-        sim = build_simulator(g, diffusion_model, seed=int(rng.integers(1 << 30)))
-        state = sim.advance(seed_bag)
-        for _t in range(horizon):
+        simulator = build_simulator(
+            graph, diffusion_model, seed=int(rng.integers(seed_upper_bound))
+        )
+        state = simulator.advance(seed_bag)
+
+        for _ in range(horizon):
             if not state.frontier:
                 break
 
-            state = sim.advance([])
+            state = simulator.advance([])
+
         totals.append(len(state.infected))
 
     return float(np.mean(totals))
 
 
 def compute_marginal_gain(
-    g: GraphInfo,
+    graph: GraphInfo,
     seeds: list[int],
-    v: int,
+    node: int,
     diffusion_model: str,
     mc_runs: int = 50,
     horizon: int = 20,
     seed: int = 0,
 ) -> float:
-    """spread(seeds + [v]) - spread(seeds)."""
-    base = mc_simulate_spread(g, seeds, diffusion_model, mc_runs, horizon, seed)
-    with_v = mc_simulate_spread(
-        g, list(seeds) + [int(v)], diffusion_model, mc_runs, horizon, seed
+    """spread(seeds + [node]) - spread(seeds)."""
+    base_spread = mc_simulate_spread(
+        graph, seeds, diffusion_model, mc_runs, horizon, seed
+    )
+    spread_with_node = mc_simulate_spread(
+        graph, list(seeds) + [int(node)], diffusion_model, mc_runs, horizon, seed
     )
 
-    return float(with_v - base)
+    return float(spread_with_node - base_spread)
 
 
-def batch_reverse_sample(g: GraphInfo, theta: int, seed: int = 0) -> list[set[int]]:
+def batch_reverse_sample(
+    graph: GraphInfo, theta: int, seed: int = 0
+) -> list[set[int]]:
     """
     Generate theta reverse-reachable sets under the IC live-edge model.
 
@@ -182,143 +205,179 @@ def batch_reverse_sample(g: GraphInfo, theta: int, seed: int = 0) -> list[set[in
     rng = np.random.default_rng(seed)
 
     # Build in-adjacency with probabilities once.
-    in_adj: dict[int, list[tuple[int, float]]] = {v: [] for v in range(g.num_nodes)}
-    for i in range(g.edge_index.shape[1]):
-        u, v = int(g.edge_index[0, i]), int(g.edge_index[1, i])
-        in_adj[v].append((u, float(g.ic_probs[i])))
+    in_adjacency = {node: [] for node in range(graph.num_nodes)}
+    for edge in range(graph.edge_index.shape[1]):
+        source = int(graph.edge_index[0, edge])
+        target = int(graph.edge_index[1, edge])
+        in_adjacency[target].append((source, float(graph.ic_probs[edge])))
 
-    rr_sets: list[set[int]] = []
+    rr_sets = []
     for _ in range(theta):
-        root = int(rng.integers(g.num_nodes))
+        root = int(rng.integers(graph.num_nodes))
         seen = {root}
         stack = [root]
+
         while stack:
-            x = stack.pop()
-            for u, p in in_adj[x]:
-                if u not in seen and rng.random() < p:
-                    seen.add(u)
-                    stack.append(u)
+            current = stack.pop()
+            for source, probability in in_adjacency[current]:
+                if source not in seen and rng.random() < probability:
+                    seen.add(source)
+                    stack.append(source)
 
         rr_sets.append(seen)
 
     return rr_sets
 
 
-def ris_select(rr_sets: list[set[int]], k: int, num_nodes: int) -> list[int]:
+def ris_select(rr_sets: list[set[int]], budget: int, num_nodes: int) -> list[int]:
     """Greedy max-coverage over RR sets -> top-k seeds (RIS selection rule)."""
-    covers: dict[int, set[int]] = {v: set() for v in range(num_nodes)}
-    for idx, s in enumerate(rr_sets):
-        for v in s:
-            covers[v].add(idx)
-    chosen: list[int] = []
-    covered: set[int] = set()
-    for _ in range(k):
-        best_v, best_gain = -1, -1
-        for v in range(num_nodes):
-            if v in chosen:
+    covers = {node: set() for node in range(num_nodes)}
+    for rr_index, rr_set in enumerate(rr_sets):
+        for node in rr_set:
+            covers[node].add(rr_index)
+
+    chosen = []
+    covered = set()
+    for _ in range(budget):
+        best_node, best_gain = -1, -1
+        for node in range(num_nodes):
+            if node in chosen:
                 continue
-            gain = len(covers[v] - covered)
+            gain = len(covers[node] - covered)
             if gain > best_gain:
-                best_gain, best_v = gain, v
-        if best_v < 0:
+                best_gain, best_node = gain, node
+
+        if best_node < 0:
             break
-        chosen.append(best_v)
-        covered |= covers[best_v]
+
+        chosen.append(best_node)
+        covered |= covers[best_node]
+
     return chosen
 
 
-# --- E. Structural Analysis -------------------------------------------------
-def detect_communities(g: GraphInfo) -> dict[int, int]:
+# Structural analysis
+def detect_communities(graph: GraphInfo) -> dict[int, int]:
     """Label-propagation communities -> {node: community_id}."""
-    graph = nx.Graph()
-    graph.add_nodes_from(range(g.num_nodes))
-    graph.add_edges_from(
-        (int(g.edge_index[0, i]), int(g.edge_index[1, i]))
-        for i in range(g.edge_index.shape[1])
+    nx_graph = nx.Graph()
+    nx_graph.add_nodes_from(range(graph.num_nodes))
+    nx_graph.add_edges_from(
+        (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge]))
+        for edge in range(graph.edge_index.shape[1])
     )
-    communities = nx.community.label_propagation_communities(graph)
-    out: dict[int, int] = {}
-    for cid, members in enumerate(communities):
-        for v in members:
-            out[int(v)] = cid
-    for v in range(g.num_nodes):
-        out.setdefault(v, len(out))
-    return out
+    communities = nx.community.label_propagation_communities(nx_graph)
+
+    labels = {}
+    for community_id, members in enumerate(communities):
+        for node in members:
+            labels[int(node)] = community_id
+
+    for node in range(graph.num_nodes):
+        labels.setdefault(node, len(labels))
+
+    return labels
 
 
-def allocate_budget(communities: dict[int, int], k: int) -> dict[int, int]:
-    """Distribute k seeds across communities proportionally to size (largest-remainder)."""
-    sizes: dict[int, int] = {}
-    for cid in communities.values():
-        sizes[cid] = sizes.get(cid, 0) + 1
+def allocate_budget(communities: dict[int, int], budget: int) -> dict[int, int]:
+    """Distribute budget seeds across communities proportionally to size (largest-remainder)."""
+    sizes = {}
+    for community_id in communities.values():
+        sizes[community_id] = sizes.get(community_id, 0) + 1
+
     total = sum(sizes.values())
-    raw = {c: k * n / total for c, n in sizes.items()}
-    alloc = {c: int(np.floor(x)) for c, x in raw.items()}
-    remaining = k - sum(alloc.values())
-    for c in sorted(raw, key=lambda c: raw[c] - alloc[c], reverse=True)[:remaining]:
-        alloc[c] += 1
-    return alloc
+    raw_shares = {
+        community_id: budget * size / total for community_id, size in sizes.items()
+    }
+    allocation = {
+        community_id: int(np.floor(share))
+        for community_id, share in raw_shares.items()
+    }
+
+    remaining = budget - sum(allocation.values())
+    by_remainder = sorted(
+        raw_shares,
+        key=lambda community_id: raw_shares[community_id] - allocation[community_id],
+        reverse=True,
+    )
+    for community_id in by_remainder[:remaining]:
+        allocation[community_id] += 1
+
+    return allocation
 
 
-# --- Look-ahead / sketch / path primitives (heavy-family support) -----------
+# Look-ahead / sketch / path primitives (heavy-family support)
 def estimate_sample_size(
-    g: GraphInfo, k: int, epsilon: float = 0.2, delta: float = 0.1
+    graph: GraphInfo,
+    budget: int,
+    epsilon: float = 0.2,
+    delta: float = 0.1,
+    min_theta: int = 200,
+    max_theta: int = 20000,
 ) -> int:
     """RIS sample-size (theta) heuristic; grows ~ n*log(n)/epsilon^2, clamped."""
-    import math
+    num_nodes = graph.num_nodes
+    raw_theta = (budget + 1) * num_nodes * math.log(max(num_nodes, 2)) / (epsilon**2)
 
-    n = g.num_nodes
-    return int(max(200, min(20000, (k + 1) * n * math.log(max(n, 2)) / (epsilon**2))))
+    return int(max(min_theta, min(max_theta, raw_theta)))
 
 
 def sample_live_edge_graph(
-    g: GraphInfo, rng: np.random.Generator
+    graph: GraphInfo, rng: np.random.Generator
 ) -> dict[int, list[int]]:
     """One IC live-edge realization -> out-adjacency of the live edges."""
-    live: dict[int, list[int]] = {v: [] for v in range(g.num_nodes)}
-    for i in range(g.edge_index.shape[1]):
-        if rng.random() < float(g.ic_probs[i]):
-            live[int(g.edge_index[0, i])].append(int(g.edge_index[1, i]))
+    live = {node: [] for node in range(graph.num_nodes)}
+    for edge in range(graph.edge_index.shape[1]):
+        if rng.random() < float(graph.ic_probs[edge]):
+            live[int(graph.edge_index[0, edge])].append(int(graph.edge_index[1, edge]))
+
     return live
 
 
-def reachable_count(live_adj: dict[int, list[int]], seeds: list[int]) -> int:
+def reachable_count(live_adjacency: dict[int, list[int]], seeds: list[int]) -> int:
     """Nodes reachable from seeds in a live-edge graph (forward BFS)."""
-    seen = {int(s) for s in seeds}
+    seen = {int(seed) for seed in seeds}
     stack = list(seen)
+
     while stack:
-        x = stack.pop()
-        for w in live_adj.get(x, ()):
-            if w not in seen:
-                seen.add(w)
-                stack.append(w)
+        current = stack.pop()
+        for neighbor in live_adjacency.get(current, ()):
+            if neighbor not in seen:
+                seen.add(neighbor)
+                stack.append(neighbor)
+
     return len(seen)
 
 
-def path_influence_scores(g: GraphInfo, max_hops: int = 2) -> np.ndarray:
+def path_influence_scores(graph: GraphInfo, max_hops: int = 2) -> np.ndarray:
     """Per-node truncated path-product influence proxy (for path-based methods), shape (N,).
 
     score[v] = sum over nodes reachable within max_hops of the best path-product of
     IC transmission probabilities from v.
     """
-    n = g.num_nodes
-    out_adj: dict[int, list[tuple[int, float]]] = {v: [] for v in range(n)}
-    for i in range(g.edge_index.shape[1]):
-        out_adj[int(g.edge_index[0, i])].append(
-            (int(g.edge_index[1, i]), float(g.ic_probs[i]))
+    num_nodes = graph.num_nodes
+    out_adjacency = {node: [] for node in range(num_nodes)}
+    for edge in range(graph.edge_index.shape[1]):
+        out_adjacency[int(graph.edge_index[0, edge])].append(
+            (int(graph.edge_index[1, edge]), float(graph.ic_probs[edge]))
         )
-    scores = np.zeros(n, dtype=np.float64)
-    for s in range(n):
-        best = {s: 1.0}
-        frontier = [(s, 1.0)]
+
+    scores = np.zeros(num_nodes, dtype=np.float64)
+    for source in range(num_nodes):
+        best = {source: 1.0}
+        frontier = [(source, 1.0)]
+
         for _ in range(max_hops):
-            nxt = []
-            for x, pp in frontier:
-                for w, p in out_adj[x]:
-                    cand = pp * p
-                    if cand > best.get(w, 0.0):
-                        best[w] = cand
-                        nxt.append((w, cand))
-            frontier = nxt
-        scores[s] = sum(v for node, v in best.items() if node != s)
+            next_frontier = []
+            for current, path_probability in frontier:
+                for neighbor, probability in out_adjacency[current]:
+                    candidate = path_probability * probability
+                    if candidate > best.get(neighbor, 0.0):
+                        best[neighbor] = candidate
+                        next_frontier.append((neighbor, candidate))
+            frontier = next_frontier
+
+        scores[source] = sum(
+            probability for node, probability in best.items() if node != source
+        )
+
     return scores

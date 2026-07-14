@@ -11,18 +11,19 @@ class WindowedOnline:
         self.windows = windows
 
     def optimize(
-        self, agent: CodingAgent, env, task: TaskSpec, g: GraphInfo
+        self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
         system = system_prompts["windowed"]
-        user = build_user_prompt("windowed", task, g)
-        strat = build_strategy(agent.generate(system, user))  # designed ONCE
-        window_len = max(1, (task.horizon + 1) // self.windows)
+        user = build_user_prompt("windowed", task, graph)
+        strategy = build_strategy(agent.generate(system, user))  # designed ONCE
+        window_length = max(1, (task.horizon + 1) // self.windows)
 
-        def action_fn(state: State, t: int) -> list[Action]:
+        def action_fn(state: State, timestep: int) -> list[Action]:
             # Consult the online algorithm at each window boundary only.
-            if t % window_len == 0:
-                return strat.act(state, g, t // window_len)
+            if timestep % window_length == 0:
+                return strategy.act(state, graph, timestep // window_length)
             return []
 
-        tr = env.rollout(action_fn, task.horizon, task.budget)
-        return strat, tr
+        trajectory = environment.rollout(action_fn, task.horizon, task.budget)
+
+        return strategy, trajectory

@@ -13,7 +13,7 @@ from data.wm_simulator import ActionOp, State
 
 Action = ActionOp
 
-# action_fn(state, t) -> action bag for timestep t
+# action_fn(state, timestep) -> action bag for that timestep
 ActionFn = Callable[[State, int], list[ActionOp]]
 
 
@@ -25,9 +25,9 @@ class GraphInfo:
     edge_index: np.ndarray  # (2, E) int64 [src, dst]
     ic_probs: np.ndarray  # (E,) float32 per-edge IC transmission prob
     directed: bool
-    _out: dict[int, list[int]] | None = field(default=None, repr=False)
-    _in: dict[int, list[int]] | None = field(default=None, repr=False)
-    _deg: np.ndarray | None = field(default=None, repr=False)
+    _out_adjacency: dict[int, list[int]] | None = field(default=None, repr=False)
+    _in_adjacency: dict[int, list[int]] | None = field(default=None, repr=False)
+    _degrees: np.ndarray | None = field(default=None, repr=False)
 
     @classmethod
     def from_store_entry(cls, entry: dict) -> "GraphInfo":
@@ -39,39 +39,40 @@ class GraphInfo:
             directed=bool(entry.get("meta", {}).get("directed", False)),
         )
 
-    def _ensure_adj(self) -> None:
-        if self._out is not None:
+    def _ensure_adjacency(self) -> None:
+        if self._out_adjacency is not None:
             return
 
-        out: dict[int, list[int]] = {v: [] for v in range(self.num_nodes)}
-        inn: dict[int, list[int]] = {v: [] for v in range(self.num_nodes)}
+        out_adjacency = {node: [] for node in range(self.num_nodes)}
+        in_adjacency = {node: [] for node in range(self.num_nodes)}
 
-        for i in range(self.edge_index.shape[1]):
-            u, v = int(self.edge_index[0, i]), int(self.edge_index[1, i])
-            out[u].append(v)
-            inn[v].append(u)
+        for edge in range(self.edge_index.shape[1]):
+            source = int(self.edge_index[0, edge])
+            target = int(self.edge_index[1, edge])
+            out_adjacency[source].append(target)
+            in_adjacency[target].append(source)
 
-        self._out, self._in = out, inn
+        self._out_adjacency, self._in_adjacency = out_adjacency, in_adjacency
 
-    def out_neighbors(self, v: int) -> list[int]:
-        self._ensure_adj()
-        assert self._out is not None
-        return self._out[int(v)]
+    def out_neighbors(self, node: int) -> list[int]:
+        self._ensure_adjacency()
+        assert self._out_adjacency is not None
+        return self._out_adjacency[int(node)]
 
-    def in_neighbors(self, v: int) -> list[int]:
-        self._ensure_adj()
-        assert self._in is not None
-        return self._in[int(v)]
+    def in_neighbors(self, node: int) -> list[int]:
+        self._ensure_adjacency()
+        assert self._in_adjacency is not None
+        return self._in_adjacency[int(node)]
 
-    def degree(self, v: int) -> int:
-        """Total degree (in + out) of node v."""
-        if self._deg is None:
-            deg = np.zeros(self.num_nodes, dtype=np.int64)
-            np.add.at(deg, self.edge_index[0], 1)
-            np.add.at(deg, self.edge_index[1], 1)
-            self._deg = deg
+    def degree(self, node: int) -> int:
+        """Total degree (in + out) of the node."""
+        if self._degrees is None:
+            degrees = np.zeros(self.num_nodes, dtype=np.int64)
+            np.add.at(degrees, self.edge_index[0], 1)
+            np.add.at(degrees, self.edge_index[1], 1)
+            self._degrees = degrees
 
-        return int(self._deg[int(v)])
+        return int(self._degrees[int(node)])
 
 
 @dataclass
@@ -101,11 +102,11 @@ class Strategy(Protocol):
     """
 
     def plan_horizon(
-        self, g: GraphInfo, budget: int, horizon: int
+        self, graph: GraphInfo, budget: int, horizon: int
     ) -> list[list[ActionOp]]:  # Method 1
         ...
 
     def act(
-        self, state: State, g: GraphInfo, t: int
+        self, state: State, graph: GraphInfo, timestep: int
     ) -> list[ActionOp]:  # Methods 2 & 3
         ...

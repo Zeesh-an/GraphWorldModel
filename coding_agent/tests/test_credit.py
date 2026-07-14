@@ -9,37 +9,41 @@ from coding_agent.types import Action, GraphInfo
 
 
 def _hub() -> GraphInfo:
-    src = [0, 0, 0, 1, 2, 3]
-    dst = [1, 2, 3, 0, 0, 0]
-    ei = np.array([src, dst], dtype=np.int64)
-    return GraphInfo(4, ei, np.full(6, 0.9, np.float32), True)
+    sources = [0, 0, 0, 1, 2, 3]
+    destinations = [1, 2, 3, 0, 0, 0]
+    edge_index = np.array([sources, destinations], dtype=np.int64)
+    return GraphInfo(4, edge_index, np.full(6, 0.9, np.float32), True)
 
 
 def test_sole_seed_gets_full_credit():
-    g = _hub()
-    env = MonteCarloEnvironment(g, "IC", mc_runs=10)
+    graph = _hub()
+    environment = MonteCarloEnvironment(graph, "IC", mc_runs=10)
     plan = [[Action("add_node", 0)], [], []]
 
-    base, entries = counterfactual_credit(env, plan, horizon=3, budget=1)
+    base_reward, entries = counterfactual_credit(
+        environment, plan, horizon=3, budget=1
+    )
 
-    assert base >= 1.0
+    assert base_reward >= 1.0
     assert len(entries) == 1
     # Removing the only seed leaves an empty plan -> ablated reward 0 -> delta == base.
-    assert entries[0]["delta"] == pytest.approx(base)
+    assert entries[0]["delta"] == pytest.approx(base_reward)
     assert entries[0]["t"] == 0
     assert entries[0]["op"] == "add_node"
     assert entries[0]["target"] == 0
 
 
 def test_empty_plan_yields_no_entries():
-    g = _hub()
-    env = MonteCarloEnvironment(g, "IC", mc_runs=5)
+    graph = _hub()
+    environment = MonteCarloEnvironment(graph, "IC", mc_runs=5)
 
-    base, entries = counterfactual_credit(env, [[], []], horizon=2, budget=0)
+    base_reward, entries = counterfactual_credit(
+        environment, [[], []], horizon=2, budget=0
+    )
 
-    assert base == 0.0
+    assert base_reward == 0.0
     assert entries == []
-    assert "No actions" in format_credit_report(base, entries)
+    assert "No actions" in format_credit_report(base_reward, entries)
 
 
 def test_report_formatting_and_feedback_prompt():
@@ -52,20 +56,20 @@ def test_report_formatting_and_feedback_prompt():
     assert "t=0: add_node(3)  delta=+2.50" in report
     assert "t=2: set_edge_weight(1->2)  delta=+0.00" in report
 
-    fb = build_feedback_prompt(4.0, "summary", credit_report=report)
-    assert "add_node(3)" in fb
+    feedback = build_feedback_prompt(4.0, "summary", credit_report=report)
+    assert "add_node(3)" in feedback
 
 
 canned = """
 class S(Strategy):
-    def plan_horizon(self, g, budget, horizon):
-        seeds = algorithms.high_degree(g, budget, "IC")
-        return [[Action("add_node", v) for v in seeds]] + [[] for _ in range(horizon)]
+    def plan_horizon(self, graph, budget, horizon):
+        seeds = algorithms.high_degree(graph, budget, "IC")
+        return [[Action("add_node", node) for node in seeds]] + [[] for _ in range(horizon)]
 """
 
 
 def test_run_experiment_credit_flag():
-    cfg = ExperimentConfig(
+    config = ExperimentConfig(
         method="one_shot",
         evaluator=monte_carlo,
         budget=1,
@@ -75,7 +79,7 @@ def test_run_experiment_credit_flag():
         credit=True,
     )
 
-    result = run_experiment(cfg, graph=_hub(), canned_script=canned)
+    result = run_experiment(config, graph=_hub(), canned_script=canned)
 
     assert result["credit_base_reward"] >= 1.0
     assert len(result["credit"]) == 1
