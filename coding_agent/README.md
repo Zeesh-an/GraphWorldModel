@@ -3,8 +3,7 @@
 An LLM coding-agent **outer loop** that designs Influence-Maximization algorithms
 emitting graph actions across **all** timesteps `t₀…t_T` (not just a `t₀` seed set),
 evaluated by the trained Graph World Model (fast inner loop) with a Monte-Carlo
-true-simulator baseline. See the design spec:
-`docs/superpowers/specs/2026-06-23-coding-agent-outer-loop-design.md`.
+true-simulator baseline.
 
 ## Architecture
 
@@ -24,11 +23,11 @@ Agent (LLM, TODO) → Python Strategy script → graph actions per t → Environ
 
 ## The three methods (`--method`)
 
-| Method | Idea | Agent calls |
-|---|---|---|
-| `one_shot` | one "super-algorithm" emits the whole `t₀…T` plan; refine on reward | few |
-| `per_step` | re-prompt the agent every timestep on the current state | one/step (expensive) |
-| `windowed` | design one online algorithm; re-apply per time window | one |
+| Method     | Idea                                                                | Agent calls          |
+| ---------- | ------------------------------------------------------------------- | -------------------- |
+| `one_shot` | one "super-algorithm" emits the whole `t₀…T` plan; refine on reward | few                  |
+| `per_step` | re-prompt the agent every timestep on the current state             | one/step (expensive) |
+| `windowed` | design one online algorithm; re-apply per time window               | one                  |
 
 ## Quick start
 
@@ -66,38 +65,38 @@ evaluator, noticeably slower on `--evaluator monte_carlo`.
 
 ## Implemented algorithms (`tools/algorithms.py`)
 
-| Family | Function | Notes |
-|---|---|---|
-| Degree | `high_degree` | top-k total degree |
-| Degree | `weighted_degree` | top-k by summed outgoing IC prob |
-| Degree | `degree_discount` | DegreeDiscount (Chen et al. 2009) |
-| Centrality | `pagerank_seeds` | top-k PageRank |
-| Centrality | `eigenvector_seeds` | top-k eigenvector centrality |
-| Centrality | `closeness_seeds` | top-k closeness centrality |
-| Greedy | `vanilla_greedy` | marginal-gain greedy (Kempe et al. 2003) |
-| Greedy | `celf` | lazy-forward greedy (Leskovec et al. 2007) |
-| Greedy | `celf_pp` | CELF++ (Goyal et al. 2011) — simplified |
-| Greedy | `adaptive_greedy` | adaptive MC count — simplified |
-| RIS | `ris_basic` | reverse influence sampling (Borgs et al. 2014), IC only |
-| RIS | `tim` | TIM/TIM+ (Tang et al. 2014) |
-| RIS | `imm` | IMM (Tang et al. 2015) — simplified |
-| RIS | `ssa` | SSA/D-SSA (Nguyen et al. 2016) — simplified |
-| RIS | `filtered_ris` | RR-size-filtered RIS |
-| Path | `sp1m` | SP1M/SPM (Kimura & Saito 2006) — truncated path-sum |
-| Path | `mia_pmia` | MIA/PMIA (Chen et al. 2010) — simplified |
-| Path | `ldag` | LDAG (Chen et al. 2010) — simplified |
-| Sketch | `static_greedy` | StaticGreedy (Cheng et al. 2014) |
-| Sketch | `skim` | SKIM (Cohen et al. 2014) — simplified |
-| Community | `community_im` | label-propagation communities + per-community degree |
-| Community | `cofim` | CoFIM (Zhang et al. 2014) — bridge-aware |
-| Community | `community_ris` | per-community RR coverage |
-| Metaheuristic | `simulated_annealing` | degree init + annealed swaps |
-| Metaheuristic | `hill_climbing` | degree init + 1-swap local search |
-| Metaheuristic | `genetic_algorithm` | seed-set GA (crossover + mutation) |
-| Hybrid | `pagerank_greedy` | PageRank candidate pool + greedy |
-| Hybrid | `degree_ris_refine` | degree init + RR-coverage swaps |
-| Hybrid | `celf_local_search` | CELF + 1-swap refinement |
-| Hybrid | `community_celf` | per-community CELF |
+| Family        | Function              | Notes                                                   |
+| ------------- | --------------------- | ------------------------------------------------------- |
+| Degree        | `high_degree`         | top-k total degree                                      |
+| Degree        | `weighted_degree`     | top-k by summed outgoing IC prob                        |
+| Degree        | `degree_discount`     | DegreeDiscount (Chen et al. 2009)                       |
+| Centrality    | `pagerank_seeds`      | top-k PageRank                                          |
+| Centrality    | `eigenvector_seeds`   | top-k eigenvector centrality                            |
+| Centrality    | `closeness_seeds`     | top-k closeness centrality                              |
+| Greedy        | `vanilla_greedy`      | marginal-gain greedy (Kempe et al. 2003)                |
+| Greedy        | `celf`                | lazy-forward greedy (Leskovec et al. 2007)              |
+| Greedy        | `celf_pp`             | CELF++ (Goyal et al. 2011) — simplified                 |
+| Greedy        | `adaptive_greedy`     | adaptive MC count — simplified                          |
+| RIS           | `ris_basic`           | reverse influence sampling (Borgs et al. 2014), IC only |
+| RIS           | `tim`                 | TIM/TIM+ (Tang et al. 2014)                             |
+| RIS           | `imm`                 | IMM (Tang et al. 2015) — simplified                     |
+| RIS           | `ssa`                 | SSA/D-SSA (Nguyen et al. 2016) — simplified             |
+| RIS           | `filtered_ris`        | RR-size-filtered RIS                                    |
+| Path          | `sp1m`                | SP1M/SPM (Kimura & Saito 2006) — truncated path-sum     |
+| Path          | `mia_pmia`            | MIA/PMIA (Chen et al. 2010) — simplified                |
+| Path          | `ldag`                | LDAG (Chen et al. 2010) — simplified                    |
+| Sketch        | `static_greedy`       | StaticGreedy (Cheng et al. 2014)                        |
+| Sketch        | `skim`                | SKIM (Cohen et al. 2014) — simplified                   |
+| Community     | `community_im`        | label-propagation communities + per-community degree    |
+| Community     | `cofim`               | CoFIM (Zhang et al. 2014) — bridge-aware                |
+| Community     | `community_ris`       | per-community RR coverage                               |
+| Metaheuristic | `simulated_annealing` | degree init + annealed swaps                            |
+| Metaheuristic | `hill_climbing`       | degree init + 1-swap local search                       |
+| Metaheuristic | `genetic_algorithm`   | seed-set GA (crossover + mutation)                      |
+| Hybrid        | `pagerank_greedy`     | PageRank candidate pool + greedy                        |
+| Hybrid        | `degree_ris_refine`   | degree init + RR-coverage swaps                         |
+| Hybrid        | `celf_local_search`   | CELF + 1-swap refinement                                |
+| Hybrid        | `community_celf`      | per-community CELF                                      |
 
 Heavy algorithms (MIA/PMIA, LDAG, SKIM, StaticGreedy, SSA, IMM, Adaptive Greedy) are
 **faithful-but-simplified** (noted in their docstrings).
