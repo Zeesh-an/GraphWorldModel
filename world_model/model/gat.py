@@ -21,6 +21,9 @@ import torch.nn.functional as F
 
 from world_model.model.model_utils import degree_encoding
 
+# Floors the attention log-bias and softmax denominator
+numerical_eps = 1e-9
+
 
 class GATLayer(nn.Module):
     """
@@ -34,7 +37,10 @@ class GATLayer(nn.Module):
     def __init__(self, hidden_dim: int, n_heads: int, dropout: float) -> None:
         super().__init__()
 
-        assert hidden_dim % n_heads == 0, "hidden_dim must be divisible by n_heads"
+        if hidden_dim % n_heads != 0:
+            raise ValueError(
+                f"hidden_dim must be divisible by n_heads, got {hidden_dim} / {n_heads}"
+            )
 
         self.hidden_dim = hidden_dim
         self.n_heads = n_heads
@@ -62,73 +68,85 @@ class GATLayer(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
-        for m in [self.W_l, self.W_r, self.out_proj]:
-            nn.init.xavier_uniform_(m.weight)
+        for module in [self.W_l, self.W_r, self.out_proj]:
+            nn.init.xavier_uniform_(module.weight)
 
         nn.init.xavier_uniform_(self.a)
 
     def forward(
         self,
-        x: torch.Tensor,
+        features: torch.Tensor,
         edge_index: torch.Tensor,
         edge_weight: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        x: (N, hidden_dim)
+        features: (N, hidden_dim)
         edge_index: (2, E) long — [src, dst]
         edge_weight: (E,) float edge weights added as log-bias to attention scores, or None for unweighted
         returns: (N, hidden_dim)
         """
-        N = x.shape[0]
-        src, dst = edge_index[0], edge_index[1]
+        num_nodes = features.shape[0]
+        sources, destinations = edge_index[0], edge_index[1]
 
         # Pre-norm
-        h = self.norm(x)
+        hidden = self.norm(features)
 
         # Per-head projections: (N, n_heads, d_head)
-        z_l = self.W_l(h).view(N, self.n_heads, self.d_head)  # self/dst
-        z_r = self.W_r(h).view(N, self.n_heads, self.d_head)  # neighbor/src
+        self_projection = self.W_l(hidden).view(num_nodes, self.n_heads, self.d_head)
+        neighbor_projection = self.W_r(hidden).view(
+            num_nodes, self.n_heads, self.d_head
+        )
 
         # GATv2 attention logits per edge, per head
         # For edge (src=u, dst=v):  e_uv = a^T LeakyReLU(z_l[v] + z_r[u])
-        z_edge = z_l[dst] + z_r[src]  # (E, n_heads, d_head)
-        z_edge = self.leaky_relu(z_edge)
-        scores = (z_edge * self.a.unsqueeze(0)).sum(dim=-1)  # (E, n_heads)
+        edge_projection = (
+            self_projection[destinations] + neighbor_projection[sources]
+        )  # (E, n_heads, d_head)
+        edge_projection = self.leaky_relu(edge_projection)
+        scores = (edge_projection * self.a.unsqueeze(0)).sum(dim=-1)  # (E, n_heads)
 
         if edge_weight is not None:
-            scores = scores + torch.log(edge_weight.clamp(min=1e-9)).unsqueeze(1)
+            scores = scores + torch.log(
+                edge_weight.clamp(min=numerical_eps)
+            ).unsqueeze(1)
 
-        # Scatter softmax over incoming edges per dst, per head
-        scores_max = torch.full((N, self.n_heads), float("-inf"), device=x.device)
+        # Scatter softmax over incoming edges per destination, per head
+        scores_max = torch.full(
+            (num_nodes, self.n_heads), float("-inf"), device=features.device
+        )
         scores_max.scatter_reduce_(
             0,
-            dst.unsqueeze(1).expand(-1, self.n_heads),
+            destinations.unsqueeze(1).expand(-1, self.n_heads),
             scores,
             reduce="amax",
             include_self=True,
         )
-        scores_exp = torch.exp(scores - scores_max[dst])  # (E, n_heads)
+        scores_exp = torch.exp(scores - scores_max[destinations])  # (E, n_heads)
 
-        scores_sum = torch.zeros(N, self.n_heads, device=x.device)
+        scores_sum = torch.zeros(num_nodes, self.n_heads, device=features.device)
         scores_sum.scatter_add_(
-            0, dst.unsqueeze(1).expand(-1, self.n_heads), scores_exp
+            0, destinations.unsqueeze(1).expand(-1, self.n_heads), scores_exp
         )
-        attn = scores_exp / (scores_sum[dst] + 1e-9)  # (E, n_heads)
-        attn = self.dropout(attn)
+        attention = scores_exp / (
+            scores_sum[destinations] + numerical_eps
+        )  # (E, n_heads)
+        attention = self.dropout(attention)
 
-        # Aggregate: value = z_r (neighbor projection)
-        agg = torch.zeros(N, self.n_heads, self.d_head, device=x.device)
-        agg.scatter_add_(
+        # Aggregate: value = neighbor projection
+        aggregated = torch.zeros(
+            num_nodes, self.n_heads, self.d_head, device=features.device
+        )
+        aggregated.scatter_add_(
             0,
-            dst.unsqueeze(1).unsqueeze(2).expand(-1, self.n_heads, self.d_head),
-            attn.unsqueeze(-1) * z_r[src],
+            destinations.unsqueeze(1).unsqueeze(2).expand(-1, self.n_heads, self.d_head),
+            attention.unsqueeze(-1) * neighbor_projection[sources],
         )  # (N, n_heads, d_head)
 
         # Concatenate heads and project
-        agg = agg.reshape(N, self.hidden_dim)
-        agg = self.out_proj(agg)
+        aggregated = aggregated.reshape(num_nodes, self.hidden_dim)
+        aggregated = self.out_proj(aggregated)
 
-        return x + self.dropout(agg)  # residual
+        return features + self.dropout(aggregated)  # residual
 
 
 class GATForwardModel(nn.Module):
@@ -151,7 +169,10 @@ class GATForwardModel(nn.Module):
     ) -> None:
         super().__init__()
 
-        assert hidden_dim % n_heads == 0, "hidden_dim must be divisible by n_heads"
+        if hidden_dim % n_heads != 0:
+            raise ValueError(
+                f"hidden_dim must be divisible by n_heads, got {hidden_dim} / {n_heads}"
+            )
 
         self.hidden_dim = hidden_dim
         self.use_pe = use_pe
@@ -177,39 +198,42 @@ class GATForwardModel(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
-    def forward(self, seed_vec: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+    def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adj: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
+        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
         returns: (N, 1) predicted outcome probabilities in [0, 1]
         """
         device = seed_vec.device
 
-        # Build edge_index from adj
-        if adj.is_sparse:
-            edge_index = adj.coalesce().indices()  # (2, E)
+        # Build edge_index from the adjacency
+        if adjacency.is_sparse:
+            edge_index = adjacency.coalesce().indices()  # (2, E)
         else:
-            edge_index = adj.nonzero(as_tuple=False).t()  # (2, E)
+            edge_index = adjacency.nonzero(as_tuple=False).t()  # (2, E)
 
         if self.use_pe:
-            pe = degree_encoding(adj, self.hidden_dim, device)  # (N, hidden_dim)
-            x = torch.cat([seed_vec, pe], dim=-1)  # (N, 1 + hidden_dim)
+            positional_encoding = degree_encoding(
+                adjacency, self.hidden_dim, device
+            )  # (N, hidden_dim)
+            features = torch.cat(
+                [seed_vec, positional_encoding], dim=-1
+            )  # (N, 1 + hidden_dim)
         else:
-            x = seed_vec  # (N, 1)
+            features = seed_vec  # (N, 1)
 
-        x = self.input_proj(x)  # (N, hidden_dim)
+        features = self.input_proj(features)  # (N, hidden_dim)
 
         for layer in self.layers:
-            x = layer(x, edge_index)  # (N, hidden_dim)
+            features = layer(features, edge_index)  # (N, hidden_dim)
 
-        out = torch.sigmoid(self.output_proj(x))  # (N, 1)
-        return out
+        return torch.sigmoid(self.output_proj(features))  # (N, 1)
 
 
 class GATEncoder(nn.Module):
@@ -235,11 +259,11 @@ class GATEncoder(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden_dim)
 
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
@@ -248,17 +272,20 @@ class GATEncoder(nn.Module):
         returns: (N, hidden_dim) node embeddings
         """
         # Add self-loops so each node attends to itself (weight 1 -> neutral log-bias)
-        n = X.shape[0]
-        loop = torch.arange(n, device=X.device)
-        ei = torch.cat([graph.edge_index, torch.stack([loop, loop])], dim=1)
-        w = torch.cat(
+        num_nodes = X.shape[0]
+        self_loops = torch.arange(num_nodes, device=X.device)
+        edge_index = torch.cat(
+            [graph.edge_index, torch.stack([self_loops, self_loops])], dim=1
+        )
+        edge_weight = torch.cat(
             [
                 graph.edge_weight,
-                torch.ones(n, device=X.device, dtype=graph.edge_weight.dtype),
+                torch.ones(num_nodes, device=X.device, dtype=graph.edge_weight.dtype),
             ]
         )
-        h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
-        for layer in self.layers:
-            h = layer(h, ei, w)  # shape: (N, hidden_dim)
 
-        return self.norm(h)  # shape: (N, hidden_dim)
+        hidden = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
+        for layer in self.layers:
+            hidden = layer(hidden, edge_index, edge_weight)  # shape: (N, hidden_dim)
+
+        return self.norm(hidden)  # shape: (N, hidden_dim)

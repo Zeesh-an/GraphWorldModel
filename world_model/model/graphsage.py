@@ -20,6 +20,9 @@ import torch.nn.functional as F
 
 from world_model.model.model_utils import degree_encoding
 
+# Prevent division-by-zero for isolated nodes (degree 0 -> mean 0)
+degree_floor = 1e-9
+
 
 class GraphSAGELayer(nn.Module):
     """
@@ -43,43 +46,48 @@ class GraphSAGELayer(nn.Module):
 
     def forward(
         self,
-        x: torch.Tensor,
+        features: torch.Tensor,
         edge_index: torch.Tensor,
         edge_weight: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        x: (N, hidden_dim)
+        features: (N, hidden_dim)
         edge_index: (2, E) long — [src, dst] with self-loops already removed
         edge_weight: (E,) float edge weights, or None for unweighted mean
         returns: (N, hidden_dim)
         """
-        N, H = x.shape[0], self.hidden_dim
-        src, dst = edge_index[0], edge_index[1]
+        num_nodes, hidden_dim = features.shape[0], self.hidden_dim
+        sources, destinations = edge_index[0], edge_index[1]
 
         # Pre-norm
-        h = self.norm(x)  # shape: (N, H)
+        hidden = self.norm(features)  # shape: (N, H)
 
         # Weighted neighbor mean aggregation via scatter_add / weighted degree
-        w = (
-            torch.ones(src.shape[0], device=x.device, dtype=h.dtype)
+        weights = (
+            torch.ones(sources.shape[0], device=features.device, dtype=hidden.dtype)
             if edge_weight is None
-            else edge_weight.to(h.dtype)
+            else edge_weight.to(hidden.dtype)
         )
-        h_neigh = torch.zeros(N, H, device=x.device, dtype=h.dtype)
-        h_neigh.scatter_add_(0, dst.unsqueeze(1).expand(-1, H), h[src] * w.unsqueeze(1))
-        deg = torch.zeros(N, device=x.device, dtype=h.dtype)
-        deg.scatter_add_(0, dst, w)
-        # Prevent division-by-zero for isolated nodes (deg=0 → mean=0)
-        deg_safe = deg.clamp(min=1e-9).unsqueeze(dim=-1)  # shape: (N, 1)
-        h_neigh = h_neigh / deg_safe  # shape: (N, H)
+        neighbor_mean = torch.zeros(
+            num_nodes, hidden_dim, device=features.device, dtype=hidden.dtype
+        )
+        neighbor_mean.scatter_add_(
+            0,
+            destinations.unsqueeze(1).expand(-1, hidden_dim),
+            hidden[sources] * weights.unsqueeze(1),
+        )
+        degrees = torch.zeros(num_nodes, device=features.device, dtype=hidden.dtype)
+        degrees.scatter_add_(0, destinations, weights)
+        safe_degrees = degrees.clamp(min=degree_floor).unsqueeze(dim=-1)  # shape: (N, 1)
+        neighbor_mean = neighbor_mean / safe_degrees  # shape: (N, H)
 
         # Concat self and neighbor mean, project back to H
-        h_cat = torch.cat([h, h_neigh], dim=-1)  # shape: (N, 2H)
-        h_out = self.linear(h_cat)  # shape: (N, H)
-        h_out = F.gelu(h_out)
-        h_out = self.dropout(h_out)
+        combined = torch.cat([hidden, neighbor_mean], dim=-1)  # shape: (N, 2H)
+        output = self.linear(combined)  # shape: (N, H)
+        output = F.gelu(output)
+        output = self.dropout(output)
 
-        return x + h_out  # residual
+        return features + output  # residual
 
 
 class GraphSAGEForwardModel(nn.Module):
@@ -125,44 +133,49 @@ class GraphSAGEForwardModel(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
-    def forward(self, seed_vec: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+    def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adj: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2 (self-loops added)
+        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2 (self-loops added)
         returns: (N, 1) predicted outcome probabilities in [0, 1]
         """
         device = seed_vec.device
 
-        # Build edge_index from adj, stripping self-loops so GraphSAGE mean
-        # aggregates over true neighbors only (self term enters via concat).
-        if adj.is_sparse:
-            edge_index = adj.coalesce().indices()  # shape: (2, E)
+        # Build edge_index from the adjacency, stripping self-loops so GraphSAGE
+        # mean aggregates over true neighbors only (self term enters via concat).
+        if adjacency.is_sparse:
+            edge_index = adjacency.coalesce().indices()  # shape: (2, E)
         else:
-            edge_index = adj.nonzero(as_tuple=False).t()  # shape: (2, E)
+            edge_index = adjacency.nonzero(as_tuple=False).t()  # shape: (2, E)
 
-        src, dst = edge_index[0], edge_index[1]
-        mask = src != dst
-        edge_index = torch.stack([src[mask], dst[mask]], dim=0)  # shape: (2, E')
+        sources, destinations = edge_index[0], edge_index[1]
+        mask = sources != destinations
+        edge_index = torch.stack(
+            [sources[mask], destinations[mask]], dim=0
+        )  # shape: (2, E')
 
         if self.use_pe:
-            pe = degree_encoding(adj, self.hidden_dim, device)  # shape: (N, H)
-            x = torch.cat([seed_vec, pe], dim=-1)  # shape: (N, 1 + H)
+            positional_encoding = degree_encoding(
+                adjacency, self.hidden_dim, device
+            )  # shape: (N, H)
+            features = torch.cat(
+                [seed_vec, positional_encoding], dim=-1
+            )  # shape: (N, 1 + H)
         else:
-            x = seed_vec  # shape: (N, 1)
+            features = seed_vec  # shape: (N, 1)
 
-        x = self.input_proj(x)  # shape: (N, H)
+        features = self.input_proj(features)  # shape: (N, H)
 
         for layer in self.layers:
-            x = layer(x, edge_index)  # shape: (N, H)
+            features = layer(features, edge_index)  # shape: (N, H)
 
-        out = torch.sigmoid(self.output_proj(x))  # shape: (N, 1)
-        return out
+        return torch.sigmoid(self.output_proj(features))  # shape: (N, 1)
 
 
 class GraphSAGEEncoder(nn.Module):
@@ -187,11 +200,11 @@ class GraphSAGEEncoder(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden_dim)
 
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
@@ -200,11 +213,12 @@ class GraphSAGEEncoder(nn.Module):
         returns: (N, hidden_dim) node embeddings
         """
         # Strip self-loops so the neighbor mean excludes self (self enters via concat)
-        ei, w = graph.edge_index, graph.edge_weight
-        mask = ei[0] != ei[1]
-        ei, w = ei[:, mask], w[mask]
-        h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
-        for layer in self.layers:
-            h = layer(h, ei, w)  # shape: (N, hidden_dim)
+        edge_index, edge_weight = graph.edge_index, graph.edge_weight
+        mask = edge_index[0] != edge_index[1]
+        edge_index, edge_weight = edge_index[:, mask], edge_weight[mask]
 
-        return self.norm(h)  # shape: (N, hidden_dim)
+        hidden = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
+        for layer in self.layers:
+            hidden = layer(hidden, edge_index, edge_weight)  # shape: (N, hidden_dim)
+
+        return self.norm(hidden)  # shape: (N, hidden_dim)

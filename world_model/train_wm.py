@@ -30,29 +30,34 @@ from world_model.wm_eval import (
     rollout_ensemble,
 )
 
+pos_weight_min = 1.0
+pos_weight_max = 50.0
 
-def _clamp_pos_weight(x: float) -> float:
-    return float(min(max(x, 1.0), 50.0))
+
+def _clamp_pos_weight(value: float) -> float:
+    return float(min(max(value, pos_weight_min), pos_weight_max))
 
 
 def compute_pos_weight(
     dataset: TransitionDataset, device: torch.device
 ) -> tuple[torch.Tensor, torch.Tensor]:
     # Diffusion changes are sparse (few infected/frontier nodes per step), so a plain BCE would collapse to predict all zeros
-    pos_i = tot = pos_f = 0
+    positive_infected = total = positive_frontier = 0
 
-    for i in range(len(dataset)):
-        it = dataset[i]
+    for index in range(len(dataset)):
+        item = dataset[index]
 
-        tot += it["y_inf"].numel()
-        pos_i += it["y_inf"].sum().item()
-        pos_f += it["y_fr"].sum().item()
+        total += item["y_inf"].numel()
+        positive_infected += item["y_inf"].sum().item()
+        positive_frontier += item["y_fr"].sum().item()
 
-    wi = (tot - pos_i) / max(pos_i, 1.0)
-    wf = (tot - pos_f) / max(pos_f, 1.0)
+    weight_infected = (total - positive_infected) / max(positive_infected, 1.0)
+    weight_frontier = (total - positive_frontier) / max(positive_frontier, 1.0)
+
     # Passed into BCEWithLogitsLoss, it up-weights the rare positive class so the model is pushed to actually predict the new infections
-    return torch.tensor([_clamp_pos_weight(wi)], device=device), torch.tensor(
-        [_clamp_pos_weight(wf)], device=device
+    return (
+        torch.tensor([_clamp_pos_weight(weight_infected)], device=device),
+        torch.tensor([_clamp_pos_weight(weight_frontier)], device=device),
     )
 
 
@@ -201,7 +206,7 @@ if __name__ == "__main__":
         train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
     )
 
-    bb = {
+    backbone_kwargs = {
         "n_heads": args.n_heads,
         "ffn_dim": args.ffn_dim,
         "alpha": args.gcnii_alpha,
@@ -216,7 +221,7 @@ if __name__ == "__main__":
         dropout=args.dropout,
         head_type=args.head,
         diffusion_model=diffusion_model,
-        **bb,
+        **backbone_kwargs,
     ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -224,16 +229,18 @@ if __name__ == "__main__":
     )
 
     if args.pos_weight == "auto":
-        pw_i, pw_f = compute_pos_weight(train_dataset, device)
+        pos_weight_infected, pos_weight_frontier = compute_pos_weight(
+            train_dataset, device
+        )
     else:
-        pw_i = pw_f = None
+        pos_weight_infected = pos_weight_frontier = None
 
-    loss_i = nn.BCEWithLogitsLoss(pos_weight=pw_i)
-    loss_f = nn.BCEWithLogitsLoss(pos_weight=pw_f)
+    infected_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight_infected)
+    frontier_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight_frontier)
 
     os.makedirs(args.ckpt_dir, exist_ok=True)
-    ckpt = Path(args.ckpt_dir) / f"wm_{args.model}_{diffusion_model}.pt"
-    best, bad = -1.0, 0
+    checkpoint_path = Path(args.ckpt_dir) / f"wm_{args.model}_{diffusion_model}.pt"
+    best_delta_f1, epochs_since_best = -1.0, 0
 
     for epoch in range(args.epochs):
         model.train()
@@ -243,7 +250,7 @@ if __name__ == "__main__":
             optimizer.zero_grad()
 
             logits = model(batch["X"], batch["graph"])
-            loss = loss_i(logits[:, 0], batch["y_inf"]) + loss_f(
+            loss = infected_loss(logits[:, 0], batch["y_inf"]) + frontier_loss(
                 logits[:, 1], batch["y_fr"]
             )
 
@@ -253,18 +260,22 @@ if __name__ == "__main__":
             loss_value = loss.item()
             progress_bar.set_postfix(loss=f"{loss_value:.6f}")
 
-        val = evaluate_one_step(model, validation_dataset, diffusion_model, device)
+        val_metrics = evaluate_one_step(
+            model, validation_dataset, diffusion_model, device
+        )
 
-        if val["delta_f1"] > best:
-            best, bad = val["delta_f1"], 0
-            torch.save(model.state_dict(), ckpt)
+        if val_metrics["delta_f1"] > best_delta_f1:
+            best_delta_f1, epochs_since_best = val_metrics["delta_f1"], 0
+            torch.save(model.state_dict(), checkpoint_path)
         else:
-            bad += 1
-            if bad >= args.patience:
-                print(f"[early-stop] epoch {epoch}, best val delta_f1={best:.4f}")
+            epochs_since_best += 1
+            if epochs_since_best >= args.patience:
+                print(
+                    f"[early-stop] epoch {epoch}, best val delta_f1={best_delta_f1:.4f}"
+                )
                 break
 
-    model.load_state_dict(torch.load(ckpt, map_location=device))
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     results = {
         "config": vars(args),
         "test": evaluate_one_step(model, test_dataset, diffusion_model, device),
@@ -289,15 +300,15 @@ if __name__ == "__main__":
             seed=args.seed,
         )
 
-    out = args.results or str(
+    results_path = args.results or str(
         Path(args.ckpt_dir) / f"results_{args.model}_{diffusion_model}.json"
     )
-    os.makedirs(Path(out).parent, exist_ok=True)
-    Path(out).write_text(json.dumps(results, indent=2, default=str))
+    os.makedirs(Path(results_path).parent, exist_ok=True)
+    Path(results_path).write_text(json.dumps(results, indent=2, default=str))
 
     print(
         json.dumps(
-            {k: results[k] for k in ("test", "rollout") if k in results},
+            {key: results[key] for key in ("test", "rollout") if key in results},
             indent=2,
             default=str,
         )

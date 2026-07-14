@@ -26,6 +26,7 @@ from data.wm_graphs import (
 from data.wm_simulator import ActionOp, Simulator, State, valid_action_ops
 
 synthetic_families = ("er", "ba", "ws", "karate")
+seed_upper_bound = 2**31 - 1
 
 
 # Storage
@@ -43,7 +44,7 @@ def build_record(
     next_marginal_infected: dict[int, float] | None = None,
     next_marginal_frontier: dict[int, float] | None = None,
 ) -> dict:
-    """Build one transition record for the JSONL sotrage."""
+    """Build one transition record for the JSONL storage."""
     record = {
         "graph_id": graph_id,
         "diffusion_model": diffusion_model,
@@ -52,7 +53,7 @@ def build_record(
         "branch": branch,
         "t": int(t),
         "state": state.to_dict(),
-        "action": [a.to_dict() for a in action],
+        "action": [action_op.to_dict() for action_op in action],
         "next_state": next_state.to_dict(),
         "reward": float(reward),
     }
@@ -60,10 +61,12 @@ def build_record(
     # Sparse {node: prob} soft targets (string keys for JSON); absent => legacy binary
     if next_marginal_infected is not None:
         record["next_marginal_infected"] = {
-            str(v): round(p, 6) for v, p in next_marginal_infected.items()
+            str(node): round(probability, 6)
+            for node, probability in next_marginal_infected.items()
         }
         record["next_marginal_frontier"] = {
-            str(v): round(p, 6) for v, p in (next_marginal_frontier or {}).items()
+            str(node): round(probability, 6)
+            for node, probability in (next_marginal_frontier or {}).items()
         }
 
     return record
@@ -111,7 +114,7 @@ class TransitionWriter:
         os.makedirs(self.out_dir, exist_ok=True)
         self._handles = {}
 
-    def write(self, rec: dict, model: str, split: str) -> None:
+    def write(self, record: dict, model: str, split: str) -> None:
         handle = self._handles.get((model, split))
         if handle is None:
             handle = open(
@@ -121,11 +124,11 @@ class TransitionWriter:
             )
             self._handles[(model, split)] = handle
 
-        handle.write(json.dumps(rec) + "\n")
+        handle.write(json.dumps(record) + "\n")
 
     def close(self) -> None:
-        for h in self._handles.values():
-            h.close()
+        for handle in self._handles.values():
+            handle.close()
 
         self._handles.clear()
 
@@ -168,11 +171,11 @@ class GenConfig:
 
 def _iter_bundles(config: GenConfig) -> Iterator[GraphBundle]:
     if config.dataset in synthetic_families:
-        for i in range(config.num_graphs):
+        for index in range(config.num_graphs):
             yield make_synthetic_bundle(
                 config.dataset,
-                index=i,
-                n=config.syn_nodes,
+                index=index,
+                num_nodes=config.syn_nodes,
                 er_p=config.er_p,
                 ba_m=config.ba_m,
                 ws_k=config.ws_k,
@@ -187,19 +190,19 @@ def _iter_bundles(config: GenConfig) -> Iterator[GraphBundle]:
         )
 
 
-def _resolve_k(config: GenConfig, n: int) -> int:
+def _resolve_budget(config: GenConfig, num_nodes: int) -> int:
     if config.budget_pct is not None:
-        return max(1, round(n * config.budget_pct / 100))
+        return max(1, round(num_nodes * config.budget_pct / 100))
 
     return config.budget
 
 
 def _assign_split(rng: np.random.Generator, split: tuple) -> str:
-    r = rng.random()
+    draw = rng.random()
 
-    if r < split[0]:
+    if draw < split[0]:
         return "train"
-    if r < split[0] + split[1]:
+    if draw < split[0] + split[1]:
         return "val"
 
     return "test"
@@ -209,26 +212,30 @@ def _episode_transitions(
     bundle: GraphBundle,
     model: str,
     algorithm: str,
-    k: int,
+    budget: int,
     rollout: int,
     config: GenConfig,
     base_rng: np.random.Generator,
     writer: TransitionWriter,
     split: str,
 ) -> None:
-    episode_id = f"{bundle.graph_id}|{model}|{algorithm}|k{k}|r{rollout}"
+    episode_id = f"{bundle.graph_id}|{model}|{algorithm}|k{budget}|r{rollout}"
 
     # Per-episode RNGs derived from the base seed for reproducibility.
-    sel_rng = np.random.default_rng(base_rng.integers(0, 2**31 - 1))
-    inj_rng = np.random.default_rng(base_rng.integers(0, 2**31 - 1))
-    sim_seed = int(base_rng.integers(0, 2**31 - 1))
+    selection_rng = np.random.default_rng(base_rng.integers(0, seed_upper_bound))
+    injection_rng = np.random.default_rng(base_rng.integers(0, seed_upper_bound))
+    simulator_seed = int(base_rng.integers(0, seed_upper_bound))
 
-    seeds = select_seeds(bundle, k=k, algorithm=algorithm, model=model, rng=sel_rng)
-    sim = Simulator(bundle.nx_graph, ic_prob_map=bundle.ic_prob_map, seed=sim_seed)
-    sim.reset(model)
+    seeds = select_seeds(
+        bundle, num_seeds=budget, algorithm=algorithm, model=model, rng=selection_rng
+    )
+    simulator = Simulator(
+        bundle.nx_graph, ic_prob_map=bundle.ic_prob_map, seed=simulator_seed
+    )
+    simulator.reset(model)
 
     s_t = State(infected=[], frontier=[])
-    seed_bag = [ActionOp("add_node", v) for v in seeds]
+    seed_bag = [ActionOp("add_node", node) for node in seeds]
 
     # Timestep loop
     for t in range(config.horizon + 1):
@@ -238,8 +245,8 @@ def _episode_transitions(
             if t == 0
             else sample_injection(
                 s_t,
-                graph=sim.model.graph.graph,
-                rng=inj_rng,
+                graph=simulator.model.graph.graph,
+                rng=injection_rng,
                 p_inject=config.inject_p,
                 action_ops=config.action_ops,
                 weight_range=(config.weight_lo, config.weight_hi),
@@ -247,21 +254,20 @@ def _episode_transitions(
         )
 
         # Counterfactual forks (same s_t, different a_t) at intermediate steps.
-        if t > 0 and config.cf_prob > 0 and inj_rng.random() < config.cf_prob:
-            snap = sim.snapshot()
-            for bi, cf_bag in enumerate(
-                counterfactual_actions(
-                    s_t,
-                    n_nodes=bundle.nx_graph.number_of_nodes(),
-                    main_bag=action,
-                    n=config.cf_branches,
-                    rng=inj_rng,
-                    action_ops=config.action_ops,
-                )
-            ):
-                sim.restore(snap)
-                s_cf, cf_inf_marg, cf_fr_marg = sim.advance_marginal(
-                    cf_bag, config.mc_marginals
+        if t > 0 and config.cf_prob > 0 and injection_rng.random() < config.cf_prob:
+            snapshot = simulator.snapshot()
+            cf_bags = counterfactual_actions(
+                s_t,
+                num_nodes=bundle.nx_graph.number_of_nodes(),
+                main_bag=action,
+                count=config.cf_branches,
+                rng=injection_rng,
+                action_ops=config.action_ops,
+            )
+            for branch_index, cf_bag in enumerate(cf_bags):
+                simulator.restore(snapshot)
+                s_cf, cf_infected_marginal, cf_frontier_marginal = (
+                    simulator.advance_marginal(cf_bag, config.mc_marginals)
                 )
                 writer.write(
                     build_record(
@@ -269,23 +275,25 @@ def _episode_transitions(
                         diffusion_model=model,
                         episode_id=episode_id,
                         algorithm=algorithm,
-                        branch=f"cf_{bi}",
+                        branch=f"cf_{branch_index}",
                         t=t,
                         state=s_t,
                         action=cf_bag,
                         next_state=s_cf,
                         reward=float(len(s_cf.infected) - len(s_t.infected)),
-                        next_marginal_infected=cf_inf_marg,
-                        next_marginal_frontier=cf_fr_marg,
+                        next_marginal_infected=cf_infected_marginal,
+                        next_marginal_frontier=cf_frontier_marginal,
                     ),
                     model=model,
                     split=split,
                 )
-            sim.restore(snap)
+            simulator.restore(snapshot)
 
         # In the main transition, apply the real action, advance one step, and write the (s_t, action, s_next) record
         # The reward is the spread gain (the increase in activated-node count this step)
-        s_next, inf_marg, fr_marg = sim.advance_marginal(action, config.mc_marginals)
+        s_next, infected_marginal, frontier_marginal = simulator.advance_marginal(
+            action, config.mc_marginals
+        )
         writer.write(
             build_record(
                 graph_id=bundle.graph_id,
@@ -298,8 +306,8 @@ def _episode_transitions(
                 action=action,
                 next_state=s_next,
                 reward=float(len(s_next.infected) - len(s_t.infected)),
-                next_marginal_infected=inf_marg,
-                next_marginal_frontier=fr_marg,
+                next_marginal_infected=infected_marginal,
+                next_marginal_frontier=frontier_marginal,
             ),
             model=model,
             split=split,
@@ -315,14 +323,14 @@ def _episode_transitions(
 def run_generation(config: GenConfig) -> dict[str, object]:
     out_dir = Path(config.out_dir)
     os.makedirs(out_dir, exist_ok=True)
-    gs = GraphStore(out_dir)
+    graph_store = GraphStore(out_dir)
     base_rng = np.random.default_rng(config.seed)
 
     n_episodes = 0
     with TransitionWriter(out_dir) as writer:
         for bundle in _iter_bundles(config):
-            gs.save(bundle)
-            k = _resolve_k(config, bundle.nx_graph.number_of_nodes())
+            graph_store.save(bundle)
+            budget = _resolve_budget(config, bundle.nx_graph.number_of_nodes())
 
             for model in config.models:
                 for algorithm in config.algorithms:
@@ -332,7 +340,7 @@ def run_generation(config: GenConfig) -> dict[str, object]:
                             bundle,
                             model,
                             algorithm,
-                            k,
+                            budget,
                             rollout,
                             config,
                             base_rng,
@@ -341,7 +349,7 @@ def run_generation(config: GenConfig) -> dict[str, object]:
                         )
                         n_episodes += 1
 
-        gs.flush()
+        graph_store.flush()
 
     metadata = {
         "task": "IM_world_model_transitions",

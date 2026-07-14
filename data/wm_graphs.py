@@ -48,28 +48,28 @@ def bundle_from_nx(
     prob_model: str,
     uniform_p: float,
 ) -> GraphBundle:
-    adj = nx.to_scipy_sparse_array(
+    adjacency = nx.to_scipy_sparse_array(
         graph,
         nodelist=list(range(graph.number_of_nodes())),
         dtype=np.float32,
         format="csr",
     )
-    edge_index, ic_probs, lt_weights = build_edge_index(adj)
+    edge_index, ic_probs, lt_weights = build_edge_index(adjacency)
 
     if prob_model == "uniform":
         ic_probs = np.full(ic_probs.shape, float(uniform_p), dtype=np.float32)
         lt_weights = ic_probs.copy()
 
     ic_prob_map = {
-        (int(edge_index[0, i]), int(edge_index[1, i])): float(ic_probs[i])
-        for i in range(edge_index.shape[1])
+        (int(edge_index[0, edge]), int(edge_index[1, edge])): float(ic_probs[edge])
+        for edge in range(edge_index.shape[1])
     }
 
     if node_feats is None:
-        deg = np.array([d for _, d in graph.degree()], dtype=np.float32)
+        degrees = np.array([degree for _, degree in graph.degree()], dtype=np.float32)
 
-        # For graphs which have no node features (such as synthethic graphs), use log(1 + degree) as a single node feature
-        node_feats = np.log1p(deg).reshape(-1, 1).astype(np.float32)
+        # For graphs which have no node features (such as synthetic graphs), use log(1 + degree) as a single node feature
+        node_feats = np.log1p(degrees).reshape(-1, 1).astype(np.float32)
 
     if node_labels is None:
         node_labels = np.zeros(graph.number_of_nodes(), dtype=np.int32)
@@ -98,7 +98,7 @@ def bundle_from_nx(
 def make_synthetic_bundle(
     family: str,
     index: int,
-    n: int = 100,
+    num_nodes: int = 100,
     er_p: float = 0.05,
     ba_m: int = 3,
     ws_k: int = 6,
@@ -107,18 +107,18 @@ def make_synthetic_bundle(
     prob_model: str = "weighted",
     uniform_p: float = 0.1,
 ) -> GraphBundle:
-    """Generate one synthetic graph instance index is folded into the seed)."""
-    inst_seed = seed + index
+    """Generate one synthetic graph instance (index is folded into the seed)."""
+    instance_seed = seed + index
 
     if family == "er":
-        graph = nx.gnp_random_graph(n, er_p, seed=inst_seed)
-        graph_id = f"er_n{n}_p{er_p}_s{inst_seed}"
+        graph = nx.gnp_random_graph(num_nodes, er_p, seed=instance_seed)
+        graph_id = f"er_n{num_nodes}_p{er_p}_s{instance_seed}"
     elif family == "ba":
-        graph = nx.barabasi_albert_graph(n, ba_m, seed=inst_seed)
-        graph_id = f"ba_n{n}_m{ba_m}_s{inst_seed}"
+        graph = nx.barabasi_albert_graph(num_nodes, ba_m, seed=instance_seed)
+        graph_id = f"ba_n{num_nodes}_m{ba_m}_s{instance_seed}"
     elif family == "ws":
-        graph = nx.watts_strogatz_graph(n, ws_k, ws_p, seed=inst_seed)
-        graph_id = f"ws_n{n}_k{ws_k}_p{ws_p}_s{inst_seed}"
+        graph = nx.watts_strogatz_graph(num_nodes, ws_k, ws_p, seed=instance_seed)
+        graph_id = f"ws_n{num_nodes}_k{ws_k}_p{ws_p}_s{instance_seed}"
     elif family == "karate":
         graph = nx.karate_club_graph()
         graph_id = "karate"
@@ -130,29 +130,29 @@ def make_synthetic_bundle(
     return bundle_from_nx(graph_id, graph, family, None, None, prob_model, uniform_p)
 
 
-def adj_to_nx(adj: sp.spmatrix, directed: bool) -> nx.Graph | nx.DiGraph:
+def adj_to_nx(adjacency: sp.spmatrix, directed: bool) -> nx.Graph | nx.DiGraph:
     """Scipy adjacency -> networkx, preserving directedness and dropping self-loops"""
     graph = nx.DiGraph() if directed else nx.Graph()
-    graph.add_nodes_from(range(adj.shape[0]))
+    graph.add_nodes_from(range(adjacency.shape[0]))
 
-    coo = adj.tocoo()
-    for u, v in zip(coo.row.tolist(), coo.col.tolist()):
-        if u != v:
-            graph.add_edge(int(u), int(v))
+    coo = adjacency.tocoo()
+    for source, destination in zip(coo.row.tolist(), coo.col.tolist()):
+        if source != destination:
+            graph.add_edge(int(source), int(destination))
 
     return graph
 
 
 def make_real_bundle_from_arrays(
     dataset: str,
-    adj: sp.spmatrix,
+    adjacency: sp.spmatrix,
     node_feats: np.ndarray,
     node_labels: np.ndarray,
     prob_model: str = "weighted",
     uniform_p: float = 0.1,
 ) -> GraphBundle:
     """Build a GraphBundle from already-loaded dataset arrays (no download)."""
-    graph = adj_to_nx(adj, real_directed[dataset])
+    graph = adj_to_nx(adjacency, real_directed[dataset])
 
     return bundle_from_nx(
         dataset,
@@ -183,15 +183,15 @@ def make_real_bundle(
         "nethept": ("datasets.nethept", "download_nethept", "load_nethept"),
     }
 
-    module_name, dl_name, ld_name = loaders[dataset]
+    module_name, download_name, load_name = loaders[dataset]
     module = importlib.import_module(module_name)
-    raw_path = getattr(module, dl_name)()
+    raw_path = getattr(module, download_name)()
 
-    adj, node_feats, node_labels, _n = getattr(module, ld_name)(raw_path)
+    adjacency, node_feats, node_labels, _ = getattr(module, load_name)(raw_path)
 
     return make_real_bundle_from_arrays(
         dataset,
-        adj,
+        adjacency,
         node_feats,
         node_labels,
         prob_model=prob_model,

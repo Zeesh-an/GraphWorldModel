@@ -14,12 +14,12 @@ Original paper: M. E. J. Newman, Phys. Rev. E 74, 036104 (2006)
 """
 
 import csv
-import zipfile
-import urllib.request
 import os
+import urllib.request
+import zipfile
+from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
-from pathlib import Path
 
 netscience_url = "https://networks.skewed.de/net/netscience/files/netscience.csv.zip"
 data_dir = Path(__file__).resolve().parent.parent / "netscience"
@@ -41,8 +41,8 @@ def download_netscience() -> Path:
         print(f"[✓] Saved to {zip_path}")
 
     print("[↓] Extracting ...")
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(data_dir)
+    with zipfile.ZipFile(zip_path, "r") as zip_file:
+        zip_file.extractall(data_dir)
     print(f"[✓] Extracted to {data_dir}")
 
     return data_dir
@@ -57,71 +57,75 @@ def load_netscience(
 
     Returns
     -------
-    adj: scipy.sparse.csr_matrix (N, N) undirected adjacency
+    adjacency: scipy.sparse.csr_matrix (N, N) undirected adjacency
     node_feats: np.ndarray (N, 1) float32 -- log(1 + degree) features
     node_labels: np.ndarray (N,) int32 -- placeholder zeros
-    N: int -- number of nodes
+    num_nodes: int -- number of nodes
     """
     # Read nodes.csv to determine N (nodes may be isolates not in edges.csv)
     node_ids = set()
     nodes_path = data_path / "nodes.csv"
     if nodes_path.exists():
-        with open(nodes_path) as f:
-            reader = csv.DictReader(f)
+        with open(nodes_path) as file:
+            reader = csv.DictReader(file)
             for row in reader:
                 node_ids.add(int(row["index"]))
 
     # Read edges
-    src_list = []
-    dst_list = []
+    source_list = []
+    destination_list = []
 
-    with open(data_path / "edges.csv") as f:
-        reader = csv.DictReader(f)
+    with open(data_path / "edges.csv") as file:
+        reader = csv.DictReader(file)
         for row in reader:
-            a, b = int(row["source"]), int(row["target"])
-            src_list.append(a)
-            dst_list.append(b)
-            node_ids.add(a)
-            node_ids.add(b)
+            source, destination = int(row["source"]), int(row["target"])
+            source_list.append(source)
+            destination_list.append(destination)
+            node_ids.add(source)
+            node_ids.add(destination)
 
     # Remap to contiguous 0..N-1 (should already be 0-indexed but may have gaps from isolates)
     sorted_ids = sorted(node_ids)
-    id_to_idx = {nid: idx for idx, nid in enumerate(sorted_ids)}
-    N = len(id_to_idx)
+    id_to_index = {node_id: index for index, node_id in enumerate(sorted_ids)}
+    num_nodes = len(id_to_index)
 
     # Build symmetric (undirected) edge arrays
-    sym_src = []
-    sym_dst = []
+    symmetric_sources = []
+    symmetric_destinations = []
 
-    for a, b in zip(src_list, dst_list):
-        ia, ib = id_to_idx[a], id_to_idx[b]
-        sym_src.append(ia)
-        sym_dst.append(ib)
-        sym_src.append(ib)
-        sym_dst.append(ia)
+    for source, destination in zip(source_list, destination_list):
+        source_index = id_to_index[source]
+        destination_index = id_to_index[destination]
+        symmetric_sources.append(source_index)
+        symmetric_destinations.append(destination_index)
+        symmetric_sources.append(destination_index)
+        symmetric_destinations.append(source_index)
 
-    src = np.array(sym_src, dtype=np.int32)
-    dst = np.array(sym_dst, dtype=np.int32)
-    data = np.ones(len(src), dtype=np.float32)
+    sources = np.array(symmetric_sources, dtype=np.int32)
+    destinations = np.array(symmetric_destinations, dtype=np.int32)
+    values = np.ones(len(sources), dtype=np.float32)
 
     # Build sparse adjacency, deduplicate via csr conversion
-    adj = sp.csr_matrix((data, (src, dst)), shape=(N, N))
-    adj = (adj > 0).astype(np.float32)
-    adj.setdiag(0)
-    adj.eliminate_zeros()
+    adjacency = sp.csr_matrix((values, (sources, destinations)), shape=(num_nodes, num_nodes))
+    adjacency = (adjacency > 0).astype(np.float32)
+    adjacency.setdiag(0)
+    adjacency.eliminate_zeros()
 
     # Degree-based node features (no natural features in this dataset)
-    degrees = np.array(adj.sum(axis=1)).flatten()
+    degrees = np.array(adjacency.sum(axis=1)).flatten()
     node_feats = np.log1p(degrees).reshape(-1, 1).astype(np.float32)  # shape: (N, 1)
 
     # Placeholder labels
-    node_labels = np.zeros(N, dtype=np.int32)
+    node_labels = np.zeros(num_nodes, dtype=np.int32)
 
-    n_edges_undirected = adj.nnz // 2
+    n_edges_undirected = adjacency.nnz // 2
     n_isolates = int((degrees == 0).sum())
-    print(f"[✓] NetScience loaded: {N} nodes, {n_edges_undirected} undirected edges")
+    print(
+        f"[✓] NetScience loaded: {num_nodes} nodes, "
+        f"{n_edges_undirected} undirected edges"
+    )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")
     if n_isolates > 0:
         print(f"    Isolate nodes (degree 0): {n_isolates}")
 
-    return adj, node_feats, node_labels, N
+    return adjacency, node_feats, node_labels, num_nodes

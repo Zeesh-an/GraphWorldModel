@@ -12,12 +12,12 @@ Source: https://datasets.syr.edu/datasets/Digg.html
 """
 
 import csv
-import zipfile
-import urllib.request
 import os
+import urllib.request
+import zipfile
+from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
-from pathlib import Path
 
 digg_url = "https://datasets.syr.edu/uploads/1296588940/Digg-dataset.zip"
 data_dir = Path(__file__).resolve().parent.parent / "digg"
@@ -39,8 +39,8 @@ def download_digg() -> Path:
         print(f"[✓] Saved to {zip_path}")
 
     print("[↓] Extracting ...")
-    with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(data_dir)
+    with zipfile.ZipFile(zip_path, "r") as zip_file:
+        zip_file.extractall(data_dir)
 
     print(f"[✓] Extracted to {data_dir / 'Digg-dataset'}")
 
@@ -54,15 +54,15 @@ def load_digg(data_path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, i
 
     Returns
     -------
-    adj: scipy.sparse.csr_matrix (N, N) undirected adjacency
+    adjacency: scipy.sparse.csr_matrix (N, N) undirected adjacency
     node_feats: np.ndarray (N, 1) float32 -- log(1 + degree) features
     node_labels: np.ndarray (N,) int32 -- placeholder zeros
-    N: int -- number of core nodes
+    num_nodes: int -- number of core nodes
     """
     # Load core node IDs
     core_ids = []
-    with open(data_path / "nodes.csv") as f:
-        for line in f:
+    with open(data_path / "nodes.csv") as file:
+        for line in file:
             line = line.strip()
             if line:
                 core_ids.append(int(line))
@@ -70,52 +70,53 @@ def load_digg(data_path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, i
     core_set = set(core_ids)
 
     # Remap non-contiguous IDs to contiguous IDs from 0, ..., N - 1
-    id_to_idx: dict[int, int] = {nid: idx for idx, nid in enumerate(sorted(core_ids))}
-    N = len(id_to_idx)
+    id_to_index = {node_id: index for index, node_id in enumerate(sorted(core_ids))}
+    num_nodes = len(id_to_index)
 
     # Load edges, keep only those between core nodes
-    src_list = []
-    dst_list = []
+    source_list = []
+    destination_list = []
     n_dropped = 0
 
-    with open(data_path / "edges.csv") as f:
-        reader = csv.reader(f)
+    with open(data_path / "edges.csv") as file:
+        reader = csv.reader(file)
 
         for row in reader:
             # Edge (a - b)
-            a, b = int(row[0]), int(row[1])
+            source, destination = int(row[0]), int(row[1])
 
-            if a in core_set and b in core_set:
-                ia, ib = id_to_idx[a], id_to_idx[b]
+            if source in core_set and destination in core_set:
+                source_index = id_to_index[source]
+                destination_index = id_to_index[destination]
 
                 # Store both directions for undirected graph
-                src_list.append(ia)
-                dst_list.append(ib)
-                src_list.append(ib)
-                dst_list.append(ia)
+                source_list.append(source_index)
+                destination_list.append(destination_index)
+                source_list.append(destination_index)
+                destination_list.append(source_index)
             else:
                 n_dropped += 1
 
-    src = np.array(src_list, dtype=np.int32)
-    dst = np.array(dst_list, dtype=np.int32)
-    data = np.ones(len(src), dtype=np.float32)
+    sources = np.array(source_list, dtype=np.int32)
+    destinations = np.array(destination_list, dtype=np.int32)
+    values = np.ones(len(sources), dtype=np.float32)
 
     # Build sparse adjacency, deduplicate via csr conversion
-    adj = sp.csr_matrix((data, (src, dst)), shape=(N, N))
-    adj = (adj > 0).astype(np.float32)
-    adj.setdiag(0)
-    adj.eliminate_zeros()
+    adjacency = sp.csr_matrix((values, (sources, destinations)), shape=(num_nodes, num_nodes))
+    adjacency = (adjacency > 0).astype(np.float32)
+    adjacency.setdiag(0)
+    adjacency.eliminate_zeros()
 
     # Degree-based node features (no natural features in Digg)
-    degrees = np.array(adj.sum(axis=1)).flatten()
+    degrees = np.array(adjacency.sum(axis=1)).flatten()
     node_feats = np.log1p(degrees).reshape(-1, 1).astype(np.float32)  # shape: (N, 1)
 
     # Placeholder labels (Digg has no node labels)
-    node_labels = np.zeros(N, dtype=np.int32)
+    node_labels = np.zeros(num_nodes, dtype=np.int32)
 
-    n_edges_undirected = adj.nnz // 2
-    print(f"[✓] Digg loaded: {N} nodes, {n_edges_undirected} undirected edges")
+    n_edges_undirected = adjacency.nnz // 2
+    print(f"[✓] Digg loaded: {num_nodes} nodes, {n_edges_undirected} undirected edges")
     print(f"    Dropped {n_dropped} edges to external nodes")
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")
 
-    return adj, node_feats, node_labels, N
+    return adjacency, node_feats, node_labels, num_nodes

@@ -13,11 +13,11 @@ Source: https://snap.stanford.edu/data/ego-Twitter.html
 """
 
 import gzip
-import urllib.request
 import os
+import urllib.request
+from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
-from pathlib import Path
 
 twitter_url = "https://snap.stanford.edu/data/twitter_combined.txt.gz"
 data_dir = Path(__file__).resolve().parent.parent / "twitter"
@@ -39,9 +39,9 @@ def download_twitter() -> Path:
         print(f"[✓] Saved to {gz_path}")
 
     print("[↓] Extracting ...")
-    with gzip.open(gz_path, "rb") as f_in:
-        with open(txt_path, "wb") as f_out:
-            f_out.write(f_in.read())
+    with gzip.open(gz_path, "rb") as gz_file:
+        with open(txt_path, "wb") as txt_file:
+            txt_file.write(gz_file.read())
     print(f"[✓] Extracted to {txt_path}")
 
     return txt_path
@@ -54,60 +54,65 @@ def load_twitter(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
 
     Returns
     -------
-    adj: scipy.sparse.csr_matrix (N, N) undirected adjacency
+    adjacency: scipy.sparse.csr_matrix (N, N) undirected adjacency
     node_feats: np.ndarray (N, 1) float32 -- log(1 + degree) features
     node_labels: np.ndarray (N,) int32 -- placeholder zeros
-    N: int -- number of nodes
+    num_nodes: int -- number of nodes
     """
     # Parse space-separated directed edge list
-    raw_src = []
-    raw_dst = []
+    raw_sources = []
+    raw_destinations = []
 
-    with open(path) as f:
-        for line in f:
+    with open(path) as file:
+        for line in file:
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
             parts = line.split()
-            raw_src.append(int(parts[0]))
-            raw_dst.append(int(parts[1]))
+            raw_sources.append(int(parts[0]))
+            raw_destinations.append(int(parts[1]))
 
     # Collect unique node IDs and remap to contiguous 0..N-1
-    all_ids = sorted(set(raw_src) | set(raw_dst))
-    id_to_idx = {nid: idx for idx, nid in enumerate(all_ids)}
-    N = len(id_to_idx)
+    all_ids = sorted(set(raw_sources) | set(raw_destinations))
+    id_to_index = {node_id: index for index, node_id in enumerate(all_ids)}
+    num_nodes = len(id_to_index)
 
     # Build symmetric (undirected) edge arrays
-    src_list = []
-    dst_list = []
+    source_list = []
+    destination_list = []
 
-    for a, b in zip(raw_src, raw_dst):
-        ia, ib = id_to_idx[a], id_to_idx[b]
+    for source, destination in zip(raw_sources, raw_destinations):
+        source_index = id_to_index[source]
+        destination_index = id_to_index[destination]
+
         # Store both directions for undirected graph
-        src_list.append(ia)
-        dst_list.append(ib)
-        src_list.append(ib)
-        dst_list.append(ia)
+        source_list.append(source_index)
+        destination_list.append(destination_index)
+        source_list.append(destination_index)
+        destination_list.append(source_index)
 
-    src = np.array(src_list, dtype=np.int32)
-    dst = np.array(dst_list, dtype=np.int32)
-    data = np.ones(len(src), dtype=np.float32)
+    sources = np.array(source_list, dtype=np.int32)
+    destinations = np.array(destination_list, dtype=np.int32)
+    values = np.ones(len(sources), dtype=np.float32)
 
     # Build sparse adjacency, deduplicate via csr conversion
-    adj = sp.csr_matrix((data, (src, dst)), shape=(N, N))
-    adj = (adj > 0).astype(np.float32)
-    adj.setdiag(0)
-    adj.eliminate_zeros()
+    adjacency = sp.csr_matrix((values, (sources, destinations)), shape=(num_nodes, num_nodes))
+    adjacency = (adjacency > 0).astype(np.float32)
+    adjacency.setdiag(0)
+    adjacency.eliminate_zeros()
 
     # Degree-based node features (no natural features in this dataset)
-    degrees = np.array(adj.sum(axis=1)).flatten()
+    degrees = np.array(adjacency.sum(axis=1)).flatten()
     node_feats = np.log1p(degrees).reshape(-1, 1).astype(np.float32)  # shape: (N, 1)
 
     # Placeholder labels
-    node_labels = np.zeros(N, dtype=np.int32)
+    node_labels = np.zeros(num_nodes, dtype=np.int32)
 
-    n_edges_undirected = adj.nnz // 2
-    print(f"[✓] Twitter loaded: {N} nodes, {n_edges_undirected} undirected edges")
+    n_edges_undirected = adjacency.nnz // 2
+    print(
+        f"[✓] Twitter loaded: {num_nodes} nodes, "
+        f"{n_edges_undirected} undirected edges"
+    )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")
 
-    return adj, node_feats, node_labels, N
+    return adjacency, node_feats, node_labels, num_nodes

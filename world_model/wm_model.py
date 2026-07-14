@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from world_model.wm_data import ch_add, ch_frontier, ch_infected, ch_remove
+from world_model.wm_data import GraphInput, ch_add, ch_frontier, ch_infected, ch_remove
 from world_model.model.gcn import GCNEncoder
 from world_model.model.graphsage import GraphSAGEEncoder
 from world_model.model.gat import GATEncoder
@@ -18,6 +18,9 @@ backbones = {
     "gat": GATEncoder,
     "gcnii": GCNIIEncoder,
 }
+
+# Probability clamp keeping logit conversion and transmission products finite
+prob_epsilon = 1e-6
 
 
 class ICTransmissionHead(nn.Module):
@@ -49,54 +52,66 @@ class ICTransmissionHead(nn.Module):
                 nn.Linear(hidden_dim, 1),
             )
 
-            for m in self.modules():
-                if isinstance(m, nn.Linear):
-                    nn.init.xavier_uniform_(m.weight)
+            for module in self.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.xavier_uniform_(module.weight)
 
-                    if m.bias is not None:
-                        nn.init.zeros_(m.bias)
+                    if module.bias is not None:
+                        nn.init.zeros_(module.bias)
 
-    def forward(self, h: torch.Tensor, X: torch.Tensor, graph) -> torch.Tensor:
-        n = h.shape[0]
+    def forward(
+        self, hidden: torch.Tensor, X: torch.Tensor, graph: GraphInput
+    ) -> torch.Tensor:
+        num_nodes = hidden.shape[0]
 
         # Apply the exogenous action (T_exo) first: add_node -> infected + active spreader;
         # remove_node -> stays infected (IC) but drops out of the frontier. Edge actions
         # are already reflected in graph.edge_index / edge_weight.
-        infected = torch.clamp(X[:, ch_infected] + X[:, ch_add], max=1.0)  # shape: (N,)
+        infected = torch.clamp(
+            X[:, ch_infected] + X[:, ch_add], max=1.0
+        )  # shape: (N,)
         frontier = torch.clamp(X[:, ch_frontier] + X[:, ch_add], max=1.0) * (
             1.0 - X[:, ch_remove]
         )  # shape: (N,)
 
-        ei, ew = graph.edge_index, graph.edge_weight
+        edge_index, edge_weight = graph.edge_index, graph.edge_weight
 
-        if ei.numel() == 0:
-            p_new = torch.zeros(n, device=h.device)
+        if edge_index.numel() == 0:
+            p_new = torch.zeros(num_nodes, device=hidden.device)
         else:
-            src, dst = ei[0], ei[1]
+            sources, destinations = edge_index[0], edge_index[1]
             if self.oracle:
-                q = ew.clamp(0.0, 1.0)  # true edge transmission prob (no learning)
+                # True edge transmission prob (no learning)
+                transmission = edge_weight.clamp(0.0, 1.0)
             else:
-                edge_in = torch.cat(
-                    [h[src], h[dst], ew.unsqueeze(dim=-1)], dim=-1
+                edge_features = torch.cat(
+                    [hidden[sources], hidden[destinations], edge_weight.unsqueeze(dim=-1)],
+                    dim=-1,
                 )  # shape: (E, 2H + 1)
-                q = torch.sigmoid(self.edge_mlp(edge_in)).squeeze(dim=-1)  # shape: (E,)
+                transmission = torch.sigmoid(self.edge_mlp(edge_features)).squeeze(
+                    dim=-1
+                )  # shape: (E,)
 
-            # transmission gated by an active (frontier) source
-            t = (q * frontier[src]).clamp(0.0, 1.0 - 1e-6)  # shape: (E,)
-            log_surv = torch.log1p(-t)  # log(1 - t), shape: (E,)
-            sum_log = torch.zeros(n, device=h.device).scatter_add_(
-                0, dst, log_surv
+            # Transmission gated by an active (frontier) source
+            gated = (transmission * frontier[sources]).clamp(
+                0.0, 1.0 - prob_epsilon
+            )  # shape: (E,)
+            log_survival = torch.log1p(-gated)  # log(1 - t), shape: (E,)
+            survival_log_sum = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+                0, destinations, log_survival
             )  # shape: (N,)
-            p_new = 1.0 - torch.exp(sum_log)  # shape: (N,)
+            p_new = 1.0 - torch.exp(survival_log_sum)  # shape: (N,)
 
         p_newly = (1.0 - infected) * p_new  # susceptibles only
         y_inf = infected + p_newly  # monotone: infected stay infected
         y_fr = p_newly  # new frontier = newly infected
 
-        probs = torch.stack([y_inf, y_fr], dim=1).clamp(1e-6, 1.0 - 1e-6)  # (N, 2)
-        return torch.log(probs) - torch.log1p(
-            -probs
-        )  # -> logits (sigmoid recovers probs)
+        probs = torch.stack([y_inf, y_fr], dim=1).clamp(
+            prob_epsilon, 1.0 - prob_epsilon
+        )  # (N, 2)
+
+        # -> logits (sigmoid recovers probs)
+        return torch.log(probs) - torch.log1p(-probs)
 
 
 class LTThresholdHead(nn.Module):
@@ -130,8 +145,10 @@ class LTThresholdHead(nn.Module):
         nn.init.xavier_uniform_(self.theta.weight)
         nn.init.zeros_(self.theta.bias)
 
-    def forward(self, h: torch.Tensor, X: torch.Tensor, graph) -> torch.Tensor:
-        n = h.shape[0]
+    def forward(
+        self, hidden: torch.Tensor, X: torch.Tensor, graph: GraphInput
+    ) -> torch.Tensor:
+        num_nodes = hidden.shape[0]
 
         # Apply the exogenous action (T_exo): add_node -> active; remove_node -> susceptible
         # (LT remove resets the node to status 0, so it can re-activate).
@@ -139,34 +156,41 @@ class LTThresholdHead(nn.Module):
             1.0 - X[:, ch_remove]
         )  # shape: (N,)
 
-        ei, ew = graph.edge_index, graph.edge_weight
+        edge_index, edge_weight = graph.edge_index, graph.edge_weight
 
-        if ei.numel() == 0:
-            f = torch.zeros(n, device=h.device)
+        if edge_index.numel() == 0:
+            active_fraction = torch.zeros(num_nodes, device=hidden.device)
         else:
-            src, dst = ei[0], ei[1]
-            num = torch.zeros(n, device=h.device).scatter_add_(
-                0, dst, active[src] * ew
-            )  # active in-neighbor weight, shape: (N,)
-            den = torch.zeros(n, device=h.device).scatter_add_(
-                0, dst, ew
-            )  # total in-weight
-            f = num / den.clamp(min=1e-6)  # active-neighbor fraction, shape: (N,)
+            sources, destinations = edge_index[0], edge_index[1]
+            # Active in-neighbor weight, shape: (N,)
+            active_weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+                0, destinations, active[sources] * edge_weight
+            )
+            # Total in-weight, shape: (N,)
+            total_weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+                0, destinations, edge_weight
+            )
+            # Active-neighbor fraction, shape: (N,)
+            active_fraction = active_weight / total_weight.clamp(min=prob_epsilon)
 
         theta_hat = torch.sigmoid(
-            self.theta(h).squeeze(dim=-1)
+            self.theta(hidden).squeeze(dim=-1)
         )  # shape: (N,) in [0, 1]
         tau = F.softplus(self.log_tau)  # scalar > 0
-        gate = (f > 0).to(
-            f.dtype
-        )  # structural self-termination: no active neighbor -> no activation
-        p_new = gate * torch.sigmoid(tau * (f - theta_hat))  # shape: (N,)
+
+        # Structural self-termination: no active neighbor -> no activation
+        gate = (active_fraction > 0).to(active_fraction.dtype)
+        p_new = gate * torch.sigmoid(
+            tau * (active_fraction - theta_hat)
+        )  # shape: (N,)
 
         p_newly = (1.0 - active) * p_new  # susceptibles only
         y_inf = active + p_newly
         y_fr = p_newly  # newly activated = new frontier
 
-        probs = torch.stack([y_inf, y_fr], dim=1).clamp(1e-6, 1.0 - 1e-6)  # (N, 2)
+        probs = torch.stack([y_inf, y_fr], dim=1).clamp(
+            prob_epsilon, 1.0 - prob_epsilon
+        )  # (N, 2)
         return torch.log(probs) - torch.log1p(-probs)  # -> logits
 
 
@@ -180,7 +204,7 @@ class WorldModel(nn.Module):
         dropout: float = 0.1,
         head_type: str = "linear",
         diffusion_model: str = "IC",
-        **bb: object,
+        **backbone_kwargs: object,
     ) -> None:
         super().__init__()
 
@@ -197,7 +221,7 @@ class WorldModel(nn.Module):
             hidden_dim=hidden_dim,
             n_layers=n_layers,
             dropout=dropout,
-            **bb,
+            **backbone_kwargs,
         )
 
         if head_type == "structured":
@@ -220,11 +244,11 @@ class WorldModel(nn.Module):
                 f"unknown head_type {head_type}; choose from linear, structured, structured_oracle"
             )
 
-    def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
+    def forward(self, X: torch.Tensor, graph: GraphInput) -> torch.Tensor:
         # X: (N, in_channels) node features; graph: GraphInput
-        h = self.encoder(X, graph)
+        hidden = self.encoder(X, graph)
 
         if self.head_type == "linear":
-            return self.head(h)  # (N, 2) logits
+            return self.head(hidden)  # (N, 2) logits
 
-        return self.head(h, X, graph)  # (N, 2) logits (structured)
+        return self.head(hidden, X, graph)  # (N, 2) logits (structured)

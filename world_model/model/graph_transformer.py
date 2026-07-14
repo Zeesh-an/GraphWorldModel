@@ -22,6 +22,9 @@ import torch.nn.functional as F
 
 from world_model.model.model_utils import degree_encoding
 
+# Floors the attention log-bias and softmax denominator
+numerical_eps = 1e-9
+
 
 # Graph Transformer Layer
 class GraphTransformerLayer(nn.Module):
@@ -48,7 +51,10 @@ class GraphTransformerLayer(nn.Module):
     ) -> None:
         super().__init__()
 
-        assert d_model % n_heads == 0, "d_model must be divisible by n_heads"
+        if d_model % n_heads != 0:
+            raise ValueError(
+                f"d_model must be divisible by n_heads, got {d_model} / {n_heads}"
+            )
 
         self.d_model = d_model
         self.n_heads = n_heads
@@ -75,84 +81,90 @@ class GraphTransformerLayer(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
-        for m in [self.Wq, self.Wk, self.Wv, self.Wo]:
-            nn.init.xavier_uniform_(m.weight)
+        for module in [self.Wq, self.Wk, self.Wv, self.Wo]:
+            nn.init.xavier_uniform_(module.weight)
 
     def forward(
         self,
-        x: torch.Tensor,
+        features: torch.Tensor,
         edge_index: torch.Tensor,
         edge_weight: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
-        x: (N, d_model)
+        features: (N, d_model)
         edge_index: (2, E) long — [src, dst]
         edge_weight: (E,) float edge weights added as log-bias to attention scores, or None for unweighted
         returns: (N, d_model)
         """
-        N = x.shape[0]
+        num_nodes = features.shape[0]
 
         # Extract source and destination node indices
-        # src[i] → dst[i] is the ith edge
-        src, dst = edge_index[0], edge_index[1]  # each (E,) E = number of edges
+        # sources[i] → destinations[i] is the ith edge
+        sources, destinations = edge_index[0], edge_index[1]  # each (E,)
 
         # Attention sublayer (pre-norm)
-        h = self.norm1(x)
+        hidden = self.norm1(features)
 
         # Project Q/K/V → (N, H, d_k), split by heads
-        Q = self.Wq(h).view(N, self.n_heads, self.d_k)
-        K = self.Wk(h).view(N, self.n_heads, self.d_k)
-        V = self.Wv(h).view(N, self.n_heads, self.d_k)
+        queries = self.Wq(hidden).view(num_nodes, self.n_heads, self.d_k)
+        keys = self.Wk(hidden).view(num_nodes, self.n_heads, self.d_k)
+        values = self.Wv(hidden).view(num_nodes, self.n_heads, self.d_k)
 
-        # For each edge (u → v), compute attention scores per edge, per head: score = Q[dst] · K[src] / sqrt(d_k)
-        # Q[dst]: (E, H, d_k),  K[src]: (E, H, d_k)
-        Q_e = Q[dst]  # (E, H, d_k)
-        K_e = K[src]  # (E, H, d_k)
-        V_e = V[src]  # (E, H, d_k)
+        # For each edge (u → v), compute attention scores per edge, per head:
+        # score = Q[dst] · K[src] / sqrt(d_k)
+        edge_queries = queries[destinations]  # (E, H, d_k)
+        edge_keys = keys[sources]  # (E, H, d_k)
+        edge_values = values[sources]  # (E, H, d_k)
 
-        scores = (Q_e * K_e).sum(dim=-1) / math.sqrt(self.d_k)  # (E, H)
+        scores = (edge_queries * edge_keys).sum(dim=-1) / math.sqrt(self.d_k)  # (E, H)
 
         if edge_weight is not None:
-            scores = scores + torch.log(edge_weight.clamp(min=1e-9)).unsqueeze(1)
+            scores = scores + torch.log(
+                edge_weight.clamp(min=numerical_eps)
+            ).unsqueeze(1)
 
         # Compute softmax over incoming edges per node per head
         # Use scatter softmax: subtract max per (dst, head) for stability
-        scores_max = torch.full((N, self.n_heads), float("-inf"), device=x.device)
+        scores_max = torch.full(
+            (num_nodes, self.n_heads), float("-inf"), device=features.device
+        )
         scores_max.scatter_reduce_(
             0,
-            dst.unsqueeze(1).expand(-1, self.n_heads),
+            destinations.unsqueeze(1).expand(-1, self.n_heads),
             scores,
             reduce="amax",
             include_self=True,
         )
-        scores_exp = torch.exp(scores - scores_max[dst])  # (E, H)
+        scores_exp = torch.exp(scores - scores_max[destinations])  # (E, H)
 
-        scores_sum = torch.zeros(N, self.n_heads, device=x.device)
+        scores_sum = torch.zeros(num_nodes, self.n_heads, device=features.device)
         scores_sum.scatter_add_(
-            0, dst.unsqueeze(1).expand(-1, self.n_heads), scores_exp
+            0, destinations.unsqueeze(1).expand(-1, self.n_heads), scores_exp
         )
-        attn = scores_exp / (scores_sum[dst] + 1e-9)  # (E, H)
-        attn = self.dropout(attn)
+        attention = scores_exp / (scores_sum[destinations] + numerical_eps)  # (E, H)
+        attention = self.dropout(attention)
 
         # Aggregate values
-        agg = torch.zeros(N, self.n_heads, self.d_k, device=x.device)
-        agg.scatter_add_(
+        aggregated = torch.zeros(
+            num_nodes, self.n_heads, self.d_k, device=features.device
+        )
+        aggregated.scatter_add_(
             0,
-            dst.unsqueeze(1).unsqueeze(2).expand(-1, self.n_heads, self.d_k),
-            attn.unsqueeze(-1) * V_e,
+            destinations.unsqueeze(1).unsqueeze(2).expand(-1, self.n_heads, self.d_k),
+            attention.unsqueeze(-1) * edge_values,
         )  # (N, H, d_k)
 
         # Reshape multiple attention heads and output projection
-        agg = agg.reshape(N, self.d_model)  # (N, d_model)
-        agg = self.Wo(agg)
+        aggregated = aggregated.reshape(num_nodes, self.d_model)  # (N, d_model)
+        aggregated = self.Wo(aggregated)
 
         # Residual/skip connection
-        x = x + self.dropout(agg)
+        features = features + self.dropout(aggregated)
 
         # FFN sublayer (pre-norm)
-        x = x + self.dropout(self.ffn(self.norm2(x)))
+        features = features + self.dropout(self.ffn(self.norm2(features)))
 
-        return x  # (N, d_model)
+        return features  # (N, d_model)
 
 
 # Full Forward Model (Graph Transformer)
@@ -178,7 +190,7 @@ class GraphTransformerForwardModel(nn.Module):
         n_layers: int = 3,
         ffn_dim: int = 128,
         dropout: float = 0.1,
-    ):
+    ) -> None:
         super().__init__()
 
         self.d_model = d_model
@@ -205,42 +217,43 @@ class GraphTransformerForwardModel(nn.Module):
 
         self._reset_parameters()
 
-    def _reset_parameters(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+    def _reset_parameters(self) -> None:
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
-    def forward(self, seed_vec: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+    def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft seed probabilities
-        adj: sparse COO (N, N) or dense (N, N)
+        adjacency: sparse COO (N, N) or dense (N, N)
         returns: (N, 1) influence probabilities in [0, 1]
         """
         device = seed_vec.device
 
-        # Build edge_index from adj
-        if adj.is_sparse:
-            edge_index = adj.coalesce().indices()  # (2, E)
+        # Build edge_index from the adjacency
+        if adjacency.is_sparse:
+            edge_index = adjacency.coalesce().indices()  # (2, E)
         else:
-            edge_index = adj.nonzero(as_tuple=False).t()  # (2, E)
+            edge_index = adjacency.nonzero(as_tuple=False).t()  # (2, E)
 
         # Compute degree positional encodings
-        pe = degree_encoding(adj, self.d_model, device)  # (N, d_model)
+        positional_encoding = degree_encoding(
+            adjacency, self.d_model, device
+        )  # (N, d_model)
 
         # Input projection: cat(seed_vec, PE) → d_model
-        x = self.input_proj(torch.cat([seed_vec, pe], dim=-1))  # (N, d_model)
+        features = self.input_proj(
+            torch.cat([seed_vec, positional_encoding], dim=-1)
+        )  # (N, d_model)
 
         # Graph Transformer layers
         for layer in self.layers:
-            x = layer(x, edge_index)
+            features = layer(features, edge_index)
 
         # Output projection
-        out = torch.sigmoid(self.output_proj(x))  # (N, 1)
-        # out = F.elu(self.output_proj(x))  # (N, 1)
-
-        return out
+        return torch.sigmoid(self.output_proj(features))  # (N, 1)
 
 
 class GraphTransformerEncoder(nn.Module):
@@ -260,6 +273,7 @@ class GraphTransformerEncoder(nn.Module):
         **_,
     ) -> None:
         super().__init__()
+
         self.input_proj = nn.Linear(in_channels, hidden_dim)
         self.layers = nn.ModuleList(
             [
@@ -268,11 +282,12 @@ class GraphTransformerEncoder(nn.Module):
             ]
         )
         self.norm = nn.LayerNorm(hidden_dim)
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
@@ -281,17 +296,20 @@ class GraphTransformerEncoder(nn.Module):
         returns: (N, hidden_dim) node embeddings
         """
         # Add self-loops so each node attends to itself (weight 1 -> neutral log-bias)
-        n = X.shape[0]
-        loop = torch.arange(n, device=X.device)
-        ei = torch.cat([graph.edge_index, torch.stack([loop, loop])], dim=1)
-        w = torch.cat(
+        num_nodes = X.shape[0]
+        self_loops = torch.arange(num_nodes, device=X.device)
+        edge_index = torch.cat(
+            [graph.edge_index, torch.stack([self_loops, self_loops])], dim=1
+        )
+        edge_weight = torch.cat(
             [
                 graph.edge_weight,
-                torch.ones(n, device=X.device, dtype=graph.edge_weight.dtype),
+                torch.ones(num_nodes, device=X.device, dtype=graph.edge_weight.dtype),
             ]
         )
-        h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
-        for layer in self.layers:
-            h = layer(h, ei, w)  # shape: (N, hidden_dim)
 
-        return self.norm(h)  # shape: (N, hidden_dim)
+        hidden = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
+        for layer in self.layers:
+            hidden = layer(hidden, edge_index, edge_weight)  # shape: (N, hidden_dim)
+
+        return self.norm(hidden)  # shape: (N, hidden_dim)

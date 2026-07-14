@@ -1,3 +1,4 @@
+# coding_agent/tests/test_methods.py
 import numpy as np
 import pytest
 
@@ -81,7 +82,7 @@ class S(Strategy):
 
 
 def test_over_budget_plan_triggers_validation_and_raises():
-    # The repair path re-prompts, but a canned script fails every retry -> StrategyError.
+    """An over-budget plan should trigger the repair path and ultimately raise StrategyError."""
     graph = _hub()
     agent = CodingAgent(CannedProvider(over_budget_script))
     environment = MonteCarloEnvironment(graph, "IC", mc_runs=10)

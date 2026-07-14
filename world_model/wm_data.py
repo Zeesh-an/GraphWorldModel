@@ -16,6 +16,9 @@ from torch.utils.data import Dataset
 in_channels = 6
 ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge = range(6)
 
+# Numerical floor for the symmetric renormalization (avoids 0^-0.5)
+degree_floor = 1e-12
+
 # X has shape (N, 6), with one row per node (N = nodes in the graph) and one column per feature channel
 # ┌─────┬─────────────┬────────────────────────────────────────────────────────────────────────────────────┬──────────────────┬───────────────────────────────────────────┐
 # │ col │    name     │                                     represents                                     │       type       │                 set from                  │
@@ -51,37 +54,44 @@ def build_graph_input(
     diffusion_model: str,
     device: torch.device,
 ) -> GraphInput:
-    ei = torch.as_tensor(edge_index, dtype=torch.long, device=device)
+    edge_index_tensor = torch.as_tensor(edge_index, dtype=torch.long, device=device)
 
-    if ei.numel() == 0:
-        ei = ei.reshape(2, 0)
+    if edge_index_tensor.numel() == 0:
+        edge_index_tensor = edge_index_tensor.reshape(2, 0)
 
-    src, dst = ei[0], ei[1]
+    sources, destinations = edge_index_tensor[0], edge_index_tensor[1]
 
     # LT ignores edge weights (structure + hidden node thresholds)
     # IC keeps p(u -> v)
     if diffusion_model == "IC":
-        w = torch.as_tensor(edge_weight, dtype=torch.float32, device=device)
+        weights = torch.as_tensor(edge_weight, dtype=torch.float32, device=device)
     else:
-        w = torch.ones(ei.shape[1], dtype=torch.float32, device=device)
+        weights = torch.ones(
+            edge_index_tensor.shape[1], dtype=torch.float32, device=device
+        )
 
     # Aggregate FROM in-neighbors: row=dst (v), col=src (u), and adds self-loops
-    loop = torch.arange(num_nodes, device=device)
-    row = torch.cat([dst, loop])
-    col = torch.cat([src, loop])
-    val = torch.cat([w, torch.ones(num_nodes, device=device)])
+    self_loops = torch.arange(num_nodes, device=device)
+    row = torch.cat([destinations, self_loops])
+    col = torch.cat([sources, self_loops])
+    values = torch.cat([weights, torch.ones(num_nodes, device=device)])
 
     # Symmetric renormalization with weighted in-degree (GCN renormalization trick, generalized)
-    deg = torch.zeros(num_nodes, device=device).scatter_add_(0, row, val)
-    dinv = deg.clamp(min=1e-12).pow(-0.5)
-    val = dinv[row] * val * dinv[col]
+    degrees = torch.zeros(num_nodes, device=device).scatter_add_(0, row, values)
+    inv_sqrt_degrees = degrees.clamp(min=degree_floor).pow(-0.5)
+    values = inv_sqrt_degrees[row] * values * inv_sqrt_degrees[col]
 
-    adj = torch.sparse_coo_tensor(
-        torch.stack([row, col]), val, (num_nodes, num_nodes)
+    adjacency = torch.sparse_coo_tensor(
+        torch.stack([row, col]), values, (num_nodes, num_nodes)
     ).coalesce()
 
     # Sparse adjacency matrix for the GNN world model
-    return GraphInput(num_nodes=num_nodes, adj_norm=adj, edge_index=ei, edge_weight=w)
+    return GraphInput(
+        num_nodes=num_nodes,
+        adj_norm=adjacency,
+        edge_index=edge_index_tensor,
+        edge_weight=weights,
+    )
 
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
@@ -89,17 +99,17 @@ edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 
 def apply_edge_ops(edges: dict, action: list[dict]) -> dict:
     """Return a new edge dict with the bag's edge ops applied (node ops ignored)"""
-    out = dict(edges)
+    updated = dict(edges)
 
-    for op in action:
-        if op["op"] in ("add_edge", "set_edge_weight"):
-            out[(int(op["target"]), int(op["destination"]))] = float(
-                op.get("weight", 1.0)
+    for action_op in action:
+        if action_op["op"] in ("add_edge", "set_edge_weight"):
+            updated[(int(action_op["target"]), int(action_op["destination"]))] = float(
+                action_op.get("weight", 1.0)
             )
-        elif op["op"] == "remove_edge":
-            out.pop((int(op["target"]), int(op["destination"])), None)
+        elif action_op["op"] == "remove_edge":
+            updated.pop((int(action_op["target"]), int(action_op["destination"])), None)
 
-    return out
+    return updated
 
 
 def reconstruct_episode_adjacency(
@@ -111,31 +121,41 @@ def reconstruct_episode_adjacency(
     through t inclusive); cf transitions branch from the PRE-step graph (cumulative
     edge ops through t-1). Node-only / diffusion-only episodes return base for all.
     """
-    has_edge_ops = any(op["op"] in edge_ops for r in records for op in r["action"])
-    out = {}
+    has_edge_ops = any(
+        action_op["op"] in edge_ops
+        for record in records
+        for action_op in record["action"]
+    )
+    adjacency_by_step = {}
 
     if not has_edge_ops:
         # If the episode has no edge operations (diffusion-only / node-action data), every step just reuses the base graph
-        for r in records:
-            out[(r["t"], r["branch"])] = base_edges
+        for record in records:
+            adjacency_by_step[(record["t"], record["branch"])] = base_edges
 
-        return out
+        return adjacency_by_step
 
-    main = sorted((r for r in records if r["branch"] == "main"), key=lambda r: r["t"])
+    main = sorted(
+        (record for record in records if record["branch"] == "main"),
+        key=lambda record: record["t"],
+    )
     running = dict(base_edges)  # cumulative state BEFORE the current main step
-    pre_by_t = {}
+    pre_edges_by_step = {}
 
-    for r in main:
-        pre_by_t[r["t"]] = dict(running)  # adj_pre[t]
-        running = apply_edge_ops(running, r["action"])  # adj_post[t] becomes next pre
-        out[(r["t"], "main")] = dict(running)  # main uses post
+    for record in main:
+        pre_edges_by_step[record["t"]] = dict(running)  # adj_pre[t]
+        # adj_post[t] becomes the next step's pre
+        running = apply_edge_ops(running, record["action"])
+        adjacency_by_step[(record["t"], "main")] = dict(running)  # main uses post
 
     # cf transitions reuse the pre-step graph at their t
-    for r in records:
-        if r["branch"] != "main":
-            out[(r["t"], r["branch"])] = pre_by_t.get(r["t"], dict(base_edges))
+    for record in records:
+        if record["branch"] != "main":
+            adjacency_by_step[(record["t"], record["branch"])] = pre_edges_by_step.get(
+                record["t"], dict(base_edges)
+            )
 
-    return out
+    return adjacency_by_step
 
 
 def build_features(
@@ -151,28 +171,28 @@ def build_features(
     X[np.asarray(state["frontier"], dtype=np.int64), ch_frontier] = 1.0
 
     # degree = log1p(total degree in A_t); input_proj + LayerNorm handle scaling.
-    deg = np.zeros(num_nodes, dtype=np.float32)
+    degrees = np.zeros(num_nodes, dtype=np.float32)
 
     if edge_index.size:
-        np.add.at(deg, edge_index[0], 1.0)
-        np.add.at(deg, edge_index[1], 1.0)
+        np.add.at(degrees, edge_index[0], 1.0)
+        np.add.at(degrees, edge_index[1], 1.0)
 
-    X[:, ch_degree] = np.log1p(deg)
+    X[:, ch_degree] = np.log1p(degrees)
 
-    for op in record["action"]:
-        if op["op"] == "add_node":
-            X[int(op["target"]), ch_add] = 1.0
-        elif op["op"] == "remove_node":
-            X[int(op["target"]), ch_remove] = 1.0
-        elif op["op"] in edge_ops:
-            X[int(op["target"]), ch_edge] = 1.0
-            X[int(op["destination"]), ch_edge] = 1.0
+    for action_op in record["action"]:
+        if action_op["op"] == "add_node":
+            X[int(action_op["target"]), ch_add] = 1.0
+        elif action_op["op"] == "remove_node":
+            X[int(action_op["target"]), ch_remove] = 1.0
+        elif action_op["op"] in edge_ops:
+            X[int(action_op["target"]), ch_edge] = 1.0
+            X[int(action_op["destination"]), ch_edge] = 1.0
 
     # Build the ground-truth next state s_{t + 1} the model is trying to predict,
     # as soft one-step marginals (MC-estimated in data gen via --mc-marginals).
-    inf_marg = record.get("next_marginal_infected")
-    fr_marg = record.get("next_marginal_frontier")
-    if inf_marg is None or fr_marg is None:
+    infected_marginal = record.get("next_marginal_infected")
+    frontier_marginal = record.get("next_marginal_frontier")
+    if infected_marginal is None or frontier_marginal is None:
         raise KeyError(
             "build_features requires soft marginal targets (next_marginal_infected / "
             "next_marginal_frontier); regenerate the dataset with "
@@ -182,15 +202,15 @@ def build_features(
     y_inf = np.zeros(num_nodes, dtype=np.float32)
     y_fr = np.zeros(num_nodes, dtype=np.float32)
 
-    for v, p in inf_marg.items():
-        y_inf[int(v)] = p
+    for node, probability in infected_marginal.items():
+        y_inf[int(node)] = probability
 
-    for v, p in fr_marg.items():
-        y_fr[int(v)] = p
+    for node, probability in frontier_marginal.items():
+        y_fr[int(node)] = probability
 
     # X: (N, 6) - node is infected/frontier at timestep t - (CH_INFECTED, CH_FRONTIER, CH_DEGREE, CH_ADD, CH_REMOVE, CH_EDGE)
     # y_inf: (N) - node is infected at timestep t + 1
-    # y_fr: (N) - node is infected at timestep t + 1
+    # y_fr: (N) - node is in the frontier at timestep t + 1
     return X, y_inf, y_fr
 
 
@@ -201,18 +221,19 @@ def load_graph_store(out_dir: Path) -> dict[str, dict]:
     store = {}
 
     for meta in index:
-        gid = meta["graph_id"]
+        graph_id = meta["graph_id"]
         npz = np.load(out_dir / "graphs" / meta["file"])
-        ei = npz["edge_index"].astype(np.int64)
-        ic = npz["ic_probs"].astype(np.float32)
+        edge_index = npz["edge_index"].astype(np.int64)
+        ic_probs = npz["ic_probs"].astype(np.float32)
         num_nodes = int(meta["n_nodes"])
 
         base_edges = {
-            (int(ei[0, i]), int(ei[1, i])): float(ic[i]) for i in range(ei.shape[1])
+            (int(edge_index[0, edge]), int(edge_index[1, edge])): float(ic_probs[edge])
+            for edge in range(edge_index.shape[1])
         }
-        store[gid] = {
-            "edge_index": ei,
-            "ic_probs": ic,
+        store[graph_id] = {
+            "edge_index": edge_index,
+            "ic_probs": ic_probs,
             "lt_weights": npz["lt_weights"],
             "num_nodes": num_nodes,
             "base_edges": base_edges,
@@ -230,10 +251,10 @@ def edges_to_arrays(
         return np.zeros((2, 0), dtype=np.int64), np.zeros((0,), dtype=np.float32)
 
     keys = list(edges.keys())
-    ei = np.array(keys, dtype=np.int64).T  # (2, E) [src, dst]
-    w = np.array([edges[k] for k in keys], dtype=np.float32)
+    edge_index = np.array(keys, dtype=np.int64).T  # (2, E) [src, dst]
+    weights = np.array([edges[key] for key in keys], dtype=np.float32)
 
-    return ei, w
+    return edge_index, weights
 
 
 class TransitionDataset(Dataset):
@@ -249,37 +270,39 @@ class TransitionDataset(Dataset):
             json.loads(line) for line in path.read_text().splitlines() if line.strip()
         ]
 
-        # groups records by (graph_id, episode_id)
+        # Group records by (graph_id, episode_id)
         groups = defaultdict(list)
-        for r in records:
-            groups[(r["graph_id"], r["episode_id"])].append(r)
+        for record in records:
+            groups[(record["graph_id"], record["episode_id"])].append(record)
 
         # Flatten every transition into samples = [(record, edge_index, edge_weight), …]
         self.samples = []
-        for (gid, _eid), recs in groups.items():
-            base = self.store[gid]["base_edges"]
-            adj_map = reconstruct_episode_adjacency(recs, base)
+        for (graph_id, _), episode_records in groups.items():
+            base_edges = self.store[graph_id]["base_edges"]
+            adjacency_map = reconstruct_episode_adjacency(episode_records, base_edges)
 
-            for r in recs:
-                ei, w = edges_to_arrays(adj_map[(r["t"], r["branch"])])
-                self.samples.append((r, ei, w))
+            for record in episode_records:
+                edge_index, weights = edges_to_arrays(
+                    adjacency_map[(record["t"], record["branch"])]
+                )
+                self.samples.append((record, edge_index, weights))
 
     def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, i: int) -> dict:
-        r, ei, w = self.samples[i]
-        n = self.store[r["graph_id"]]["num_nodes"]
-        X, y_inf, y_fr = build_features(r, ei, n)
+    def __getitem__(self, index: int) -> dict:
+        record, edge_index, weights = self.samples[index]
+        num_nodes = self.store[record["graph_id"]]["num_nodes"]
+        X, y_inf, y_fr = build_features(record, edge_index, num_nodes)
 
         return {
             "X": torch.from_numpy(X),
             "y_inf": torch.from_numpy(y_inf),
             "y_fr": torch.from_numpy(y_fr),
-            "edge_index": torch.from_numpy(ei),
-            "edge_weight": torch.from_numpy(w),
-            "num_nodes": n,
-            "record": r,
+            "edge_index": torch.from_numpy(edge_index),
+            "edge_weight": torch.from_numpy(weights),
+            "num_nodes": num_nodes,
+            "record": record,
         }
 
 
@@ -289,29 +312,41 @@ def collate_transitions(
     device: torch.device,
 ) -> dict:
     """Stack B transitions into one disjoint block-diagonal graph + a GraphInput."""
-    Xs, yi, yf, eis, ews, bidx = [], [], [], [], [], []
+    x_parts = []
+    y_inf_parts = []
+    y_fr_parts = []
+    edge_index_parts = []
+    edge_weight_parts = []
+    batch_index_parts = []
     offset = 0
 
-    for b, item in enumerate(batch):
+    for position, item in enumerate(batch):
         num_nodes = item["num_nodes"]
-        Xs.append(item["X"])
-        yi.append(item["y_inf"])
-        yf.append(item["y_fr"])
-        eis.append(
-            item["edge_index"] + offset
-        )  # offset node ids into the block-diagonal graph
-        ews.append(item["edge_weight"])
-        bidx.append(torch.full((num_nodes,), b, dtype=torch.long))
+        x_parts.append(item["X"])
+        y_inf_parts.append(item["y_inf"])
+        y_fr_parts.append(item["y_fr"])
+        # Offset node ids into the block-diagonal graph
+        edge_index_parts.append(item["edge_index"] + offset)
+        edge_weight_parts.append(item["edge_weight"])
+        batch_index_parts.append(torch.full((num_nodes,), position, dtype=torch.long))
 
         offset += num_nodes
 
-    X = torch.cat(Xs).to(device)
-    y_inf = torch.cat(yi).to(device)
-    y_fr = torch.cat(yf).to(device)
+    X = torch.cat(x_parts).to(device)
+    y_inf = torch.cat(y_inf_parts).to(device)
+    y_fr = torch.cat(y_fr_parts).to(device)
 
-    edge_index = torch.cat(eis, dim=1) if eis else torch.zeros(2, 0, dtype=torch.long)
-    edge_weight = torch.cat(ews) if ews else torch.zeros(0, dtype=torch.float32)
-    gi = build_graph_input(
+    edge_index = (
+        torch.cat(edge_index_parts, dim=1)
+        if edge_index_parts
+        else torch.zeros(2, 0, dtype=torch.long)
+    )
+    edge_weight = (
+        torch.cat(edge_weight_parts)
+        if edge_weight_parts
+        else torch.zeros(0, dtype=torch.float32)
+    )
+    graph_input = build_graph_input(
         edge_index.numpy(), edge_weight.numpy(), offset, diffusion_model, device
     )
 
@@ -319,7 +354,7 @@ def collate_transitions(
         "X": X,
         "y_inf": y_inf,
         "y_fr": y_fr,
-        "graph": gi,
-        "batch_index": torch.cat(bidx).to(device),
-        "records": [it["record"] for it in batch],
+        "graph": graph_input,
+        "batch_index": torch.cat(batch_index_parts).to(device),
+        "records": [item["record"] for item in batch],
     }

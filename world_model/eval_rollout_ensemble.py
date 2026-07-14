@@ -63,7 +63,8 @@ if __name__ == "__main__":
     device = torch.device(args.device)
 
     print(
-        f"{'run':>34} | {'marg_mae':>9} | {'count_w1':>9} | {'count_bias':>10} | {'model_cnt':>9} | {'true_cnt':>9}"
+        f"{'run':>34} | {'marg_mae':>9} | {'count_w1':>9} | {'count_bias':>10} | "
+        f"{'model_cnt':>9} | {'true_cnt':>9}"
     )
     for path in args.results:
         results = json.loads(Path(path).read_text())
@@ -71,7 +72,7 @@ if __name__ == "__main__":
 
         model = load_trained_model(config, device)
         store = load_graph_store(config["data_dir"])
-        ens = rollout_ensemble(
+        ensemble = rollout_ensemble(
             model,
             config["data_dir"],
             config["diffusion_model"],
@@ -83,14 +84,15 @@ if __name__ == "__main__":
             seed=args.seed,
         )
 
-        results["rollout_ensemble"] = ens
+        results["rollout_ensemble"] = ensemble
         os.makedirs(Path(path).parent, exist_ok=True)
         Path(path).write_text(json.dumps(results, indent=2, default=str))
 
         run = Path(path).stem
         print(
             f"{run:>34} | "
-            f"{ens['ens_marg_mae']:>9.4f} | {ens['ens_count_w1']:>9.3f} | "
-            f"{ens['ens_count_bias']:>10.3f} | {ens['ens_final_count_model']:>9.2f} | "
-            f"{ens['ens_final_count_true']:>9.2f}"
+            f"{ensemble['ens_marg_mae']:>9.4f} | {ensemble['ens_count_w1']:>9.3f} | "
+            f"{ensemble['ens_count_bias']:>10.3f} | "
+            f"{ensemble['ens_final_count_model']:>9.2f} | "
+            f"{ensemble['ens_final_count_true']:>9.2f}"
         )

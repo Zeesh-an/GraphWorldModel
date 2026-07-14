@@ -10,8 +10,8 @@ from dataclasses import dataclass
 
 import networkx as nx
 import numpy as np
-import ndlib.models.ModelConfig as mc
-import ndlib.models.epidemics as ep  # IC, LT
+import ndlib.models.ModelConfig as model_config_module
+import ndlib.models.epidemics as epidemics  # IC, LT
 
 valid_action_ops = (
     "add_node",
@@ -49,8 +49,8 @@ class State:
     frontier: list[int]
 
     def to_dict(self) -> dict:
-        infected = sorted(int(v) for v in self.infected)
-        frontier = sorted(int(v) for v in self.frontier)
+        infected = sorted(int(node) for node in self.infected)
+        frontier = sorted(int(node) for node in self.frontier)
 
         return {
             "infected": infected,
@@ -78,7 +78,7 @@ class Simulator:
         self, model_name: str, lt_thresholds: dict[int, float] | None = None
     ) -> None:
         self.model_name = model_name
-        config = mc.Configuration()
+        config = model_config_module.Configuration()
 
         if model_name == "IC":
             # Independent Cascade (IC)
@@ -88,23 +88,25 @@ class Simulator:
             ic_graph.add_nodes_from(self.graph.nodes())
             ic_graph.add_edges_from(self.ic_prob_map.keys())
 
-            model = ep.IndependentCascadesModel(ic_graph, seed=self.seed)
-            for (u, v), p in self.ic_prob_map.items():
-                config.add_edge_configuration("threshold", (u, v), float(p))
+            model = epidemics.IndependentCascadesModel(ic_graph, seed=self.seed)
+            for (source, destination), probability in self.ic_prob_map.items():
+                config.add_edge_configuration(
+                    "threshold", (source, destination), float(probability)
+                )
         else:
             # Linear Threshold (LT)
             # Copy so edge actions mutate this episode's graph, not the shared bundle
-            model = ep.ThresholdModel(self.graph.copy(), seed=self.seed)
+            model = epidemics.ThresholdModel(self.graph.copy(), seed=self.seed)
 
             if lt_thresholds is None:
                 lt_thresholds = {
-                    int(n): float(self.rng.uniform(0.0, 1.0))
-                    for n in self.graph.nodes()
+                    int(node): float(self.rng.uniform(0.0, 1.0))
+                    for node in self.graph.nodes()
                 }
 
-            for n in self.graph.nodes():
+            for node in self.graph.nodes():
                 config.add_node_configuration(
-                    "threshold", int(n), float(lt_thresholds[int(n)])
+                    "threshold", int(node), float(lt_thresholds[int(node)])
                 )
 
         config.add_model_initial_configuration("Infected", [])
@@ -116,18 +118,26 @@ class Simulator:
         if self.model_name == "IC":
             # IC: 0 = Susceptible, 1 = Infected (currently infectious), 2 = Removed (already spread, spent)
             # Active: 1, 2
-            return {int(n) for n, s in self.model.status.items() if s in (1, 2)}
+            return {
+                int(node)
+                for node, status in self.model.status.items()
+                if status in (1, 2)
+            }
         else:
             # LT: 0 = Susceptible, 1 = Infected
             # Active: 1
-            return {int(n) for n, s in self.model.status.items() if s == 1}
+            return {
+                int(node) for node, status in self.model.status.items() if status == 1
+            }
 
     def current_state(self) -> State:
         # IC frontier = status-1 spreaders; LT's "newly flipped" delta is only available via advance()
         active = self.active_nodes()
 
         if self.model_name == "IC":
-            frontier = {int(n) for n, s in self.model.status.items() if s == 1}
+            frontier = {
+                int(node) for node, status in self.model.status.items() if status == 1
+            }
         else:
             frontier = set()
 
@@ -147,34 +157,35 @@ class Simulator:
                 )
             elif action.op == "add_edge":
                 # New edge u -> v: diffusion can traverse it from the next iteration onwards
-                u, v = int(action.target), int(action.destination)
-                self.model.graph.add_edges(u, [v])
+                source, destination = int(action.target), int(action.destination)
+                self.model.graph.add_edges(source, [destination])
 
                 if self.model_name == "IC":
                     # IC needs a per-edge transmission probability (the edge threshold)
-                    self.model.params["edges"]["threshold"][(u, v)] = float(
-                        action.weight
-                    )
+                    self.model.params["edges"]["threshold"][
+                        (source, destination)
+                    ] = float(action.weight)
             elif action.op == "remove_edge":
                 # Drop the edge u -> v so diffusion can no longer traverse it
-                u, v = int(action.target), int(action.destination)
-                self.model.graph.remove_edges(u, [v])
+                source, destination = int(action.target), int(action.destination)
+                self.model.graph.remove_edges(source, [destination])
 
                 if self.model_name == "IC":
-                    self.model.params["edges"]["threshold"].pop((u, v), None)
+                    self.model.params["edges"]["threshold"].pop(
+                        (source, destination), None
+                    )
             elif action.op == "set_edge_weight":
                 # Perturb the edge's transmission probability (IC only because LT ignores edge weights)
                 if self.model_name == "IC":
-                    u, v = int(action.target), int(action.destination)
-                    self.model.params["edges"]["threshold"][(u, v)] = float(
-                        action.weight
-                    )
+                    source, destination = int(action.target), int(action.destination)
+                    self.model.params["edges"]["threshold"][
+                        (source, destination)
+                    ] = float(action.weight)
 
     def advance(self, bag: list[ActionOp]) -> State:
         # s_{t + 1} = T_endo(T_exo(s_t, a_t))
-        prev_active = (
-            self.active_nodes()
-        )  # Snapsot previous active nodes before actions
+        # Snapshot previous active nodes before actions
+        previous_active = self.active_nodes()
 
         self.apply_actions(bag)  # Apply the actions (exogenous effect)
         self.model.iteration()  # Run one diffusion iteration (endogenous diffusion dynamics)
@@ -183,28 +194,31 @@ class Simulator:
 
         if self.model_name == "IC":
             # IC frontier = status = 1 nodes
-            frontier = {int(n) for n, s in self.model.status.items() if s == 1}
+            frontier = {
+                int(node) for node, status in self.model.status.items() if status == 1
+            }
         else:
-            # LT frontier = active - prev_active (the nodes that newly flipped this step)
-            frontier = active - prev_active
+            # LT frontier = active - previous_active (the nodes that newly flipped this step)
+            frontier = active - previous_active
 
         return State(infected=sorted(active), frontier=sorted(frontier))
 
     def advance_marginal(
         self, bag: list[ActionOp], num_mc: int
     ) -> tuple[State, dict, dict]:
-        # Esimate the one-step marginals by Monte Carlo - s_{t + 1} = T_endo(T_exo(s_t, a_t))
-        assert num_mc >= 1, "num_mc must be >= 1"
+        # Estimate the one-step marginals by Monte Carlo - s_{t + 1} = T_endo(T_exo(s_t, a_t))
+        if num_mc < 1:
+            raise ValueError(f"num_mc must be >= 1, got {num_mc}")
 
         # T_exo (action) is deterministic, so it is applied once
-        prev_active = self.active_nodes()
+        previous_active = self.active_nodes()
         self.apply_actions(bag)  # edge/graph mutations persist across draws
         post_action = self.snapshot()  # status after the action, before diffusion
 
         # IC is stochastic, while LT is deterministic, so only 1 run is needed for LT
         draws = num_mc if self.model_name == "IC" else 1
-        inf_counts = {}
-        fr_counts = {}
+        infected_counts = {}
+        frontier_counts = {}
         last_state = None
 
         # T_endo (diffusion iteration) is stochastic (for IC), so it is sampled using Monte Carlo simulations from the post-action state
@@ -217,23 +231,31 @@ class Simulator:
 
             active = self.active_nodes()
             if self.model_name == "IC":
-                frontier = {int(n) for n, s in self.model.status.items() if s == 1}
+                frontier = {
+                    int(node)
+                    for node, status in self.model.status.items()
+                    if status == 1
+                }
             else:
-                frontier = active - prev_active
+                frontier = active - previous_active
 
-            for v in active:
-                inf_counts[v] = inf_counts.get(v, 0) + 1
+            for node in active:
+                infected_counts[node] = infected_counts.get(node, 0) + 1
 
-            for v in frontier:
-                fr_counts[v] = fr_counts.get(v, 0) + 1
+            for node in frontier:
+                frontier_counts[node] = frontier_counts.get(node, 0) + 1
 
             last_state = State(infected=sorted(active), frontier=sorted(frontier))
 
         # Averaging across Monte Carlo runs turns the target into the true probability
-        inf_marg = {int(v): c / draws for v, c in inf_counts.items()}
-        fr_marg = {int(v): c / draws for v, c in fr_counts.items()}
+        infected_marginal = {
+            int(node): count / draws for node, count in infected_counts.items()
+        }
+        frontier_marginal = {
+            int(node): count / draws for node, count in frontier_counts.items()
+        }
 
-        return last_state, inf_marg, fr_marg
+        return last_state, infected_marginal, frontier_marginal
 
     def snapshot(self) -> tuple[dict, int]:
         return (dict(self.model.status), int(self.model.actual_iteration))

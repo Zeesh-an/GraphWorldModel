@@ -23,8 +23,8 @@ def _load_records(out_dir: Path) -> list:
         raise ValueError(f"no transitions_*.jsonl files found under {out_dir}")
 
     records = []
-    for fp in files:
-        for line in fp.read_text().strip().splitlines():
+    for file_path in files:
+        for line in file_path.read_text().strip().splitlines():
             if line:
                 records.append(json.loads(line))
 
@@ -33,7 +33,10 @@ def _load_records(out_dir: Path) -> list:
 
 def _action_key(action: list) -> tuple:
     return tuple(
-        sorted((a["op"], a["target"], a.get("destination", -1)) for a in action)
+        sorted(
+            (action_op["op"], action_op["target"], action_op.get("destination", -1))
+            for action_op in action
+        )
     )
 
 
@@ -45,8 +48,8 @@ def compute_checks(out_dir: Path) -> dict:
     main = [record for record in records if record["branch"] == "main"]
     monotone = sum(
         1
-        for r in main
-        if r["next_state"]["infected_count"] >= r["state"]["infected_count"]
+        for record in main
+        if record["next_state"]["infected_count"] >= record["state"]["infected_count"]
     )
     main_monotone_ratio = monotone / len(main) if main else 0.0
 
@@ -64,38 +67,44 @@ def compute_checks(out_dir: Path) -> dict:
 
     sensitivity_pairs = 0
 
-    for recs in groups.values():
-        if len(recs) < 2:
+    for group_records in groups.values():
+        if len(group_records) < 2:
             continue
-        by_action: dict[tuple[tuple[str, int], ...], set[tuple[int, ...]]] = {}
-        for r in recs:
-            by_action.setdefault(_action_key(r["action"]), set()).add(
-                tuple(r["next_state"]["infected"])
+
+        by_action = {}
+        for record in group_records:
+            by_action.setdefault(_action_key(record["action"]), set()).add(
+                tuple(record["next_state"]["infected"])
             )
+
         actions = list(by_action.keys())
-        for i in range(len(actions)):
-            for j in range(i + 1, len(actions)):
-                if by_action[actions[i]] != by_action[actions[j]]:
+        for first in range(len(actions)):
+            for second in range(first + 1, len(actions)):
+                if by_action[actions[first]] != by_action[actions[second]]:
                     sensitivity_pairs += 1
 
     # per-algorithm mean final spread (terminal infected_count, main branch) —
     # reported (not strictly asserted) so the ranking random < degree/pagerank
     # < celf/local_search can be eyeballed without MC-flaky test failures.
-    ep_final = {}
-    ep_algo = {}
+    episode_final = {}
+    episode_algorithm = {}
 
-    for r in main:
-        ek = (r["graph_id"], r["episode_id"])
-        ep_algo[ek] = r["algorithm"]
-        ep_final[ek] = max(ep_final.get(ek, 0), r["next_state"]["infected_count"])
+    for record in main:
+        episode_key = (record["graph_id"], record["episode_id"])
+        episode_algorithm[episode_key] = record["algorithm"]
+        episode_final[episode_key] = max(
+            episode_final.get(episode_key, 0),
+            record["next_state"]["infected_count"],
+        )
 
-    algo_spreads = defaultdict(list)
+    algorithm_spreads = defaultdict(list)
 
-    for ek, fin in ep_final.items():
-        algo_spreads[ep_algo[ek]].append(fin)
+    for episode_key, final_spread in episode_final.items():
+        algorithm_spreads[episode_algorithm[episode_key]].append(final_spread)
 
     per_algorithm_final_spread = {
-        a: float(np.mean(v)) for a, v in sorted(algo_spreads.items())
+        algorithm: float(np.mean(spreads))
+        for algorithm, spreads in sorted(algorithm_spreads.items())
     }
 
     return {

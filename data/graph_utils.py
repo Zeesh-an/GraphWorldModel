@@ -4,15 +4,15 @@ Shared graph utilities for data generation
 Common graph preprocessing functions used across inverse graph problem data generators.
 """
 
+import os
+from collections import defaultdict
+from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
-import os
-from pathlib import Path
-from collections import defaultdict
 
 
 def build_edge_index(
-    adj: sp.csr_matrix,
+    adjacency: sp.csr_matrix,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert adjacency to COO edge_index and compute edge probabilities.
@@ -27,15 +27,15 @@ def build_edge_index(
     lt_weights: (E,) float32
     """
     # Convert to COO and extract source and destination arrays from adjacency matrix
-    adj_coo = adj.tocoo()
-    src = adj_coo.row.astype(np.int32)
-    dst = adj_coo.col.astype(np.int32)
+    coo = adjacency.tocoo()
+    sources = coo.row.astype(np.int32)
+    destinations = coo.col.astype(np.int32)
 
-    in_deg = np.array(adj.sum(axis=0)).flatten()  # (N,) in-degree
-    in_deg = np.where(in_deg == 0, 1, in_deg)  # avoid divide-by-zero
+    in_degrees = np.array(adjacency.sum(axis=0)).flatten()  # (N,) in-degree
+    in_degrees = np.where(in_degrees == 0, 1, in_degrees)  # avoid divide-by-zero
 
     # Independent Cascade (IC): each edge gets probability = 1/in_degree(dst)
-    ic_probs = (1.0 / in_deg[dst]).astype(np.float32)
+    ic_probs = (1.0 / in_degrees[destinations]).astype(np.float32)
 
     # DeepIM does not use clipping
     # ic_probs = np.clip(ic_probs, 0.001, 0.5)  # cap for realism
@@ -43,14 +43,14 @@ def build_edge_index(
     # Linear Threshold (LT): weights must sum to ≤ 1 per node (already true with 1/in_deg)
     lt_weights = ic_probs.copy()
 
-    edge_index = np.stack([src, dst], axis=0)  # (2, E)
+    edge_index = np.stack([sources, destinations], axis=0)  # (2, E)
 
     return edge_index, ic_probs, lt_weights
 
 
 def build_adjacency_lists(
-    src: np.ndarray,
-    dst: np.ndarray,
+    sources: np.ndarray,
+    destinations: np.ndarray,
     ic_probs: np.ndarray,
     lt_weights: np.ndarray,
 ) -> tuple[dict, dict]:
@@ -62,18 +62,18 @@ def build_adjacency_lists(
     out_adj: dict[int, list[tuple[int, float]]] out_adj[u] = [(v, p), ...]  used by Independent Cascade (IC)
     in_adj: dict[int, list[tuple[int, float]]] in_adj[v] = [(u, w), ...]  used by Linear Threshold (LT)
     """
-    # adj_list[v] = list of (neighbor_u, prob_u_v) incoming edges
-    in_adj = defaultdict(list)  # in_adj[v]  = [(u, p), ...] used by LT
-    out_adj = defaultdict(list)  # out_adj[u] = [(v, p), ...] used by IC
+    # in_adjacency[v] = list of (neighbor_u, prob_u_v) incoming edges
+    in_adjacency = defaultdict(list)  # in_adjacency[v]  = [(u, p), ...] used by LT
+    out_adjacency = defaultdict(list)  # out_adjacency[u] = [(v, p), ...] used by IC
 
-    for i, (u, v) in enumerate(zip(src, dst)):
-        # List of (v, p) for outgoing edges from u (used by IC)
-        out_adj[int(u)].append((int(v), float(ic_probs[i])))
+    for edge, (source, destination) in enumerate(zip(sources, destinations)):
+        # Outgoing edges from the source (used by IC)
+        out_adjacency[int(source)].append((int(destination), float(ic_probs[edge])))
 
-        # List of (u, w) for incoming edges to v (used by LT)
-        in_adj[int(v)].append((int(u), float(lt_weights[i])))
+        # Incoming edges to the destination (used by LT)
+        in_adjacency[int(destination)].append((int(source), float(lt_weights[edge])))
 
-    return dict(out_adj), dict(in_adj)
+    return dict(out_adjacency), dict(in_adjacency)
 
 
 def save_graph(
@@ -101,6 +101,6 @@ def save_graph(
 
 def load_graph(data_dir: Path) -> dict:
     """Load graph data. Returns dict with numpy arrays."""
-    d = np.load(data_dir / "graph_data.npz")
+    data = np.load(data_dir / "graph_data.npz")
 
-    return {k: d[k] for k in d.files}
+    return {key: data[key] for key in data.files}

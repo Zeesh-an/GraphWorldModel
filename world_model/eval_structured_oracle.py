@@ -16,7 +16,6 @@ from world_model.wm_data import in_channels, load_graph_store
 from world_model.wm_eval import rollout_ensemble
 from world_model.wm_model import WorldModel
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Oracle structured rollout (q = true edge prob) — validates the IC structural form"
@@ -81,7 +80,7 @@ if __name__ == "__main__":
     ).to(device)
 
     store = load_graph_store(args.data_dir)
-    ens = rollout_ensemble(
+    ensemble = rollout_ensemble(
         model,
         args.data_dir,
         args.diffusion_model,
@@ -94,9 +93,11 @@ if __name__ == "__main__":
     )
 
     print(
-        f"[oracle structured rollout]  marg_mae={ens['ens_marg_mae']:.4f}  "
-        f"count_w1={ens['ens_count_w1']:.3f}  count_bias={ens['ens_count_bias']:.3f}  "
-        f"model_cnt={ens['ens_final_count_model']:.2f}  true_cnt={ens['ens_final_count_true']:.2f}"
+        f"[oracle structured rollout]  marg_mae={ensemble['ens_marg_mae']:.4f}  "
+        f"count_w1={ensemble['ens_count_w1']:.3f}  "
+        f"count_bias={ensemble['ens_count_bias']:.3f}  "
+        f"model_cnt={ensemble['ens_final_count_model']:.2f}  "
+        f"true_cnt={ensemble['ens_final_count_true']:.2f}"
     )
     print(
         "(expect count_bias ~ 0 and model_cnt ~ true_cnt if the structural form is correct)"

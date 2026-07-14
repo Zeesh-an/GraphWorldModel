@@ -13,11 +13,11 @@ Original paper: A. McCallum et al., "Automating the Construction of
     Internet Portals with Machine Learning," Information Retrieval (2000)
 """
 
-import urllib.request
 import os
+import urllib.request
+from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
-from pathlib import Path
 
 cora_ml_url = "https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz"
 data_dir = Path(__file__).resolve().parent.parent / "cora_ml"
@@ -25,33 +25,33 @@ data_dir = Path(__file__).resolve().parent.parent / "cora_ml"
 
 def download_cora_ml() -> Path:
     os.makedirs(data_dir, exist_ok=True)
-    dest = data_dir / "cora_ml.npz"
+    destination = data_dir / "cora_ml.npz"
 
-    if dest.exists():
-        print(f"[✓] Cora-ML already downloaded at {dest}")
-        return dest
+    if destination.exists():
+        print(f"[✓] Cora-ML already downloaded at {destination}")
+        return destination
 
     print(f"[↓] Downloading Cora-ML from {cora_ml_url} ...")
-    urllib.request.urlretrieve(cora_ml_url, dest)
-    print(f"[✓] Saved to {dest}")
+    urllib.request.urlretrieve(cora_ml_url, destination)
+    print(f"[✓] Saved to {destination}")
 
-    return dest
+    return destination
 
 
 def load_cora_ml(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
     """
     Returns
     -------
-    adj: scipy.sparse.csr_matrix (N, N) binary directed adjacency
+    adjacency: scipy.sparse.csr_matrix (N, N) binary directed adjacency
     features: np.ndarray (N, F) float32 bag-of-words
     labels: np.ndarray (N,) int32 class labels
-    N: int -- number of nodes
+    num_nodes: int -- number of nodes
     """
     raw = np.load(path, allow_pickle=True)
 
     # The npz stores the adjacency as a sparse matrix in COO format
     # Reconstruct the (N, N) sparse binary adjacency matrix from CSR components
-    adj = sp.csr_matrix(
+    adjacency = sp.csr_matrix(
         (raw["adj_data"], raw["adj_indices"], raw["adj_indptr"]),
         shape=raw["adj_shape"],
     ).astype(np.float32)
@@ -68,9 +68,10 @@ def load_cora_ml(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
     labels = raw["labels"].astype(np.int32)
 
     print(
-        f"[✓] Cora-ML loaded: {adj.shape[0]} nodes, "
-        f"{adj.nnz} edges, {features.shape[1]} features, "
+        f"[✓] Cora-ML loaded: {adjacency.shape[0]} nodes, "
+        f"{adjacency.nnz} edges, {features.shape[1]} features, "
         f"{len(np.unique(labels))} classes"
     )
-    N = adj.shape[0]
-    return adj, features, labels, N
+    num_nodes = adjacency.shape[0]
+
+    return adjacency, features, labels, num_nodes

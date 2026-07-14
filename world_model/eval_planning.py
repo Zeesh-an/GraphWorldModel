@@ -25,7 +25,7 @@ from world_model.wm_model import WorldModel
 
 def load_trained_model(config: dict, device: torch.device) -> torch.nn.Module:
     """Rebuild the WorldModel from a saved run config and load its checkpoint."""
-    bb = {
+    backbone_kwargs = {
         "n_heads": config["n_heads"],
         "ffn_dim": config["ffn_dim"],
         "alpha": config["gcnii_alpha"],
@@ -39,21 +39,22 @@ def load_trained_model(config: dict, device: torch.device) -> torch.nn.Module:
         dropout=config["dropout"],
         head_type=config.get("head", "linear"),
         diffusion_model=config["diffusion_model"],
-        **bb,
+        **backbone_kwargs,
     ).to(device)
 
     # train_wm.py saves to <ckpt_dir>/wm_<model>_<dm>.pt
-    ckpt = (
+    checkpoint_path = (
         Path(config["ckpt_dir"])
         / f"wm_{config['model']}_{config['diffusion_model']}.pt"
     )
-    if not ckpt.exists():
+    if not checkpoint_path.exists():
         raise FileNotFoundError(
-            f"checkpoint not found: {ckpt} (derived from model={config['model']}, "
-            f"diffusion_model={config['diffusion_model']}, ckpt_dir={config['ckpt_dir']})"
+            f"checkpoint not found: {checkpoint_path} (derived from "
+            f"model={config['model']}, diffusion_model={config['diffusion_model']}, "
+            f"ckpt_dir={config['ckpt_dir']})"
         )
 
-    model.load_state_dict(torch.load(ckpt, map_location=device))
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     return model
 
 

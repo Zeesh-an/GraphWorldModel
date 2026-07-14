@@ -32,14 +32,15 @@ class GCNLayer(nn.Module):
         self.linear = nn.Linear(in_features=hidden_dim, out_features=hidden_dim)
         self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
-        # x: (N, hidden_dim), adj: sparse COO (N, N) normalized
-        h = self.norm(x)
-        h = torch.sparse.mm(adj, h)  # (N, hidden_dim)
-        h = self.linear(h)
-        h = F.gelu(h)
-        h = self.dropout(h)
-        return x + h  # residual
+    def forward(self, features: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
+        # features: (N, hidden_dim), adjacency: sparse COO (N, N) normalized
+        hidden = self.norm(features)
+        hidden = torch.sparse.mm(adjacency, hidden)  # (N, hidden_dim)
+        hidden = self.linear(hidden)
+        hidden = F.gelu(hidden)
+        hidden = self.dropout(hidden)
+
+        return features + hidden  # residual
 
 
 class GCNForwardModel(nn.Module):
@@ -82,33 +83,36 @@ class GCNForwardModel(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
-    def forward(self, seed_vec: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+    def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adj: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
+        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
         returns: (N, 1) predicted outcome probabilities in [0, 1]
         """
         device = seed_vec.device
 
         if self.use_pe:
-            pe = degree_encoding(adj, self.hidden_dim, device)  # (N, hidden_dim)
-            x = torch.cat([seed_vec, pe], dim=-1)  # (N, 1 + hidden_dim)
+            positional_encoding = degree_encoding(
+                adjacency, self.hidden_dim, device
+            )  # (N, hidden_dim)
+            features = torch.cat(
+                [seed_vec, positional_encoding], dim=-1
+            )  # (N, 1 + hidden_dim)
         else:
-            x = seed_vec  # (N, 1)
+            features = seed_vec  # (N, 1)
 
-        x = self.input_proj(x)  # (N, hidden_dim)
+        features = self.input_proj(features)  # (N, hidden_dim)
 
         for layer in self.layers:
-            x = layer(x, adj)  # (N, hidden_dim)
+            features = layer(features, adjacency)  # (N, hidden_dim)
 
-        out = torch.sigmoid(self.output_proj(x))  # (N, 1)
-        return out
+        return torch.sigmoid(self.output_proj(features))  # (N, 1)
 
 
 class GCNEncoder(nn.Module):
@@ -133,11 +137,11 @@ class GCNEncoder(nn.Module):
         )
         self.norm = nn.LayerNorm(hidden_dim)
 
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
@@ -145,8 +149,8 @@ class GCNEncoder(nn.Module):
         graph: GraphInput — uses graph.adj_norm (sparse COO, normalized)
         returns: (N, hidden_dim) node embeddings
         """
-        h = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
+        hidden = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)
         for layer in self.layers:
-            h = layer(h, graph.adj_norm)  # shape: (N, hidden_dim)
+            hidden = layer(hidden, graph.adj_norm)  # shape: (N, hidden_dim)
 
-        return self.norm(h)  # shape: (N, hidden_dim)
+        return self.norm(hidden)  # shape: (N, hidden_dim)

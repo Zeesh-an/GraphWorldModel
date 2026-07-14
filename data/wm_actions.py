@@ -19,6 +19,8 @@ spine_algorithms = (
     "local_search",
 )
 
+seed_upper_bound = 2**31 - 1
+
 
 def estimate_spread(
     bundle: GraphBundle,
@@ -36,14 +38,14 @@ def estimate_spread(
         return 0.0
 
     # Seed nodes are initialized as add_node actions on the seed node set
-    seed_bag = [ActionOp("add_node", int(v)) for v in seeds]
+    seed_bag = [ActionOp("add_node", int(node)) for node in seeds]
     totals = []
 
-    for run in range(mc_runs):
+    for _ in range(mc_runs):
         simulator = Simulator(
             bundle.nx_graph,
             ic_prob_map=bundle.ic_prob_map,
-            seed=int(rng.integers(0, 2**31 - 1)),
+            seed=int(rng.integers(0, seed_upper_bound)),
         )
         simulator.reset(model)
         state = simulator.advance(seed_bag)
@@ -65,7 +67,7 @@ def _out_degree(graph: nx.Graph | nx.DiGraph) -> dict[int, int]:
 
 def select_seeds(
     bundle: GraphBundle,
-    k: int,
+    num_seeds: int,
     algorithm: str,
     model: str,
     rng: np.random.Generator,
@@ -75,78 +77,93 @@ def select_seeds(
     graph = bundle.nx_graph
 
     if algorithm == "random":
-        # Get k distinct random nodes
+        # Get num_seeds distinct random nodes
         return sorted(
-            int(v) for v in rng.choice(graph.number_of_nodes(), size=k, replace=False)
+            int(node)
+            for node in rng.choice(
+                graph.number_of_nodes(), size=num_seeds, replace=False
+            )
         )
 
     if algorithm == "degree":
         # Get the top-k highest-degree nodes
         degrees = _out_degree(graph)
-        return sorted(sorted(degrees, key=lambda v: degrees[v], reverse=True)[:k])
+        ranked = sorted(degrees, key=lambda node: degrees[node], reverse=True)
+        return sorted(ranked[:num_seeds])
 
     if algorithm == "pagerank":
-        # Get k nodes using PageRank (influence by random-walk importance)
-        pr = nx.pagerank(graph)
-        return sorted(int(v) for v in sorted(pr, key=lambda v: pr[v], reverse=True)[:k])
+        # Get num_seeds nodes using PageRank (influence by random-walk importance)
+        pagerank_scores = nx.pagerank(graph)
+        ranked = sorted(
+            pagerank_scores, key=lambda node: pagerank_scores[node], reverse=True
+        )
+        return sorted(int(node) for node in ranked[:num_seeds])
 
     if algorithm == "betweenness":
-        # Get k nodes using betweenness (nodes that sit on many shortest paths)
-        bc = nx.betweenness_centrality(graph)
-        return sorted(int(v) for v in sorted(bc, key=lambda v: bc[v], reverse=True)[:k])
+        # Get num_seeds nodes using betweenness (nodes that sit on many shortest paths)
+        betweenness_scores = nx.betweenness_centrality(graph)
+        ranked = sorted(
+            betweenness_scores,
+            key=lambda node: betweenness_scores[node],
+            reverse=True,
+        )
+        return sorted(int(node) for node in ranked[:num_seeds])
 
     if algorithm == "celf":
-        # Get k nodes by building the seed set one node at a time, each round adding the node with the highest marginal gain (how much it increases expected spread on top of the seeds already chosen)
+        # Get num_seeds nodes by building the seed set one node at a time, each round adding the node with the highest marginal gain (how much it increases expected spread on top of the seeds already chosen)
 
         # Marginal-gain greedy (same seed set as CELF's lazy heap). Telescoping
-        # marginal gains mean `base` always equals spread(seeds).
+        # marginal gains mean `base_spread` always equals spread(seeds).
         seeds = []
-        base = 0.0
+        base_spread = 0.0
         candidates = list(range(graph.number_of_nodes()))
 
-        for _ in range(k):
+        for _ in range(num_seeds):
             # -inf so the highest-gain candidate is always chosen, even when MC noise
-            # makes every marginal gain negative (otherwise best_v can stay None).
-            best_v, best_gain = None, float("-inf")
-            for v in candidates:
+            # makes every marginal gain negative (otherwise best_node can stay None).
+            best_node, best_gain = None, float("-inf")
+            for node in candidates:
                 gain = (
                     estimate_spread(
                         bundle,
-                        seeds + [v],
+                        seeds + [node],
                         model=model,
                         mc_runs=mc_runs,
                         horizon=horizon,
                         rng=rng,
                     )
-                    - base
+                    - base_spread
                 )
 
                 if gain > best_gain:
-                    best_gain, best_v = gain, v
+                    best_gain, best_node = gain, node
 
-            seeds.append(int(best_v))
-            candidates.remove(best_v)
-            base += best_gain
+            seeds.append(int(best_node))
+            candidates.remove(best_node)
+            base_spread += best_gain
 
         return sorted(seeds)
 
     if algorithm == "local_search":
-        # Get k nodes starting from the degree heuristic, then tries 1-swaps: replace one seed with a non-seed and keep the swap if it improves estimated spread
+        # Get num_seeds nodes starting from the degree heuristic, then try 1-swaps: replace one seed with a non-seed and keep the swap if it improves estimated spread
 
-        seeds = select_seeds(bundle, k=k, algorithm="degree", model=model, rng=rng)
-        best = estimate_spread(
+        seeds = select_seeds(
+            bundle, num_seeds=num_seeds, algorithm="degree", model=model, rng=rng
+        )
+        best_spread = estimate_spread(
             bundle, seeds, model=model, mc_runs=mc_runs, horizon=horizon, rng=rng
         )
         improved, rounds = True, 0
+
         while improved and rounds < 3:
             improved, rounds = False, rounds + 1
-            for i in range(len(seeds)):
-                for v in range(graph.number_of_nodes()):
-                    if v in seeds:
+            for position in range(len(seeds)):
+                for node in range(graph.number_of_nodes()):
+                    if node in seeds:
                         continue
                     trial = list(seeds)
-                    trial[i] = v
-                    sp = estimate_spread(
+                    trial[position] = node
+                    spread = estimate_spread(
                         bundle,
                         trial,
                         model=model,
@@ -154,8 +171,8 @@ def select_seeds(
                         horizon=horizon,
                         rng=rng,
                     )
-                    if sp > best:
-                        best, seeds, improved = sp, trial, True
+                    if spread > best_spread:
+                        best_spread, seeds, improved = spread, trial, True
                         break
                 if improved:
                     break
@@ -172,9 +189,9 @@ def _random_edge(
 
     if not edges:
         return None
-    u, v = edges[int(rng.integers(len(edges)))]
+    source, destination = edges[int(rng.integers(len(edges)))]
 
-    return int(u), int(v)
+    return int(source), int(destination)
 
 
 def _random_non_edge(
@@ -183,13 +200,13 @@ def _random_non_edge(
     # A few tries to land a missing edge
     # The graphs are sparse so this almost always hits
     for _ in range(10):
-        u, v = (
+        source, destination = (
             int(rng.integers(graph.number_of_nodes())),
             int(rng.integers(graph.number_of_nodes())),
         )
 
-        if u != v and not graph.has_edge(u, v):
-            return u, v
+        if source != destination and not graph.has_edge(source, destination):
+            return source, destination
 
     return None
 
@@ -206,7 +223,9 @@ def _build_action(
 
     if op == "add_node":
         # Build an action that randomly adds a susceptible node
-        susceptible = [v for v in range(graph.number_of_nodes()) if v not in infected]
+        susceptible = [
+            node for node in range(graph.number_of_nodes()) if node not in infected
+        ]
         if susceptible:
             return [ActionOp("add_node", int(rng.choice(susceptible)))]
     elif op == "remove_node":
@@ -266,26 +285,30 @@ def sample_injection(
 
 def counterfactual_actions(
     state: State,
-    n_nodes: int,
+    num_nodes: int,
     main_bag: list[ActionOp],
-    n: int,
+    count: int,
     rng: np.random.Generator,
     action_ops: list[str],
 ) -> list[list[ActionOp]]:
     """
-    Up to n action bags distinct from main_bag and each other. Forks cover
+    Up to `count` action bags distinct from main_bag and each other. Forks cover
     node ops only (NULL, a random add_node, a random remove_node) so the
     snapshot/restore branch never has to undo an edge mutation.
     """
     infected = set(state.infected)
-    susceptible = [v for v in range(n_nodes) if v not in infected]
+    susceptible = [node for node in range(num_nodes) if node not in infected]
     active = list(state.frontier) if state.frontier else list(state.infected)
 
     def key(bag: list[ActionOp]) -> tuple:
         return tuple(
             sorted(
-                (a.op, a.target, a.destination if a.destination is not None else -1)
-                for a in bag
+                (
+                    action.op,
+                    action.target,
+                    action.destination if action.destination is not None else -1,
+                )
+                for action in bag
             )
         )
 
@@ -298,16 +321,16 @@ def counterfactual_actions(
     if "remove_node" in action_ops and active:
         pool.append([ActionOp("remove_node", int(rng.choice(active)))])
 
-    out = []
+    bags = []
 
     for bag in pool:
         if key(bag) in seen:
             continue
 
         seen.add(key(bag))
-        out.append(bag)
+        bags.append(bag)
 
-        if len(out) == n:
+        if len(bags) == count:
             break
 
-    return out
+    return bags

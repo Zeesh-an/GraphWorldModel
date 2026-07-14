@@ -36,14 +36,14 @@ class GCNIILayer(nn.Module):
         hidden_dim: int,
         alpha: float,
         lamda: float,
-        layer_idx: int,
+        layer_index: int,
         dropout: float,
     ) -> None:
         super().__init__()
 
         self.alpha = alpha
-        # Layer indices are 1-based in the paper: β_l = log(λ/l + 1) (layer_idx is l)
-        self.beta = math.log(lamda / layer_idx + 1.0)
+        # Layer indices are 1-based in the paper: β_l = log(λ/l + 1) (layer_index is l)
+        self.beta = math.log(lamda / layer_index + 1.0)
 
         self.W = nn.Linear(in_features=hidden_dim, out_features=hidden_dim, bias=False)
         self.dropout = nn.Dropout(p=dropout)
@@ -54,25 +54,32 @@ class GCNIILayer(nn.Module):
         nn.init.xavier_uniform_(self.W.weight)
 
     def forward(
-        self, h: torch.Tensor, h0: torch.Tensor, adj: torch.Tensor
+        self,
+        hidden: torch.Tensor,
+        initial_hidden: torch.Tensor,
+        adjacency: torch.Tensor,
     ) -> torch.Tensor:
         """
-        h: (N, hidden_dim) — current hidden state
-        h0: (N, hidden_dim) — initial projected features (shared across layers)
-        adj: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
+        hidden: (N, hidden_dim) — current hidden state
+        initial_hidden: (N, hidden_dim) — initial projected features (shared across layers)
+        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
         returns: (N, hidden_dim)
         """
         # Dropout on input hidden state (matches reference GCNII implementation)
-        h = self.dropout(h)
+        hidden = self.dropout(hidden)
 
         # Propagation + initial residual
-        propagated = torch.sparse.mm(adj, h)  # shape: (N, H)
-        support = (1.0 - self.alpha) * propagated + self.alpha * h0  # shape: (N, H)
+        propagated = torch.sparse.mm(adjacency, hidden)  # shape: (N, H)
+        support = (
+            1.0 - self.alpha
+        ) * propagated + self.alpha * initial_hidden  # shape: (N, H)
 
         # Identity mapping: ((1 - β)·I + β·W) · support
-        out = (1.0 - self.beta) * support + self.beta * self.W(support)  # shape: (N, H)
+        output = (1.0 - self.beta) * support + self.beta * self.W(
+            support
+        )  # shape: (N, H)
 
-        return F.relu(out)
+        return F.relu(output)
 
 
 class GCNIIForwardModel(nn.Module):
@@ -111,10 +118,10 @@ class GCNIIForwardModel(nn.Module):
                     hidden_dim=hidden_dim,
                     alpha=alpha,
                     lamda=lamda,
-                    layer_idx=layer_idx + 1,  # 1-based, matches paper
+                    layer_index=layer_index + 1,  # 1-based, matches paper
                     dropout=dropout,
                 )
-                for layer_idx in range(n_layers)
+                for layer_index in range(n_layers)
             ]
         )
 
@@ -126,34 +133,37 @@ class GCNIIForwardModel(nn.Module):
         self._reset_parameters()
 
     def _reset_parameters(self) -> None:
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
-    def forward(self, seed_vec: torch.Tensor, adj: torch.Tensor) -> torch.Tensor:
+    def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adj: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
+        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
         returns: (N, 1) predicted outcome probabilities in [0, 1]
         """
         device = seed_vec.device
 
         if self.use_pe:
-            pe = degree_encoding(adj, self.hidden_dim, device)  # shape: (N, H)
-            x = torch.cat([seed_vec, pe], dim=-1)  # shape: (N, 1 + H)
+            positional_encoding = degree_encoding(
+                adjacency, self.hidden_dim, device
+            )  # shape: (N, H)
+            features = torch.cat(
+                [seed_vec, positional_encoding], dim=-1
+            )  # shape: (N, 1 + H)
         else:
-            x = seed_vec  # shape: (N, 1)
+            features = seed_vec  # shape: (N, 1)
 
-        h0 = self.input_proj(x)  # shape: (N, H)
-        h = h0
+        initial_hidden = self.input_proj(features)  # shape: (N, H)
+        hidden = initial_hidden
 
         for layer in self.layers:
-            h = layer(h, h0, adj)  # shape: (N, H)
+            hidden = layer(hidden, initial_hidden, adjacency)  # shape: (N, H)
 
-        out = torch.sigmoid(self.output_proj(h))  # shape: (N, 1)
-        return out
+        return torch.sigmoid(self.output_proj(hidden))  # shape: (N, 1)
 
 
 class GCNIIEncoder(nn.Module):
@@ -177,17 +187,19 @@ class GCNIIEncoder(nn.Module):
         self.input_proj = nn.Linear(in_channels, hidden_dim)
         self.layers = nn.ModuleList(
             [
-                GCNIILayer(hidden_dim, alpha, lamda, layer_idx=i + 1, dropout=dropout)
-                for i in range(n_layers)
+                GCNIILayer(
+                    hidden_dim, alpha, lamda, layer_index=index + 1, dropout=dropout
+                )
+                for index in range(n_layers)
             ]
         )
         self.norm = nn.LayerNorm(hidden_dim)
 
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
@@ -195,9 +207,9 @@ class GCNIIEncoder(nn.Module):
         graph: GraphInput — uses graph.adj_norm (sparse COO, normalized)
         returns: (N, hidden_dim) node embeddings
         """
-        h0 = F.relu(self.input_proj(X))  # shape: (N, hidden_dim)
-        h = h0
+        initial_hidden = F.relu(self.input_proj(X))  # shape: (N, hidden_dim)
+        hidden = initial_hidden
         for layer in self.layers:
-            h = layer(h, h0, graph.adj_norm)  # shape: (N, hidden_dim)
+            hidden = layer(hidden, initial_hidden, graph.adj_norm)  # shape: (N, hidden_dim)
 
-        return self.norm(h)  # shape: (N, hidden_dim)
+        return self.norm(hidden)  # shape: (N, hidden_dim)

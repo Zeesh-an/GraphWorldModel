@@ -39,6 +39,7 @@ def _signature_line(function: Callable) -> str:
 
 
 def build_api_reference() -> str:
+    """Return a formatted reference of named algorithms + primitives."""
     algorithm_lines = [
         _signature_line(algorithms.algorithms[name]) for name in algorithm_names
     ]

@@ -22,25 +22,25 @@ def binary_f1(pred: np.ndarray, target: np.ndarray) -> float:
 
 
 def new_infection_f1(
-    pred_inf: np.ndarray,
+    pred_infected: np.ndarray,
     y_inf: np.ndarray,
     infected_t: np.ndarray,
 ) -> float:
     # Restrict to nodes that were susceptible (not yet infected) at time t, and then predict the binary F1
     susceptible = ~infected_t.astype(bool)
     return binary_f1(
-        pred_inf.astype(bool) & susceptible, y_inf.astype(bool) & susceptible
+        pred_infected.astype(bool) & susceptible, y_inf.astype(bool) & susceptible
     )
 
 
 def delta_f1(
-    pred_inf: np.ndarray,
+    pred_infected: np.ndarray,
     y_inf: np.ndarray,
     infected_t: np.ndarray,
 ) -> float:
     # Restrict to nodes whose state actually changed between t and t + 1, and then predict the binary F1
     changed = y_inf.astype(bool) != infected_t.astype(bool)
-    pred_changed = pred_inf.astype(bool) != infected_t.astype(bool)
+    pred_changed = pred_infected.astype(bool) != infected_t.astype(bool)
     return binary_f1(pred_changed, changed)
 
 
@@ -57,8 +57,8 @@ def brier_score(prob: np.ndarray, target: np.ndarray) -> float:
 
 
 def score_predictions(
-    pred_inf: np.ndarray,
-    pred_fr: np.ndarray,
+    pred_infected: np.ndarray,
+    pred_frontier: np.ndarray,
     y_inf: np.ndarray,
     y_fr: np.ndarray,
     infected_t: np.ndarray,
@@ -66,10 +66,10 @@ def score_predictions(
 ) -> dict[str, float]:
     """Compute all metrics. All per-node arrays are concatenated across the eval set."""
     return {
-        "infected_acc": accuracy(pred_inf, y_inf),
-        "frontier_acc": accuracy(pred_fr, y_fr),
-        "new_infection_f1": new_infection_f1(pred_inf, y_inf, infected_t),
-        "delta_f1": delta_f1(pred_inf, y_inf, infected_t),
+        "infected_acc": accuracy(pred_infected, y_inf),
+        "frontier_acc": accuracy(pred_frontier, y_fr),
+        "new_infection_f1": new_infection_f1(pred_infected, y_inf, infected_t),
+        "delta_f1": delta_f1(pred_infected, y_inf, infected_t),
     }
 
 

@@ -23,6 +23,7 @@ power_iterations = 100
 def build_simulator(
     graph: GraphInfo, diffusion_model: str, seed: int = 0
 ) -> Simulator:
+    """Construct an NDlib Simulator from a GraphInfo."""
     nx_graph = nx.DiGraph() if graph.directed else nx.Graph()
     nx_graph.add_nodes_from(range(graph.num_nodes))
     ic_prob_map = {}
