@@ -1,12 +1,10 @@
-"""Top-level driver: run the coding-agent outer loop over the inner-loop environment.
-
-CLI:
-    python -m coding_agent.run --data-dir data/output/ba20_marg_structured \
-        --wm-results-json world_model/checkpoints/ba20_marg_structured_sage_IC.json \
-        --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare
 """
+Top-level driver: run the coding-agent outer loop over the inner-loop environment
 
-from __future__ import annotations
+python -m coding_agent.run --data-dir data/output/ba20_marg_structured \
+    --wm-results-json world_model/checkpoints/ba20_marg_structured_sage_IC.json \
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare
+"""
 
 import argparse
 import json
@@ -16,6 +14,7 @@ from functools import partial
 from pathlib import Path
 
 from coding_agent.agent import CodingAgent, TODOProvider
+from coding_agent.credit import counterfactual_credit
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
@@ -44,6 +43,7 @@ class ExperimentConfig:
     graph_id: str | None = None  # which graph in the store (default: first)
     wm_results_json: str | None = None  # train_wm.py results JSON (for the WM env)
     compare: bool = False  # also evaluate the winning strategy on the MC baseline
+    credit: bool = False  # per-action counterfactual credit (feedback + results)
     out_json: str | None = None
 
 
@@ -118,7 +118,7 @@ def run_experiment(
     if cfg.method == "windowed":
         method = WindowedOnline(windows=cfg.windows)
     if cfg.method == "one_shot":
-        method = OneShotSuperAlgorithm(outer_iters=cfg.outer_iters)
+        method = OneShotSuperAlgorithm(outer_iters=cfg.outer_iters, credit=cfg.credit)
 
     strategy, trajectory = method.optimize(agent, env, task, g)
 
@@ -129,6 +129,15 @@ def run_experiment(
         "summary": summarize(trajectory),
         "cost": trajectory.cost,
     }
+
+    if cfg.credit:
+        # Credit of the executed action sequence; for state-dependent strategies
+        # (per_step/windowed) the recorded bags are replayed as a fixed plan.
+        base, entries = counterfactual_credit(
+            env, trajectory.actions, cfg.horizon, cfg.budget
+        )
+        result["credit_base_reward"] = base
+        result["credit"] = entries
 
     if cfg.compare and cfg.evaluator == world_model:
         mc_env = MonteCarloEnvironment(g, cfg.diffusion_model, mc_runs=cfg.mc_runs)
@@ -153,108 +162,121 @@ def run_experiment(
 
 
 def _parse_args() -> ExperimentConfig:
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description="Coding-agent outer loop over the world model"
     )
-    p.add_argument(
+
+    parser.add_argument(
         "--method",
         type=str,
         default="one_shot",
         choices=["one_shot", "per_step", "windowed"],
         help="outer-loop method (default: one_shot).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--evaluator",
         type=str,
         default="world_model",
         choices=["world_model", "monte_carlo"],
         help="inner-loop evaluator (default: world_model).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--diffusion-model",
         type=str,
         default="IC",
         choices=["IC", "LT"],
         help="diffusion dynamics (default: IC).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--budget", type=int, default=5, help="seed/action budget (default: 5)."
     )
-    p.add_argument(
+    parser.add_argument(
         "--horizon", type=int, default=10, help="rollout horizon (default: 10)."
     )
-    p.add_argument(
+    parser.add_argument(
         "--windows",
         type=int,
         default=3,
         help="number of windows for windowed method (default: 3).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--outer-iters",
         type=int,
         default=3,
         help="outer refinement iterations (default: 3).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--mc-runs",
         type=int,
         default=30,
         help="Monte Carlo simulator runs (default: 30).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--n-samples",
         type=int,
         default=20,
         help="world-model rollout samples (default: 20).",
     )
-    p.add_argument("--seed", type=int, default=42, help="random seed (default: 42).")
-    p.add_argument(
+    parser.add_argument(
+        "--seed", type=int, default=42, help="random seed (default: 42)."
+    )
+    parser.add_argument(
         "--device", type=str, default="cpu", help="torch device string (default: cpu)."
     )
-    p.add_argument(
+    parser.add_argument(
         "--data-dir",
         type=str,
         default=None,
         help="generated data directory (default: None).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--graph-id",
         type=str,
         default=None,
         help="graph id inside the graph store (default: None).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--wm-results-json",
         type=str,
         default=None,
         help="world-model results JSON path (default: None).",
     )
-    p.add_argument(
+    parser.add_argument(
         "--compare",
         action="store_true",
         help="also evaluate the final strategy on Monte Carlo (default: False).",
     )
-    p.add_argument(
+    parser.add_argument(
+        "--credit",
+        action="store_true",
+        help="per-action counterfactual credit: ablate each action, report its "
+        "delta-spread in refinement feedback and the results JSON; costs one "
+        "extra rollout per action (default: False).",
+    )
+    parser.add_argument(
         "--out-json", type=str, default=None, help="output JSON path (default: None)."
     )
-    a = p.parse_args()
+
+    args = parser.parse_args()
+
     return ExperimentConfig(
-        method=a.method,
-        evaluator=a.evaluator,
-        diffusion_model=a.diffusion_model,
-        budget=a.budget,
-        horizon=a.horizon,
-        windows=a.windows,
-        outer_iters=a.outer_iters,
-        mc_runs=a.mc_runs,
-        n_samples=a.n_samples,
-        seed=a.seed,
-        device=a.device,
-        data_dir=a.data_dir,
-        graph_id=a.graph_id,
-        wm_results_json=a.wm_results_json,
-        compare=a.compare,
-        out_json=a.out_json,
+        method=args.method,
+        evaluator=args.evaluator,
+        diffusion_model=args.diffusion_model,
+        budget=args.budget,
+        horizon=args.horizon,
+        windows=args.windows,
+        outer_iters=args.outer_iters,
+        mc_runs=args.mc_runs,
+        n_samples=args.n_samples,
+        seed=args.seed,
+        device=args.device,
+        data_dir=args.data_dir,
+        graph_id=args.graph_id,
+        wm_results_json=args.wm_results_json,
+        compare=args.compare,
+        credit=args.credit,
+        out_json=args.out_json,
     )
 
 

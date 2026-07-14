@@ -1,8 +1,4 @@
-"""Provider-agnostic coding agent. The concrete LLM call is the ONLY TODO in the
-subsystem; wire a provider once the model choice is confirmed.
-"""
-
-from __future__ import annotations
+"""Provider-agnostic coding agent. The concrete LLM call is the ONLY TODO in the subsystem; wire a provider once the model choice is confirmed."""
 
 import re
 from typing import Protocol

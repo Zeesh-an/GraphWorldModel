@@ -1,8 +1,7 @@
-"""Introspect the tools library into a human/agent-readable API reference string,
+"""
+Introspect the tools library into a human/agent-readable API reference string,
 injected into the coding-agent prompts so the model sees the exact callable surface.
 """
-
-from __future__ import annotations
 
 import inspect
 
@@ -43,6 +42,7 @@ def build_api_reference() -> str:
     """Return a formatted reference of named algorithms + primitives."""
     algo_lines = [_sig_line(algorithms.algorithms[name]) for name in algorithm_names]
     prim_lines = [_sig_line(fn) for fn in primitives_list]
+
     return (
         "NAMED ALGORITHMS  (from coding_agent.tools.algorithms, imported as `algorithms`)\n"
         + "\n".join(algo_lines)

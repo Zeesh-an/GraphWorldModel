@@ -46,6 +46,24 @@ python -m coding_agent.run \
 > The LLM provider is a TODO (`agent.TODOProvider` raises). Until a model is wired,
 > run with a canned script via `run_experiment(cfg, graph=..., canned_script=...)`.
 
+## Counterfactual credit (`--credit`)
+
+Per-action reward attribution (`credit.py`): each action in the plan is ablated
+(removed, everything else identical, same rollout seed) and re-rolled, giving
+`delta = base_spread - ablated_spread` — the spread that single action is
+responsible for (`~0` = wasted budget). With `--credit`:
+
+- **`one_shot` refinement turns** include the per-action credit report, so the
+  agent gets causal feedback ("your t=3 seed contributed +0.2") instead of a
+  bare scalar reward.
+- **The results JSON** gains `credit_base_reward` + `credit` (one entry per
+  action) for the winning strategy, whatever the method. For state-dependent
+  strategies (`per_step`/`windowed`) the recorded bags are replayed as a fixed
+  plan, so credit is an approximation there.
+
+Cost: one extra rollout per action per evaluation — cheap on the world-model
+evaluator, noticeably slower on `--evaluator monte_carlo`.
+
 ## Implemented algorithms (`tools/algorithms.py`)
 
 | Family | Function | Notes |

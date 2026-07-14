@@ -70,9 +70,15 @@ LIBRARY API:
 Write the Strategy now (method = {method})."""
 
 
-def build_feedback_prompt(reward: float, summary: str, error: str | None = None) -> str:
+def build_feedback_prompt(
+    reward: float,
+    summary: str,
+    error: str | None = None,
+    credit_report: str | None = None,
+) -> str:
     err = f"\nThe previous script raised an error:\n{error}\n" if error else ""
+    credit = f"\n{credit_report}\n" if credit_report else ""
     return f"""\
 Your previous strategy achieved final spread (reward) = {reward}.
-Trajectory summary: {summary}{err}
+Trajectory summary: {summary}{err}{credit}
 Revise the Strategy to increase final spread. Reply with one ```python block."""
