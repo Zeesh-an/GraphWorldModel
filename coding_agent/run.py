@@ -13,7 +13,9 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from coding_agent.agent import CodingAgent, TODOProvider
+from dotenv import load_dotenv
+
+from coding_agent.agent import CodingAgent, GatewayProvider
 from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.methods.base import OuterLoopMethod, summarize
@@ -30,6 +32,7 @@ monte_carlo = "monte_carlo"
 class ExperimentConfig:
     method: str = "one_shot"  # one_shot | per_step | windowed
     evaluator: str = "world_model"  # world_model | monte_carlo
+    model: str = "claude-sonnet-5"  # gateway model name
     diffusion_model: str = "IC"  # IC | LT
     budget: int = 5
     horizon: int = 10
@@ -114,7 +117,11 @@ def run_experiment(
         graph = _load_graph(config)
 
     environment = _build_environment(config, graph)
-    provider = _CannedProvider(canned_script) if canned_script else TODOProvider()
+    provider = (
+        _CannedProvider(canned_script)
+        if canned_script
+        else GatewayProvider(config.model)
+    )
     agent = CodingAgent(provider)
     task = TaskSpec(
         diffusion_model=config.diffusion_model,
@@ -163,9 +170,7 @@ def run_experiment(
             if plan is not None
             else partial(_strategy_action, strategy, graph)
         )
-        mc_trajectory = mc_environment.rollout(
-            action_fn, config.horizon, config.budget
-        )
+        mc_trajectory = mc_environment.rollout(action_fn, config.horizon, config.budget)
         result["mc_reward"] = mc_trajectory.reward
         result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward
 
@@ -181,6 +186,12 @@ def _parse_args() -> ExperimentConfig:
         description="Coding-agent outer loop over the world model"
     )
 
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="claude-sonnet-5",
+        help="gateway model name, e.g. gpt-5.6-sol (default: claude-sonnet-5).",
+    )
     parser.add_argument(
         "--method",
         type=str,
@@ -203,10 +214,16 @@ def _parse_args() -> ExperimentConfig:
         help="diffusion dynamics (default: IC).",
     )
     parser.add_argument(
-        "--budget", type=int, default=5, help="seed/action budget (default: 5)."
+        "--budget",
+        type=int,
+        default=5,
+        help="seed/action budget (default: 5).",
     )
     parser.add_argument(
-        "--horizon", type=int, default=10, help="rollout horizon (default: 10)."
+        "--horizon",
+        type=int,
+        default=10,
+        help="rollout horizon (default: 10).",
     )
     parser.add_argument(
         "--windows",
@@ -233,10 +250,16 @@ def _parse_args() -> ExperimentConfig:
         help="world-model rollout samples (default: 20).",
     )
     parser.add_argument(
-        "--seed", type=int, default=42, help="random seed (default: 42)."
+        "--seed",
+        type=int,
+        default=42,
+        help="random seed (default: 42).",
     )
     parser.add_argument(
-        "--device", type=str, default="cpu", help="torch device string (default: cpu)."
+        "--device",
+        type=str,
+        default="cpu",
+        help="torch device string (default: cpu).",
     )
     parser.add_argument(
         "--data-dir",
@@ -275,6 +298,7 @@ def _parse_args() -> ExperimentConfig:
     args = parser.parse_args()
 
     return ExperimentConfig(
+        model=args.model,
         method=args.method,
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,
@@ -296,5 +320,7 @@ def _parse_args() -> ExperimentConfig:
 
 
 if __name__ == "__main__":
+    load_dotenv()
+
     config = _parse_args()
     print(json.dumps(run_experiment(config), indent=2, default=str))

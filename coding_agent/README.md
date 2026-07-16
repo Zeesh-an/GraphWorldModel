@@ -17,7 +17,8 @@ Agent (LLM, TODO) → Python Strategy script → graph actions per t → Environ
   `action_fn(state, timestep) → list[Action]`.
 - **Inner loop** (`envs/`): `WorldModelEnvironment` (default, fast) or
   `MonteCarloEnvironment` (NDlib ground truth) behind one `rollout()` interface.
-- **Agent** (`agent.py`): provider-agnostic; the concrete LLM call is the only TODO.
+- **Agent** (`agent.py`): provider-agnostic; `GatewayProvider` is the concrete LLM
+  call (OpenAI-compatible gateway, `gpt-*` and `claude-*` models).
 - **Library** (`tools/`): named algorithms over a primitive layer; the agent's script
   may call these.
 
@@ -42,8 +43,9 @@ python -m coding_agent.run \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare
 ```
 
-> The LLM provider is a TODO (`agent.TODOProvider` raises). Until a model is wired,
-> run with a canned script via `run_experiment(cfg, graph=..., canned_script=...)`.
+> The LLM defaults to `claude-sonnet-5` via the gateway (`--model` switches, e.g.
+> `gpt-5.6-sol`); requires `GATEWAY_BASE_URL` + tokens in `.env`. Model-less runs
+> (tests) use a canned script via `run_experiment(cfg, graph=..., canned_script=...)`.
 
 ## Counterfactual credit (`--credit`)
 
@@ -110,9 +112,12 @@ Primitives (`tools/primitives.py`): `compute_degree`, `compute_out_degree`,
 
 ## Wiring a model
 
-Implement an `LLMProvider` (`agent.py`) with `complete(system, user) -> str` and pass it
-to `CodingAgent(provider)`. The prompts (`prompts.py`) and script executor
-(`executor.py`) are already complete.
+`GatewayProvider` (`agent.py`) is wired to the lab's OpenAI-compatible gateway. It
+reads `GATEWAY_BASE_URL` and the per-account token from the environment
+(`CLAUDE_GATEWAY_TOKEN` for `claude-*` models, `CHATGPT_GATEWAY_TOKEN` otherwise) —
+put them in `.env` (gitignored) and `load_dotenv()` picks them up in `run.py`.
+To use a different backend, implement an `LLMProvider` with
+`complete(system, user) -> str` and pass it to `CodingAgent(provider)`.
 
 ## Tests
 

@@ -1,7 +1,5 @@
 # coding_agent/tests/test_agent.py
-import pytest
-
-from coding_agent.agent import CodingAgent, TODOProvider, extract_code_block
+from coding_agent.agent import CodingAgent, GatewayProvider, extract_code_block
 
 
 def test_extract_code_block():
@@ -13,10 +11,12 @@ def test_extract_code_block_no_fence_returns_stripped():
     assert extract_code_block("class S: pass") == "class S: pass"
 
 
-def test_todo_provider_raises():
-    agent = CodingAgent(TODOProvider())
-    with pytest.raises(NotImplementedError):
-        agent.generate("sys", "user")
+def test_gateway_provider_routes_token_by_model(monkeypatch):
+    monkeypatch.setenv("GATEWAY_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("CLAUDE_GATEWAY_TOKEN", "claude-token")
+    monkeypatch.setenv("CHATGPT_GATEWAY_TOKEN", "chatgpt-token")
+    assert GatewayProvider("claude-sonnet-5").client.api_key == "claude-token"
+    assert GatewayProvider("gpt-5.6-sol").client.api_key == "chatgpt-token"
 
 
 def test_agent_uses_injected_provider():
