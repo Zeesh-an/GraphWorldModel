@@ -81,6 +81,27 @@ class S(Strategy):
 """
 
 
+# Script with a runtime bug: compute_degree returns an ndarray, not a dict.
+buggy_runtime_script = """
+class S(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        degrees = primitives.compute_degree(graph)
+        best = degrees.get(0)
+        return [[Action("add_node", best)]] + [[] for _ in range(horizon)]
+"""
+
+
+def test_runtime_error_in_plan_becomes_strategy_error():
+    """A crash inside generated code must convert to StrategyError (repair feedback), not escape raw."""
+    graph = _hub()
+    agent = CodingAgent(CannedProvider(buggy_runtime_script))
+    environment = MonteCarloEnvironment(graph, "IC", mc_runs=10)
+    with pytest.raises(StrategyError, match="AttributeError"):
+        OneShotSuperAlgorithm(outer_iters=1).optimize(
+            agent, environment, TaskSpec(budget=1, horizon=3), graph
+        )
+
+
 def test_over_budget_plan_triggers_validation_and_raises():
     """An over-budget plan should trigger the repair path and ultimately raise StrategyError."""
     graph = _hub()

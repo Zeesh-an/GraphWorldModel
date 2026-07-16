@@ -1,7 +1,7 @@
 """Method 3: design one online algorithm; re-apply it per time window."""
 
 from coding_agent.agent import CodingAgent
-from coding_agent.executor import build_strategy
+from coding_agent.executor import build_strategy, call_strategy
 from coding_agent.prompts import build_user_prompt, system_prompts
 from coding_agent.types import Action, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
@@ -21,7 +21,9 @@ class WindowedOnline:
         def action_fn(state: State, timestep: int) -> list[Action]:
             # Consult the online algorithm at each window boundary only.
             if timestep % window_length == 0:
-                return strategy.act(state, graph, timestep // window_length)
+                return call_strategy(
+                    strategy.act, state, graph, timestep // window_length
+                )
             return []
 
         trajectory = environment.rollout(action_fn, task.horizon, task.budget)

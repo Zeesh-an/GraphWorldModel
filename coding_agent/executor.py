@@ -8,6 +8,7 @@ sandbox. Do not run untrusted scripts from outside the agent loop.
 """
 
 import traceback
+from typing import Callable
 
 from coding_agent.tools import algorithms, primitives
 from coding_agent.types import Action, GraphInfo, State, Strategy
@@ -61,6 +62,19 @@ def build_strategy(script: str) -> Strategy:
         return strategy_class()  # type: ignore[call-arg]
     except Exception as error:  # noqa: BLE001
         raise StrategyError(f"Could not instantiate Strategy: {error}") from error
+
+
+def call_strategy(method: Callable, *args) -> object:
+    """Invoke generated-strategy code, converting any runtime failure into a StrategyError repair turn."""
+    try:
+        return method(*args)
+    except StrategyError:
+        raise
+    except Exception as error:  # noqa: BLE001 — surface any strategy error to the agent
+        raise StrategyError(
+            f"strategy raised {type(error).__name__}: {error}\n"
+            f"{traceback.format_exc()}"
+        ) from error
 
 
 def validate_actions(bag: list, num_nodes: int, budget: int) -> None:

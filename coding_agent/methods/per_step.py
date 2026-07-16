@@ -1,7 +1,7 @@
 """Method 2: re-prompt the agent at every timestep on the current state."""
 
 from coding_agent.agent import CodingAgent
-from coding_agent.executor import StrategyError, build_strategy
+from coding_agent.executor import StrategyError, build_strategy, call_strategy
 from coding_agent.prompts import build_user_prompt, system_prompts
 from coding_agent.types import Action, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
@@ -20,7 +20,7 @@ class PerStepReprompt:
                 f"infected={state.infected}, frontier={state.frontier}"
             )
             last_strategy = build_strategy(agent.generate(system, user))
-            return last_strategy.act(state, graph, timestep)
+            return call_strategy(last_strategy.act, state, graph, timestep)
 
         trajectory = environment.rollout(action_fn, task.horizon, task.budget)
         if last_strategy is None:

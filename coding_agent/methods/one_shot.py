@@ -8,7 +8,12 @@ from coding_agent.credit import (
     format_credit_report,
     planned_action,
 )
-from coding_agent.executor import StrategyError, build_strategy, validate_actions
+from coding_agent.executor import (
+    StrategyError,
+    build_strategy,
+    call_strategy,
+    validate_actions,
+)
 from coding_agent.methods.base import summarize
 from coding_agent.prompts import (
     build_feedback_prompt,
@@ -35,7 +40,9 @@ class OneShotSuperAlgorithm:
         for _ in range(self.outer_iters):
             try:
                 strategy = build_strategy(agent.generate(system, user))
-                plan = strategy.plan_horizon(graph, task.budget, task.horizon)
+                plan = call_strategy(
+                    strategy.plan_horizon, graph, task.budget, task.horizon
+                )
                 total_adds = 0
 
                 for bag in plan:
