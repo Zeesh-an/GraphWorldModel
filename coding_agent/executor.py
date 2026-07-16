@@ -59,9 +59,13 @@ def build_strategy(script: str) -> Strategy:
 
     strategy_class = candidates[-1]
     try:
-        return strategy_class()  # type: ignore[call-arg]
+        strategy = strategy_class()  # type: ignore[call-arg]
     except Exception as error:  # noqa: BLE001
         raise StrategyError(f"Could not instantiate Strategy: {error}") from error
+
+    # Retained so results JSONs archive the exact code that produced the reward.
+    strategy.source_script = script
+    return strategy
 
 
 def call_strategy(method: Callable, *args) -> object:

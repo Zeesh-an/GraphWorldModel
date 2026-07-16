@@ -4,7 +4,9 @@ sampling the next state from its predicted marginals each step.
 """
 
 import json
+import time
 from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -141,6 +143,7 @@ class WorldModelEnvironment:
     def rollout(
         self, action_fn: ActionFn, horizon: int, budget: int, seed: int = 0
     ) -> Trajectory:
+        start = time.perf_counter()
         rng = np.random.default_rng(seed)
         final_counts = []
         representative = None
@@ -160,5 +163,9 @@ class WorldModelEnvironment:
             actions=actions,
             reward=reward,
             infected_counts=counts,
-            cost={"n_samples": self.n_samples, "env": "world_model"},
+            cost={
+                "n_samples": self.n_samples,
+                "env": "world_model",
+                "rollout_seconds": time.perf_counter() - start,
+            },
         )

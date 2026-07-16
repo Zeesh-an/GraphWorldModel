@@ -11,6 +11,7 @@ python -m coding_agent.run --data-dir data/output/ba20_marg_structured \
 import argparse
 import json
 import os
+import time
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -115,6 +116,8 @@ def run_experiment(
     graph: GraphInfo | None = None,
     canned_script: str | None = None,
 ) -> dict:
+    experiment_start = time.perf_counter()
+
     if graph is None:
         graph = _load_graph(config)
 
@@ -141,12 +144,28 @@ def run_experiment(
 
     strategy, trajectory = method.optimize(agent, environment, task, graph)
 
+    # Per-timestep log of the representative rollout (first ensemble sample):
+    # entry t holds the action bag applied at t and the resulting state. The
+    # reward is the ensemble MEAN, so this single sample's final infected count
+    # need not equal it exactly.
+    timeline = [
+        {"t": timestep, "actions": [action.to_dict() for action in bag]}
+        | state.to_dict()
+        for timestep, (bag, state) in enumerate(
+            zip(trajectory.actions, trajectory.states[1:], strict=True)
+        )
+    ]
+
     result = {
         "method": config.method,
         "evaluator": config.evaluator,
+        "model": "canned" if canned_script else config.model,
         "reward": trajectory.reward,
         "summary": summarize(trajectory),
+        # For per_step this is the last timestep's script (one is generated per step).
+        "script": strategy.source_script,
         "cost": trajectory.cost,
+        "timeline": timeline,
     }
 
     if config.credit:
@@ -174,7 +193,12 @@ def run_experiment(
         )
         mc_trajectory = mc_environment.rollout(action_fn, config.horizon, config.budget)
         result["mc_reward"] = mc_trajectory.reward
+        result["mc_rollout_seconds"] = mc_trajectory.cost["rollout_seconds"]
         result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward
+
+    # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives
+    # in cost.rollout_seconds / mc_rollout_seconds.
+    result["elapsed_seconds"] = time.perf_counter() - experiment_start
 
     if config.out_json:
         os.makedirs(Path(config.out_json).parent, exist_ok=True)

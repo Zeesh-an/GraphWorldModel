@@ -40,3 +40,15 @@ def test_run_experiment_mc_with_canned_script():
     result = run_experiment(config, graph=_hub(), canned_script=canned)
     assert result["reward"] >= 1.0
     assert result["method"] == "one_shot"
+    assert result["model"] == "canned"
+    assert "class S(Strategy):" in result["script"]
+    assert result["cost"]["rollout_seconds"] > 0
+    assert result["elapsed_seconds"] >= result["cost"]["rollout_seconds"]
+
+    timeline = result["timeline"]
+    assert timeline[0]["t"] == 0
+    assert timeline[0]["actions"][0]["op"] == "add_node"
+    assert timeline[0]["infected_count"] >= 1
+    assert all(
+        {"t", "actions", "infected", "frontier"} <= entry.keys() for entry in timeline
+    )

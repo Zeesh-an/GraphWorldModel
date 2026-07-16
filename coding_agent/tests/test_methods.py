@@ -51,6 +51,7 @@ def test_one_shot_runs_and_scores():
         agent, environment, TaskSpec(budget=1, horizon=4), graph
     )
     assert trajectory.reward >= 1.0
+    assert "class S(Strategy):" in strategy.source_script
 
 
 def test_per_step_runs():

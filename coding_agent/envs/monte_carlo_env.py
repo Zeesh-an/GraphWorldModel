@@ -5,6 +5,8 @@ the strategy's actions at every timestep and averaging spread over mc_runs.
 This is the baseline the world-model environment is compared against.
 """
 
+import time
+
 import numpy as np
 
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory
@@ -24,6 +26,7 @@ class MonteCarloEnvironment:
     def rollout(
         self, action_fn: ActionFn, horizon: int, budget: int, seed: int = 0
     ) -> Trajectory:
+        start = time.perf_counter()
         rng = np.random.default_rng(seed)
         final_counts = []
         representative_states = []
@@ -66,5 +69,9 @@ class MonteCarloEnvironment:
             actions=representative_actions,
             reward=reward,
             infected_counts=representative_counts,
-            cost={"mc_runs": self.mc_runs, "env": "monte_carlo"},
+            cost={
+                "mc_runs": self.mc_runs,
+                "env": "monte_carlo",
+                "rollout_seconds": time.perf_counter() - start,
+            },
         )
