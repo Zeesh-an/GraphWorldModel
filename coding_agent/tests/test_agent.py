@@ -11,6 +11,14 @@ def test_extract_code_block_no_fence_returns_stripped():
     assert extract_code_block("class S: pass") == "class S: pass"
 
 
+def test_extract_code_block_prefers_fence_with_class():
+    raw = (
+        "Plan:\n```python\nseeds = [1, 2]\n```\nThen:\n"
+        "```python\nclass S(Strategy):\n    pass\n```"
+    )
+    assert extract_code_block(raw).startswith("class S(Strategy)")
+
+
 def test_gateway_provider_routes_token_by_model(monkeypatch):
     monkeypatch.setenv("GATEWAY_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("CLAUDE_GATEWAY_TOKEN", "claude-token")

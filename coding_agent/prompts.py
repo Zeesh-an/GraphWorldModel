@@ -4,8 +4,10 @@ from coding_agent.tools.library_api import build_api_reference
 common_rules = """\
 You are designing an Influence Maximization algorithm as an executable Python script.
 
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else.
-The block MUST define a class subclassing `Strategy`.
+OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
+no prose before or after. The block MUST define a class subclassing `Strategy`
+and contain nothing outside that class: no imports, no module-level code, no
+example usage.
 
 AVAILABLE NAMES (already imported into your script's namespace — do NOT import them):
 - `Action(op, target, destination=None, weight=None)` : a graph action. Ops:
@@ -30,6 +32,17 @@ Return a list of length (horizon+1): element t is the action bag applied at time
 This is your whole multi-timestep plan, decided up front. Classical algorithms only
 fill element 0 (the seed set) and leave the rest empty — go beyond that: schedule
 interventions across t0..tT to maximize final spread.
+
+REPLY SHAPE (adapt the logic, keep the structure):
+```python
+class MyStrategy(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        seeds = algorithms.high_degree(graph, budget, "IC")
+        plan = [[Action("add_node", node) for node in seeds]]
+        plan += [[] for _ in range(horizon)]
+        return plan
+```
+Do not return this baseline unchanged — improve on it.
 """,
     "per_step": common_rules
     + """\
@@ -38,6 +51,16 @@ METHOD: PER-STEP POLICY.
 Implement `act(self, state, graph, timestep) -> list[Action]`.
 You are called once per timestep with the CURRENT state; return that step's action bag.
 React to which nodes are infected/frontier right now.
+
+REPLY SHAPE (adapt the logic, keep the structure; budget/horizon are in the task):
+```python
+class MyStrategy(Strategy):
+    def act(self, state, graph, timestep):
+        if timestep == 0:
+            seeds = algorithms.high_degree(graph, 5, "IC")  # 5 = task budget
+            return [Action("add_node", node) for node in seeds]
+        return []
+```
 """,
     "windowed": common_rules
     + """\
@@ -48,6 +71,14 @@ You are called once per time WINDOW with the current state and the window index.
 Treat each call as solving a fresh IM sub-problem on the current state; you may reuse a
 classical algorithm (e.g. `algorithms.celf`) within each window.
 Note: for this windowed method the budget applies PER window call (you are invoked once per window).
+
+REPLY SHAPE (adapt the logic, keep the structure; budget/horizon are in the task):
+```python
+class MyStrategy(Strategy):
+    def act(self, state, graph, timestep):
+        seeds = algorithms.celf(graph, 5, "IC")  # 5 = per-window budget
+        return [Action("add_node", node) for node in seeds]
+```
 """,
 }
 

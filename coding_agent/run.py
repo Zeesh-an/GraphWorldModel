@@ -2,8 +2,10 @@
 Top-level driver: run the coding-agent outer loop over the inner-loop environment
 
 python -m coding_agent.run --data-dir data/output/ba20_marg_structured \
+    --model claude-haiku-4-5-20251001 \
     --wm-results-json world_model/checkpoints/ba20_marg_structured_sage_IC.json \
-    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --outer-iters 1 --out-json coding_agent/results/first_llm_run.json
 """
 
 import argparse

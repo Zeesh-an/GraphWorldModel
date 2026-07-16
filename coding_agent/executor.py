@@ -46,8 +46,9 @@ def build_strategy(script: str) -> Strategy:
     candidates = [
         value
         for name, value in namespace.items()
+        # Identity check, not name: a script may legally name its class "Strategy".
         if isinstance(value, type)
-        and name != "Strategy"
+        and value is not Strategy
         and (hasattr(value, "plan_horizon") or hasattr(value, "act"))
     ]
     if not candidates:

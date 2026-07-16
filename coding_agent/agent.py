@@ -36,9 +36,11 @@ class GatewayProvider:
         self.model = model
 
     def complete(self, system: str, user: str) -> str:
+        # The gateway's Claude account silently DROPS system messages (it fronts a
+        # Claude Code session with its own system prompt), so the system prompt is
+        # folded into the user turn. Verified: gpt models also honor it there.
         messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
+            {"role": "user", "content": f"{system}\n\n{user}"},
         ]
 
         for attempt in range(1, gateway_retries + 1):
@@ -68,9 +70,16 @@ _code_fence = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
 
 
 def extract_code_block(text: str) -> str:
-    """Pull the first fenced Python block; fall back to the stripped text."""
-    match = _code_fence.search(text)
-    return match.group(1).strip() if match else text.strip()
+    """Pull the first fenced block defining a class (else the first fence, else the stripped text)."""
+    blocks = _code_fence.findall(text)
+
+    # Models sometimes emit prose snippets in extra fences; the Strategy class
+    # is the block we want.
+    for block in blocks:
+        if "class " in block:
+            return block.strip()
+
+    return blocks[0].strip() if blocks else text.strip()
 
 
 class CodingAgent:
