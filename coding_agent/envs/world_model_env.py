@@ -131,8 +131,10 @@ class WorldModelEnvironment:
         sample_arrays = [base_arrays] * num_samples
         block_input = self._block_graph_input(sample_arrays)
 
+        # Per-sample infected/frontier sets
         infected = [set() for _ in range(num_samples)]
         frontier = [set() for _ in range(num_samples)]
+
         active = [True] * num_samples
 
         representative_states = [State([], [])]
@@ -147,6 +149,7 @@ class WorldModelEnvironment:
             for sample in range(num_samples):
                 if not active[sample]:
                     continue
+
                 state = State(sorted(infected[sample]), sorted(frontier[sample]))
                 bags[sample] = action_fn(state, timestep)
                 bag_dicts[sample] = [action.to_dict() for action in bags[sample]]
@@ -180,6 +183,9 @@ class WorldModelEnvironment:
                 x_parts.append(X)
 
             features = torch.from_numpy(np.concatenate(x_parts, axis=0))
+
+            # One forward pass of the model given the block graph
+            # Get probabilities with the sigmoid activation function
             probabilities = (
                 torch.sigmoid(self.model(features.to(self.device), block_input))
                 .cpu()
@@ -187,6 +193,7 @@ class WorldModelEnvironment:
                 .reshape(num_samples, num_nodes, 2)
             )  # shape: (n_samples, N, 2)
 
+            # Bernoulli darws for both channels across all samples at once
             infected_draws = (
                 rng.random((num_samples, num_nodes)) < probabilities[:, :, 0]
             )
@@ -197,8 +204,11 @@ class WorldModelEnvironment:
             for sample in range(num_samples):
                 if not active[sample]:
                     continue
+
                 infected[sample] = set(np.nonzero(infected_draws[sample])[0].tolist())
                 frontier[sample] = set(np.nonzero(frontier_draws[sample])[0].tolist())
+
+                # Terminate early once the cascade is dead (empty frontier) and the strategy is idle (empty bag)
                 if timestep > 0 and not frontier[sample] and not bags[sample]:
                     active[sample] = False
 
@@ -213,12 +223,16 @@ class WorldModelEnvironment:
                 break
 
         final_counts = [float(len(infected[sample])) for sample in range(num_samples)]
+
+        # The reward is the mean of the final infected node counts
         reward = float(np.mean(final_counts)) if final_counts else 0.0
+
         reward_se = (
             float(np.std(final_counts, ddof=1) / np.sqrt(len(final_counts)))
             if len(final_counts) > 1
             else 0.0
         )
+
         states = representative_states
         actions = representative_actions
         counts = representative_counts

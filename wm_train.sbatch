@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=wm_train
-#SBATCH --output=logs/%x_%A_%a.out
+#SBATCH --output=logs/%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
