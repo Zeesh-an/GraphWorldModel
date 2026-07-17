@@ -118,8 +118,3 @@ reads `GATEWAY_BASE_URL` and the per-account token from the environment
 put them in `.env` (gitignored) and `load_dotenv()` picks them up in `run.py`.
 To use a different backend, implement an `LLMProvider` with
 `complete(system, user) -> str` and pass it to `CodingAgent(provider)`.
-
-## Tests
-
-`uv run pytest coding_agent/tests -q` — exercises the full outer+inner loop with
-injected canned scripts (no model required).
