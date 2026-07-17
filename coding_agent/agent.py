@@ -22,7 +22,7 @@ class LLMProvider(Protocol):
 class GatewayProvider:
     """OpenAI-compatible gateway over ChatGPT/Claude Pro subscriptions."""
 
-    def __init__(self, model: str) -> None:
+    def __init__(self, model: str, temperature: float | None = None) -> None:
         # Each subscription account has its own bearer token, so the token is picked from the model-name family (claude-* vs gpt-*)
         token_env = (
             "CLAUDE_GATEWAY_TOKEN"
@@ -37,6 +37,8 @@ class GatewayProvider:
             max_retries=0,
         )
         self.model = model
+        # None -> provider default sampling; 0.0 -> greedy decoding
+        self.temperature = temperature
 
     def complete(self, system: str, user: str) -> str:
         # Add the system prompt in the user turn since the gateway drops system prompts
@@ -44,10 +46,14 @@ class GatewayProvider:
             {"role": "user", "content": f"{system}\n\n{user}"},
         ]
 
+        sampling_kwargs = (
+            {} if self.temperature is None else {"temperature": self.temperature}
+        )
+
         for attempt in range(1, gateway_retries + 1):
             try:
                 response = self.client.chat.completions.create(
-                    model=self.model, messages=messages
+                    model=self.model, messages=messages, **sampling_kwargs
                 )
                 content = response.choices[0].message.content
 

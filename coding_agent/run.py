@@ -40,6 +40,9 @@ class ExperimentConfig:
     method: str = "one_shot"  # one_shot | per_step | windowed
     evaluator: str = "world_model"  # world_model | monte_carlo
     model: str = "claude-sonnet-5"  # gateway model name
+    temperature: float | None = (
+        None  # LLM sampling temperature; None -> provider default
+    )
     diffusion_model: str = "IC"  # IC | LT
     budget: int = 5
     horizon: int = 10
@@ -160,7 +163,7 @@ class Baseline(Strategy):
     provider = (
         _CannedProvider(canned_script)
         if canned_script
-        else GatewayProvider(config.model)
+        else GatewayProvider(config.model, temperature=config.temperature)
     )
     agent = CodingAgent(provider)
     task = TaskSpec(
@@ -260,6 +263,12 @@ if __name__ == "__main__":
         type=str,
         default="claude-sonnet-5",
         help="gateway model name, e.g. gpt-5.6-sol (default: claude-sonnet-5).",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=None,
+        help="LLM sampling temperature; 0.0 = greedy decoding, omit for the provider default (default: None).",
     )
     parser.add_argument(
         "--allowed-ops",
@@ -385,6 +394,7 @@ if __name__ == "__main__":
 
     config = ExperimentConfig(
         model=args.model,
+        temperature=args.temperature,
         baseline=args.baseline,
         allowed_ops=tuple(args.allowed_ops),
         method=args.method,
