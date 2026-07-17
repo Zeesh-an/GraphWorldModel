@@ -10,7 +10,7 @@ from coding_agent.tools import algorithms, primitives
 
 algorithm_names = list(algorithms.algorithms.keys())
 
-# Primitives we advertise to the agent (pure, safe to call).
+# Primitives we advertise to the agent (pure, safe to call)
 primitives_list = [
     primitives.compute_degree,
     primitives.compute_out_degree,

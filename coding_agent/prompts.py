@@ -1,6 +1,7 @@
 from coding_agent.types import GraphInfo, TaskSpec
 from coding_agent.tools.library_api import build_api_reference
 
+# Shared system-prompt preamble containing common rules for the coding agent
 common_rules = """\
 You are designing an Influence Maximization algorithm as an executable Python script.
 
@@ -22,6 +23,7 @@ ACTION RULES:
 - You may also use remove_node / add_edge / remove_edge / set_edge_weight to steer the cascade.
 """
 
+# System prompts dict-keyed by method name (one_shot, per_step, windowed)
 system_prompts = {
     "one_shot": common_rules
     + """\

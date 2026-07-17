@@ -7,17 +7,18 @@
 #SBATCH --mem=16G
 #SBATCH --gres=gpu:1
 
+# Usage: sbatch wm_train.sbatch <model> <diffusion_model> <data_dir>
+# Usage: sbatch wm_train.sbatch sage IC data/output/ba20_marg_structured
+
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
 mkdir -p world_model/checkpoints logs
 
-# Usage: sbatch train.sbatch <model> <diffusion_model> <data_dir>
-
-# model           = gcn | sage | gt | gat | gcnii  (default gcn)
+# model           = gcn | sage | gt | gat | gcnii  (default sage)
 # diffusion_model = IC | LT                        (default IC)
 # data_dir        = a data/output/<...> directory  (default data/output/ba_all)
-MODEL="${1:-gcn}"
+MODEL="${1:-sage}"
 DM="${2:-IC}"
 DATA="${3:-data/output/ba_all}"
 

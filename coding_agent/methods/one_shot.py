@@ -1,7 +1,6 @@
 """Method 1: one-shot super-algorithm with reward-driven skill refinement."""
 
 from functools import partial
-
 from tqdm import tqdm
 
 from coding_agent.agent import CodingAgent
@@ -46,12 +45,15 @@ class OneShotSuperAlgorithm:
                     f"[one_shot] iter {iteration + 1}/{self.outer_iters}: "
                     f"requesting strategy script..."
                 )
+
+                # Build the strategy object from the LLM generated code, and call it
                 strategy = build_strategy(agent.generate(system, user))
                 plan = call_strategy(
                     strategy.plan_horizon, graph, task.budget, task.horizon
                 )
                 total_adds = 0
 
+                # Validate all actions in the plan and verify that the plan stayed under the budget nodes
                 for bag in plan:
                     validate_actions(
                         bag, graph.num_nodes, task.budget, task.allowed_ops
@@ -60,26 +62,33 @@ class OneShotSuperAlgorithm:
 
                 if total_adds > task.budget:
                     raise StrategyError(
-                        f"plan adds {total_adds} seeds in total, "
-                        f"exceeds budget {task.budget}"
+                        f"plan adds {total_adds} seeds in total, exceeds budget {task.budget}"
                     )
 
-                # Binding the plan once avoids a late-binding closure bug.
+                # Bind the plan once into an ActionFn to avoid a late-binding closure bug
                 action_fn = partial(planned_action, plan)
+
+                # Roll the plan out and get the trajectory's reward, which is this iteration's score
                 trajectory = environment.rollout(action_fn, task.horizon, task.budget)
             except StrategyError as error:
                 last_error = str(error)
+
+                # Log the first line of any StrategyError
                 tqdm.write(
                     f"[one_shot] iter {iteration + 1}: script failed — "
                     f"{last_error.splitlines()[0]}"
                 )
+
+                # Rebuild the user prompt with the feedback containing a reward of 0.0 and the full error text
                 user = (
                     base_user
                     + "\n\n"
                     + build_feedback_prompt(0.0, "script failed", error=last_error)
                 )
+
                 continue
 
+            # Keep the best strategy and trajectory pair by reward
             if best is None or trajectory.reward > best[1].reward:
                 best = (strategy, trajectory)
 
@@ -92,15 +101,17 @@ class OneShotSuperAlgorithm:
                 reward=f"{trajectory.reward:.2f}", best=f"{best[1].reward:.2f}"
             )
 
-            # Optional per-action counterfactual credit: costs one extra rollout per
-            # action, but turns the scalar reward into causal feedback.
+            # If using the credit flag, ablate each action and run the optional per-action counterfactual credit
+            # Costs one extra rollout per action, but turns the scalar reward into causal feedback
             report = None
+
             if self.credit:
                 base_reward, entries = counterfactual_credit(
                     environment, plan, task.horizon, task.budget
                 )
                 report = format_credit_report(base_reward, entries)
 
+            # Rebuild the user prompt with the feedback containing this iteration's trajectory reward, summary report, and credit report
             user = (
                 base_user
                 + "\n\n"

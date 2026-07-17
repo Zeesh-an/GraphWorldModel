@@ -6,6 +6,7 @@ from collections import defaultdict
 import networkx as nx
 import numpy as np
 import torch
+import torch.nn as nn
 from scipy.stats import wasserstein_distance
 
 from world_model.wm_data import (
@@ -36,7 +37,7 @@ def _cat_arrays(arrays: list[np.ndarray]) -> np.ndarray:
 
 @torch.inference_mode()
 def evaluate_one_step(
-    model: torch.nn.Module,
+    model: nn.Module,
     dataset: TransitionDataset,
     diffusion_model: str,
     device: torch.device,
@@ -167,7 +168,7 @@ def evaluate_one_step(
 
 @torch.inference_mode()
 def rollout_episodes(
-    model: torch.nn.Module,
+    model: nn.Module,
     out_dir: str,
     diffusion_model: str,
     store: dict[str, dict],
@@ -289,7 +290,7 @@ def _action_bag(action_dicts: list[dict]) -> list[ActionOp]:
 
 @torch.inference_mode()
 def rollout_ensemble(
-    model: torch.nn.Module,
+    model: nn.Module,
     out_dir: str,
     diffusion_model: str,
     store: dict[str, dict],
@@ -417,12 +418,12 @@ def rollout_ensemble(
         "ens_marg_mae": float(np.mean(marginal_mae)) if marginal_mae else 0.0,
         "ens_count_w1": float(np.mean(count_w1)) if count_w1 else 0.0,
         "ens_count_bias": float(np.mean(count_bias)) if count_bias else 0.0,
-        "ens_final_count_model": float(np.mean(final_model_counts))
-        if final_model_counts
-        else 0.0,
-        "ens_final_count_true": float(np.mean(final_true_counts))
-        if final_true_counts
-        else 0.0,
+        "ens_final_count_model": (
+            float(np.mean(final_model_counts)) if final_model_counts else 0.0
+        ),
+        "ens_final_count_true": (
+            float(np.mean(final_true_counts)) if final_true_counts else 0.0
+        ),
         "ens_n_samples": float(n_samples),
         "ens_n_episodes": float(len(episode_keys)),
     }
@@ -456,7 +457,7 @@ def rebuild_simulator(
 
 @torch.inference_mode()
 def planning_regret(
-    model: torch.nn.Module,
+    model: nn.Module,
     store_entry: dict,
     diffusion_model: str,
     device: torch.device,
@@ -553,7 +554,7 @@ def planning_regret(
 
 @torch.inference_mode()
 def planning_regret_multi(
-    model: torch.nn.Module,
+    model: nn.Module,
     store: dict[str, dict],
     diffusion_model: str,
     device: torch.device,

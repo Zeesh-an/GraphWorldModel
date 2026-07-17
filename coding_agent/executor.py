@@ -2,9 +2,6 @@
 Execute a generated strategy script in a controlled namespace and return a
 validated Strategy. All failures raise StrategyError carrying a message suitable
 for feeding back to the agent as a repair turn.
-
-NOTE: exec in a restricted namespace is a research scaffold, NOT a security
-sandbox. Do not run untrusted scripts from outside the agent loop.
 """
 
 import traceback
@@ -20,7 +17,7 @@ class StrategyError(RuntimeError):
 
 
 def _namespace() -> dict:
-    # The exact callable surface the prompts advertise.
+    # The exact callable surface the prompts advertise
     return {
         "Action": Action,
         "State": State,
@@ -33,13 +30,16 @@ def _namespace() -> dict:
 
 
 def build_strategy(script: str) -> Strategy:
+    # Converts a generated script string into a live object
     namespace = _namespace()
+
     try:
+        # Convert script string into an executable Strategy object for the agent
         compiled = compile(script, "<agent_strategy>", "exec")
-        exec(compiled, namespace)  # noqa: S102 — scaffold; see module docstring
+        exec(compiled, namespace)
     except SyntaxError as error:
         raise StrategyError(f"SyntaxError in generated script: {error}") from error
-    except Exception as error:  # noqa: BLE001 — surface any exec error to the agent
+    except Exception as error:
         raise StrategyError(
             f"Error executing generated script: {error}\n{traceback.format_exc()}"
         ) from error
@@ -47,11 +47,12 @@ def build_strategy(script: str) -> Strategy:
     candidates = [
         value
         for name, value in namespace.items()
-        # Identity check, not name: a script may legally name its class "Strategy".
+        # Identity check, not name: a script may legally name its class "Strategy"
         if isinstance(value, type)
         and value is not Strategy
         and (hasattr(value, "plan_horizon") or hasattr(value, "act"))
     ]
+
     if not candidates:
         raise StrategyError(
             "No Strategy subclass with plan_horizon()/act() found in the script."
@@ -59,11 +60,11 @@ def build_strategy(script: str) -> Strategy:
 
     strategy_class = candidates[-1]
     try:
-        strategy = strategy_class()  # type: ignore[call-arg]
-    except Exception as error:  # noqa: BLE001
+        strategy = strategy_class()
+    except Exception as error:
         raise StrategyError(f"Could not instantiate Strategy: {error}") from error
 
-    # Retained so results JSONs archive the exact code that produced the reward.
+    # Retained so results JSONs archive the exact code that produced the reward
     strategy.source_script = script
     return strategy
 
@@ -74,7 +75,7 @@ def call_strategy(method: Callable, *args) -> object:
         return method(*args)
     except StrategyError:
         raise
-    except Exception as error:  # noqa: BLE001 — surface any strategy error to the agent
+    except Exception as error:
         raise StrategyError(
             f"strategy raised {type(error).__name__}: {error}\n"
             f"{traceback.format_exc()}"
@@ -86,16 +87,19 @@ def validate_actions(
 ) -> None:
     """Raise StrategyError if an action bag references invalid nodes, uses a disallowed op, or exceeds budget."""
     num_adds = 0
+
     for action in bag:
         if action.op not in allowed_ops:
             raise StrategyError(
                 f"action op '{action.op}' is not allowed for this task; "
                 f"must be one of {allowed_ops}."
             )
+
         if not (0 <= int(action.target) < num_nodes):
             raise StrategyError(
                 f"action targets node {action.target} out of range [0,{num_nodes})."
             )
+
         if action.op == "add_node":
             num_adds += 1
 

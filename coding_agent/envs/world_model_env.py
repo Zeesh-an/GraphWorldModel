@@ -1,14 +1,13 @@
 """
-World-model environment: roll the trained transition model f_theta autoregressively,
-sampling the next state from its predicted marginals each step.
+World-model environment: roll the trained transition model f_theta autoregressively, sampling the next state from its predicted marginals each step.
 """
 
 import json
 import time
 from pathlib import Path
-
 import numpy as np
 import torch
+import torch.nn as nn
 
 from world_model.wm_data import (
     GraphInput,
@@ -27,7 +26,7 @@ edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 class WorldModelEnvironment:
     def __init__(
         self,
-        model: torch.nn.Module,
+        model: nn.Module,
         graph: GraphInfo,
         diffusion_model: str,
         device: str = "cpu",
@@ -38,6 +37,7 @@ class WorldModelEnvironment:
         self.diffusion_model = diffusion_model
         self.device = torch.device(device)
         self.n_samples = n_samples
+
         self.base_edges = {
             (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge])): float(
                 graph.ic_probs[edge]
@@ -54,6 +54,8 @@ class WorldModelEnvironment:
         n_samples: int = 20,
     ) -> "WorldModelEnvironment":
         """Rebuild a WorldModel from a train_wm.py results JSON config and load its checkpoint."""
+
+        # Read the config block of a results JSON file
         config = json.loads(Path(results_json).read_text())["config"]
         backbone_kwargs = {
             "n_heads": config["n_heads"],
@@ -61,6 +63,8 @@ class WorldModelEnvironment:
             "alpha": config["gcnii_alpha"],
             "lamda": config["gcnii_lamda"],
         }
+
+        # Reconstruct the exact WorldModel architecture from the config
         model = WorldModel(
             config["model"],
             in_channels=in_channels,
@@ -71,6 +75,8 @@ class WorldModelEnvironment:
             diffusion_model=config["diffusion_model"],
             **backbone_kwargs,
         )
+
+        # Get the checkpoint path
         checkpoint_path = (
             Path(config["ckpt_dir"])
             / f"wm_{config['model']}_{config['diffusion_model']}.pt"
@@ -81,6 +87,7 @@ class WorldModelEnvironment:
                 f"world-model checkpoint not found: {checkpoint_path}"
             )
 
+        # Load the model weights from the checkpoint file
         model.load_state_dict(
             torch.load(checkpoint_path, map_location=device, weights_only=True)
         )
@@ -90,9 +97,9 @@ class WorldModelEnvironment:
         )
 
     def _block_graph_input(self, sample_arrays: list[tuple]) -> GraphInput:
-        # Disjoint block-diagonal union of every sample's graph: normalization
-        # is per-component, so this equals the per-sample GraphInputs stacked.
+        # Disjoint block-diagonal union of every sample's graph: normalization is per-component, so this equals the per-sample GraphInputs stacked
         num_nodes = self.graph.num_nodes
+
         edge_parts = [
             edge_index + sample * num_nodes
             for sample, (edge_index, _) in enumerate(sample_arrays)
@@ -118,7 +125,7 @@ class WorldModelEnvironment:
 
         # All samples advance in lockstep: each timestep is ONE block-diagonal
         # forward pass instead of n_samples separate ones. Edge state is
-        # copy-on-write; the block input is rebuilt only after an edge op.
+        # copy-on-write; the block input is rebuilt only after an edge op
         base_arrays = edges_to_arrays(self.base_edges)
         sample_edges = [self.base_edges] * num_samples
         sample_arrays = [base_arrays] * num_samples
@@ -144,10 +151,9 @@ class WorldModelEnvironment:
                 bags[sample] = action_fn(state, timestep)
                 bag_dicts[sample] = [action.to_dict() for action in bags[sample]]
 
-                # Apply edge ops so the model sees the post-action graph.
+                # Apply edge operations so the model sees the post-action graph
                 if any(
-                    action_dict["op"] in edge_ops
-                    for action_dict in bag_dicts[sample]
+                    action_dict["op"] in edge_ops for action_dict in bag_dicts[sample]
                 ):
                     sample_edges[sample] = apply_edge_ops(
                         sample_edges[sample], bag_dicts[sample]

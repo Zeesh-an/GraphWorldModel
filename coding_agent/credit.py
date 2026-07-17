@@ -17,6 +17,7 @@ from coding_agent.types import Action, State
 def planned_action(
     plan: list[list[Action]], state: State, timestep: int
 ) -> list[Action]:
+    """Dapts a static plan into an ActionFn."""
     return plan[timestep] if timestep < len(plan) else []
 
 
@@ -28,6 +29,7 @@ def counterfactual_credit(
     seed: int = 0,
 ) -> tuple[float, list[dict]]:
     """Return (base_reward, one credit entry per action in the plan)."""
+    # Base rollout with the full plan
     base_reward = environment.rollout(
         partial(planned_action, plan), horizon, budget, seed=seed
     ).reward
@@ -35,10 +37,11 @@ def counterfactual_credit(
     entries = []
     for timestep, bag in enumerate(plan[: horizon + 1]):
         for action_index, action in enumerate(bag):
-            # Same plan minus exactly this one action (bags shallow-copied so the
-            # original plan is untouched).
+            # Same plan minus exactly this one action (bags shallow-copied so the original plan is untouched)
             ablated = [list(action_bag) for action_bag in plan]
             del ablated[timestep][action_index]
+
+            # Run the rollout without the ablated action
             ablated_reward = environment.rollout(
                 partial(planned_action, ablated), horizon, budget, seed=seed
             ).reward
@@ -49,8 +52,10 @@ def counterfactual_credit(
                 "target": int(action.target),
                 "delta": round(base_reward - ablated_reward, 3),
             }
+
             if action.destination is not None:
                 entry["destination"] = int(action.destination)
+
             entries.append(entry)
 
     return base_reward, entries

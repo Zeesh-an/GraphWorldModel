@@ -13,7 +13,8 @@ from data.wm_simulator import ActionOp, State, valid_action_ops
 
 Action = ActionOp
 
-# action_fn(state, timestep) -> action bag for that timestep
+# ActionFn is the interface between strategies and environments (every environment's rollout() consumes one of these; every method produces one):
+# ActionFn is a function mapping (current state, timestep) -> action bag for that timestamp
 ActionFn = Callable[[State, int], list[ActionOp]]
 
 
@@ -31,7 +32,7 @@ class GraphInfo:
 
     @classmethod
     def from_store_entry(cls, entry: dict) -> "GraphInfo":
-        """Build from a world_model.wm_data.load_graph_store entry."""
+        """Build GraphInfo from a world_model.wm_data.load_graph_store entry."""
         return cls(
             num_nodes=int(entry["num_nodes"]),
             edge_index=np.asarray(entry["edge_index"], dtype=np.int64),
@@ -43,12 +44,14 @@ class GraphInfo:
         if self._out_adjacency is not None:
             return
 
+        # Build the in and out adjacency lists
         out_adjacency = {node: [] for node in range(self.num_nodes)}
         in_adjacency = {node: [] for node in range(self.num_nodes)}
 
         for edge in range(self.edge_index.shape[1]):
             source = int(self.edge_index[0, edge])
             target = int(self.edge_index[1, edge])
+
             out_adjacency[source].append(target)
             in_adjacency[target].append(source)
 
@@ -77,6 +80,8 @@ class GraphInfo:
 
 @dataclass
 class TaskSpec:
+    """Experiment problem statement and task specification details"""
+
     task: str = "influence_maximization"
     objective: str = "maximize_final_spread"
     diffusion_model: str = "IC"  # "IC" or "LT"
@@ -87,6 +92,8 @@ class TaskSpec:
 
 @dataclass
 class Trajectory:
+    """What a rollout reeturns"""
+
     states: list[State]
     actions: list[list[ActionOp]]
     reward: float  # final spread (infected count)
@@ -98,16 +105,13 @@ class Strategy(Protocol):
     """
     Contract the agent's generated script must implement.
 
-    A script may implement only the method its outer-loop method needs; the
-    executor validates the required one is present.
+    A script may implement only the method its outer-loop method needs; the executor validates the required one is present.
     """
 
+    # Method 1 (One-shot algorithm generation)
     def plan_horizon(
         self, graph: GraphInfo, budget: int, horizon: int
-    ) -> list[list[ActionOp]]:  # Method 1
-        ...
+    ) -> list[list[ActionOp]]: ...
 
-    def act(
-        self, state: State, graph: GraphInfo, timestep: int
-    ) -> list[ActionOp]:  # Methods 2 & 3
-        ...
+    # Methods 2 (Per-step algorithm generation) and 3 (Windowed algorithm generation)
+    def act(self, state: State, graph: GraphInfo, timestep: int) -> list[ActionOp]: ...

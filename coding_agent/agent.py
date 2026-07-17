@@ -1,10 +1,16 @@
-"""Provider-agnostic coding agent. GatewayProvider is the concrete LLM call; it needs GATEWAY_BASE_URL and the per-account tokens from .env (load_dotenv first)."""
+"""
+Coding Agent LLM call to the gateway provider.
+
+GatewayProvider is the concrete LLM call; it needs GATEWAY_BASE_URL and the per-account tokens from the .env file.
+"""
 
 import os
 import re
 from typing import Protocol
 
 from openai import OpenAI, OpenAIError
+
+gateway_retries = 3
 
 
 class LLMProvider(Protocol):
@@ -13,21 +19,18 @@ class LLMProvider(Protocol):
         ...
 
 
-gateway_retries = 3
-
-
 class GatewayProvider:
-    """OpenAI-compatible gateway over the lab's ChatGPT/Claude Pro subscriptions."""
+    """OpenAI-compatible gateway over ChatGPT/Claude Pro subscriptions."""
 
     def __init__(self, model: str) -> None:
-        # Each subscription account has its own bearer token, so the token is
-        # picked from the model-name family (claude-* vs gpt-*).
+        # Each subscription account has its own bearer token, so the token is picked from the model-name family (claude-* vs gpt-*)
         token_env = (
             "CLAUDE_GATEWAY_TOKEN"
             if model.startswith("claude")
             else "CHATGPT_GATEWAY_TOKEN"
         )
-        # max_retries=0: retries are owned here so each failure prints a warning.
+
+        # max_retries=0: retries are owned here so each failure prints a warning
         self.client = OpenAI(
             base_url=os.environ["GATEWAY_BASE_URL"],
             api_key=os.environ[token_env],
@@ -36,9 +39,7 @@ class GatewayProvider:
         self.model = model
 
     def complete(self, system: str, user: str) -> str:
-        # The gateway's Claude account silently DROPS system messages (it fronts a
-        # Claude Code session with its own system prompt), so the system prompt is
-        # folded into the user turn. Verified: gpt models also honor it there.
+        # Add the system prompt in the user turn since the gateway drops system prompts
         messages = [
             {"role": "user", "content": f"{system}\n\n{user}"},
         ]
@@ -49,15 +50,18 @@ class GatewayProvider:
                     model=self.model, messages=messages
                 )
                 content = response.choices[0].message.content
+
                 if content is None:
                     raise ValueError(
                         f"gateway returned empty content for model {self.model!r}: "
                         f"{response}"
                     )
+
                 return content
             except (OpenAIError, ValueError) as error:
                 if attempt == gateway_retries:
                     raise
+
                 print(
                     f"warning: gateway call failed (attempt {attempt}/"
                     f"{gateway_retries}, model {self.model!r}): {error}"
@@ -66,15 +70,14 @@ class GatewayProvider:
         raise RuntimeError("unreachable: retry loop exits via return or raise")
 
 
-_code_fence = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
+code_fence = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL)
 
 
 def extract_code_block(text: str) -> str:
     """Pull the first fenced block defining a class (else the first fence, else the stripped text)."""
-    blocks = _code_fence.findall(text)
+    blocks = code_fence.findall(text)
 
-    # Models sometimes emit prose snippets in extra fences; the Strategy class
-    # is the block we want.
+    # Models sometimes emit prose snippets in extra fences; the Strategy class is the block we want
     for block in blocks:
         if "class " in block:
             return block.strip()

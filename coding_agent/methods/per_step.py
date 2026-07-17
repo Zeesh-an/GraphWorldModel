@@ -16,9 +16,10 @@ class PerStepReprompt:
 
         def action_fn(state: State, timestep: int) -> list[Action]:
             nonlocal last_strategy, llm_calls
+
+            # One LLM call per (ensemble sample, timestep)
             llm_calls += 1
-            # One LLM call per (ensemble sample, timestep) — this line is the
-            # only visibility into that cost while the rollout runs.
+
             print(
                 f"[per_step] LLM call {llm_calls} (t={timestep}, "
                 f"|infected|={len(state.infected)})"
@@ -27,10 +28,15 @@ class PerStepReprompt:
                 f"\n\nCURRENT STATE (t={timestep}): "
                 f"infected={state.infected}, frontier={state.frontier}"
             )
+
+            # Build the strategy object from the LLM generated code, and call it
             last_strategy = build_strategy(agent.generate(system, user))
+
             return call_strategy(last_strategy.act, state, graph, timestep)
 
+        # Roll the plan out and get the trajectory's reward, which is the score
         trajectory = environment.rollout(action_fn, task.horizon, task.budget)
+
         if last_strategy is None:
             raise StrategyError("per-step method produced no strategy")
 

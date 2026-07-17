@@ -17,13 +17,14 @@ import json
 import os
 from pathlib import Path
 import torch
+import torch.nn as nn
 
 from world_model.wm_data import in_channels, load_graph_store
 from world_model.wm_eval import planning_regret_multi
 from world_model.wm_model import WorldModel
 
 
-def load_trained_model(config: dict, device: torch.device) -> torch.nn.Module:
+def load_trained_model(config: dict, device: torch.device) -> nn.Module:
     """Rebuild the WorldModel from a saved run config and load its checkpoint."""
     backbone_kwargs = {
         "n_heads": config["n_heads"],
