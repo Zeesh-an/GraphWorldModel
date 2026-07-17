@@ -7,8 +7,6 @@ env/
 
 logs/
 
-*.sbatch
-
 # Claude
 .claude/
 docs/

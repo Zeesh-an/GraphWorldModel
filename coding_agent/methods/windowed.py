@@ -15,8 +15,10 @@ class WindowedOnline:
     ) -> tuple[Strategy, Trajectory]:
         system = system_prompts["windowed"]
         user = build_user_prompt("windowed", task, graph)
+        print("[windowed] requesting online algorithm script...")
         strategy = build_strategy(agent.generate(system, user))  # designed ONCE
         window_length = max(1, (task.horizon + 1) // self.windows)
+        print(f"[windowed] rolling out {self.windows} windows of {window_length} steps")
 
         def action_fn(state: State, timestep: int) -> list[Action]:
             # Consult the online algorithm at each window boundary only.

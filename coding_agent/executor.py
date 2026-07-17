@@ -81,14 +81,16 @@ def call_strategy(method: Callable, *args) -> object:
         ) from error
 
 
-def validate_actions(bag: list, num_nodes: int, budget: int) -> None:
-    """Raise StrategyError if an action bag references invalid nodes, uses an unknown op, or exceeds budget."""
+def validate_actions(
+    bag: list, num_nodes: int, budget: int, allowed_ops: tuple = valid_action_ops
+) -> None:
+    """Raise StrategyError if an action bag references invalid nodes, uses a disallowed op, or exceeds budget."""
     num_adds = 0
     for action in bag:
-        if action.op not in valid_action_ops:
+        if action.op not in allowed_ops:
             raise StrategyError(
-                f"action op '{action.op}' is not valid; "
-                f"must be one of {valid_action_ops}."
+                f"action op '{action.op}' is not allowed for this task; "
+                f"must be one of {allowed_ops}."
             )
         if not (0 <= int(action.target) < num_nodes):
             raise StrategyError(

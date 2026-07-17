@@ -4,7 +4,7 @@ Top-level driver: run the coding-agent outer loop over the inner-loop environmen
 python -m coding_agent.run --data-dir data/output/ba20_marg_structured \
     --model claude-haiku-4-5-20251001 \
     --wm-results-json world_model/checkpoints/ba20_marg_structured_sage_IC.json \
-    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare --credit \
     --outer-iters 3 --out-json coding_agent/results/llm_run_1.json
 """
 
@@ -27,6 +27,7 @@ from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo, TaskSpec
+from data.wm_simulator import valid_action_ops
 
 world_model = "world_model"
 monte_carlo = "monte_carlo"
@@ -52,6 +53,7 @@ class ExperimentConfig:
     compare: bool = False  # also evaluate the winning strategy on the MC baseline
     credit: bool = False  # per-action counterfactual credit (feedback + results)
     baseline: str | None = None  # library algorithm name; evaluates it with no LLM
+    allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
     out_json: str | None = None
 
 
@@ -157,6 +159,7 @@ class Baseline(Strategy):
         diffusion_model=config.diffusion_model,
         budget=config.budget,
         horizon=config.horizon,
+        allowed_ops=tuple(config.allowed_ops),
     )
 
     method = build_method(config.method)
@@ -203,6 +206,7 @@ class Baseline(Strategy):
         result["credit"] = entries
 
     if config.compare and config.evaluator == world_model:
+        print(f"[run] MC compare replay ({config.mc_runs} runs)...")
         mc_environment = MonteCarloEnvironment(
             graph, config.diffusion_model, mc_runs=config.mc_runs
         )
@@ -243,6 +247,15 @@ def _parse_args() -> ExperimentConfig:
         type=str,
         default="claude-sonnet-5",
         help="gateway model name, e.g. gpt-5.6-sol (default: claude-sonnet-5).",
+    )
+    parser.add_argument(
+        "--allowed-ops",
+        type=str,
+        nargs="+",
+        default=list(valid_action_ops),
+        choices=list(valid_action_ops),
+        help="action ops the strategy may emit; e.g. add_node remove_node for a "
+        "node-ops-only run (default: all five ops).",
     )
     parser.add_argument(
         "--baseline",
@@ -346,7 +359,7 @@ def _parse_args() -> ExperimentConfig:
     parser.add_argument(
         "--credit",
         action="store_true",
-        help="per-action counterfactual credit: ablate each action, report its  delta-spread in refinement feedback and the results JSON; costs one extra rollout per action (default: False).",
+        help="per-action counterfactual credit: ablate each action, report its delta-spread in refinement feedback and the results JSON; costs one extra rollout per action (default: False).",
     )
     parser.add_argument(
         "--out-json",
@@ -360,6 +373,7 @@ def _parse_args() -> ExperimentConfig:
     return ExperimentConfig(
         model=args.model,
         baseline=args.baseline,
+        allowed_ops=tuple(args.allowed_ops),
         method=args.method,
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,

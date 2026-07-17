@@ -89,6 +89,7 @@ TASK: {task.task} — {task.objective}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   (max seeds total)
 horizon = {task.horizon} (timesteps)
+allowed_ops = {", ".join(task.allowed_ops)}   (any other op is REJECTED)
 
 GRAPH:
 num_nodes = {graph.num_nodes}

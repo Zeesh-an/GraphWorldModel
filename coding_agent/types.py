@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Protocol
 import numpy as np
 
-from data.wm_simulator import ActionOp, State
+from data.wm_simulator import ActionOp, State, valid_action_ops
 
 Action = ActionOp
 
@@ -82,6 +82,7 @@ class TaskSpec:
     diffusion_model: str = "IC"  # "IC" or "LT"
     budget: int = 5
     horizon: int = 10
+    allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
 
 
 @dataclass

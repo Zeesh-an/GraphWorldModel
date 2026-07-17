@@ -2,6 +2,8 @@
 
 from functools import partial
 
+from tqdm import tqdm
+
 from coding_agent.agent import CodingAgent
 from coding_agent.credit import (
     counterfactual_credit,
@@ -37,8 +39,13 @@ class OneShotSuperAlgorithm:
         best = None
         last_error = None
 
-        for _ in range(self.outer_iters):
+        progress_bar = tqdm(range(self.outer_iters), desc="one_shot refinement")
+        for iteration in progress_bar:
             try:
+                tqdm.write(
+                    f"[one_shot] iter {iteration + 1}/{self.outer_iters}: "
+                    f"requesting strategy script..."
+                )
                 strategy = build_strategy(agent.generate(system, user))
                 plan = call_strategy(
                     strategy.plan_horizon, graph, task.budget, task.horizon
@@ -46,7 +53,9 @@ class OneShotSuperAlgorithm:
                 total_adds = 0
 
                 for bag in plan:
-                    validate_actions(bag, graph.num_nodes, task.budget)
+                    validate_actions(
+                        bag, graph.num_nodes, task.budget, task.allowed_ops
+                    )
                     total_adds += sum(1 for action in bag if action.op == "add_node")
 
                 if total_adds > task.budget:
@@ -60,6 +69,10 @@ class OneShotSuperAlgorithm:
                 trajectory = environment.rollout(action_fn, task.horizon, task.budget)
             except StrategyError as error:
                 last_error = str(error)
+                tqdm.write(
+                    f"[one_shot] iter {iteration + 1}: script failed — "
+                    f"{last_error.splitlines()[0]}"
+                )
                 user = (
                     base_user
                     + "\n\n"
@@ -69,6 +82,15 @@ class OneShotSuperAlgorithm:
 
             if best is None or trajectory.reward > best[1].reward:
                 best = (strategy, trajectory)
+
+            tqdm.write(
+                f"[one_shot] iter {iteration + 1}: reward={trajectory.reward:.2f} "
+                f"(best={best[1].reward:.2f}, "
+                f"rollout {trajectory.cost.get('rollout_seconds', 0.0):.2f}s)"
+            )
+            progress_bar.set_postfix(
+                reward=f"{trajectory.reward:.2f}", best=f"{best[1].reward:.2f}"
+            )
 
             # Optional per-action counterfactual credit: costs one extra rollout per
             # action, but turns the scalar reward into causal feedback.

@@ -103,6 +103,30 @@ def test_runtime_error_in_plan_becomes_strategy_error():
         )
 
 
+# Script emitting an edge op, for testing allowed_ops restriction.
+edge_op_script = """
+class S(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        plan = [[Action("add_node", 0)], [Action("set_edge_weight", 0, 1, weight=0.9)]]
+        return plan + [[] for _ in range(horizon - 1)]
+"""
+
+
+def test_disallowed_op_rejected_when_node_ops_only():
+    graph = _hub()
+    agent = CodingAgent(CannedProvider(edge_op_script))
+    environment = MonteCarloEnvironment(graph, "IC", mc_runs=10)
+    task = TaskSpec(budget=1, horizon=4, allowed_ops=("add_node", "remove_node"))
+    with pytest.raises(StrategyError, match="not allowed"):
+        OneShotSuperAlgorithm(outer_iters=1).optimize(agent, environment, task, graph)
+
+    # Same script passes when all ops are allowed.
+    strategy, trajectory = OneShotSuperAlgorithm(outer_iters=1).optimize(
+        agent, environment, TaskSpec(budget=1, horizon=4), graph
+    )
+    assert trajectory.reward >= 1.0
+
+
 def test_over_budget_plan_triggers_validation_and_raises():
     """An over-budget plan should trigger the repair path and ultimately raise StrategyError."""
     graph = _hub()

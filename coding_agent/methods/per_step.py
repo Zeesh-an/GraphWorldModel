@@ -12,9 +12,17 @@ class PerStepReprompt:
     ) -> tuple[Strategy, Trajectory]:
         system = system_prompts["per_step"]
         last_strategy = None
+        llm_calls = 0
 
         def action_fn(state: State, timestep: int) -> list[Action]:
-            nonlocal last_strategy
+            nonlocal last_strategy, llm_calls
+            llm_calls += 1
+            # One LLM call per (ensemble sample, timestep) — this line is the
+            # only visibility into that cost while the rollout runs.
+            print(
+                f"[per_step] LLM call {llm_calls} (t={timestep}, "
+                f"|infected|={len(state.infected)})"
+            )
             user = build_user_prompt("per_step", task, graph) + (
                 f"\n\nCURRENT STATE (t={timestep}): "
                 f"infected={state.infected}, frontier={state.frontier}"
