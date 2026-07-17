@@ -1,7 +1,7 @@
 """
 Core contracts for the coding-agent outer loop.
 
-Reuses the canonical Action/State value types from the data simulator so the
+Reuses the canonical ActionOp/State value types from the data simulator so the
 strategies, environments, and the trained world model all speak the same action vocabulary.
 """
 
@@ -11,10 +11,8 @@ import numpy as np
 
 from data.wm_simulator import ActionOp, State, valid_action_ops
 
-Action = ActionOp
-
 # ActionFn is the interface between strategies and environments (every environment's rollout() consumes one of these; every method produces one):
-# ActionFn is a function mapping (current state, timestep) -> action bag for that timestamp
+# ActionFn is a function mapping (current state, timestep) -> action bag for that timestep
 ActionFn = Callable[[State, int], list[ActionOp]]
 
 
@@ -92,7 +90,7 @@ class TaskSpec:
 
 @dataclass
 class Trajectory:
-    """What a rollout reeturns"""
+    """What a rollout returns"""
 
     states: list[State]
     actions: list[list[ActionOp]]

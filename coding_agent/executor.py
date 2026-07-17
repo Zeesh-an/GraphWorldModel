@@ -8,7 +8,7 @@ import traceback
 from typing import Callable
 
 from coding_agent.tools import algorithms, primitives
-from coding_agent.types import Action, GraphInfo, State, Strategy
+from coding_agent.types import ActionOp, GraphInfo, State, Strategy
 from data.wm_simulator import valid_action_ops
 
 
@@ -19,7 +19,7 @@ class StrategyError(RuntimeError):
 def _namespace() -> dict:
     # The exact callable surface the prompts advertise
     return {
-        "Action": Action,
+        "ActionOp": ActionOp,
         "State": State,
         "GraphInfo": GraphInfo,
         "Strategy": Strategy,

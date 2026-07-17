@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from coding_agent.envs.world_model_env import WorldModelEnvironment
-from coding_agent.types import Action, GraphInfo, State
+from coding_agent.types import ActionOp, GraphInfo, State
 from world_model.wm_data import in_channels
 from world_model.wm_model import WorldModel
 
@@ -31,8 +31,8 @@ def test_wm_env_rollout_shapes_and_seed_effect():
     )
     environment = WorldModelEnvironment(model, graph, "IC", device="cpu", n_samples=8)
 
-    def action_fn(state: State, timestep: int) -> list[Action]:
-        return [Action("add_node", 0)] if timestep == 0 else []
+    def action_fn(state: State, timestep: int) -> list[ActionOp]:
+        return [ActionOp("add_node", 0)] if timestep == 0 else []
 
     trajectory = environment.rollout(action_fn, horizon=4, budget=1)
     assert len(trajectory.infected_counts) >= 1
@@ -53,8 +53,8 @@ def _environment(n_samples: int = 4) -> WorldModelEnvironment:
     return WorldModelEnvironment(model, _hub(), "IC", device="cpu", n_samples=n_samples)
 
 
-def _seed_hub(state: State, timestep: int) -> list[Action]:
-    return [Action("add_node", 0)] if timestep == 0 else []
+def _seed_hub(state: State, timestep: int) -> list[ActionOp]:
+    return [ActionOp("add_node", 0)] if timestep == 0 else []
 
 
 def test_rollout_contract_and_determinism():
@@ -73,11 +73,11 @@ def test_rollout_contract_and_determinism():
 def test_rollout_with_edge_ops_rebuilds_graph():
     environment = _environment()
 
-    def action_fn(state: State, timestep: int) -> list[Action]:
+    def action_fn(state: State, timestep: int) -> list[ActionOp]:
         if timestep == 0:
-            return [Action("add_node", 0)]
+            return [ActionOp("add_node", 0)]
         if timestep == 1:
-            return [Action("set_edge_weight", 0, 1, weight=0.5)]
+            return [ActionOp("set_edge_weight", 0, 1, weight=0.5)]
         return []
 
     trajectory = environment.rollout(action_fn, horizon=3, budget=1)

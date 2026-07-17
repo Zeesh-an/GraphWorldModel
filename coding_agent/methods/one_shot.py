@@ -15,7 +15,7 @@ from coding_agent.executor import (
     call_strategy,
     validate_actions,
 )
-from coding_agent.methods.base import summarize
+from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.prompts import (
     build_feedback_prompt,
     build_user_prompt,
@@ -24,7 +24,7 @@ from coding_agent.prompts import (
 from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
 
 
-class OneShotSuperAlgorithm:
+class OneShotSuperAlgorithm(OuterLoopMethod):
     def __init__(self, outer_iters: int = 3, credit: bool = False) -> None:
         self.outer_iters = outer_iters
         self.credit = credit

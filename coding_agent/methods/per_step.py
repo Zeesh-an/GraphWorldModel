@@ -2,11 +2,12 @@
 
 from coding_agent.agent import CodingAgent
 from coding_agent.executor import StrategyError, build_strategy, call_strategy
+from coding_agent.methods.base import OuterLoopMethod
 from coding_agent.prompts import build_user_prompt, system_prompts
-from coding_agent.types import Action, GraphInfo, State, Strategy, TaskSpec, Trajectory
+from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
 
-class PerStepReprompt:
+class PerStepReprompt(OuterLoopMethod):
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
@@ -14,7 +15,7 @@ class PerStepReprompt:
         last_strategy = None
         llm_calls = 0
 
-        def action_fn(state: State, timestep: int) -> list[Action]:
+        def action_fn(state: State, timestep: int) -> list[ActionOp]:
             nonlocal last_strategy, llm_calls
 
             # One LLM call per (ensemble sample, timestep)

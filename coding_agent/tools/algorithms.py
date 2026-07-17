@@ -273,6 +273,7 @@ def _greedy_discount_select(
             )
         )
         chosen.append(node)
+
         for neighbor in graph.out_neighbors(node):
             discounted[neighbor] *= discount
 
@@ -400,6 +401,7 @@ def imm(
     theta = max(
         initial_theta, primitives.estimate_sample_size(graph, budget, epsilon=epsilon)
     )
+
     if theta > initial_theta:
         rr_sets = rr_sets + primitives.batch_reverse_sample(
             graph, theta=theta - initial_theta, seed=1
@@ -454,6 +456,7 @@ def filtered_ris(
         for rr_set in primitives.batch_reverse_sample(graph, theta=theta, seed=0)
         if len(rr_set) >= min_size
     ]
+
     if not rr_sets:
         rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=0)
 
@@ -522,6 +525,7 @@ def static_greedy(
         for node in range(graph.num_nodes):
             if node in seeds:
                 continue
+
             gain = float(
                 np.mean(
                     [
@@ -548,9 +552,11 @@ def skim(
 ) -> list[int]:
     """SKIM (Cohen et al. 2014): rank by average single-seed reachability over sketches (simplified)."""
     rng = np.random.default_rng(0)
+
     live_graphs = [
         primitives.sample_live_edge_graph(graph, rng) for _ in range(snapshots)
     ]
+
     scores = np.array(
         [
             float(
@@ -569,9 +575,7 @@ def skim(
 
 
 # Community (additions)
-def cofim(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
-) -> list[int]:
+def cofim(graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_) -> list[int]:
     """CoFIM (Zhang et al. 2014): per-community budget + degree with cross-community bridge bonus."""
     communities = primitives.detect_communities(graph)
     allocation = primitives.allocate_budget(communities, budget)
@@ -701,10 +705,12 @@ def genetic_algorithm(
 
     def fill(child: list[int]) -> list[int]:
         child = list(dict.fromkeys(child))
+
         while len(child) < budget:
             node = int(rng.choice(pool))
             if node not in child:
                 child.append(node)
+
         return child[:budget]
 
     def fitness(individual: list[int]) -> float:
@@ -727,14 +733,18 @@ def genetic_algorithm(
             individual for _, individual in scored[: max(2, population_size // 2)]
         ]
         children = []
+
         while len(children) < population_size - len(survivors):
             parent_a = survivors[int(rng.integers(len(survivors)))]
             parent_b = survivors[int(rng.integers(len(survivors)))]
+
             cut = budget // 2
             child = fill(parent_a[:cut] + parent_b[cut:])
+
             if rng.random() < mutation_rate:
                 child[int(rng.integers(budget))] = int(rng.choice(pool))
                 child = fill(child)
+
             children.append(child)
 
         population = survivors + children
@@ -773,6 +783,7 @@ def degree_ris_refine(
         for node in range(graph.num_nodes):
             if node in seeds:
                 continue
+
             if len(covers[node] - rest) > len(covers[seed] - rest):
                 covered = rest | covers[node]
                 seeds[position] = node
@@ -799,11 +810,13 @@ def celf_local_search(
         for node in range(graph.num_nodes):
             if node in seeds:
                 continue
+
             trial = list(seeds)
             trial[position] = node
             spread = primitives.mc_simulate_spread(
                 graph, trial, diffusion_model, mc_runs, horizon
             )
+
             if spread > best_spread:
                 best_spread, seeds = spread, trial
                 break
@@ -829,14 +842,17 @@ def community_celf(
     seeds = []
     for community_id, community_budget in allocation.items():
         local_seeds = []
+
         for _ in range(community_budget):
             best_node, best_gain = -1, float("-inf")
             for node in members[community_id]:
                 if node in local_seeds:
                     continue
+
                 gain = primitives.compute_marginal_gain(
                     graph, seeds + local_seeds, node, diffusion_model, mc_runs, horizon
                 )
+
                 if gain > best_gain:
                     best_gain, best_node = gain, node
 
@@ -848,7 +864,7 @@ def community_celf(
     return _pad_seeds(seeds, graph, budget)
 
 
-# Registry enumerated by the library API and README.
+# Registry enumerated by the library API and README
 algorithms = {
     # degree
     "high_degree": high_degree,

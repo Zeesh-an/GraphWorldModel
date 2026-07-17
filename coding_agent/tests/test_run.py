@@ -15,10 +15,10 @@ canned = """
 class S(Strategy):
     def plan_horizon(self, graph, budget, horizon):
         seeds = algorithms.high_degree(graph, budget, "IC")
-        return [[Action("add_node", node) for node in seeds]] + [[] for _ in range(horizon)]
+        return [[ActionOp("add_node", node) for node in seeds]] + [[] for _ in range(horizon)]
     def act(self, state, graph, timestep):
         if timestep == 0:
-            return [Action("add_node", node) for node in algorithms.high_degree(graph, 1, "IC")]
+            return [ActionOp("add_node", node) for node in algorithms.high_degree(graph, 1, "IC")]
         return []
 """
 

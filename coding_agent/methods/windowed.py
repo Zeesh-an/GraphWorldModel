@@ -2,11 +2,12 @@
 
 from coding_agent.agent import CodingAgent
 from coding_agent.executor import build_strategy, call_strategy
+from coding_agent.methods.base import OuterLoopMethod
 from coding_agent.prompts import build_user_prompt, system_prompts
-from coding_agent.types import Action, GraphInfo, State, Strategy, TaskSpec, Trajectory
+from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
 
-class WindowedOnline:
+class WindowedOnline(OuterLoopMethod):
     def __init__(self, windows: int = 3) -> None:
         self.windows = windows
 
@@ -23,7 +24,7 @@ class WindowedOnline:
         window_length = max(1, (task.horizon + 1) // self.windows)
         print(f"[windowed] rolling out {self.windows} windows of {window_length} steps")
 
-        def action_fn(state: State, timestep: int) -> list[Action]:
+        def action_fn(state: State, timestep: int) -> list[ActionOp]:
             # Consult the online algorithm at each window boundary only
             if timestep % window_length == 0:
                 return call_strategy(

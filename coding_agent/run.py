@@ -2,10 +2,11 @@
 Top-level driver: run the coding-agent outer loop over the inner-loop environment
 
 python -m coding_agent.run --data-dir data/output/ba20_marg_structured \
-    --model claude-haiku-4-5-20251001 \
+    --model claude-sonnet-5 \
     --wm-results-json world_model/checkpoints/ba20_marg_structured_sage_IC.json \
-    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare --credit \
-    --outer-iters 3 --out-json coding_agent/results/llm_run_1.json
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --allowed-ops add_node remove_node \
+    --outer-iters 5 --out-json coding_agent/results/llm_run_3.json
 """
 
 import argparse
@@ -15,12 +16,12 @@ import time
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-
 from dotenv import load_dotenv
 
 from coding_agent.agent import CodingAgent, GatewayProvider
 from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
+from coding_agent.envs.world_model_env import WorldModelEnvironment
 from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
 from coding_agent.methods.per_step import PerStepReprompt
@@ -28,6 +29,7 @@ from coding_agent.methods.windowed import WindowedOnline
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo, TaskSpec
 from data.wm_simulator import valid_action_ops
+from world_model.wm_data import load_graph_store
 
 world_model = "world_model"
 monte_carlo = "monte_carlo"
@@ -70,10 +72,13 @@ class _CannedProvider:
 def build_method(name: str) -> OuterLoopMethod:
     if name == "one_shot":
         return OneShotSuperAlgorithm()
+
     if name == "per_step":
         return PerStepReprompt()
+
     if name == "windowed":
         return WindowedOnline()
+
     raise ValueError(f"unknown method {name!r}; choose one_shot|per_step|windowed")
 
 
@@ -83,10 +88,9 @@ def _load_graph(config: ExperimentConfig) -> GraphInfo:
             "config.data_dir is required unless a graph is passed directly"
         )
 
-    from world_model.wm_data import load_graph_store
-
     store = load_graph_store(config.data_dir)
     graph_id = config.graph_id or next(iter(store))
+
     return GraphInfo.from_store_entry(store[graph_id])
 
 
@@ -95,17 +99,18 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
         return MonteCarloEnvironment(
             graph, config.diffusion_model, mc_runs=config.mc_runs
         )
-    if config.evaluator == world_model:
-        from coding_agent.envs.world_model_env import WorldModelEnvironment
 
+    if config.evaluator == world_model:
         if config.wm_results_json is None:
             raise ValueError("evaluator=world_model requires config.wm_results_json")
+
         return WorldModelEnvironment.from_results_json(
             config.wm_results_json,
             graph,
             device=config.device,
             n_samples=config.n_samples,
         )
+
     raise ValueError(f"unknown evaluator {config.evaluator!r}")
 
 
@@ -130,11 +135,14 @@ def run_experiment(
     if canned_script is not None:
         provider_label = "canned"
     elif config.baseline is not None:
-        # Classical-library baseline: same pipeline, envs, and metrics — no LLM.
+        # Classical-library baseline: same pipeline, envs, and metrics — no LLM
         if config.baseline not in algorithm_names:
             raise ValueError(
                 f"unknown baseline {config.baseline!r}; choose one of {algorithm_names}"
             )
+
+        # For classical baseline, construct a canned one-shot script that calls algorithms.<name>(graph, budget, dynamics, horizon=horizon)
+        # Seeds at t=0
         provider_label = f"baseline:{config.baseline}"
         canned_script = f"""\
 class Baseline(Strategy):
@@ -142,7 +150,7 @@ class Baseline(Strategy):
         seeds = algorithms.{config.baseline}(
             graph, budget, "{config.diffusion_model}", horizon=horizon
         )
-        return [[Action("add_node", node) for node in seeds]] + [
+        return [[ActionOp("add_node", node) for node in seeds]] + [
             [] for _ in range(horizon)
         ]
 """
@@ -165,17 +173,18 @@ class Baseline(Strategy):
     method = build_method(config.method)
     if config.method == "windowed":
         method = WindowedOnline(windows=config.windows)
+
     if config.method == "one_shot":
         method = OneShotSuperAlgorithm(
             outer_iters=config.outer_iters, credit=config.credit
         )
 
+    # Optimize the method with the outer-loop coding agent iteration loop to find the best strategy and trajectory result
     strategy, trajectory = method.optimize(agent, environment, task, graph)
 
     # Per-timestep log of the representative rollout (first ensemble sample):
-    # entry t holds the action bag applied at t and the resulting state. The
-    # reward is the ensemble MEAN, so this single sample's final infected count
-    # need not equal it exactly.
+    # entry t holds the action bag applied at t and the resulting state
+    # The reward is the ensemble MEAN, so this single sample's final infected count need not equal it exactly
     timeline = [
         {"t": timestep, "actions": [action.to_dict() for action in bag]}
         | state.to_dict()
@@ -190,23 +199,25 @@ class Baseline(Strategy):
         "model": provider_label,
         "reward": trajectory.reward,
         "summary": summarize(trajectory),
-        # For per_step this is the last timestep's script (one is generated per step).
+        # For per_step this is the last timestep's script (one is generated per step)
         "script": strategy.source_script,
         "cost": trajectory.cost,
         "timeline": timeline,
     }
 
+    # When the credit flag is enabled, ablate the executed action sequence against the same environment and measure the reward
     if config.credit:
-        # Credit of the executed action sequence; for state-dependent strategies
-        # (per_step/windowed) the recorded bags are replayed as a fixed plan.
+        # Credit of the executed action sequence; for state-dependent strategies (per_step/windowed) the recorded bags are replayed as a fixed plan
         base_reward, entries = counterfactual_credit(
             environment, trajectory.actions, config.horizon, config.budget
         )
         result["credit_base_reward"] = base_reward
         result["credit"] = entries
 
+    # When the compare flag is enabled, build a Monte Carlo environment and rollout with Monte Carlo simulation to compare against the world model
     if config.compare and config.evaluator == world_model:
         print(f"[run] MC compare replay ({config.mc_runs} runs)...")
+
         mc_environment = MonteCarloEnvironment(
             graph, config.diffusion_model, mc_runs=config.mc_runs
         )
@@ -220,14 +231,14 @@ class Baseline(Strategy):
             if plan is not None
             else partial(_strategy_action, strategy, graph)
         )
+
         mc_trajectory = mc_environment.rollout(action_fn, config.horizon, config.budget)
         result["mc_reward"] = mc_trajectory.reward
         result["mc_reward_se"] = mc_trajectory.cost["reward_se"]
         result["mc_rollout_seconds"] = mc_trajectory.cost["rollout_seconds"]
         result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward
 
-    # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives
-    # in cost.rollout_seconds / mc_rollout_seconds.
+    # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives in cost.rollout_seconds / mc_rollout_seconds
     result["elapsed_seconds"] = time.perf_counter() - experiment_start
 
     if config.out_json:
@@ -237,7 +248,9 @@ class Baseline(Strategy):
     return result
 
 
-def _parse_args() -> ExperimentConfig:
+if __name__ == "__main__":
+    load_dotenv()
+
     parser = argparse.ArgumentParser(
         description="Coding-agent outer loop over the world model"
     )
@@ -370,7 +383,7 @@ def _parse_args() -> ExperimentConfig:
 
     args = parser.parse_args()
 
-    return ExperimentConfig(
+    config = ExperimentConfig(
         model=args.model,
         baseline=args.baseline,
         allowed_ops=tuple(args.allowed_ops),
@@ -393,9 +406,4 @@ def _parse_args() -> ExperimentConfig:
         out_json=args.out_json,
     )
 
-
-if __name__ == "__main__":
-    load_dotenv()
-
-    config = _parse_args()
     print(json.dumps(run_experiment(config), indent=2, default=str))

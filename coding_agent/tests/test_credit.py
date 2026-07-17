@@ -5,7 +5,7 @@ from coding_agent.credit import counterfactual_credit, format_credit_report
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.prompts import build_feedback_prompt
 from coding_agent.run import ExperimentConfig, monte_carlo, run_experiment
-from coding_agent.types import Action, GraphInfo
+from coding_agent.types import ActionOp, GraphInfo
 
 
 def _hub() -> GraphInfo:
@@ -18,7 +18,7 @@ def _hub() -> GraphInfo:
 def test_sole_seed_gets_full_credit():
     graph = _hub()
     environment = MonteCarloEnvironment(graph, "IC", mc_runs=10)
-    plan = [[Action("add_node", 0)], [], []]
+    plan = [[ActionOp("add_node", 0)], [], []]
 
     base_reward, entries = counterfactual_credit(
         environment, plan, horizon=3, budget=1
@@ -64,7 +64,7 @@ canned = """
 class S(Strategy):
     def plan_horizon(self, graph, budget, horizon):
         seeds = algorithms.high_degree(graph, budget, "IC")
-        return [[Action("add_node", node) for node in seeds]] + [[] for _ in range(horizon)]
+        return [[ActionOp("add_node", node) for node in seeds]] + [[] for _ in range(horizon)]
 """
 
 

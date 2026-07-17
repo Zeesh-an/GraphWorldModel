@@ -1,6 +1,6 @@
 import numpy as np
 
-from coding_agent.types import Action, GraphInfo, State, Trajectory
+from coding_agent.types import ActionOp, GraphInfo, State, Trajectory
 
 
 def _triangle() -> GraphInfo:
@@ -32,7 +32,7 @@ def test_graphinfo_from_store_entry():
 
 
 def test_action_and_state_reexport():
-    action = Action("add_node", 1)
+    action = ActionOp("add_node", 1)
     assert action.op == "add_node" and action.target == 1
     state = State(infected=[0], frontier=[0])
     assert state.to_dict()["infected_count"] == 1

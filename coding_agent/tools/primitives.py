@@ -20,9 +20,7 @@ norm_floor = 1e-12
 power_iterations = 100
 
 
-def build_simulator(
-    graph: GraphInfo, diffusion_model: str, seed: int = 0
-) -> Simulator:
+def build_simulator(graph: GraphInfo, diffusion_model: str, seed: int = 0) -> Simulator:
     """Construct an NDlib Simulator from a GraphInfo."""
     nx_graph = nx.DiGraph() if graph.directed else nx.Graph()
     nx_graph.add_nodes_from(range(graph.num_nodes))
@@ -193,9 +191,7 @@ def compute_marginal_gain(
     return float(spread_with_node - base_spread)
 
 
-def batch_reverse_sample(
-    graph: GraphInfo, theta: int, seed: int = 0
-) -> list[set[int]]:
+def batch_reverse_sample(graph: GraphInfo, theta: int, seed: int = 0) -> list[set[int]]:
     """
     Generate theta reverse-reachable sets under the IC live-edge model.
 
@@ -290,8 +286,7 @@ def allocate_budget(communities: dict[int, int], budget: int) -> dict[int, int]:
         community_id: budget * size / total for community_id, size in sizes.items()
     }
     allocation = {
-        community_id: int(np.floor(share))
-        for community_id, share in raw_shares.items()
+        community_id: int(np.floor(share)) for community_id, share in raw_shares.items()
     }
 
     remaining = budget - sum(allocation.values())
@@ -350,7 +345,8 @@ def reachable_count(live_adjacency: dict[int, list[int]], seeds: list[int]) -> i
 
 
 def path_influence_scores(graph: GraphInfo, max_hops: int = 2) -> np.ndarray:
-    """Per-node truncated path-product influence proxy (for path-based methods), shape (N,).
+    """
+    Per-node truncated path-product influence proxy (for path-based methods), shape (N,).
 
     score[v] = sum over nodes reachable within max_hops of the best path-product of
     IC transmission probabilities from v.

@@ -193,7 +193,7 @@ class WorldModelEnvironment:
                 .reshape(num_samples, num_nodes, 2)
             )  # shape: (n_samples, N, 2)
 
-            # Bernoulli darws for both channels across all samples at once
+            # Bernoulli draws for both channels across all samples at once
             infected_draws = (
                 rng.random((num_samples, num_nodes)) < probabilities[:, :, 0]
             )

@@ -2,7 +2,7 @@
 import numpy as np
 
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
-from coding_agent.types import Action, GraphInfo, State
+from coding_agent.types import ActionOp, GraphInfo, State
 
 
 def _hub() -> GraphInfo:
@@ -19,8 +19,8 @@ def test_mc_rollout_seeds_hub_spreads():
     graph = _hub()
     environment = MonteCarloEnvironment(graph, "IC", mc_runs=20)
 
-    def action_fn(state: State, timestep: int) -> list[Action]:
-        return [Action("add_node", 0)] if timestep == 0 else []
+    def action_fn(state: State, timestep: int) -> list[ActionOp]:
+        return [ActionOp("add_node", 0)] if timestep == 0 else []
 
     trajectory = environment.rollout(action_fn, horizon=5, budget=1)
     assert trajectory.reward >= 1.0
@@ -32,7 +32,7 @@ def test_mc_rollout_no_action_no_spread():
     graph = _hub()
     environment = MonteCarloEnvironment(graph, "IC", mc_runs=10)
 
-    def no_action(state: State, timestep: int) -> list[Action]:
+    def no_action(state: State, timestep: int) -> list[ActionOp]:
         return []
 
     trajectory = environment.rollout(no_action, horizon=3, budget=0)

@@ -8,11 +8,11 @@ valid_script = """
 class MyStrategy(Strategy):
     def plan_horizon(self, graph, budget, horizon):
         seeds = algorithms.high_degree(graph, budget, "IC")
-        plan = [[Action("add_node", node) for node in seeds]]
+        plan = [[ActionOp("add_node", node) for node in seeds]]
         plan += [[] for _ in range(horizon)]
         return plan
     def act(self, state, graph, timestep):
-        return [Action("add_node", 0)] if timestep == 0 else []
+        return [ActionOp("add_node", 0)] if timestep == 0 else []
 """
 
 syntax_error_script = (

@@ -22,14 +22,14 @@ one_shot_script = """
 class S(Strategy):
     def plan_horizon(self, graph, budget, horizon):
         seeds = algorithms.high_degree(graph, budget, "IC")
-        return [[Action("add_node", node) for node in seeds]] + [[] for _ in range(horizon)]
+        return [[ActionOp("add_node", node) for node in seeds]] + [[] for _ in range(horizon)]
 """
 
 per_step_script = """
 class S(Strategy):
     def act(self, state, graph, timestep):
         if timestep == 0:
-            return [Action("add_node", node) for node in algorithms.high_degree(graph, 1, "IC")]
+            return [ActionOp("add_node", node) for node in algorithms.high_degree(graph, 1, "IC")]
         return []
 """
 
@@ -78,7 +78,7 @@ def test_windowed_runs():
 over_budget_script = """
 class S(Strategy):
     def plan_horizon(self, graph, budget, horizon):
-        return [[Action("add_node", 0), Action("add_node", 1)]] + [[] for _ in range(horizon)]
+        return [[ActionOp("add_node", 0), ActionOp("add_node", 1)]] + [[] for _ in range(horizon)]
 """
 
 
@@ -88,7 +88,7 @@ class S(Strategy):
     def plan_horizon(self, graph, budget, horizon):
         degrees = primitives.compute_degree(graph)
         best = degrees.get(0)
-        return [[Action("add_node", best)]] + [[] for _ in range(horizon)]
+        return [[ActionOp("add_node", best)]] + [[] for _ in range(horizon)]
 """
 
 
@@ -107,7 +107,7 @@ def test_runtime_error_in_plan_becomes_strategy_error():
 edge_op_script = """
 class S(Strategy):
     def plan_horizon(self, graph, budget, horizon):
-        plan = [[Action("add_node", 0)], [Action("set_edge_weight", 0, 1, weight=0.9)]]
+        plan = [[ActionOp("add_node", 0)], [ActionOp("set_edge_weight", 0, 1, weight=0.9)]]
         return plan + [[] for _ in range(horizon - 1)]
 """
 

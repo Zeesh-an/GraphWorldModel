@@ -11,19 +11,19 @@ approximation there — the live policy would have reacted to the ablated cascad
 
 from functools import partial
 
-from coding_agent.types import Action, State
+from coding_agent.types import ActionOp, State
 
 
 def planned_action(
-    plan: list[list[Action]], state: State, timestep: int
-) -> list[Action]:
-    """Dapts a static plan into an ActionFn."""
+    plan: list[list[ActionOp]], state: State, timestep: int
+) -> list[ActionOp]:
+    """Adapts a static plan into an ActionFn."""
     return plan[timestep] if timestep < len(plan) else []
 
 
 def counterfactual_credit(
     environment: object,
-    plan: list[list[Action]],
+    plan: list[list[ActionOp]],
     horizon: int,
     budget: int,
     seed: int = 0,
