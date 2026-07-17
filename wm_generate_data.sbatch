@@ -23,7 +23,7 @@ mkdir -p data/output logs
 
 # --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
-python data/generate_wm_data.py \
+python -m data/generate_wm_data \
     --dataset ba --num-graphs 20 --syn-nodes 100 --ba-m 3 \
     --models IC LT --prob-model weighted --budget 5 \
     --algorithms random degree pagerank betweenness \
@@ -34,7 +34,7 @@ python data/generate_wm_data.py \
     --split 0.7 0.15 0.15 --seed 42 \
     --out-dir data/output/ba20_marg_structured
 
-python data.validate_wm_data.py --dir data/output/ba20_marg_structured
+python -m data.validate_wm_data --dir data/output/ba20_marg_structured
 
 python -c "import json; print('action_ops:', json.load(open('data/output/ba20_marg_structured/metadata.json'))['config']['action_ops'])"
 
