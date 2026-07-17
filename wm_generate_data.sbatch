@@ -23,7 +23,7 @@ mkdir -p data/output logs
 
 # --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
-python -m data/generate_wm_data \
+python -m data.generate_wm_data \
     --dataset ba --num-graphs 20 --syn-nodes 100 --ba-m 3 \
     --models IC LT --prob-model weighted --budget 5 \
     --algorithms random degree pagerank betweenness \

@@ -33,7 +33,7 @@ esac
 # Confirm the job actually got a GPU
 python -c "import torch; print('CUDA:', torch.cuda.is_available(), '|', (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU-ONLY'))"
 
-python -m world_model/train_wm \
+python -m world_model.train_wm \
     --data-dir "$DATA" --diffusion-model "$DM" \
     --model "$MODEL" --head structured --hidden-dim 64 $EXTRA \
     --epochs 400 --lr 1e-3 --weight-decay 5e-4 --batch-size 32 \
