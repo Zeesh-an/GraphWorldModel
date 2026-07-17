@@ -38,3 +38,48 @@ def test_wm_env_rollout_shapes_and_seed_effect():
     assert len(trajectory.infected_counts) >= 1
     # The seeded hub is infected (T_exo baked into the structured head).
     assert trajectory.reward >= 1.0
+
+
+def _environment(n_samples: int = 4) -> WorldModelEnvironment:
+    torch.manual_seed(0)
+    model = WorldModel(
+        "sage",
+        in_channels=in_channels,
+        hidden_dim=16,
+        n_layers=2,
+        head_type="structured",
+        diffusion_model="IC",
+    )
+    return WorldModelEnvironment(model, _hub(), "IC", device="cpu", n_samples=n_samples)
+
+
+def _seed_hub(state: State, timestep: int) -> list[Action]:
+    return [Action("add_node", 0)] if timestep == 0 else []
+
+
+def test_rollout_contract_and_determinism():
+    environment = _environment()
+    trajectory = environment.rollout(_seed_hub, horizon=3, budget=1)
+
+    assert len(trajectory.states) == len(trajectory.actions) + 1
+    assert len(trajectory.infected_counts) == len(trajectory.states)
+    assert trajectory.cost["rollout_seconds"] > 0
+    assert trajectory.cost["n_samples"] == 4
+
+    repeat = environment.rollout(_seed_hub, horizon=3, budget=1)
+    assert repeat.reward == trajectory.reward  # same seed -> same draws
+
+
+def test_rollout_with_edge_ops_rebuilds_graph():
+    environment = _environment()
+
+    def action_fn(state: State, timestep: int) -> list[Action]:
+        if timestep == 0:
+            return [Action("add_node", 0)]
+        if timestep == 1:
+            return [Action("set_edge_weight", 0, 1, weight=0.5)]
+        return []
+
+    trajectory = environment.rollout(action_fn, horizon=3, budget=1)
+    assert trajectory.actions[1][0].op == "set_edge_weight"
+    assert len(trajectory.states) == len(trajectory.actions) + 1

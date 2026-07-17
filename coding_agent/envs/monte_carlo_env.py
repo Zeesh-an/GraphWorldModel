@@ -60,6 +60,11 @@ class MonteCarloEnvironment:
                 representative_counts = counts
 
         reward = float(np.mean(final_counts)) if final_counts else 0.0
+        reward_se = (
+            float(np.std(final_counts, ddof=1) / np.sqrt(len(final_counts)))
+            if len(final_counts) > 1
+            else 0.0
+        )
 
         # Report the averaged final count as the endpoint.
         representative_counts[-1] = reward
@@ -72,6 +77,7 @@ class MonteCarloEnvironment:
             cost={
                 "mc_runs": self.mc_runs,
                 "env": "monte_carlo",
+                "reward_se": reward_se,
                 "rollout_seconds": time.perf_counter() - start,
             },
         )

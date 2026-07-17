@@ -11,6 +11,7 @@ import numpy as np
 import torch
 
 from world_model.wm_data import (
+    GraphInput,
     apply_edge_ops,
     build_features,
     build_graph_input,
@@ -88,74 +89,133 @@ class WorldModelEnvironment:
             model, graph, config["diffusion_model"], device=device, n_samples=n_samples
         )
 
-    @torch.inference_mode()
-    def _single_rollout(
-        self, action_fn: ActionFn, horizon: int, rng: np.random.Generator
-    ) -> tuple[list[State], list[list], list[float]]:
+    def _block_graph_input(self, sample_arrays: list[tuple]) -> GraphInput:
+        # Disjoint block-diagonal union of every sample's graph: normalization
+        # is per-component, so this equals the per-sample GraphInputs stacked.
         num_nodes = self.graph.num_nodes
-        edges = dict(self.base_edges)
-        infected = set()
-        frontier = set()
-        states = [State([], [])]
-        actions = []
-        counts = [0.0]
+        edge_parts = [
+            edge_index + sample * num_nodes
+            for sample, (edge_index, _) in enumerate(sample_arrays)
+        ]
+        weight_parts = [edge_weights for _, edge_weights in sample_arrays]
 
-        for timestep in range(horizon + 1):
-            state = State(sorted(infected), sorted(frontier))
-            bag = action_fn(state, timestep)
-            actions.append(bag)
+        return build_graph_input(
+            np.concatenate(edge_parts, axis=1),
+            np.concatenate(weight_parts),
+            num_nodes * len(sample_arrays),
+            self.diffusion_model,
+            self.device,
+        )
 
-            # Apply edge ops so the model sees the post-action graph.
-            bag_dicts = [action.to_dict() for action in bag]
-            if any(action_dict["op"] in edge_ops for action_dict in bag_dicts):
-                edges = apply_edge_ops(edges, bag_dicts)
-
-            edge_index, edge_weights = edges_to_arrays(edges)
-            record = {
-                "state": {"infected": sorted(infected), "frontier": sorted(frontier)},
-                "action": bag_dicts,
-                "next_state": {"infected": [], "frontier": []},
-                "next_marginal_infected": {},
-                "next_marginal_frontier": {},
-            }
-            X, _, _ = build_features(record, edge_index, num_nodes)
-            graph_input = build_graph_input(
-                edge_index, edge_weights, num_nodes, self.diffusion_model, self.device
-            )
-            probabilities = (
-                torch.sigmoid(
-                    self.model(torch.from_numpy(X).to(self.device), graph_input)
-                )
-                .cpu()
-                .numpy()
-            )  # shape: (N, 2)
-            infected_draw = rng.random(num_nodes) < probabilities[:, 0]
-            frontier_draw = rng.random(num_nodes) < probabilities[:, 1]
-            infected = set(np.nonzero(infected_draw)[0].tolist())
-            frontier = set(np.nonzero(frontier_draw)[0].tolist())
-            states.append(State(sorted(infected), sorted(frontier)))
-            counts.append(float(len(infected)))
-            if timestep > 0 and not frontier and not bag:
-                break
-
-        return states, actions, counts
-
+    @torch.inference_mode()
     def rollout(
         self, action_fn: ActionFn, horizon: int, budget: int, seed: int = 0
     ) -> Trajectory:
         start = time.perf_counter()
         rng = np.random.default_rng(seed)
-        final_counts = []
-        representative = None
+        num_nodes = self.graph.num_nodes
+        num_samples = self.n_samples
 
-        for sample in range(self.n_samples):
-            states, actions, counts = self._single_rollout(action_fn, horizon, rng)
-            final_counts.append(counts[-1])
-            if sample == 0:
-                representative = (states, actions, counts)
+        # All samples advance in lockstep: each timestep is ONE block-diagonal
+        # forward pass instead of n_samples separate ones. Edge state is
+        # copy-on-write; the block input is rebuilt only after an edge op.
+        base_arrays = edges_to_arrays(self.base_edges)
+        sample_edges = [self.base_edges] * num_samples
+        sample_arrays = [base_arrays] * num_samples
+        block_input = self._block_graph_input(sample_arrays)
 
+        infected = [set() for _ in range(num_samples)]
+        frontier = [set() for _ in range(num_samples)]
+        active = [True] * num_samples
+
+        representative_states = [State([], [])]
+        representative_actions = []
+        representative_counts = [0.0]
+
+        for timestep in range(horizon + 1):
+            record_representative = active[0]
+            bags = [[] for _ in range(num_samples)]
+            bag_dicts = [[] for _ in range(num_samples)]
+
+            for sample in range(num_samples):
+                if not active[sample]:
+                    continue
+                state = State(sorted(infected[sample]), sorted(frontier[sample]))
+                bags[sample] = action_fn(state, timestep)
+                bag_dicts[sample] = [action.to_dict() for action in bags[sample]]
+
+                # Apply edge ops so the model sees the post-action graph.
+                if any(
+                    action_dict["op"] in edge_ops
+                    for action_dict in bag_dicts[sample]
+                ):
+                    sample_edges[sample] = apply_edge_ops(
+                        sample_edges[sample], bag_dicts[sample]
+                    )
+                    sample_arrays[sample] = edges_to_arrays(sample_edges[sample])
+                    block_input = None
+
+            if block_input is None:
+                block_input = self._block_graph_input(sample_arrays)
+
+            x_parts = []
+            for sample in range(num_samples):
+                record = {
+                    "state": {
+                        "infected": sorted(infected[sample]),
+                        "frontier": sorted(frontier[sample]),
+                    },
+                    "action": bag_dicts[sample],
+                    "next_state": {"infected": [], "frontier": []},
+                    "next_marginal_infected": {},
+                    "next_marginal_frontier": {},
+                }
+                X, _, _ = build_features(record, sample_arrays[sample][0], num_nodes)
+                x_parts.append(X)
+
+            features = torch.from_numpy(np.concatenate(x_parts, axis=0))
+            probabilities = (
+                torch.sigmoid(self.model(features.to(self.device), block_input))
+                .cpu()
+                .numpy()
+                .reshape(num_samples, num_nodes, 2)
+            )  # shape: (n_samples, N, 2)
+
+            infected_draws = (
+                rng.random((num_samples, num_nodes)) < probabilities[:, :, 0]
+            )
+            frontier_draws = (
+                rng.random((num_samples, num_nodes)) < probabilities[:, :, 1]
+            )
+
+            for sample in range(num_samples):
+                if not active[sample]:
+                    continue
+                infected[sample] = set(np.nonzero(infected_draws[sample])[0].tolist())
+                frontier[sample] = set(np.nonzero(frontier_draws[sample])[0].tolist())
+                if timestep > 0 and not frontier[sample] and not bags[sample]:
+                    active[sample] = False
+
+            if record_representative:
+                representative_actions.append(bags[0])
+                representative_states.append(
+                    State(sorted(infected[0]), sorted(frontier[0]))
+                )
+                representative_counts.append(float(len(infected[0])))
+
+            if not any(active):
+                break
+
+        final_counts = [float(len(infected[sample])) for sample in range(num_samples)]
         reward = float(np.mean(final_counts)) if final_counts else 0.0
-        states, actions, counts = representative  # type: ignore[misc]
+        reward_se = (
+            float(np.std(final_counts, ddof=1) / np.sqrt(len(final_counts)))
+            if len(final_counts) > 1
+            else 0.0
+        )
+        states = representative_states
+        actions = representative_actions
+        counts = representative_counts
         counts[-1] = reward
 
         return Trajectory(
@@ -166,6 +226,7 @@ class WorldModelEnvironment:
             cost={
                 "n_samples": self.n_samples,
                 "env": "world_model",
+                "reward_se": reward_se,
                 "rollout_seconds": time.perf_counter() - start,
             },
         )

@@ -8,7 +8,7 @@ package produces the supervised `(input, target)` pairs it is trained on.
 - **Graph** `G` — a directed/undirected graph with per-edge IC transmission
   probabilities (`ic_probs`) and LT weights (`lt_weights`), saved once per graph.
 - **State** `s_t = (infected, frontier)` — `infected` = every node ever activated;
-  `frontier` = the nodes that activated *this step* (IC: the status-1 spreaders;
+  `frontier` = the nodes that activated _this step_ (IC: the status-1 spreaders;
   LT: the fresh wave that flipped this iteration).
 - **Action** `a_t` — a bag of node/edge ops: `add_node`, `remove_node`,
   `add_edge`, `remove_edge`, `set_edge_weight` (empty bag = `NULL`). Which ops are
@@ -45,11 +45,11 @@ python data/generate_wm_data.py --dataset ba --num-graphs 1 \
 
 # Multi-graph synthetic set (trustworthy ranking) — 20 BA graphs, both dynamics
 python data/generate_wm_data.py --dataset ba --num-graphs 20 \
-    --action-ops add_node remove_node --models IC LT \
+    --action-ops add_node remove_node add_edge remove_edge set_edge_weight --models IC LT \
     --out-dir data/output/ba20_marg_structured
 
 # Real dataset (downloads on first use)
-python data/generate_wm_data.py --dataset jazz --action-ops add_node remove_node
+python data/generate_wm_data.py --dataset jazz --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
 # Tiny end-to-end check
 python data/generate_wm_data.py --smoke --out-dir /tmp/wm_smoke
@@ -80,15 +80,15 @@ write graphs_index.json + metadata.json
 
 `make_synthetic_bundle` / `make_real_bundle` produce a `GraphBundle`:
 
-| Field          | Shape / type            | Meaning                                                            |
-| -------------- | ----------------------- | ----------------------------------------------------------------- |
-| `nx_graph`     | networkx graph          | the structure (directed for citations, undirected otherwise)      |
-| `edge_index`   | `(2, E)` int32          | `[src, dst]` arcs in COO form                                     |
-| `ic_probs`     | `(E,)` float32          | per-edge IC transmission probability `p(u→v)`                    |
-| `lt_weights`   | `(E,)` float32          | per-edge LT influence weight (`= ic_probs`)                       |
-| `node_feats`   | `(N, F)` float32        | node features; synthetic graphs use `log1p(degree)` (`F=1`)       |
-| `node_labels`  | `(N,)` int32            | class labels (real datasets) or zeros                             |
-| `ic_prob_map`  | `dict[(u,v)→p]`         | edge→prob map the simulator configures NDlib with                |
+| Field         | Shape / type     | Meaning                                                      |
+| ------------- | ---------------- | ------------------------------------------------------------ |
+| `nx_graph`    | networkx graph   | the structure (directed for citations, undirected otherwise) |
+| `edge_index`  | `(2, E)` int32   | `[src, dst]` arcs in COO form                                |
+| `ic_probs`    | `(E,)` float32   | per-edge IC transmission probability `p(u→v)`                |
+| `lt_weights`  | `(E,)` float32   | per-edge LT influence weight (`= ic_probs`)                  |
+| `node_feats`  | `(N, F)` float32 | node features; synthetic graphs use `log1p(degree)` (`F=1`)  |
+| `node_labels` | `(N,)` int32     | class labels (real datasets) or zeros                        |
+| `ic_prob_map` | `dict[(u,v)→p]`  | edge→prob map the simulator configures NDlib with            |
 
 Edge probabilities come from `graph_utils.build_edge_index`: by default the
 **weighted cascade** model `p(u→v) = 1 / in_degree(v)` (high-in-degree nodes are
@@ -102,14 +102,14 @@ Each episode commits a seed set chosen by one of the six **spine algorithms**
 (`SPINE_ALGORITHMS`). These span the cheap-but-weak to expensive-but-strong range
 so the dataset covers a spectrum of seed qualities:
 
-| Algorithm      | How it picks k seeds                                                                 |
+| Algorithm      | How it picks k seeds                                                                |
 | -------------- | ----------------------------------------------------------------------------------- |
-| `random`       | k distinct uniform-random nodes                                                      |
-| `degree`       | top-k by (out-)degree                                                                |
-| `pagerank`     | top-k by PageRank (random-walk importance)                                           |
-| `betweenness`  | top-k by betweenness centrality (nodes on many shortest paths)                       |
-| `celf`         | greedy marginal-gain: add the node that most increases MC-estimated spread, ×k       |
-| `local_search` | start from `degree`, then 1-swap seeds while estimated spread improves (≤ 3 rounds)  |
+| `random`       | k distinct uniform-random nodes                                                     |
+| `degree`       | top-k by (out-)degree                                                               |
+| `pagerank`     | top-k by PageRank (random-walk importance)                                          |
+| `betweenness`  | top-k by betweenness centrality (nodes on many shortest paths)                      |
+| `celf`         | greedy marginal-gain: add the node that most increases MC-estimated spread, ×k      |
+| `local_search` | start from `degree`, then 1-swap seeds while estimated spread improves (≤ 3 rounds) |
 
 `celf` and `local_search` call `estimate_spread`, an NDlib Monte-Carlo spread
 oracle (seed → diffuse to horizon, average final infected count over `mc_runs`).
@@ -119,7 +119,7 @@ oracle (seed → diffuse to horizon, average final infected count over `mc_runs`
 A fresh `Simulator` is reset for the chosen dynamics, then stepped over
 `--horizon + 1` timesteps:
 
-- **t = 0** the action *is* the seed commit: `add_node` ops for every seed node.
+- **t = 0** the action _is_ the seed commit: `add_node` ops for every seed node.
 - **t > 0** an action is sampled by `sample_injection`: with probability
   `1 - --inject-p` it is `NULL` (pure diffusion); otherwise one op is drawn
   uniformly from `--action-ops` with a random valid target on the live graph.
@@ -133,10 +133,10 @@ A fresh `Simulator` is reset for the chosen dynamics, then stepped over
 At intermediate steps, with probability `--cf-prob`, the simulator is
 snapshotted and `--cf-branches` alternative action bags (drawn by
 `counterfactual_actions`, restricted to node ops so the snapshot never has to
-undo an edge mutation) are each applied from the *same* `s_t`. Each fork is
+undo an edge mutation) are each applied from the _same_ `s_t`. Each fork is
 written as a `cf_i` branch. This gives the trainer matched `(s_t, a, s_{t+1})` vs
 `(s_t, a', s'_{t+1})` pairs — the only signal that forces the model to be
-*action-conditioned* rather than state-autoregressive, and the basis of the
+_action-conditioned_ rather than state-autoregressive, and the basis of the
 **action-sensitivity** eval metric.
 
 ### 5. Monte-Carlo soft marginals (`Simulator.advance_marginal`)
@@ -227,10 +227,10 @@ mutate the per-episode adjacency.
 
 ## Diffusion dynamics
 
-| Model  | Determinism                       | Per-step rule                                                                    |
-| ------ | --------------------------------- | ------------------------------------------------------------------------------- |
-| **IC** | stochastic                        | each newly infected `u` gets one try to infect each out-neighbor `v` with prob `p(u→v)`; success → `v` infected. Monotone (no node ever de-activates). Status: 0 Susceptible, 1 Infected (spreader, this step), 2 Removed (spent). |
-| **LT** | deterministic given thresholds    | `v` activates when the summed weight of its active in-neighbors ≥ its threshold `θ_v`. Thresholds are drawn `U(0,1)` per node **per episode and not stored**, so from a state-only view LT looks stochastic. |
+| Model  | Determinism                    | Per-step rule                                                                                                                                                                                                                      |
+| ------ | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **IC** | stochastic                     | each newly infected `u` gets one try to infect each out-neighbor `v` with prob `p(u→v)`; success → `v` infected. Monotone (no node ever de-activates). Status: 0 Susceptible, 1 Infected (spreader, this step), 2 Removed (spent). |
+| **LT** | deterministic given thresholds | `v` activates when the summed weight of its active in-neighbors ≥ its threshold `θ_v`. Thresholds are drawn `U(0,1)` per node **per episode and not stored**, so from a state-only view LT looks stochastic.                       |
 
 This determinism difference is why IC averages over `--mc-marginals` draws while
 LT uses a single draw, and why the world model uses a different structured head
@@ -240,31 +240,31 @@ per dynamics (see `world_model/README.md`).
 
 ## Customizable probabilities / knobs
 
-| Flag                              | Default       | What it controls                                                                                         |
-| --------------------------------- | ------------- | -------------------------------------------------------------------------------------------------------- |
-| `--dataset`                       | `cora_ml`     | real (`cora_ml, digg, twitter, jazz, netscience, power_grid, nethept`) or synthetic (`er, ba, ws, karate`) |
-| `--num-graphs`                    | `1`           | number of synthetic graph instances (folded into the seed)                                               |
-| `--syn-nodes`                     | `100`         | nodes per synthetic graph                                                                                |
-| `--models`                        | `IC LT`       | which dynamics to generate transitions for                                                               |
-| `--prob-model {weighted,uniform}` | `weighted`    | IC prob: `weighted` = 1/in_degree(v); `uniform` = constant `--uniform-p`                                 |
-| `--uniform-p`                     | `0.1`         | the constant IC prob (and LT weight) when `--prob-model uniform`                                         |
-| `--budget` / `--budget-pct`       | `5` / `None`  | seed-set size k (pct overrides absolute)                                                                 |
-| `--algorithms`                    | all 6 spine   | which seed selectors to roll out                                                                         |
-| `--rollouts` / `--horizon`        | `10` / `10`   | episodes per (graph, model, algo) / max timesteps                                                        |
-| `--inject-p`                      | `0.3`         | P(an intermediate step injects an action at all vs NULL)                                                 |
-| `--action-ops`                    | `[]`          | which ops to inject; empty = diffusion-only                                                              |
-| `--weight-lo` / `--weight-hi`     | `0.0` / `1.0` | range for `add_edge`/`set_edge_weight` weights, sampled `U(lo, hi)`                                      |
-| `--cf-prob`                       | `0.2`         | P(spawn counterfactual forks at a step)                                                                  |
-| `--cf-branches`                   | `2`           | # alternate-action branches per fork                                                                     |
-| `--mc-marginals`                  | `30`          | MC draws per step to estimate soft next-step marginal targets (1 = single-draw binary target)           |
-| `--split`                         | `0.7 0.15 0.15` | train / val / test episode split probabilities                                                         |
-| `--er-p`                          | `0.05`        | ER edge probability G(n, p) — structural                                                                 |
-| `--ba-m`                          | `3`           | BA attachment count (not a prob)                                                                         |
-| `--ws-k` / `--ws-p`               | `6` / `0.1`   | WS ring degree / rewire probability (structural)                                                         |
-| `--seed`                          | `42`          | master RNG (graph + selection + injection + sim all derive from it)                                      |
+| Flag                              | Default         | What it controls                                                                                           |
+| --------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------- |
+| `--dataset`                       | `cora_ml`       | real (`cora_ml, digg, twitter, jazz, netscience, power_grid, nethept`) or synthetic (`er, ba, ws, karate`) |
+| `--num-graphs`                    | `1`             | number of synthetic graph instances (folded into the seed)                                                 |
+| `--syn-nodes`                     | `100`           | nodes per synthetic graph                                                                                  |
+| `--models`                        | `IC LT`         | which dynamics to generate transitions for                                                                 |
+| `--prob-model {weighted,uniform}` | `weighted`      | IC prob: `weighted` = 1/in_degree(v); `uniform` = constant `--uniform-p`                                   |
+| `--uniform-p`                     | `0.1`           | the constant IC prob (and LT weight) when `--prob-model uniform`                                           |
+| `--budget` / `--budget-pct`       | `5` / `None`    | seed-set size k (pct overrides absolute)                                                                   |
+| `--algorithms`                    | all 6 spine     | which seed selectors to roll out                                                                           |
+| `--rollouts` / `--horizon`        | `10` / `10`     | episodes per (graph, model, algo) / max timesteps                                                          |
+| `--inject-p`                      | `0.3`           | P(an intermediate step injects an action at all vs NULL)                                                   |
+| `--action-ops`                    | `[]`            | which ops to inject; empty = diffusion-only                                                                |
+| `--weight-lo` / `--weight-hi`     | `0.0` / `1.0`   | range for `add_edge`/`set_edge_weight` weights, sampled `U(lo, hi)`                                        |
+| `--cf-prob`                       | `0.2`           | P(spawn counterfactual forks at a step)                                                                    |
+| `--cf-branches`                   | `2`             | # alternate-action branches per fork                                                                       |
+| `--mc-marginals`                  | `30`            | MC draws per step to estimate soft next-step marginal targets (1 = single-draw binary target)              |
+| `--split`                         | `0.7 0.15 0.15` | train / val / test episode split probabilities                                                             |
+| `--er-p`                          | `0.05`          | ER edge probability G(n, p) — structural                                                                   |
+| `--ba-m`                          | `3`             | BA attachment count (not a prob)                                                                           |
+| `--ws-k` / `--ws-p`               | `6` / `0.1`     | WS ring degree / rewire probability (structural)                                                           |
+| `--seed`                          | `42`            | master RNG (graph + selection + injection + sim all derive from it)                                        |
 
 > LT node thresholds are drawn `U(0, 1)` per node internally — no CLI flag, and
-> they are not stored (the world model must learn the threshold *marginal*).
+> they are not stored (the world model must learn the threshold _marginal_).
 
 ---
 
@@ -273,24 +273,24 @@ per dynamics (see `world_model/README.md`).
 `python data/validate_wm_data.py --dir <output_dir>` runs post-hoc gate checks on
 a produced dataset and prints a JSON summary:
 
-| Check                         | What it confirms                                                              |
-| ----------------------------- | ---------------------------------------------------------------------------- |
-| reward spread                 | rewards are not collapsed to a constant (mean/std/min/max)                   |
-| `main_monotone_ratio`         | main-branch `infected_count` is non-decreasing step to step (IC sanity)     |
-| `action_sensitivity_pairs`    | groups where same `(graph, episode, t, state)` + different action → different `next_state` (counterfactual coverage is real) |
-| `per_algorithm_final_spread`  | mean terminal spread per spine algorithm (eyeball `random < degree/pagerank < celf/local_search`) |
+| Check                        | What it confirms                                                                                                             |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| reward spread                | rewards are not collapsed to a constant (mean/std/min/max)                                                                   |
+| `main_monotone_ratio`        | main-branch `infected_count` is non-decreasing step to step (IC sanity)                                                      |
+| `action_sensitivity_pairs`   | groups where same `(graph, episode, t, state)` + different action → different `next_state` (counterfactual coverage is real) |
+| `per_algorithm_final_spread` | mean terminal spread per spine algorithm (eyeball `random < degree/pagerank < celf/local_search`)                            |
 
 ---
 
 ## Modules
 
-| Module                | Responsibility                                                                               |
-| --------------------- | -------------------------------------------------------------------------------------------- |
-| `wm_graphs.py`        | graph providers (real + synthetic) + edge probabilities → `GraphBundle`                       |
+| Module                | Responsibility                                                                                                    |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `wm_graphs.py`        | graph providers (real + synthetic) + edge probabilities → `GraphBundle`                                           |
 | `wm_simulator.py`     | `State` / `ActionOp` types + NDlib stepwise IC/LT sim with action injection, `advance_marginal`, snapshot/restore |
-| `wm_actions.py`       | spine seed selectors + MC spread oracle + injection schedule + counterfactual candidates      |
-| `graph_utils.py`      | adjacency → `edge_index` + IC/LT edge probabilities (shared)                                  |
-| `generate_wm_data.py` | graph store + JSONL transition writer + CLI orchestrator                                      |
-| `validate_wm_data.py` | post-hoc gate-check harness                                                                   |
-| `datasets/`           | per-dataset download + load helpers (lazy-imported by `wm_graphs.py`)                         |
-| `old/`                | **legacy** diffusion-only CND/IM/SL generators (archived; superseded by `generate_wm_data.py`) |
+| `wm_actions.py`       | spine seed selectors + MC spread oracle + injection schedule + counterfactual candidates                          |
+| `graph_utils.py`      | adjacency → `edge_index` + IC/LT edge probabilities (shared)                                                      |
+| `generate_wm_data.py` | graph store + JSONL transition writer + CLI orchestrator                                                          |
+| `validate_wm_data.py` | post-hoc gate-check harness                                                                                       |
+| `datasets/`           | per-dataset download + load helpers (lazy-imported by `wm_graphs.py`)                                             |
+| `old/`                | **legacy** diffusion-only CND/IM/SL generators (archived; superseded by `generate_wm_data.py`)                    |

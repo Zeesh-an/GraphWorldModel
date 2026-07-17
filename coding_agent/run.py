@@ -42,7 +42,7 @@ class ExperimentConfig:
     horizon: int = 10
     windows: int = 3
     outer_iters: int = 3
-    mc_runs: int = 30
+    mc_runs: int = 200
     n_samples: int = 20
     seed: int = 42
     device: str = "cpu"
@@ -218,6 +218,7 @@ class Baseline(Strategy):
         )
         mc_trajectory = mc_environment.rollout(action_fn, config.horizon, config.budget)
         result["mc_reward"] = mc_trajectory.reward
+        result["mc_reward_se"] = mc_trajectory.cost["reward_se"]
         result["mc_rollout_seconds"] = mc_trajectory.cost["rollout_seconds"]
         result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward
 
@@ -248,8 +249,7 @@ def _parse_args() -> ExperimentConfig:
         type=str,
         default=None,
         choices=algorithm_names,
-        help="evaluate this classical library algorithm instead of an LLM "
-        "strategy (default: None).",
+        help="evaluate this classical library algorithm instead of an LLM strategy (default: None).",
     )
     parser.add_argument(
         "--method",
@@ -299,8 +299,8 @@ def _parse_args() -> ExperimentConfig:
     parser.add_argument(
         "--mc-runs",
         type=int,
-        default=30,
-        help="Monte Carlo simulator runs (default: 30).",
+        default=200,
+        help="Monte Carlo simulator runs; ~(spread_std/target_se)^2, dial down for large graphs with --evaluator monte_carlo (default: 200).",
     )
     parser.add_argument(
         "--n-samples",
@@ -346,9 +346,7 @@ def _parse_args() -> ExperimentConfig:
     parser.add_argument(
         "--credit",
         action="store_true",
-        help="per-action counterfactual credit: ablate each action, report its "
-        "delta-spread in refinement feedback and the results JSON; costs one "
-        "extra rollout per action (default: False).",
+        help="per-action counterfactual credit: ablate each action, report its  delta-spread in refinement feedback and the results JSON; costs one extra rollout per action (default: False).",
     )
     parser.add_argument(
         "--out-json",
