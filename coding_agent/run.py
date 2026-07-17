@@ -5,7 +5,7 @@ python -m coding_agent.run --data-dir data/output/ba20_marg_structured \
     --model claude-haiku-4-5-20251001 \
     --wm-results-json world_model/checkpoints/ba20_marg_structured_sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
-    --outer-iters 3 --out-json coding_agent/results/first_llm_run.json
+    --outer-iters 3 --out-json coding_agent/results/llm_run_1.json
 """
 
 import argparse
@@ -25,6 +25,7 @@ from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
 from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
+from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo, TaskSpec
 
 world_model = "world_model"
@@ -50,6 +51,7 @@ class ExperimentConfig:
     wm_results_json: str | None = None  # train_wm.py results JSON (for the WM env)
     compare: bool = False  # also evaluate the winning strategy on the MC baseline
     credit: bool = False  # per-action counterfactual credit (feedback + results)
+    baseline: str | None = None  # library algorithm name; evaluates it with no LLM
     out_json: str | None = None
 
 
@@ -122,6 +124,29 @@ def run_experiment(
         graph = _load_graph(config)
 
     environment = _build_environment(config, graph)
+
+    if canned_script is not None:
+        provider_label = "canned"
+    elif config.baseline is not None:
+        # Classical-library baseline: same pipeline, envs, and metrics — no LLM.
+        if config.baseline not in algorithm_names:
+            raise ValueError(
+                f"unknown baseline {config.baseline!r}; choose one of {algorithm_names}"
+            )
+        provider_label = f"baseline:{config.baseline}"
+        canned_script = f"""\
+class Baseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        seeds = algorithms.{config.baseline}(
+            graph, budget, "{config.diffusion_model}", horizon=horizon
+        )
+        return [[Action("add_node", node) for node in seeds]] + [
+            [] for _ in range(horizon)
+        ]
+"""
+    else:
+        provider_label = config.model
+
     provider = (
         _CannedProvider(canned_script)
         if canned_script
@@ -159,7 +184,7 @@ def run_experiment(
     result = {
         "method": config.method,
         "evaluator": config.evaluator,
-        "model": "canned" if canned_script else config.model,
+        "model": provider_label,
         "reward": trajectory.reward,
         "summary": summarize(trajectory),
         # For per_step this is the last timestep's script (one is generated per step).
@@ -217,6 +242,14 @@ def _parse_args() -> ExperimentConfig:
         type=str,
         default="claude-sonnet-5",
         help="gateway model name, e.g. gpt-5.6-sol (default: claude-sonnet-5).",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=str,
+        default=None,
+        choices=algorithm_names,
+        help="evaluate this classical library algorithm instead of an LLM "
+        "strategy (default: None).",
     )
     parser.add_argument(
         "--method",
@@ -318,13 +351,17 @@ def _parse_args() -> ExperimentConfig:
         "extra rollout per action (default: False).",
     )
     parser.add_argument(
-        "--out-json", type=str, default=None, help="output JSON path (default: None)."
+        "--out-json",
+        type=str,
+        default=None,
+        help="output JSON path (default: None).",
     )
 
     args = parser.parse_args()
 
     return ExperimentConfig(
         model=args.model,
+        baseline=args.baseline,
         method=args.method,
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,

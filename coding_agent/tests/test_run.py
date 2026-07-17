@@ -52,3 +52,18 @@ def test_run_experiment_mc_with_canned_script():
     assert all(
         {"t", "actions", "infected", "frontier"} <= entry.keys() for entry in timeline
     )
+
+
+def test_run_experiment_baseline_no_llm():
+    config = ExperimentConfig(
+        evaluator=monte_carlo,
+        budget=1,
+        horizon=4,
+        mc_runs=10,
+        outer_iters=1,
+        baseline="high_degree",
+    )
+    result = run_experiment(config, graph=_hub())
+    assert result["model"] == "baseline:high_degree"
+    assert result["reward"] >= 1.0
+    assert "algorithms.high_degree" in result["script"]
