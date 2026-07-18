@@ -238,7 +238,7 @@ loss   = BCEWithLogits(logits[:,0], y_inf)                # next-infected
 Example:
 
 ```bash
-python world_model/train_wm.py \
+python -m world_model.train_wm \
     --data-dir data/output/ba20_marg_structured --diffusion-model IC \
     --model sage --head structured --pos-weight off \
     --hidden-dim 64 --n-layers 3 --epochs 400 --batch-size 32 --patience 50 \

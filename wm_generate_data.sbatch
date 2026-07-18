@@ -26,7 +26,7 @@ mkdir -p data/output logs
 python -m data.generate_wm_data \
     --dataset ba --num-graphs 20 --syn-nodes 100 --ba-m 3 \
     --models IC LT --prob-model weighted --budget 5 \
-    --algorithms random degree pagerank betweenness celf local_search \
+    --algorithms random degree pagerank betweenness \
     --rollouts 10 --horizon 10 --inject-p 0.3 --cf-prob 0.3 --cf-branches 2 \
     --action-ops add_node remove_node \
     --weight-lo 0.0 --weight-hi 1.0 \

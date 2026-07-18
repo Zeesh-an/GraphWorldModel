@@ -32,30 +32,37 @@ See the design spec:
 ```bash
 source .venv/bin/activate
 
+# NOTE: run as modules from the repo root (python -m ...); the file-path form
+# breaks the repo-root imports. Omitting --algorithms defaults to ALL SIX spine
+# selectors — celf and local_search are MC-greedy and turn a minutes-long
+# generation into hours. Pass the four analytic selectors for fast generation.
+
 # Diffusion-only (no actions) — the default when --action-ops is omitted
-python data/generate_wm_data.py --dataset ba --num-graphs 1
+python -m data.generate_wm_data --dataset ba --num-graphs 1
 
 # Node action interventions
-python data/generate_wm_data.py --dataset ba --num-graphs 1 \
+python -m data.generate_wm_data --dataset ba --num-graphs 1 \
     --action-ops add_node remove_node
 
 # Edge action interventions
-python data/generate_wm_data.py --dataset ba --num-graphs 1 \
+python -m data.generate_wm_data --dataset ba --num-graphs 1 \
     --action-ops add_edge remove_edge set_edge_weight
 
-# Multi-graph synthetic set (trustworthy ranking) — 20 BA graphs, both dynamics
-python data/generate_wm_data.py --dataset ba --num-graphs 20 \
+# Multi-graph synthetic set (trustworthy ranking) — 20 BA graphs, both dynamics,
+# all five ops, four cheap selectors (the ba20_marg_structured recipe)
+python -m data.generate_wm_data --dataset ba --num-graphs 20 \
     --action-ops add_node remove_node add_edge remove_edge set_edge_weight --models IC LT \
+    --algorithms random degree pagerank betweenness \
     --out-dir data/output/ba20_marg_structured
 
 # Real dataset (downloads on first use)
-python data/generate_wm_data.py --dataset jazz --action-ops add_node remove_node add_edge remove_edge set_edge_weight
+python -m data.generate_wm_data --dataset jazz --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
 # Tiny end-to-end check
-python data/generate_wm_data.py --smoke --out-dir /tmp/wm_smoke
+python -m data.generate_wm_data --smoke --out-dir /tmp/wm_smoke
 
 # Validate a produced dataset (gate checks)
-python data/validate_wm_data.py --dir data/output/ba
+python -m data.validate_wm_data --dir data/output/ba
 ```
 
 ---
@@ -270,7 +277,7 @@ per dynamics (see `world_model/README.md`).
 
 ## Validation (`validate_wm_data.py`)
 
-`python data/validate_wm_data.py --dir <output_dir>` runs post-hoc gate checks on
+`python -m data.validate_wm_data --dir <output_dir>` runs post-hoc gate checks on
 a produced dataset and prints a JSON summary:
 
 | Check                        | What it confirms                                                                                                             |

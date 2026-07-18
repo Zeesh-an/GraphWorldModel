@@ -179,13 +179,15 @@ settings are simply which ops you enable via `--action-ops` (omit = diffusion-on
 ```bash
 source .venv/bin/activate
 
-# 1. Generate data — 20 BA graphs, IC + LT, node actions, MC-marginal targets
-python data/generate_wm_data.py --dataset ba --num-graphs 20 \
-    --action-ops add_node remove_node --models IC LT \
+# 1. Generate data — 20 BA graphs, IC + LT, all five action ops, four cheap
+#    seed selectors, MC-marginal targets
+python -m data.generate_wm_data --dataset ba --num-graphs 20 \
+    --action-ops add_node remove_node add_edge remove_edge set_edge_weight \
+    --models IC LT --algorithms random degree pagerank betweenness \
     --out-dir data/output/ba20_marg_structured
 
 # 2. Train the world model — GraphSAGE, structured IC head
-python world_model/train_wm.py \
+python -m world_model.train_wm \
     --data-dir data/output/ba20_marg_structured --diffusion-model IC \
     --model sage --head structured --pos-weight off \
     --hidden-dim 64 --n-layers 3 --epochs 400 --batch-size 32 --patience 50 \
@@ -193,9 +195,9 @@ python world_model/train_wm.py \
     --results world_model/checkpoints/ba20_marg_structured_sage_IC.json
 
 # 3. (optional) re-evaluate a checkpoint without retraining
-python world_model/eval_rollout_ensemble.py \
+python -m world_model.eval_rollout_ensemble \
     --results world_model/checkpoints/ba20_marg_structured_sage_IC.json --device cpu
-python world_model/eval_structured_oracle.py \
+python -m world_model.eval_structured_oracle \
     --data-dir data/output/ba20_marg_structured --diffusion-model IC --device cpu
 ```
 
