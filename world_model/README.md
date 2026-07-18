@@ -198,6 +198,15 @@ The `f_v > 0` gate gives the same self-terminating bound as IC. One-step metrics
 are looser than IC by design (the best a state-only model can do is the threshold
 marginal `P(activate | f_v)`), but the rollout is faithful.
 
+### `structured_residual` (IC only, `--head structured_residual`)
+
+`ICTransmissionHead(residual=True)`: `q = sigmoid(logit(w) + MLP([h_u, h_v, w]))`.
+The MLP learns a residual correction on the true IC transmission prob, so zero
+correction reproduces the oracle exactly. Use when the training data lacks
+edge-weight diversity (e.g. node-op-only action sets): the plain `structured`
+head's `w → q` mapping is then unanchored and drifts optimistic in free-running
+rollouts (count_bias ≈ +2) despite equal one-step metrics.
+
 ### `structured_oracle` (validation only)
 
 `ICTransmissionHead(oracle=True)`: skips the MLP and sets `q = edge_weight` (the

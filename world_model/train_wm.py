@@ -89,14 +89,20 @@ if __name__ == "__main__":
         "--head",
         type=str,
         default="linear",
-        choices=["linear", "structured"],
-        help="output head type (default: linear).",
+        choices=["linear", "structured", "structured_residual"],
+        help="output head type; structured_residual anchors IC transmission on the true edge prob and learns only a correction (default: linear).",
     )
     parser.add_argument(
-        "--hidden-dim", type=int, default=64, help="hidden dimension (default: 64)."
+        "--hidden-dim",
+        type=int,
+        default=64,
+        help="hidden dimension (default: 64).",
     )
     parser.add_argument(
-        "--n-layers", type=int, default=3, help="number of encoder layers (default: 3)."
+        "--n-layers",
+        type=int,
+        default=3,
+        help="number of encoder layers (default: 3).",
     )
     parser.add_argument(
         "--n-heads",

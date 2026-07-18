@@ -30,6 +30,9 @@ case "$MODEL" in
   *)     EXTRA="--n-layers 3" ;; # gcn, sage
 esac
 
+CKPT_DIR="world_model/checkpoints/$(basename "$DATA")"
+mkdir -p "$CKPT_DIR"
+
 # Confirm the job actually got a GPU
 python -c "import torch; print('CUDA:', torch.cuda.is_available(), '|', (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU-ONLY'))"
 
@@ -39,7 +42,7 @@ python -m world_model.train_wm \
     --epochs 400 --lr 1e-3 --weight-decay 5e-4 --batch-size 32 \
     --pos-weight off --patience 50 --seed 42 \
     --device cuda --plan-demo \
-    --ckpt-dir world_model/checkpoints \
-    --results "world_model/checkpoints/$(basename "$DATA")_${MODEL}_${DM}.json"
+    --ckpt-dir "$CKPT_DIR" \
+    --results "$CKPT_DIR/${MODEL}_${DM}.json"
 
 echo "[train] done: model=$MODEL dm=$DM data=$DATA"

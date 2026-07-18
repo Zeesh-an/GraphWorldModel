@@ -40,9 +40,12 @@ class ICTransmissionHead(nn.Module):
     Returns logits (N, 2) so training (BCEWithLogits) and eval (sigmoid) are unchanged.
     """
 
-    def __init__(self, hidden_dim: int, oracle: bool = False) -> None:
+    def __init__(
+        self, hidden_dim: int, oracle: bool = False, residual: bool = False
+    ) -> None:
         super().__init__()
         self.oracle = oracle
+        self.residual = residual
 
         if not oracle:
             # [h_u, h_v, edge_weight] -> transmission logit
@@ -67,9 +70,7 @@ class ICTransmissionHead(nn.Module):
         # Apply the exogenous action (T_exo) first: add_node -> infected + active spreader;
         # remove_node -> stays infected (IC) but drops out of the frontier. Edge actions
         # are already reflected in graph.edge_index / edge_weight.
-        infected = torch.clamp(
-            X[:, ch_infected] + X[:, ch_add], max=1.0
-        )  # shape: (N,)
+        infected = torch.clamp(X[:, ch_infected] + X[:, ch_add], max=1.0)  # shape: (N,)
         frontier = torch.clamp(X[:, ch_frontier] + X[:, ch_add], max=1.0) * (
             1.0 - X[:, ch_remove]
         )  # shape: (N,)
@@ -85,19 +86,36 @@ class ICTransmissionHead(nn.Module):
                 transmission = edge_weight.clamp(0.0, 1.0)
             else:
                 edge_features = torch.cat(
-                    [hidden[sources], hidden[destinations], edge_weight.unsqueeze(dim=-1)],
+                    [
+                        hidden[sources],
+                        hidden[destinations],
+                        edge_weight.unsqueeze(dim=-1),
+                    ],
                     dim=-1,
                 )  # shape: (E, 2H + 1)
-                transmission = torch.sigmoid(self.edge_mlp(edge_features)).squeeze(
+                transmission_logits = self.edge_mlp(edge_features).squeeze(
                     dim=-1
                 )  # shape: (E,)
+
+                if self.residual:
+                    # Anchor q on the true IC transmission prob: the MLP learns only
+                    # a residual correction, so zero correction == the oracle head
+                    # Removes the need for edge-weight-diverse training data to pin down the w -> q mapping
+                    anchor = edge_weight.clamp(prob_epsilon, 1.0 - prob_epsilon)
+                    transmission_logits = (
+                        transmission_logits + torch.log(anchor) - torch.log1p(-anchor)
+                    )
+
+                transmission = torch.sigmoid(transmission_logits)  # shape: (E,)
 
             # Transmission gated by an active (frontier) source
             gated = (transmission * frontier[sources]).clamp(
                 0.0, 1.0 - prob_epsilon
             )  # shape: (E,)
             log_survival = torch.log1p(-gated)  # log(1 - t), shape: (E,)
-            survival_log_sum = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+            survival_log_sum = torch.zeros(
+                num_nodes, device=hidden.device
+            ).scatter_add_(
                 0, destinations, log_survival
             )  # shape: (N,)
             p_new = 1.0 - torch.exp(survival_log_sum)  # shape: (N,)
@@ -180,9 +198,7 @@ class LTThresholdHead(nn.Module):
 
         # Structural self-termination: no active neighbor -> no activation
         gate = (active_fraction > 0).to(active_fraction.dtype)
-        p_new = gate * torch.sigmoid(
-            tau * (active_fraction - theta_hat)
-        )  # shape: (N,)
+        p_new = gate * torch.sigmoid(tau * (active_fraction - theta_hat))  # shape: (N,)
 
         p_newly = (1.0 - active) * p_new  # susceptibles only
         y_inf = active + p_newly
@@ -231,6 +247,15 @@ class WorldModel(nn.Module):
                 if diffusion_model == "LT"
                 else ICTransmissionHead(hidden_dim)
             )
+        elif head_type == "structured_residual":
+            # IC-only: anchors q on the IC edge transmission prob (q = w at zero
+            # correction), so calibration does not depend on edge-op-diverse data
+            if diffusion_model == "LT":
+                raise ValueError(
+                    "structured_residual is IC-only: it anchors q on the IC edge "
+                    "transmission prob; LT edge weights carry no transmission meaning"
+                )
+            self.head = ICTransmissionHead(hidden_dim, residual=True)
         elif head_type == "structured_oracle":
             # Oracle is IC-only (LT thresholds are not stored, so no oracle there)
             self.head = ICTransmissionHead(hidden_dim, oracle=True)
@@ -241,7 +266,8 @@ class WorldModel(nn.Module):
             nn.init.zeros_(self.head.bias)
         else:
             raise ValueError(
-                f"unknown head_type {head_type}; choose from linear, structured, structured_oracle"
+                f"unknown head_type {head_type}; choose from linear, structured, "
+                f"structured_residual, structured_oracle"
             )
 
     def forward(self, X: torch.Tensor, graph: GraphInput) -> torch.Tensor:

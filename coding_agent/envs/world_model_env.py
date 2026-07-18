@@ -193,20 +193,40 @@ class WorldModelEnvironment:
                 .reshape(num_samples, num_nodes, 2)
             )  # shape: (n_samples, N, 2)
 
-            # Bernoulli draws for both channels across all samples at once
-            infected_draws = (
-                rng.random((num_samples, num_nodes)) < probabilities[:, :, 0]
-            )
-            frontier_draws = (
-                rng.random((num_samples, num_nodes)) < probabilities[:, :, 1]
-            )
+            # Coupled sampling: draw the new infections once from the frontier
+            # marginal, then derive both channels (frontier = new wave, infected
+            # accumulates through the action semantics)
+            # Independent per-channel draws create inconsistent states (ghost spreaders: frontier=1,
+            # infected=0) that systematically inflate free-running rollouts
+            new_draws = rng.random((num_samples, num_nodes)) < probabilities[:, :, 1]
 
             for sample in range(num_samples):
                 if not active[sample]:
                     continue
 
-                infected[sample] = set(np.nonzero(infected_draws[sample])[0].tolist())
-                frontier[sample] = set(np.nonzero(frontier_draws[sample])[0].tolist())
+                adds = {
+                    action_dict["target"]
+                    for action_dict in bag_dicts[sample]
+                    if action_dict["op"] == "add_node"
+                }
+                removes = {
+                    action_dict["target"]
+                    for action_dict in bag_dicts[sample]
+                    if action_dict["op"] == "remove_node"
+                }
+
+                post_exo_infected = infected[sample] | adds
+
+                if self.diffusion_model == "LT":
+                    # LT remove_node returns the node to Susceptible; IC keeps it counted
+                    post_exo_infected -= removes
+
+                new_nodes = (
+                    set(np.nonzero(new_draws[sample])[0].tolist()) - post_exo_infected
+                )
+
+                infected[sample] = post_exo_infected | new_nodes
+                frontier[sample] = new_nodes
 
                 # Terminate early once the cascade is dead (empty frontier) and the strategy is idle (empty bag)
                 if timestep > 0 and not frontier[sample] and not bags[sample]:

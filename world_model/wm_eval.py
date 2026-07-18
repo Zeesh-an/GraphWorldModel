@@ -389,12 +389,37 @@ def rollout_ensemble(
                     .cpu()
                     .numpy()
                 )
-                infected_draw = rng.random(num_nodes) < probs[:, 0]
-                frontier_draw = rng.random(num_nodes) < probs[:, 1]
-                model_infected[sample, step, np.nonzero(infected_draw)[0]] = 1.0
 
-                current_infected = set(np.nonzero(infected_draw)[0].tolist())
-                current_frontier = set(np.nonzero(frontier_draw)[0].tolist())
+                # Coupled sampling: draw the new infections once from the frontier
+                # marginal, then derive both channels (frontier = new wave, infected
+                # accumulates through the action semantics)
+                # Independent per-channel draws create inconsistent states (ghost spreaders: frontier=1,
+                # infected=0) that systematically inflate free-running rollouts
+                adds = {
+                    int(action_op["target"])
+                    for action_op in record["action"]
+                    if action_op["op"] == "add_node"
+                }
+                removes = {
+                    int(action_op["target"])
+                    for action_op in record["action"]
+                    if action_op["op"] == "remove_node"
+                }
+
+                post_exo_infected = current_infected | adds
+
+                if diffusion_model == "LT":
+                    # LT remove_node returns the node to Susceptible; IC keeps it counted.
+                    post_exo_infected -= removes
+
+                new_draw = rng.random(num_nodes) < probs[:, 1]
+                new_nodes = set(np.nonzero(new_draw)[0].tolist()) - post_exo_infected
+
+                current_infected = post_exo_infected | new_nodes
+                current_frontier = new_nodes
+                model_infected[
+                    sample, step, np.asarray(sorted(current_infected), dtype=np.int64)
+                ] = 1.0
 
         # Per-node infection frequency, shape: (num_steps, num_nodes)
         model_marginal = model_infected.mean(axis=0)
