@@ -14,6 +14,7 @@ python world_model/train_wm.py \
 import argparse
 import json
 import os
+import time
 from functools import partial
 from pathlib import Path
 import numpy as np
@@ -247,6 +248,7 @@ if __name__ == "__main__":
     os.makedirs(args.ckpt_dir, exist_ok=True)
     checkpoint_path = Path(args.ckpt_dir) / f"wm_{args.model}_{diffusion_model}.pt"
     best_delta_f1, epochs_since_best = -1.0, 0
+    train_start = time.perf_counter()
 
     for epoch in range(args.epochs):
         model.train()
@@ -281,9 +283,13 @@ if __name__ == "__main__":
                 )
                 break
 
+    train_seconds = time.perf_counter() - train_start
+    print(f"[train] total training time: {train_seconds:.1f}s")
+
     model.load_state_dict(torch.load(checkpoint_path, map_location=device))
     results = {
         "config": vars(args),
+        "train_seconds": train_seconds,
         "test": evaluate_one_step(model, test_dataset, diffusion_model, device),
     }
     results["rollout"] = rollout_ensemble(

@@ -38,7 +38,7 @@ python -c "import torch; print('CUDA:', torch.cuda.is_available(), '|', (torch.c
 
 python -m world_model.train_wm \
     --data-dir "$DATA" --diffusion-model "$DM" \
-    --model "$MODEL" --head structured --hidden-dim 64 $EXTRA \
+    --model "$MODEL" --head structured_residual --hidden-dim 64 $EXTRA \
     --epochs 400 --lr 1e-3 --weight-decay 5e-4 --batch-size 32 \
     --pos-weight off --patience 50 --seed 42 \
     --device cuda --plan-demo \
