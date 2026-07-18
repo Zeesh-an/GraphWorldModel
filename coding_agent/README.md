@@ -1,120 +1,454 @@
 # Coding-Agent Outer Loop
 
-An LLM coding-agent **outer loop** that designs Influence-Maximization algorithms
-emitting graph actions across **all** timesteps `t₀…t_T` (not just a `t₀` seed set),
-evaluated by the trained Graph World Model (fast inner loop) with a Monte-Carlo
-true-simulator baseline.
+An LLM coding agent that **designs Influence-Maximization algorithms as executable
+Python programs**, where the designed algorithm emits graph interventions across
+**all** timesteps `t₀ … t_T` — not just a seed set at `t₀` — and is scored by rolling
+its actions through a learned Graph World Model (fast inner loop) with the NDlib
+Monte-Carlo simulator as ground truth.
 
-## Architecture
+---
+
+## 1. Problem formulation: multi-timestep algorithms
+
+### The reframing
+
+Mark an algorithm's output as `R` (its _result_). Every classical IM/SL algorithm —
+PageRank seeding, greedy/CELF, RIS, source localization — produces only **`R_{t₀}`**:
+one solution at time zero, after which the dynamics simply run. That is the
+**degenerate special case** of what this subsystem targets:
 
 ```
-Agent (LLM, TODO) → Python Strategy script → graph actions per t → Environment → reward
-                          ▲                                              │
-                          └──────────── refine on reward ───────────────┘
+classical:   R_{t₀}                          (seed set, then hands off to dynamics)
+this work:   R_{t₀}, R_{t₁}, R_{t₂}, …, R_{t_T}   (an intervention at every timestep)
 ```
 
-- **Outer loop** (`methods/`): three interchangeable methods, all producing an
-  `action_fn(state, timestep) → list[ActionOp]`.
-- **Inner loop** (`envs/`): `WorldModelEnvironment` (default, fast) or
-  `MonteCarloEnvironment` (NDlib ground truth) behind one `rollout()` interface.
-- **Agent** (`agent.py`): provider-agnostic; `GatewayProvider` is the concrete LLM
-  call (OpenAI-compatible gateway, `gpt-*` and `claude-*` models).
-- **Library** (`tools/`): named algorithms over a primitive layer; the agent's script
-  may call these.
+Equivalently, in optimization terms: the classical formulation confines the decision
+variables to `t₀`; here the problem is **augmented with decision variables at
+`t₁, t₂, …`**. Even adding only `t₁` changes the problem class — a human can hand-design
+PageRank, but not a "super-PageRank" that anticipates and schedules interventions
+across time. A coding agent can attempt it, and classical methods fall out as the
+`R_{t₀}`-only special case (an all-at-`t₀` plan with empty later bags — exactly what
+the `--baseline` mode constructs).
 
-## The three methods (`--method`)
+**Scope note:** the horizon does not need to be long for this to be a real
+contribution. Two or three intervention timesteps (`t₀ + t₁`, or `t₀ + t₁ + t₂`)
+already constitute the augmented problem; 100-step plans are neither needed nor
+affordable.
 
-| Method     | Idea                                                                | Agent calls          |
-| ---------- | ------------------------------------------------------------------- | -------------------- |
-| `one_shot` | one "super-algorithm" emits the whole `t₀…T` plan; refine on reward | few                  |
-| `per_step` | re-prompt the agent every timestep on the current state             | one/step (expensive) |
-| `windowed` | design one online algorithm; re-apply per time window               | one                  |
+### Formal objects
 
-## Quick start
+- **State** `S_t = (infected_t, frontier_t)` — ever-activated nodes and the currently
+  spreading wave (sorted node-id lists; `data.wm_simulator.State`).
+- **Action bag** `A_t = [ActionOp, …]` — zero or more operations applied at step `t`.
+  `ActionOp(op, target, destination=None, weight=None)` is the **unified action
+  representation**: an explicit _type_ dimension (`op`) and _target_ dimensions
+  (`target`, `destination`, `weight`), so one formulation covers seed injection,
+  node removal, and structural edits across task types instead of one encoding
+  per problem. The same value type is used by the data generator, the trained
+  world model, and every strategy here (`types.ActionOp` is the simulator's class,
+  re-exported — there is exactly one definition in the project).
+- **Plan** `R_{t₀…T} = [A_0, A_1, …, A_T]` — what Method 1 strategies emit
+  (`horizon + 1` bags; bag `t` is applied at timestep `t`).
+- **Transition** `S_{t+1} ~ P(· | S_t, A_t, G_t)` — one simulator/world-model step:
+  the deterministic action effect (T_exo) followed by one stochastic diffusion
+  step (T_endo). Edge ops mutate `G_t` itself.
+- **Reward** `J = E[ |infected_{T+1}| ]` — expected final spread, estimated by an
+  ensemble (`mc_runs` NDlib rollouts or `n_samples` world-model rollouts).
+- **Budget** `b` — at most `b` `add_node` actions across the whole plan.
+
+### What the feedback optimizes
+
+The refinement loop adjusts **the algorithm (the skill), never the LLM's weights**.
+The outer loop searches over _programs_: propose an algorithm → roll its actions
+through the environment → feed the scalar reward (plus optional per-action credit
+and error tracebacks) back as a revision prompt → the agent rewrites the program.
+The world model's role is to make each candidate evaluation cheap enough that this
+program-level search is affordable.
+
+---
+
+## 2. Architecture
+
+```
+             ┌────────────────────── outer loop (methods/) ──────────────────────┐
+             │                                                                    │
+  LLM (agent.py) ──► Python Strategy script ──► executor.py ──► ActionFn(state,t) │
+             ▲            (exec + validate)                          │            │
+             │                                                        ▼            │
+             │                                    Environment.rollout (envs/)      │
+             │                                    WM (fast) / NDlib MC (truth)     │
+             │                                                        │            │
+             └──────── reward + summary + credit + errors ◄───────────┘            │
+                                                                                   │
+             └─────────────────────────────────────────────────────────────────────┘
+```
+
+| File          | Responsibility                                                                                                                                                                                           |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `types.py`    | `GraphInfo` (read-only graph view: `edge_index (2,E)`, `ic_probs (E,)`, lazy adjacency/degree caches), `TaskSpec` (budget/horizon/dynamics/`allowed_ops`), `Trajectory`, `Strategy` protocol, `ActionFn` |
+| `agent.py`    | `LLMProvider` protocol, `GatewayProvider` (lab gateway), `extract_code_block`, `CodingAgent`                                                                                                             |
+| `prompts.py`  | system prompts per method (output contract + reply skeleton), user prompt (task/graph/API), feedback prompt                                                                                              |
+| `executor.py` | `build_strategy` (exec in controlled namespace), `call_strategy` (runtime-error conversion), `validate_actions`, `StrategyError`                                                                         |
+| `methods/`    | `one_shot.py`, `per_step.py`, `windowed.py` — all implement `OuterLoopMethod.optimize(agent, env, task, graph) → (Strategy, Trajectory)`                                                                 |
+| `envs/`       | `MonteCarloEnvironment` (NDlib ground truth), `WorldModelEnvironment` (trained GNN simulator) behind one `rollout(action_fn, horizon, budget, seed)` interface                                           |
+| `tools/`      | `primitives.py` (16 classical-IM building blocks), `algorithms.py` (30 named algorithms), `library_api.py` (auto-generated prompt reference)                                                             |
+| `credit.py`   | per-action counterfactual credit via paired ablation rollouts                                                                                                                                            |
+| `run.py`      | experiment driver: config, provider selection, baselines, compare replay, results JSON                                                                                                                   |
+
+The single coupling point between methods and environments is the **`ActionFn`
+closure**: `(State, timestep) → list[ActionOp]`. Environments never know whether
+actions come from a fixed plan, a live policy, or an LLM call — which is exactly
+what makes the world model a drop-in replacement for the simulator.
+
+---
+
+## 3. The three methods (`--method`)
+
+The methods are two extremes plus a middle point on a cost/adaptivity spectrum.
+They differ **only** in who produces the `t > 0` actions and how often the LLM is
+invoked; the environment contract is identical.
+
+### Method 1 — `one_shot`: one super-algorithm emits the whole horizon
+
+The agent designs a single algorithm whose `plan_horizon(graph, budget, horizon)`
+returns the entire plan `R_{t₀…T}` up front. The environment rolls the whole plan;
+the final reward (plus a trajectory summary, plus optional per-action credit, plus
+the full traceback if the script failed) is appended to the next prompt, and the
+agent **revises the algorithm** — up to `--outer-iters` times, keeping the
+best-by-reward candidate.
+
+- Inner execution is an **open-loop plan** (committed before seeing the realized
+  stochastic trajectory); the outer skill-refinement loop is closed.
+- LLM cost: `outer_iters` calls total. Rollout cost per candidate is one ensemble.
+- Implementation detail: `plan_horizon` is invoked through `call_strategy`, so a
+  runtime crash _inside generated code_ becomes a `StrategyError` whose traceback
+  is fed back as a repair turn rather than killing the run. Every bag is validated
+  (op legality vs `allowed_ops`, node range, per-bag and whole-plan seed budget).
+- This is the highest-novelty method (the "super-algorithm") and the feasibility
+  probe: can a program anticipate the full horizon?
+
+### Method 2 — `per_step`: re-prompt the agent at every timestep
+
+The LLM **is** the policy: at each timestep the current state (full infected +
+frontier lists) is appended to the prompt, the agent writes a fresh script, its
+`act(state, graph, timestep)` is executed for that step only.
+
+- Maximally adaptive — every action conditions on the realized state.
+- **Prohibitively expensive**: the LLM is called once per _(ensemble sample ×
+  timestep)_. With `n_samples=20` and horizon 10 that is up to ~200 coding-agent
+  calls per evaluation. Treat this method as the adaptivity **upper bound / cost
+  reference**, not the practical operating point. Every call is logged
+  (`[per_step] LLM call k (t=…, |infected|=…)`) because that count is the cost.
+- Caveats: there is no repair loop (a `StrategyError` mid-rollout aborts the
+  method), `validate_actions` is not applied to `act` outputs, and the archived
+  `script` in the results JSON is the _last_ generated script (one exists per call).
+
+### Method 3 — `windowed`: one online algorithm, re-applied per time window
+
+The agent designs the algorithm **once**; the timeline is split into
+`--windows` stages (`window_length = max(1, (horizon+1) // windows)`), and the
+algorithm's `act(state, graph, window_index)` is consulted only at window
+boundaries — solving a fresh sub-problem on the current state each window
+(classical algorithms may be reused per window; the prompt says so explicitly).
+Budget applies **per window call**.
+
+- One LLM call, closed-loop at window granularity: cheaper than Method 2,
+  more reactive than Method 1.
+- The simplest method to stand up — "apply the old IM algorithm, staged" — and it
+  reframes the objective from a single terminal target into per-window objectives
+  with state rolled forward between stages.
+
+### The trade-off spectrum
+
+|                              | Method 1 (`one_shot`)                       | Method 3 (`windowed`)                   | Method 2 (`per_step`)                    |
+| ---------------------------- | ------------------------------------------- | --------------------------------------- | ---------------------------------------- |
+| LLM/agent calls              | `outer_iters` (refinement only)             | 1 (designed once)                       | one per sample × timestep                |
+| Adaptivity to realized state | none (open-loop plan)                       | per-window                              | per-step                                 |
+| Cost                         | low                                         | low–medium                              | very high                                |
+| Novelty                      | highest (super-algorithm across time)       | moderate (classical algos, staged)      | adaptivity bound, not a practical method |
+| Loop type                    | open-loop plan + closed skill refinement    | closed-loop policy (window granularity) | closed-loop policy (LLM as policy)       |
+| Failure handling             | full repair loop (errors → revision prompt) | fail-fast                               | fail-fast                                |
+
+---
+
+## 4. The action space
+
+Five operations, shared with the data generator and the world model
+(`data.wm_simulator.valid_action_ops`):
+
+| op                | fields                         | IC effect                                          | LT effect                              |
+| ----------------- | ------------------------------ | -------------------------------------------------- | -------------------------------------- |
+| `add_node`        | `target`                       | activate node (transmits during this step)         | activate node                          |
+| `remove_node`     | `target`                       | leaves the frontier, **stays counted** as infected | back to Susceptible (can re-activate)  |
+| `add_edge`        | `target→destination`, `weight` | add arc with transmission prob `weight`            | add edge structurally (weight ignored) |
+| `remove_edge`     | `target→destination`           | remove arc                                         | remove edge                            |
+| `set_edge_weight` | `target→destination`, `weight` | set transmission prob                              | no-op                                  |
+
+**Budget semantics (and a known sharp edge):** `validate_actions` charges only
+`add_node` against the budget — edge ops are currently **free**. Left
+unconstrained, capable models reliably discover the degenerate exploit: boost every
+frontier out-edge to ~1.0 and convert stochastic IC into deterministic percolation
+(observed: `mc_reward` 99.97/100). Two controls exist today:
+
+- `--allowed-ops add_node remove_node` — restricts the ops a strategy may emit;
+  enforced in the prompt (`any other op is REJECTED`) _and_ by `validate_actions`,
+  whose rejection message feeds the repair loop.
+- A per-op cost/budget model is the planned fix for making edge ops a fair,
+  non-degenerate part of the game.
+
+**Rules vs. coverage are independent knobs:** `--allowed-ops` sets the _game rules_
+for the agent; the world model's training data sets its _coverage_. Train the
+evaluator on the superset of ops (supersets are safe; subsets bite — see §7).
+
+---
+
+## 5. The agent layer: from chat reply to validated program
+
+### What the LLM sees (the complete context)
+
+The system prompt (per method) carries: the role; the output contract (exactly one
+fenced ```python block, one `Strategy` subclass, no imports, no module-level code);
+the injected-names documentation; the action rules; the method's interface
+(`plan_horizon`vs`act`); and a concrete **reply skeleton** (small models follow
+scaffolds far more reliably than prose rules). The user prompt carries: task and
+objective strings, `diffusion_model`, `budget`, `horizon`, `allowed_ops`, the graph
+as **three aggregate numbers only** (`num_nodes`, `num_edges`, `directed`), the full
+auto-generated **library API reference** (every algorithm and primitive signature
+with its first docstring line — docstrings in `tools/` are literally prompt text),
+and the closing instruction. Refinement turns append: previous reward, trajectory
+summary, the error traceback (repair path), and the credit report (`--credit`).
+
+The LLM never sees raw topology. By design, the _generated code_ gets the real
+graph at runtime (`GraphInfo` with full `edge_index`, `ic_probs`, neighbor/degree
+accessors); the LLM's job is to write an algorithm that inspects the graph
+programmatically, not to reason over an adjacency list in context.
+
+### Extraction, execution, validation
+
+1. `extract_code_block` collects all fenced blocks and prefers the first one
+   containing `class ` (models pad replies with prose snippets in extra fences),
+   falling back to the first fence, then the raw text.
+2. `build_strategy` compiles and `exec`s the script in a **controlled namespace**
+   containing exactly the names the prompts advertise: `ActionOp`, `State`,
+   `GraphInfo`, `Strategy`, `algorithms`, `primitives`. Candidate classes are
+   discovered by attribute (`plan_horizon`/`act`), excluding the injected base _by
+   identity_ (a script may legally name its class `Strategy`). The instantiated
+   strategy gets `source_script` attached so results JSONs archive the exact code
+   that earned the reward. _This is a research scaffold, not a security sandbox._
+3. `call_strategy` wraps every invocation of generated code: any exception becomes
+   a `StrategyError` carrying the exception type and full traceback.
+4. `validate_actions` checks each bag: op ∈ `allowed_ops`, node ids in range,
+   seeds within budget (per bag, and `one_shot` additionally enforces the total
+   across the plan).
+
+`StrategyError` is the failure currency of the subsystem: it marks "the generated
+program is wrong" (recoverable — becomes a revision prompt), as opposed to every
+other exception, which is a bug in _this_ codebase and crashes loudly.
+
+### Providers
+
+`GatewayProvider` speaks the OpenAI chat API against the lab gateway, routing the
+bearer token by model family (`claude-*` vs `gpt-*`; tokens + `GATEWAY_BASE_URL`
+live in the gitignored `.env`, loaded by `run.py`). Two operational quirks it
+absorbs: the gateway's Claude account **drops system messages**, so system+user are
+folded into a single user turn (verified harmless for gpt models); and retries are
+owned locally (3 attempts with printed warnings) with SDK retries disabled.
+`--temperature 0.0` gives greedy decoding for reproducible evals — keep the
+provider default (sampling) for refinement runs, where cross-iteration diversity
+is what the search feeds on. Any object with `complete(system, user) → str`
+satisfies `LLMProvider`; tests and `--baseline` inject canned providers.
+
+---
+
+## 6. Environments: the inner loop
+
+Both environments implement `rollout(action_fn, horizon, budget, seed) → Trajectory`
+with identical semantics: start from the empty state; at each timestep `t ∈
+[0, horizon]` ask `action_fn(state, t)` for a bag, advance one step, record; stop
+early when the cascade is dead (empty frontier) _and_ the strategy is idle (empty
+bag). Reward is the **ensemble mean** of final infected counts; `cost.reward_se`
+(sample std / √n) self-reports the noise; the recorded `states`/`actions` are the
+**first sample's** trajectory (the representative), whose last count is overwritten
+by the ensemble mean — which is why `counts` can end in a non-integer.
+
+### `MonteCarloEnvironment` — ground truth
+
+`mc_runs` independent NDlib simulators (fresh child-seeded simulator per run),
+exact IC/LT stepwise dynamics with full action support. This is the baseline the
+world model is measured against, and what `--compare` replays the winning strategy
+on.
+
+### `WorldModelEnvironment` — the learned simulator
+
+Loads a trained `WorldModel` from a `train_wm.py` results JSON: the `"config"`
+block reconstructs the exact architecture, and the checkpoint path is derived as
+`ckpt_dir / wm_<backbone>_<dynamics>.pt` (keep per-dataset `ckpt_dir`s — the
+filename does not encode the dataset). Rollout mechanics:
+
+- **Lockstep block-diagonal batching**: all `n_samples` rollouts advance together;
+  each timestep is ONE forward pass over the disjoint union of the samples' graphs
+  (adjacency normalization is per-component, so this is exact — the same trick as
+  the training collate). ~20× fewer forwards than per-sample loops.
+- **Copy-on-write edge state**: the graph tensor is built once per rollout and
+  rebuilt only when an edge op actually fires; each sample owns its own adjacency
+  after mutating it.
+- **Coupled sampling**: each step draws the _new infections_ once from the
+  frontier marginal, then derives both channels — `frontier := new wave`,
+  `infected` accumulates through the action semantics (adds join; IC removes stay
+  counted; LT removes return to susceptible). Independent per-channel Bernoullis
+  (the previous scheme) create impossible states — "ghost spreaders" with
+  frontier=1, infected=0 — that systematically inflate free-running rollouts
+  (measured at ~+1 count bias via the oracle head).
+- Per-sample early termination with an active mask; per-sample states are honored
+  for `per_step` semantics (each sample's `action_fn` call sees that sample's own
+  state).
+
+### Trusting the evaluator (read before believing `reward`)
+
+- **`wm_minus_mc` is the trust meter.** Always run `--compare` while iterating;
+  the WM's validated band on in-distribution plans is roughly ±2 (≈ its own
+  `reward_se` at 20 samples).
+- **OOD is about action _intensity_, not just op type.** A WM trained with ~1
+  injected op per step scores single interventions well and mass interventions
+  arbitrarily badly (observed error growing +2.4 → −5.7 → −39.7 with edge-boost
+  count). Match the training action distribution to what the agent is allowed to
+  emit.
+- **One-step metrics cannot certify an evaluator.** A per-wave transmission
+  optimism of ~1% is invisible to teacher-forced `delta_f1`/Brier and compounds to
+  +2 nodes over a 10-step rollout. Gate world-model checkpoints on
+  `rollout.ens_count_bias` (target |bias| ≲ 1), and prefer the
+  `structured_residual` head for IC when training data lacks edge-weight
+  diversity (it anchors per-edge transmission on the true probability and learns
+  only a residual correction; zero correction equals the validated oracle).
+- Ensemble sizes are a noise knob: comparisons between strategies need
+  `mc_runs` such that the gap exceeds ~2×√(se₁² + se₂²); the `--mc-runs`
+  default (200) gives SE ≈ 0.6 on BA-100-scale spreads.
+
+---
+
+## 7. Counterfactual credit (`--credit`)
+
+`credit.py` converts the scalar reward into causal, per-action feedback: for each
+action in the plan, re-roll the **same environment with the same seed** with that
+single action deleted; `delta = base_reward − ablated_reward` is the spread that
+action is responsible for (`~0` = wasted budget). The shared seed makes the
+comparison paired (common-random-numbers variance reduction). With `--credit`:
+
+- `one_shot` refinement prompts include the per-action report — the agent sees
+  "your `set_edge_weight(7→9)` contributed +0.00" instead of a bare scalar, which
+  is precisely the signal that kills wasted actions.
+- The results JSON gains `credit_base_reward` + one `{t, op, target, delta}` entry
+  per action.
+- For state-dependent strategies (`per_step`/`windowed`) the recorded bags are
+  replayed as a fixed plan, so credit is an approximation there (the live policy
+  would have reacted to the ablated cascade).
+
+Cost: one extra ensemble rollout per action in the plan.
+
+---
+
+## 8. The tools library
+
+The strategy's callable surface — advertised to the LLM verbatim via
+`library_api.build_api_reference()` (signatures via `inspect`, summaries from the
+first docstring line).
+
+**Primitives** (`tools/primitives.py`, 16 advertised): degree/out-degree/weighted-
+degree scoring, top-k selection, power-iteration PageRank, eigenvector/closeness
+centrality, `mc_simulate_spread` (the honest NDlib spread estimator), marginal
+gain, reverse-reachable-set sampling + max-coverage selection (`batch_reverse_sample`,
+`ris_select`), label-propagation communities + largest-remainder budget allocation,
+RIS sample-size heuristic, live-edge sampling + reachability, truncated
+path-product influence scores.
+
+**Named algorithms** (`tools/algorithms.py`, 30, uniform signature
+`(graph, budget, diffusion_model, **kw) → list[int]`):
+
+| Family        | Functions                                                                     |
+| ------------- | ----------------------------------------------------------------------------- |
+| Degree        | `high_degree`, `weighted_degree`, `degree_discount`                           |
+| Centrality    | `pagerank_seeds`, `eigenvector_seeds`, `closeness_seeds`                      |
+| Greedy (MC)   | `vanilla_greedy`, `celf`, `celf_pp`, `adaptive_greedy`                        |
+| RIS           | `ris_basic`, `tim`, `imm`, `ssa`, `filtered_ris`                              |
+| Path          | `sp1m`, `mia_pmia`, `ldag`                                                    |
+| Sketch        | `static_greedy`, `skim`                                                       |
+| Community     | `community_im`, `cofim`, `community_ris`                                      |
+| Metaheuristic | `simulated_annealing`, `hill_climbing`, `genetic_algorithm`                   |
+| Hybrid        | `pagerank_greedy`, `degree_ris_refine`, `celf_local_search`, `community_celf` |
+
+Heavy algorithms (MIA/PMIA, LDAG, SKIM, StaticGreedy, SSA, IMM, CELF++, Adaptive
+Greedy) are faithful-but-simplified, noted in their docstrings. All MC-based
+estimators use the real NDlib simulator — the honest classical cost that the world
+model exists to undercut in the outer loop.
+
+---
+
+## 9. Running experiments
 
 ```bash
-# Monte-Carlo baseline, canned strategy (no model needed) — via Python:
-python -c "from coding_agent.run import ExperimentConfig, run_experiment; ..."
+# LLM run: node-ops game, WM evaluator, MC compare, credit feedback
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --allowed-ops add_node remove_node \
+    --model claude-sonnet-5 --outer-iters 3 --credit \
+    --out-json coding_agent/results/run.json
 
-# World-model inner loop on a trained checkpoint:
-python -m coding_agent.run \
-    --data-dir data/output/ba20_marg_structured \
-    --wm-results-json world_model/checkpoints/ba20_marg_structured_sage_IC.json \
-    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare
+# Classical baseline through the identical pipeline (no LLM, no .env needed)
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --baseline celf --outer-iters 1 --out-json coding_agent/results/baseline_celf.json
+
+# Reproducible eval: greedy decoding
+#   ... --temperature 0.0
 ```
 
-> The LLM defaults to `claude-sonnet-5` via the gateway (`--model` switches, e.g.
-> `gpt-5.6-sol`); requires `GATEWAY_BASE_URL` + tokens in `.env`. Model-less runs
-> (tests) use a canned script via `run_experiment(cfg, graph=..., canned_script=...)`.
+Key flags: `--method {one_shot,per_step,windowed}` · `--evaluator
+{world_model,monte_carlo}` · `--model` (gateway name; default `claude-sonnet-5`) ·
+`--temperature` (omit = provider default; `0.0` = greedy) · `--allowed-ops` ·
+`--baseline <algorithm>` (synthesizes the all-at-`t₀` special-case plan) ·
+`--budget` / `--horizon` / `--windows` / `--outer-iters` · `--mc-runs` (MC ensemble
+/ compare size; default 200) · `--n-samples` (WM ensemble; default 20) ·
+`--graph-id` (default: first graph in the store) · `--compare` · `--credit` ·
+`--out-json`.
 
-## Counterfactual credit (`--credit`)
+### Results JSON schema
 
-Per-action reward attribution (`credit.py`): each action in the plan is ablated
-(removed, everything else identical, same rollout seed) and re-rolled, giving
-`delta = base_spread - ablated_spread` — the spread that single action is
-responsible for (`~0` = wasted budget). With `--credit`:
+| Key                                               | Meaning                                                                                                                                                                |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `method`, `evaluator`, `model`                    | provenance; `model` is the gateway name, `baseline:<algo>`, or `canned`                                                                                                |
+| `reward`                                          | ensemble-mean final spread under the inner-loop evaluator                                                                                                              |
+| `summary`                                         | one-line trajectory summary (final spread, steps, per-step counts)                                                                                                     |
+| `script`                                          | the exact source of the winning strategy (per_step: last generated script)                                                                                             |
+| `cost`                                            | `{n_samples                                                                                                                                                            | mc_runs, env, reward_se, rollout_seconds}` for the winning trajectory |
+| `timeline`                                        | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
+| `credit_base_reward`, `credit`                    | with `--credit`: paired-ablation base reward + per-action deltas                                                                                                       |
+| `mc_reward`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy                                                                                                          |
+| `wm_minus_mc`                                     | evaluator fidelity on this exact strategy — the trust meter                                                                                                            |
+| `elapsed_seconds`                                 | whole experiment including LLM calls                                                                                                                                   |
 
-- **`one_shot` refinement turns** include the per-action credit report, so the
-  agent gets causal feedback ("your t=3 seed contributed +0.2") instead of a
-  bare scalar reward.
-- **The results JSON** gains `credit_base_reward` + `credit` (one entry per
-  action) for the winning strategy, whatever the method. For state-dependent
-  strategies (`per_step`/`windowed`) the recorded bags are replayed as a fixed
-  plan, so credit is an approximation there.
+Timing semantics: `cost.rollout_seconds` vs `mc_rollout_seconds` is the WM-vs-MC
+speed comparison on the same strategy (normalize by ensemble size:
+`/n_samples` vs `/mc_runs`). For `per_step`, rollout time includes LLM latency —
+use `one_shot`/`windowed` for clean simulator timing.
 
-Cost: one extra rollout per action per evaluation — cheap on the world-model
-evaluator, noticeably slower on `--evaluator monte_carlo`.
+---
 
-## Implemented algorithms (`tools/algorithms.py`)
+## 10. Practical notes
 
-| Family        | Function              | Notes                                                   |
-| ------------- | --------------------- | ------------------------------------------------------- |
-| Degree        | `high_degree`         | top-k total degree                                      |
-| Degree        | `weighted_degree`     | top-k by summed outgoing IC prob                        |
-| Degree        | `degree_discount`     | DegreeDiscount (Chen et al. 2009)                       |
-| Centrality    | `pagerank_seeds`      | top-k PageRank                                          |
-| Centrality    | `eigenvector_seeds`   | top-k eigenvector centrality                            |
-| Centrality    | `closeness_seeds`     | top-k closeness centrality                              |
-| Greedy        | `vanilla_greedy`      | marginal-gain greedy (Kempe et al. 2003)                |
-| Greedy        | `celf`                | lazy-forward greedy (Leskovec et al. 2007)              |
-| Greedy        | `celf_pp`             | CELF++ (Goyal et al. 2011) — simplified                 |
-| Greedy        | `adaptive_greedy`     | adaptive MC count — simplified                          |
-| RIS           | `ris_basic`           | reverse influence sampling (Borgs et al. 2014), IC only |
-| RIS           | `tim`                 | TIM/TIM+ (Tang et al. 2014)                             |
-| RIS           | `imm`                 | IMM (Tang et al. 2015) — simplified                     |
-| RIS           | `ssa`                 | SSA/D-SSA (Nguyen et al. 2016) — simplified             |
-| RIS           | `filtered_ris`        | RR-size-filtered RIS                                    |
-| Path          | `sp1m`                | SP1M/SPM (Kimura & Saito 2006) — truncated path-sum     |
-| Path          | `mia_pmia`            | MIA/PMIA (Chen et al. 2010) — simplified                |
-| Path          | `ldag`                | LDAG (Chen et al. 2010) — simplified                    |
-| Sketch        | `static_greedy`       | StaticGreedy (Cheng et al. 2014)                        |
-| Sketch        | `skim`                | SKIM (Cohen et al. 2014) — simplified                   |
-| Community     | `community_im`        | label-propagation communities + per-community degree    |
-| Community     | `cofim`               | CoFIM (Zhang et al. 2014) — bridge-aware                |
-| Community     | `community_ris`       | per-community RR coverage                               |
-| Metaheuristic | `simulated_annealing` | degree init + annealed swaps                            |
-| Metaheuristic | `hill_climbing`       | degree init + 1-swap local search                       |
-| Metaheuristic | `genetic_algorithm`   | seed-set GA (crossover + mutation)                      |
-| Hybrid        | `pagerank_greedy`     | PageRank candidate pool + greedy                        |
-| Hybrid        | `degree_ris_refine`   | degree init + RR-coverage swaps                         |
-| Hybrid        | `celf_local_search`   | CELF + 1-swap refinement                                |
-| Hybrid        | `community_celf`      | per-community CELF                                      |
-
-Heavy algorithms (MIA/PMIA, LDAG, SKIM, StaticGreedy, SSA, IMM, Adaptive Greedy) are
-**faithful-but-simplified** (noted in their docstrings).
-
-Primitives (`tools/primitives.py`): `compute_degree`, `compute_out_degree`,
-`compute_weighted_degree`, `compute_pagerank`, `compute_centrality`,
-`get_top_degree_nodes`, `mc_simulate_spread`, `compute_marginal_gain`,
-`batch_reverse_sample`, `ris_select`, `detect_communities`, `allocate_budget`,
-`estimate_sample_size`, `sample_live_edge_graph`, `reachable_count`,
-`path_influence_scores`, `build_simulator`.
-
-## Wiring a model
-
-`GatewayProvider` (`agent.py`) is wired to the lab's OpenAI-compatible gateway. It
-reads `GATEWAY_BASE_URL` and the per-account token from the environment
-(`CLAUDE_GATEWAY_TOKEN` for `claude-*` models, `CHATGPT_GATEWAY_TOKEN` otherwise) —
-put them in `.env` (gitignored) and `load_dotenv()` picks them up in `run.py`.
-To use a different backend, implement an `LLMProvider` with
-`complete(system, user) -> str` and pass it to `CodingAgent(provider)`.
+- **BA graphs are degree-trivial.** On BA-100, degree ≈ CELF ≈ any portfolio; a
+  strong agent will _find the ceiling_ (≈ the classical baselines), not beat it.
+  Separation comes from community-structured graphs (WS/SBM/real), from temporal
+  scheduling, and — once budgeted — from edge ops that no classical baseline uses.
+- `per_step` cost scales as active-samples × timesteps LLM calls per evaluation;
+  budget accordingly or use `--evaluator monte_carlo --mc-runs <small>` while
+  prototyping it.
+- `--outer-iters 1` disables the repair loop; ≥3 recommended for any live model
+  (the first script is frequently imperfect, and the traceback-as-feedback path is
+  what fixes it).
+- The `.env` at the repo root provides `GATEWAY_BASE_URL`,
+  `CLAUDE_GATEWAY_TOKEN`, `CHATGPT_GATEWAY_TOKEN` (gitignored; `chmod 600`).
+- Old results JSONs archive scripts written against the former `Action` alias;
+  the exec namespace now exposes `ActionOp` — re-generated scripts are unaffected,
+  but replaying archived pre-rename scripts verbatim would fail.

@@ -1,12 +1,13 @@
 """
 Top-level driver: run the coding-agent outer loop over the inner-loop environment
 
-python -m coding_agent.run --data-dir data/output/ba20_marg_structured \
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --model claude-sonnet-5 \
-    --wm-results-json world_model/checkpoints/ba20_marg_structured_sage_IC.json \
+    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
-    --outer-iters 5 --out-json coding_agent/results/llm_run_3.json
+    --mc-runs 200 --n-samples 50 \
+    --outer-iters 5 --out-json coding_agent/results/llm_run_5.json
 """
 
 import argparse
@@ -33,6 +34,9 @@ from world_model.wm_data import load_graph_store
 
 world_model = "world_model"
 monte_carlo = "monte_carlo"
+
+# Fresh-seed WM re-evaluations of the winning strategy during --compare
+wm_reeval_seeds = 3
 
 
 @dataclass
@@ -240,6 +244,21 @@ class Baseline(Strategy):
         result["mc_reward_se"] = mc_trajectory.cost["reward_se"]
         result["mc_rollout_seconds"] = mc_trajectory.cost["rollout_seconds"]
         result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward
+
+        # `reward` is the max over outer iterations, all evaluated at rollout
+        # seed 0 — it carries selection optimism (winner's curse) plus that one
+        # seed's persistent luck. Re-evaluating the winner on fresh seeds gives
+        # the unbiased WM estimate: judge evaluator fidelity by
+        # wm_reeval_minus_mc, not wm_minus_mc.
+        reeval_rewards = [
+            environment.rollout(
+                action_fn, config.horizon, config.budget, seed=reeval_seed
+            ).reward
+            for reeval_seed in range(1, wm_reeval_seeds + 1)
+        ]
+        result["wm_reeval_rewards"] = reeval_rewards
+        result["wm_reeval_mean"] = sum(reeval_rewards) / len(reeval_rewards)
+        result["wm_reeval_minus_mc"] = result["wm_reeval_mean"] - mc_trajectory.reward
 
     # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives in cost.rollout_seconds / mc_rollout_seconds
     result["elapsed_seconds"] = time.perf_counter() - experiment_start

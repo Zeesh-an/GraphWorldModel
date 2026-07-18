@@ -56,10 +56,9 @@ NDlib:
   (`random, degree, pagerank, betweenness, celf, local_search`).
 - **t > 0** optionally injects an action (probability `--inject-p`), else `NULL`.
 - each step is advanced and recorded as `(s_t, a_t, s_{t+1}, reward)`.
-- **counterfactual forks** re-apply *different* actions from the same `s_t` (same
+- **counterfactual forks** re-apply _different_ actions from the same `s_t` (same
   state, different action) — the signal that forces action-conditioning.
-- **Monte-Carlo marginals**: each step is re-run `--mc-marginals` times (default
-  30) to estimate the *true* one-step probability `P(infected)` / `P(frontier)`
+- **Monte-Carlo marginals**: each step is re-run `--mc-marginals` times (default 30) to estimate the _true_ one-step probability `P(infected)` / `P(frontier)`
   per node — these soft marginals are the training targets.
 
 Full details, the JSONL schema, and every flag: [`data/README.md`](data/README.md).
@@ -71,14 +70,14 @@ Each transition becomes a per-node feature matrix and a graph view.
 **`X` — shape `(N, 6)`**, one row per node, six channels describing time `t`
 before diffusion:
 
-| col | channel | represents | type |
-| --- | ------- | ---------- | ---- |
-| 0 | `infected`    | node ever-activated at `t` (state)              | binary |
-| 1 | `frontier`    | node in the current spreading wave at `t` (state)| binary |
-| 2 | `degree`      | `log1p(total degree)` in the time-`t` graph (structure) | float |
-| 3 | `act_add`     | target of an `add_node` op this step (action)   | binary |
-| 4 | `act_remove`  | target of a `remove_node` op this step (action) | binary |
-| 5 | `act_edge`    | endpoint of an edge op this step (action)       | binary |
+| col | channel      | represents                                              | type   |
+| --- | ------------ | ------------------------------------------------------- | ------ |
+| 0   | `infected`   | node ever-activated at `t` (state)                      | binary |
+| 1   | `frontier`   | node in the current spreading wave at `t` (state)       | binary |
+| 2   | `degree`     | `log1p(total degree)` in the time-`t` graph (structure) | float  |
+| 3   | `act_add`    | target of an `add_node` op this step (action)           | binary |
+| 4   | `act_remove` | target of a `remove_node` op this step (action)         | binary |
+| 5   | `act_edge`   | endpoint of an edge op this step (action)               | binary |
 
 Channels 0–1 are the **state**, 2 is **structure**, 3–5 are the **action**
 projected onto nodes. **Targets** `y_inf, y_fr` (each `(N,)`) are the soft MC
@@ -97,13 +96,13 @@ A **backbone encoder** maps `X (N,6) → h (N, hidden)`, then a **head** maps
 
 Five plug-and-play backbones (`--model`):
 
-| backbone | `--model` | mechanism | graph view |
-| -------- | --------- | --------- | ---------- |
-| GCN | `gcn` | `Â X W`, pre-norm residual | `adj_norm` |
-| GraphSAGE | `sage` | `concat(self, weighted-mean(neighbors))` | `edge_index` + `edge_weight` |
-| GATv2 | `gat` | dynamic attention `aᵀLeakyReLU(W_l h_v + W_r h_u)`, multi-head | `edge_index` + `edge_weight` |
-| Graph Transformer | `gt` | scaled dot-product attention + FFN, pre-norm | `edge_index` + `edge_weight` |
-| GCNII | `gcnii` | initial residual + identity mapping (deep) | `adj_norm` |
+| backbone          | `--model` | mechanism                                                      | graph view                   |
+| ----------------- | --------- | -------------------------------------------------------------- | ---------------------------- |
+| GCN               | `gcn`     | `Â X W`, pre-norm residual                                     | `adj_norm`                   |
+| GraphSAGE         | `sage`    | `concat(self, weighted-mean(neighbors))`                       | `edge_index` + `edge_weight` |
+| GATv2             | `gat`     | dynamic attention `aᵀLeakyReLU(W_l h_v + W_r h_u)`, multi-head | `edge_index` + `edge_weight` |
+| Graph Transformer | `gt`      | scaled dot-product attention + FFN, pre-norm                   | `edge_index` + `edge_weight` |
+| GCNII             | `gcnii`   | initial residual + identity mapping (deep)                     | `adj_norm`                   |
 
 Three heads (`--head`):
 
@@ -141,13 +140,13 @@ Every action is `(op, target, [destination], [weight])`. `target` is the node (o
 edge source `u`); `destination` is the edge sink `v`; `weight` is the IC
 transmission probability for the edge.
 
-| op | record fields | IC effect | LT effect |
-| -- | ------------- | --------- | --------- |
-| `add_node`        | `target=v`                          | activate `v` (spreader next step)        | activate `v`                       |
-| `remove_node`     | `target=v`                          | mark Removed/spent (stays counted)       | back to Susceptible (can re-activate) |
-| `add_edge`        | `target=u, destination=v, weight=w` | add arc `u→v` with transmission `w`      | add edge structurally (weight ignored) |
-| `remove_edge`     | `target=u, destination=v`           | remove arc `u→v`                         | remove edge structurally           |
-| `set_edge_weight` | `target=u, destination=v, weight=w` | set arc `u→v` transmission `w`           | no-op (LT ignores edge weights)    |
+| op                | record fields                       | IC effect                           | LT effect                              |
+| ----------------- | ----------------------------------- | ----------------------------------- | -------------------------------------- |
+| `add_node`        | `target=v`                          | activate `v` (spreader next step)   | activate `v`                           |
+| `remove_node`     | `target=v`                          | mark Removed/spent (stays counted)  | back to Susceptible (can re-activate)  |
+| `add_edge`        | `target=u, destination=v, weight=w` | add arc `u→v` with transmission `w` | add edge structurally (weight ignored) |
+| `remove_edge`     | `target=u, destination=v`           | remove arc `u→v`                    | remove edge structurally               |
+| `set_edge_weight` | `target=u, destination=v, weight=w` | set arc `u→v` transmission `w`      | no-op (LT ignores edge weights)        |
 
 Node ops set the `act_add` / `act_remove` input channels; edge ops set the
 `act_edge` channel **and** mutate the per-episode adjacency. The three data
@@ -203,30 +202,30 @@ python -m world_model.eval_structured_oracle \
 
 ### Key training flags
 
-| flag | default | meaning |
-| ---- | ------- | ------- |
-| `--data-dir` | — | generated dataset directory |
-| `--diffusion-model` | `IC` | `IC` or `LT` (selects the structured head too) |
-| `--model` | `gcn` | backbone: `gcn`, `sage`, `gt`, `gat`, `gcnii` |
-| `--head` | `linear` | `linear` or `structured` (use `structured` for a faithful simulator) |
-| `--pos-weight` | `auto` | class-imbalance up-weighting; use `off` with the structured head |
-| `--hidden-dim` / `--n-layers` | `64` / `3` | encoder width / depth |
-| `--n-heads` / `--ffn-dim` | `4` / `128` | attention backbones (GAT/GT) |
-| `--gcnii-alpha` / `--gcnii-lamda` | `0.1` / `0.5` | GCNII initial-residual / decay |
-| `--epochs` / `--patience` | `200` / `30` | training length / early-stop on val `delta_f1` |
-| `--plan-demo` / `--plan-graphs` | off / `5` | run multi-graph planning-regret eval |
+| flag                              | default       | meaning                                                              |
+| --------------------------------- | ------------- | -------------------------------------------------------------------- |
+| `--data-dir`                      | —             | generated dataset directory                                          |
+| `--diffusion-model`               | `IC`          | `IC` or `LT` (selects the structured head too)                       |
+| `--model`                         | `gcn`         | backbone: `gcn`, `sage`, `gt`, `gat`, `gcnii`                        |
+| `--head`                          | `linear`      | `linear` or `structured` (use `structured` for a faithful simulator) |
+| `--pos-weight`                    | `auto`        | class-imbalance up-weighting; use `off` with the structured head     |
+| `--hidden-dim` / `--n-layers`     | `64` / `3`    | encoder width / depth                                                |
+| `--n-heads` / `--ffn-dim`         | `4` / `128`   | attention backbones (GAT/GT)                                         |
+| `--gcnii-alpha` / `--gcnii-lamda` | `0.1` / `0.5` | GCNII initial-residual / decay                                       |
+| `--epochs` / `--patience`         | `200` / `30`  | training length / early-stop on val `delta_f1`                       |
+| `--plan-demo` / `--plan-graphs`   | off / `5`     | run multi-graph planning-regret eval                                 |
 
 ---
 
 ## Current results (BA-100, structured SAGE, seed 42)
 
-| | IC | LT |
-| --- | --- | --- |
-| one-step `delta_f1` | **0.829** | **0.539** (partial-observability cap) |
-| `brier_infected` (calibration) | **0.0012** | **0.0320** |
-| rollout `count_bias` (≈0 = no saturation) | **−0.58** | **−1.43** |
-| final count model / true | **36.6 / 36.7** | **47.3 / 46.2** |
-| planning regret model / degree / random | 0.244 / 0.269 / 3.11 | 0.196 / 0.271 / 3.37 |
+|                                           | IC                   | LT                                    |
+| ----------------------------------------- | -------------------- | ------------------------------------- |
+| one-step `delta_f1`                       | **0.829**            | **0.539** (partial-observability cap) |
+| `brier_infected` (calibration)            | **0.0012**           | **0.0320**                            |
+| rollout `count_bias` (≈0 = no saturation) | **−0.58**            | **−1.43**                             |
+| final count model / true                  | **36.6 / 36.7**      | **47.3 / 46.2**                       |
+| planning regret model / degree / random   | 0.244 / 0.269 / 3.11 | 0.196 / 0.271 / 3.37                  |
 
 The structured SAGE world model is an accurate, calibrated, **non-saturating**
 one-step simulator on both dynamics and beats random planning decisively. Full
