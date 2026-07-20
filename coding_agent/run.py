@@ -1,6 +1,33 @@
 """
 Top-level driver: run the coding-agent outer loop over the inner-loop environment
 
+Baselines -
+
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --baseline degree_discount --outer-iters 1 \
+    --out-json coding_agent/results/baseline_degree_discount.json
+
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --baseline celf_pp --outer-iters 1 \
+    --out-json coding_agent/results/baseline_celf_pp.json
+
+
+Graph algorithm routing (LLM picks from a list of graph algorithms, no synthesis) -
+
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+    --model claude-sonnet-5 \
+    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --routing --outer-iters 1 \
+    --out-json coding_agent/results/routing.json
+
+
+Coding Agent (One-shot) -
+
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --model claude-sonnet-5 \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
@@ -13,6 +40,7 @@ python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
 import argparse
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from functools import partial
@@ -27,6 +55,7 @@ from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
 from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
+from coding_agent.prompts import build_routing_prompt, routing_system
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo, TaskSpec
 from data.wm_simulator import valid_action_ops
@@ -62,6 +91,7 @@ class ExperimentConfig:
     compare: bool = False  # also evaluate the winning strategy on the MC baseline
     credit: bool = False  # per-action counterfactual credit (feedback + results)
     baseline: str | None = None  # library algorithm name; evaluates it with no LLM
+    routing: bool = False  # GA routing: one LLM call picks a library algorithm
     allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
     out_json: str | None = None
 
@@ -121,6 +151,23 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
     raise ValueError(f"unknown evaluator {config.evaluator!r}")
 
 
+def _parse_routing_choice(reply: str) -> str:
+    cleaned = reply.strip().strip("`'\".")
+
+    if cleaned in algorithm_names:
+        return cleaned
+
+    # Models sometimes wrap the name in prose; accept iff exactly one menu name appears
+    mentioned = [name for name in algorithm_names if re.search(rf"\b{name}\b", reply)]
+    if len(mentioned) == 1:
+        return mentioned[0]
+
+    raise ValueError(
+        f"routing reply must name exactly one library algorithm, got {reply!r} "
+        f"(matched: {mentioned})"
+    )
+
+
 def _strategy_action(
     strategy: object, graph: GraphInfo, state: object, timestep: int
 ) -> list:
@@ -139,6 +186,27 @@ def run_experiment(
 
     environment = _build_environment(config, graph)
 
+    task = TaskSpec(
+        diffusion_model=config.diffusion_model,
+        budget=config.budget,
+        horizon=config.horizon,
+        allowed_ops=tuple(config.allowed_ops),
+    )
+
+    # GA routing: one LLM call selects from the algorithm pool (no synthesis),
+    # then the pick runs through the identical --baseline canned path below
+    routing_reply = None
+    if config.routing:
+        if config.baseline is not None:
+            raise ValueError("--routing and --baseline are mutually exclusive")
+
+        router = GatewayProvider(config.model, temperature=config.temperature)
+        routing_reply = router.complete(
+            routing_system, build_routing_prompt(task, graph)
+        )
+        config.baseline = _parse_routing_choice(routing_reply)
+        print(f"[run] routing picked {config.baseline!r}")
+
     if canned_script is not None:
         provider_label = "canned"
     elif config.baseline is not None:
@@ -150,7 +218,11 @@ def run_experiment(
 
         # For classical baseline, construct a canned one-shot script that calls algorithms.<name>(graph, budget, dynamics, horizon=horizon)
         # Seeds at t=0
-        provider_label = f"baseline:{config.baseline}"
+        provider_label = (
+            f"routing:{config.baseline}"
+            if config.routing
+            else f"baseline:{config.baseline}"
+        )
         canned_script = f"""\
 class Baseline(Strategy):
     def plan_horizon(self, graph, budget, horizon):
@@ -170,12 +242,6 @@ class Baseline(Strategy):
         else GatewayProvider(config.model, temperature=config.temperature)
     )
     agent = CodingAgent(provider)
-    task = TaskSpec(
-        diffusion_model=config.diffusion_model,
-        budget=config.budget,
-        horizon=config.horizon,
-        allowed_ops=tuple(config.allowed_ops),
-    )
 
     method = build_method(config.method)
     if config.method == "windowed":
@@ -211,6 +277,9 @@ class Baseline(Strategy):
         "cost": trajectory.cost,
         "timeline": timeline,
     }
+
+    if routing_reply is not None:
+        result["routing_reply"] = routing_reply
 
     # When the credit flag is enabled, ablate the executed action sequence against the same environment and measure the reward
     if config.credit:
@@ -304,6 +373,11 @@ if __name__ == "__main__":
         default=None,
         choices=algorithm_names,
         help="evaluate this classical library algorithm instead of an LLM strategy (default: None).",
+    )
+    parser.add_argument(
+        "--routing",
+        action="store_true",
+        help="GA-routing baseline: one LLM call picks a library algorithm from the menu, then it runs through the --baseline canned path (default: False).",
     )
     parser.add_argument(
         "--method",
@@ -415,6 +489,7 @@ if __name__ == "__main__":
         model=args.model,
         temperature=args.temperature,
         baseline=args.baseline,
+        routing=args.routing,
         allowed_ops=tuple(args.allowed_ops),
         method=args.method,
         evaluator=args.evaluator,

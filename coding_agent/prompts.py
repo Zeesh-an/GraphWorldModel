@@ -1,5 +1,5 @@
 from coding_agent.types import GraphInfo, TaskSpec
-from coding_agent.tools.library_api import build_api_reference
+from coding_agent.tools.library_api import build_algorithm_menu, build_api_reference
 
 # Shared system-prompt preamble containing common rules for the coding agent
 common_rules = """\
@@ -102,6 +102,34 @@ LIBRARY API:
 {build_api_reference()}
 
 Write the Strategy now (method = {method})."""
+
+
+# GA-routing baseline: the LLM selects from the pool but never synthesizes code
+routing_system = """\
+You are an algorithm-selection router for Influence Maximization.
+You will be given a task, a graph description, and a menu of classical library
+algorithms. Pick the single most promising algorithm for this graph and task.
+
+Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+no explanation."""
+
+
+def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
+    return f"""\
+TASK: {task.task} — {task.objective}
+diffusion_model = {task.diffusion_model}
+budget = {task.budget}   (max seeds total)
+horizon = {task.horizon} (timesteps)
+
+GRAPH:
+num_nodes = {graph.num_nodes}
+num_edges = {graph.edge_index.shape[1]}
+directed = {graph.directed}
+
+ALGORITHM MENU:
+{build_algorithm_menu()}
+
+Reply with exactly one name from the menu."""
 
 
 def build_feedback_prompt(

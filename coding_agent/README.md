@@ -400,6 +400,14 @@ python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
     --baseline celf --outer-iters 1 --out-json coding_agent/results/baseline_celf.json
 
+# GA routing: one LLM call picks a library algorithm (no code synthesis),
+# then it runs through the identical --baseline canned path
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+    --model claude-sonnet-5 \
+    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --routing --outer-iters 1 --out-json coding_agent/results/routing.json
+
 # Reproducible eval: greedy decoding
 #   ... --temperature 0.0
 ```
@@ -408,6 +416,9 @@ Key flags: `--method {one_shot,per_step,windowed}` · `--evaluator
 {world_model,monte_carlo}` · `--model` (gateway name; default `claude-sonnet-5`) ·
 `--temperature` (omit = provider default; `0.0` = greedy) · `--allowed-ops` ·
 `--baseline <algorithm>` (synthesizes the all-at-`t₀` special-case plan) ·
+`--routing` (GA-routing baseline: the LLM selects one pool algorithm from a
+name+summary menu — adaptive *selection* without synthesis; the pick is recorded
+as `model: routing:<algo>` and the raw reply as `routing_reply`) ·
 `--budget` / `--horizon` / `--windows` / `--outer-iters` · `--mc-runs` (MC ensemble
 / compare size; default 200) · `--n-samples` (WM ensemble; default 20) ·
 `--graph-id` (default: first graph in the store) · `--compare` · `--credit` ·
@@ -417,7 +428,7 @@ Key flags: `--method {one_shot,per_step,windowed}` · `--evaluator
 
 | Key                                               | Meaning                                                                                                                                                                |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `method`, `evaluator`, `model`                    | provenance; `model` is the gateway name, `baseline:<algo>`, or `canned`                                                                                                |
+| `method`, `evaluator`, `model`                    | provenance; `model` is the gateway name, `baseline:<algo>`, `routing:<algo>`, or `canned`                                                                              |
 | `reward`                                          | ensemble-mean final spread under the inner-loop evaluator                                                                                                              |
 | `summary`                                         | one-line trajectory summary (final spread, steps, per-step counts)                                                                                                     |
 | `script`                                          | the exact source of the winning strategy (per_step: last generated script)                                                                                             |

@@ -38,6 +38,17 @@ def _signature_line(function: Callable) -> str:
     return f"  {function.__name__}{signature}\n      {summary}"
 
 
+def build_algorithm_menu() -> str:
+    """Return one `- name: summary` line per library algorithm (routing prompt)."""
+    lines = []
+    for name in algorithm_names:
+        doc_lines = (algorithms.algorithms[name].__doc__ or "").strip().splitlines()
+        summary = doc_lines[0] if doc_lines else ""
+        lines.append(f"- {name}: {summary}")
+
+    return "\n".join(lines)
+
+
 def build_api_reference() -> str:
     """Return a formatted reference of named algorithms + primitives."""
     algorithm_lines = [
