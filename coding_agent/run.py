@@ -24,6 +24,16 @@ python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
     --routing --outer-iters 1 \
     --out-json coding_agent/results/routing.json
+    
+
+Oracle - 
+
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+    --model claude-sonnet-5 \
+    --method one_shot --evaluator oracle --budget 5 --horizon 10 --compare \
+    --allowed-ops add_node remove_node \
+    --mc-runs 200 --n-samples 50 \
+    --outer-iters 5 --out-json coding_agent/results/oracle_run.json
 
 
 Coding Agent (One-shot) -

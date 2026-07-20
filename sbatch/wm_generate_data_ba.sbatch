@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=wm_generate_data
+#SBATCH --job-name=wm_generate_data_ba
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 
-# Usage: sbatch wm_generate_data.sbatch
+# Usage: sbatch sbatch/wm_generate_data_ba.sbatch
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/

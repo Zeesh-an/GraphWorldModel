@@ -7,8 +7,8 @@
 #SBATCH --mem=16G
 #SBATCH --gres=gpu:1
 
-# Usage: sbatch wm_train.sbatch <model> <diffusion_model> <data_dir>
-# Usage: sbatch wm_train.sbatch sage IC data/output/ba20_marg_structured
+# Usage: sbatch sbatch/wm_train.sbatch <model> <diffusion_model> <data_dir>
+# Usage: sbatch sbatch/wm_train.sbatch sage IC data/output/sbm40_marg_structured
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
