@@ -158,18 +158,28 @@ settings are simply which ops you enable via `--action-ops` (omit = diffusion-on
 ## Datasets
 
 **Synthetic** (`--dataset`): `er` (Erdős–Rényi), `ba` (Barabási–Albert), `ws`
-(Watts–Strogatz), `karate`. Generated in bulk via `--num-graphs` with
-`log1p(degree)` node features.
+(Watts–Strogatz), `sbm` (stochastic block model — planted communities via
+`--sbm-blocks/--sbm-p-in/--sbm-p-out`), `karate`. Generated in bulk via
+`--num-graphs` with `log1p(degree)` node features.
 
-**Real** (downloaded on first use via `data/datasets/`):
+**Real** (downloaded on first use via `data/datasets/`; Weibo needs a manual
+AMiner download — see `data/datasets/weibo.py`):
 
-| Dataset        | Nodes  | Edges  | Type                        | Node Features          |
-| -------------- | ------ | ------ | --------------------------- | ---------------------- |
-| **Cora-ML**    | 2,995  | 8,416  | Directed (citations)        | 2,879-dim bag-of-words |
-| **Jazz**       | 198    | 2,742  | Undirected (collaborations) | log(1 + degree)        |
-| **NetScience** | 1,589  | 2,742  | Undirected (coauthorship)   | log(1 + degree)        |
-| **Power Grid** | 4,941  | 6,594  | Undirected (power lines)    | log(1 + degree)        |
-| **NetHEPT**    | 15,229 | 62,752 | Directed (citations)        | log(1 + total degree)  |
+| Dataset        | Nodes     | Edges     | Type                             | Node Features          |
+| -------------- | --------- | --------- | -------------------------------- | ---------------------- |
+| **Cora-ML**    | 2,995     | 8,416     | Directed (citations)             | 2,879-dim bag-of-words |
+| **Jazz**       | 198       | 2,742     | Undirected (collaborations)      | log(1 + degree)        |
+| **NetScience** | 1,589     | 2,742     | Undirected (coauthorship)        | log(1 + degree)        |
+| **Power Grid** | 4,941     | 6,594     | Undirected (power lines)         | log(1 + degree)        |
+| **NetHEPT**    | 15,229    | 62,752    | Directed (citations)             | log(1 + total degree)  |
+| **Twitter**    | 81,306    | ≈1.3M     | Undirected (follows, symmetrized)| log(1 + degree)        |
+| **Digg**       | 116,893   | ≈2.6M     | Undirected (friendships)         | log(1 + degree)        |
+| **YouTube**    | 1,134,890 | 2,987,624 | Undirected (friendships)         | log(1 + degree)        |
+| **Weibo**      | 1,787,443 | ≈216M     | Directed (influence u→v)         | log(1 + total degree)  |
+
+The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what
+the current NDlib rollout + selector pipeline can simulate in reasonable time —
+they are targets for a future scalable-simulation pass, not day-one datasets.
 
 ---
 

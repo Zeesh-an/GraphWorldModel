@@ -68,6 +68,8 @@ def load_netscience(
     if nodes_path.exists():
         with open(nodes_path) as file:
             reader = csv.DictReader(file)
+            # Header lines look like "# index, label, _pos" — strip the comment marker and padding
+            reader.fieldnames = [name.strip(" #") for name in reader.fieldnames]
             for row in reader:
                 node_ids.add(int(row["index"]))
 
@@ -77,6 +79,7 @@ def load_netscience(
 
     with open(data_path / "edges.csv") as file:
         reader = csv.DictReader(file)
+        reader.fieldnames = [name.strip(" #") for name in reader.fieldnames]
         for row in reader:
             source, destination = int(row["source"]), int(row["target"])
             source_list.append(source)
@@ -106,7 +109,9 @@ def load_netscience(
     values = np.ones(len(sources), dtype=np.float32)
 
     # Build sparse adjacency, deduplicate via csr conversion
-    adjacency = sp.csr_matrix((values, (sources, destinations)), shape=(num_nodes, num_nodes))
+    adjacency = sp.csr_matrix(
+        (values, (sources, destinations)), shape=(num_nodes, num_nodes)
+    )
     adjacency = (adjacency > 0).astype(np.float32)
     adjacency.setdiag(0)
     adjacency.eliminate_zeros()

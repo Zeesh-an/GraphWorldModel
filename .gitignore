@@ -35,6 +35,17 @@ __pycache__/
 # Action-conditioned world-model generated data
 data/output/
 
+# Raw real-dataset downloads (written by the data/datasets/ loaders)
+data/cora_ml/
+data/digg/
+data/twitter/
+data/jazz/
+data/netscience/
+data/power_grid/
+data/nethept/
+data/weibo/
+data/youtube/
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb

@@ -95,7 +95,9 @@ def load_power_grid(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, 
     values = np.ones(len(sources), dtype=np.float32)
 
     # Build sparse adjacency, deduplicate via csr conversion
-    adjacency = sp.csr_matrix((values, (sources, destinations)), shape=(num_nodes, num_nodes))
+    adjacency = sp.csr_matrix(
+        (values, (sources, destinations)), shape=(num_nodes, num_nodes)
+    )
     adjacency = (adjacency > 0).astype(np.float32)
     adjacency.setdiag(0)
     adjacency.eliminate_zeros()

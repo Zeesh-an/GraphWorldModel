@@ -103,7 +103,9 @@ def load_nethept(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
     values = np.ones(len(sources), dtype=np.float32)
 
     # Build directed sparse adjacency
-    adjacency = sp.csr_matrix((values, (sources, destinations)), shape=(num_nodes, num_nodes))
+    adjacency = sp.csr_matrix(
+        (values, (sources, destinations)), shape=(num_nodes, num_nodes)
+    )
     adjacency = (adjacency > 0).astype(np.float32)
     adjacency.setdiag(0)
     adjacency.eliminate_zeros()

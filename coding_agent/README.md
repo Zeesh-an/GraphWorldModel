@@ -408,12 +408,24 @@ python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
     --routing --outer-iters 1 --out-json coding_agent/results/routing.json
 
+# Oracle-dynamics ceiling: true IC transitions, no checkpoint / --wm-results-json
+python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+    --model claude-sonnet-5 \
+    --method one_shot --evaluator oracle --budget 5 --horizon 10 --compare \
+    --outer-iters 5 --out-json coding_agent/results/oracle_run.json
+
+# Native coding agent: one real execution per candidate, episodes counted
+#   ... --evaluator monte_carlo --mc-runs 1
+
 # Reproducible eval: greedy decoding
 #   ... --temperature 0.0
 ```
 
 Key flags: `--method {one_shot,per_step,windowed}` · `--evaluator
-{world_model,monte_carlo}` · `--model` (gateway name; default `claude-sonnet-5`) ·
+{world_model,monte_carlo,oracle}` (`oracle` = true IC dynamics via the
+`structured_oracle` head — no checkpoint, IC-only, the model-based ceiling;
+`monte_carlo --mc-runs 1` = the native-agent condition, one real execution per
+candidate) · `--model` (gateway name; default `claude-sonnet-5`) ·
 `--temperature` (omit = provider default; `0.0` = greedy) · `--allowed-ops` ·
 `--baseline <algorithm>` (synthesizes the all-at-`t₀` special-case plan) ·
 `--routing` (GA-routing baseline: the LLM selects one pool algorithm from a
@@ -434,6 +446,7 @@ as `model: routing:<algo>` and the raw reply as `routing_reply`) ·
 | `script`                                          | the exact source of the winning strategy (per_step: last generated script)                                                                                             |
 | `cost`                                            | `{n_samples                                                                                                                                                            | mc_runs, env, reward_se, rollout_seconds}` for the winning trajectory |
 | `timeline`                                        | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
+| `real_env_episodes`                               | cumulative real-environment episodes consumed by inner-loop feedback (0 for `world_model`/`oracle`; the `--compare` referee replay is excluded)                        |
 | `credit_base_reward`, `credit`                    | with `--credit`: paired-ablation base reward + per-action deltas                                                                                                       |
 | `mc_reward`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy                                                                                                          |
 | `wm_minus_mc`                                     | evaluator fidelity on this exact strategy — the trust meter                                                                                                            |

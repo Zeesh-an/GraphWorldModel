@@ -63,6 +63,7 @@ from world_model.wm_data import load_graph_store
 
 world_model = "world_model"
 monte_carlo = "monte_carlo"
+oracle = "oracle"
 
 # Fresh-seed WM re-evaluations of the winning strategy during --compare
 wm_reeval_seeds = 3
@@ -71,7 +72,7 @@ wm_reeval_seeds = 3
 @dataclass
 class ExperimentConfig:
     method: str = "one_shot"  # one_shot | per_step | windowed
-    evaluator: str = "world_model"  # world_model | monte_carlo
+    evaluator: str = "world_model"  # world_model | monte_carlo | oracle
     model: str = "claude-sonnet-5"  # gateway model name
     temperature: float | None = (
         None  # LLM sampling temperature; None -> provider default
@@ -144,6 +145,15 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
         return WorldModelEnvironment.from_results_json(
             config.wm_results_json,
             graph,
+            device=config.device,
+            n_samples=config.n_samples,
+        )
+
+    if config.evaluator == oracle:
+        # Ground-truth dynamics ceiling: no checkpoint, no --wm-results-json
+        return WorldModelEnvironment.oracle(
+            graph,
+            config.diffusion_model,
             device=config.device,
             n_samples=config.n_samples,
         )
@@ -275,6 +285,9 @@ class Baseline(Strategy):
         # For per_step this is the last timestep's script (one is generated per step)
         "script": strategy.source_script,
         "cost": trajectory.cost,
+        # Inner-loop real-environment episodes only (0 for model-based
+        # evaluators); the --compare referee replay is deliberately excluded
+        "real_env_episodes": getattr(environment, "episodes_used", 0),
         "timeline": timeline,
     }
 
@@ -291,7 +304,7 @@ class Baseline(Strategy):
         result["credit"] = entries
 
     # When the compare flag is enabled, build a Monte Carlo environment and rollout with Monte Carlo simulation to compare against the world model
-    if config.compare and config.evaluator == world_model:
+    if config.compare and config.evaluator in (world_model, oracle):
         print(f"[run] MC compare replay ({config.mc_runs} runs)...")
 
         mc_environment = MonteCarloEnvironment(
@@ -390,8 +403,8 @@ if __name__ == "__main__":
         "--evaluator",
         type=str,
         default="world_model",
-        choices=["world_model", "monte_carlo"],
-        help="inner-loop evaluator (default: world_model).",
+        choices=["world_model", "monte_carlo", "oracle"],
+        help="inner-loop evaluator; oracle = true IC dynamics, no checkpoint needed (default: world_model).",
     )
     parser.add_argument(
         "--diffusion-model",

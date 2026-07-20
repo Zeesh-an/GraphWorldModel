@@ -20,6 +20,9 @@ class MonteCarloEnvironment:
         self.graph = graph
         self.diffusion_model = diffusion_model
         self.mc_runs = mc_runs
+        # Cumulative real-environment episodes across all rollout calls — the
+        # sample-efficiency axis for the native-agent condition (--mc-runs 1)
+        self.episodes_used = 0
 
     def rollout(
         self, action_fn: ActionFn, horizon: int, budget: int, seed: int = 0
@@ -31,6 +34,8 @@ class MonteCarloEnvironment:
         representative_states = []
         representative_actions = []
         representative_counts = []
+
+        self.episodes_used += self.mc_runs
 
         for run in range(self.mc_runs):
             # For each monte carlo run, build a fresh NDlib simulator with a child seed

@@ -22,6 +22,11 @@ from coding_agent.types import ActionFn, GraphInfo, State, Trajectory
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 
+# Tiny throwaway encoder for the oracle head: q = true edge weight, so the
+# encoder output never reaches the transmission model and no checkpoint exists
+oracle_hidden_dim = 8
+oracle_n_layers = 1
+
 
 class WorldModelEnvironment:
     def __init__(
@@ -95,6 +100,34 @@ class WorldModelEnvironment:
         return cls(
             model, graph, config["diffusion_model"], device=device, n_samples=n_samples
         )
+
+    @classmethod
+    def oracle(
+        cls,
+        graph: GraphInfo,
+        diffusion_model: str,
+        device: str = "cpu",
+        n_samples: int = 20,
+    ) -> "WorldModelEnvironment":
+        """Ground-truth dynamics baseline: same rollout machinery, q = true edge weight."""
+        if diffusion_model != "IC":
+            raise ValueError(
+                "oracle dynamics are IC-only: LT thresholds are drawn per episode "
+                "and never stored, so no true LT transition function exists — use "
+                "the monte_carlo evaluator with a large --mc-runs as the LT proxy"
+            )
+
+        model = WorldModel(
+            "gcn",
+            in_channels=in_channels,
+            hidden_dim=oracle_hidden_dim,
+            n_layers=oracle_n_layers,
+            dropout=0.0,
+            head_type="structured_oracle",
+            diffusion_model=diffusion_model,
+        )
+
+        return cls(model, graph, diffusion_model, device=device, n_samples=n_samples)
 
     def _block_graph_input(self, sample_arrays: list[tuple]) -> GraphInput:
         # Disjoint block-diagonal union of every sample's graph: normalization is per-component, so this equals the per-sample GraphInputs stacked

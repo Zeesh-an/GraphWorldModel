@@ -25,7 +25,7 @@ from data.wm_graphs import (
 )
 from data.wm_simulator import ActionOp, Simulator, State, valid_action_ops
 
-synthetic_families = ("er", "ba", "ws", "karate")
+synthetic_families = ("er", "ba", "ws", "sbm", "karate")
 seed_upper_bound = 2**31 - 1
 
 
@@ -167,6 +167,9 @@ class GenConfig:
     ba_m: int = 3
     ws_k: int = 6
     ws_p: float = 0.1
+    sbm_blocks: int = 4
+    sbm_p_in: float = 0.15
+    sbm_p_out: float = 0.01
 
 
 def _iter_bundles(config: GenConfig) -> Iterator[GraphBundle]:
@@ -180,6 +183,9 @@ def _iter_bundles(config: GenConfig) -> Iterator[GraphBundle]:
                 ba_m=config.ba_m,
                 ws_k=config.ws_k,
                 ws_p=config.ws_p,
+                sbm_blocks=config.sbm_blocks,
+                sbm_p_in=config.sbm_p_in,
+                sbm_p_out=config.sbm_p_out,
                 seed=config.seed,
                 prob_model=config.prob_model,
                 uniform_p=config.uniform_p,
@@ -410,6 +416,24 @@ def parse_args() -> GenConfig:
         help="WS rewire probability (default: 0.1).",
     )
     parser.add_argument(
+        "--sbm-blocks",
+        type=int,
+        default=4,
+        help="SBM community count (default: 4).",
+    )
+    parser.add_argument(
+        "--sbm-p-in",
+        type=float,
+        default=0.15,
+        help="SBM within-block edge probability (default: 0.15).",
+    )
+    parser.add_argument(
+        "--sbm-p-out",
+        type=float,
+        default=0.01,
+        help="SBM cross-block edge probability (default: 0.01).",
+    )
+    parser.add_argument(
         "--models",
         type=str,
         nargs="+",
@@ -548,6 +572,9 @@ def parse_args() -> GenConfig:
         ba_m=args.ba_m,
         ws_k=args.ws_k,
         ws_p=args.ws_p,
+        sbm_blocks=args.sbm_blocks,
+        sbm_p_in=args.sbm_p_in,
+        sbm_p_out=args.sbm_p_out,
         models=args.models,
         prob_model=args.prob_model,
         uniform_p=args.uniform_p,

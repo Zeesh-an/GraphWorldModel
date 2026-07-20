@@ -249,7 +249,7 @@ per dynamics (see `world_model/README.md`).
 
 | Flag                              | Default         | What it controls                                                                                           |
 | --------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------- |
-| `--dataset`                       | `cora_ml`       | real (`cora_ml, digg, twitter, jazz, netscience, power_grid, nethept`) or synthetic (`er, ba, ws, karate`) |
+| `--dataset`                       | `cora_ml`       | real (`cora_ml, digg, twitter, jazz, netscience, power_grid, nethept, weibo, youtube`) or synthetic (`er, ba, ws, sbm, karate`); `weibo` needs a manual AMiner download (see `data/datasets/weibo.py`) |
 | `--num-graphs`                    | `1`             | number of synthetic graph instances (folded into the seed)                                                 |
 | `--syn-nodes`                     | `100`           | nodes per synthetic graph                                                                                  |
 | `--models`                        | `IC LT`         | which dynamics to generate transitions for                                                                 |
@@ -268,6 +268,8 @@ per dynamics (see `world_model/README.md`).
 | `--er-p`                          | `0.05`          | ER edge probability G(n, p) — structural                                                                   |
 | `--ba-m`                          | `3`             | BA attachment count (not a prob)                                                                           |
 | `--ws-k` / `--ws-p`               | `6` / `0.1`     | WS ring degree / rewire probability (structural)                                                           |
+| `--sbm-blocks`                    | `4`             | SBM community count (block sizes split `--syn-nodes` evenly)                                               |
+| `--sbm-p-in` / `--sbm-p-out`      | `0.15` / `0.01` | SBM within-block / cross-block edge probability                                                            |
 | `--seed`                          | `42`            | master RNG (graph + selection + injection + sim all derive from it)                                        |
 
 > LT node thresholds are drawn `U(0, 1)` per node internally — no CLI flag, and

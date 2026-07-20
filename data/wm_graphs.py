@@ -18,9 +18,11 @@ real_directed = {
     "digg": True,
     "twitter": True,
     "nethept": True,
+    "weibo": True,
     "jazz": False,
     "netscience": False,
     "power_grid": False,
+    "youtube": False,
 }
 
 
@@ -103,6 +105,9 @@ def make_synthetic_bundle(
     ba_m: int = 3,
     ws_k: int = 6,
     ws_p: float = 0.1,
+    sbm_blocks: int = 4,
+    sbm_p_in: float = 0.15,
+    sbm_p_out: float = 0.01,
     seed: int = 0,
     prob_model: str = "weighted",
     uniform_p: float = 0.1,
@@ -119,6 +124,20 @@ def make_synthetic_bundle(
     elif family == "ws":
         graph = nx.watts_strogatz_graph(num_nodes, ws_k, ws_p, seed=instance_seed)
         graph_id = f"ws_n{num_nodes}_k{ws_k}_p{ws_p}_s{instance_seed}"
+    elif family == "sbm":
+        # Even block sizes (remainder folded into the first block); dense within
+        # blocks, sparse across — the community structure BA graphs lack
+        sizes = [num_nodes // sbm_blocks] * sbm_blocks
+        sizes[0] += num_nodes - sum(sizes)
+        block_probs = [
+            [sbm_p_in if row == column else sbm_p_out for column in range(sbm_blocks)]
+            for row in range(sbm_blocks)
+        ]
+        graph = nx.stochastic_block_model(sizes, block_probs, seed=instance_seed)
+        graph_id = (
+            f"sbm_n{num_nodes}_b{sbm_blocks}_pin{sbm_p_in}_pout{sbm_p_out}"
+            f"_s{instance_seed}"
+        )
     elif family == "karate":
         graph = nx.karate_club_graph()
         graph_id = "karate"
@@ -171,23 +190,19 @@ def make_real_bundle(
     """
     Download (if needed) + load a real dataset, then build a GraphBundle.
 
-    The loader is imported lazily so unit tests need no network access.
+    The loader is imported lazily so building synthetic graphs needs no network access.
     """
-    loaders = {
-        "cora_ml": ("datasets.cora_ml", "download_cora_ml", "load_cora_ml"),
-        "digg": ("datasets.digg", "download_digg", "load_digg"),
-        "twitter": ("datasets.twitter", "download_twitter", "load_twitter"),
-        "jazz": ("datasets.jazz", "download_jazz", "load_jazz"),
-        "netscience": ("datasets.netscience", "download_netscience", "load_netscience"),
-        "power_grid": ("datasets.power_grid", "download_power_grid", "load_power_grid"),
-        "nethept": ("datasets.nethept", "download_nethept", "load_nethept"),
-    }
+    if dataset not in real_directed:
+        raise ValueError(
+            f"unknown real dataset {dataset!r}; choose one of {sorted(real_directed)}"
+        )
 
-    module_name, download_name, load_name = loaders[dataset]
-    module = importlib.import_module(module_name)
-    raw_path = getattr(module, download_name)()
+    # Every loader module follows the same contract: data/datasets/<name>.py
+    # exposing download_<name>() -> raw path and load_<name>(path) -> arrays
+    module = importlib.import_module(f"data.datasets.{dataset}")
+    raw_path = getattr(module, f"download_{dataset}")()
 
-    adjacency, node_feats, node_labels, _ = getattr(module, load_name)(raw_path)
+    adjacency, node_feats, node_labels, _ = getattr(module, f"load_{dataset}")(raw_path)
 
     return make_real_bundle_from_arrays(
         dataset,
