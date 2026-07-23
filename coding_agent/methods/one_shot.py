@@ -1,5 +1,6 @@
 """Method 1: one-shot super-algorithm with reward-driven skill refinement."""
 
+import time
 from functools import partial
 from tqdm import tqdm
 
@@ -70,9 +71,21 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 strategy = build_strategy(
                     agent.generate(system, user), self.strategy_mode
                 )
+
+                # The generated algorithm's own computation — with free-mode
+                # composition scripts this internal planning dominates wall-clock
+                plan_start = time.perf_counter()
+                tqdm.write(
+                    f"[one_shot] iter {iteration + 1}: executing plan_horizon()..."
+                )
                 plan = call_strategy(
                     strategy.plan_horizon, graph, task.budget, task.horizon
                 )
+                tqdm.write(
+                    f"[one_shot] iter {iteration + 1}: plan built in "
+                    f"{time.perf_counter() - plan_start:.1f}s; rolling out..."
+                )
+
                 validate_plan(plan, task, graph)
 
                 # Bind the plan once into an ActionFn to avoid a late-binding closure bug
@@ -126,7 +139,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 base_user
                 + "\n\n"
                 + build_feedback_prompt(
-                    trajectory.reward, summarize(trajectory, graph), credit_report=report
+                    trajectory.reward,
+                    summarize(trajectory, graph),
+                    credit_report=report,
                 )
             )
 

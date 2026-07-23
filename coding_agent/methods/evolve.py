@@ -4,6 +4,7 @@ parent from the population (refine or restructure), never a fresh program.
 Stagnation switches the operator from refine to restructure.
 """
 
+import time
 from functools import partial
 from tqdm import tqdm
 
@@ -96,9 +97,19 @@ class EvolveSearch(OuterLoopMethod):
                 strategy = build_strategy(
                     agent.generate(system, user), self.strategy_mode
                 )
+
+                plan_start = time.perf_counter()
+                tqdm.write(
+                    f"[evolve] iter {iteration + 1}: executing plan_horizon()..."
+                )
                 plan = call_strategy(
                     strategy.plan_horizon, graph, task.budget, task.horizon
                 )
+                tqdm.write(
+                    f"[evolve] iter {iteration + 1}: plan built in "
+                    f"{time.perf_counter() - plan_start:.1f}s; rolling out..."
+                )
+
                 validate_plan(plan, task, graph)
 
                 trajectory = environment.rollout(
