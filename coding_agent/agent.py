@@ -6,6 +6,7 @@ GatewayProvider is the concrete LLM call; it needs GATEWAY_BASE_URL and the per-
 
 import os
 import re
+import time
 from typing import Protocol
 
 from openai import OpenAI, OpenAIError
@@ -97,4 +98,13 @@ class CodingAgent:
 
     def generate(self, system: str, user: str) -> str:
         """Call the provider and return the extracted Python script."""
-        return extract_code_block(self.provider.complete(system, user))
+        start = time.perf_counter()
+        reply = self.provider.complete(system, user)
+        script = extract_code_block(reply)
+
+        print(
+            f"[agent] response received in {time.perf_counter() - start:.1f}s "
+            f"({len(reply)} chars -> script of {len(script.splitlines())} lines)"
+        )
+
+        return script

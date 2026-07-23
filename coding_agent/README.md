@@ -491,7 +491,9 @@ candidate) · `--model` (gateway name; default `claude-sonnet-5`) ·
 `--routing` (GA-routing baseline: the LLM selects one pool algorithm from a
 name+summary menu — adaptive _selection_ without synthesis; the pick is recorded
 as `model: routing:<algo>` and the raw reply as `routing_reply`) ·
-`--budget` / `--horizon` / `--windows` / `--outer-iters` · `--mc-runs` (MC ensemble
+`--budget` / `--budget-pct` (percent of `num_nodes`, overrides `--budget` —
+same resolution rule as data generation) / `--horizon` / `--windows` /
+`--outer-iters` · `--mc-runs` (MC ensemble
 / compare size; default 200) · `--n-samples` (WM ensemble; default 20) ·
 `--graph-id` (default: first graph in the store) · `--compare` · `--credit` ·
 `--out-json`.

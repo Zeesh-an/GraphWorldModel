@@ -110,6 +110,7 @@ class ExperimentConfig:
     )
     diffusion_model: str = "IC"  # IC | LT
     budget: int = 5
+    budget_pct: float | None = None  # overrides budget: % of the graph's num_nodes
     horizon: int = 10
     windows: int = 3
     outer_iters: int = 3
@@ -231,7 +232,20 @@ def run_experiment(
     if graph is None:
         graph, graph_id = _load_graph(config)
 
+    # Same resolution rule as data generation: pct of N overrides the absolute k
+    if config.budget_pct is not None:
+        config.budget = max(1, round(graph.num_nodes * config.budget_pct / 100))
+
+    print(
+        f"[run] graph {graph_id or 'inline'}: {graph.num_nodes} nodes, "
+        f"{graph.edge_index.shape[1]} arcs | evaluator={config.evaluator} "
+        f"method={config.method} mode={config.strategy_mode} "
+        f"budget={config.budget} ({100.0 * config.budget / graph.num_nodes:.2f}% "
+        f"of N) horizon={config.horizon}"
+    )
+
     environment = _build_environment(config, graph)
+    print(f"[run] {config.evaluator} environment ready")
 
     task = TaskSpec(
         diffusion_model=config.diffusion_model,
@@ -316,7 +330,12 @@ class Baseline(Strategy):
         )
 
     # Optimize the method with the outer-loop coding agent iteration loop to find the best strategy and trajectory result
+    print(f"[run] optimizing with {config.method} (provider {provider_label})...")
     strategy, trajectory = method.optimize(agent, environment, task, graph)
+    print(
+        f"[run] winner: reward={trajectory.reward:.2f} "
+        f"({100.0 * trajectory.reward / graph.num_nodes:.2f}% of N)"
+    )
 
     # Per-timestep log of the representative rollout (first ensemble sample):
     # entry t holds the action bag applied at t and the resulting state
@@ -360,6 +379,7 @@ class Baseline(Strategy):
 
     # When the credit flag is enabled, ablate the executed action sequence against the same environment and measure the reward
     if config.credit:
+        print("[run] per-action counterfactual credit (one rollout per action)...")
         # Credit of the executed action sequence; for state-dependent strategies (per_step/windowed) the recorded bags are replayed as a fixed plan
         base_reward, entries = counterfactual_credit(
             environment, trajectory.actions, config.horizon, config.budget
@@ -393,6 +413,15 @@ class Baseline(Strategy):
         result["mc_reward_se"] = mc_trajectory.cost["reward_se"]
         result["mc_rollout_seconds"] = mc_trajectory.cost["rollout_seconds"]
         result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward
+        print(
+            f"[run] mc_reward={mc_trajectory.reward:.2f} "
+            f"±{mc_trajectory.cost['reward_se']:.2f} "
+            f"(wm_minus_mc={result['wm_minus_mc']:+.2f})"
+        )
+        print(
+            f"[run] re-evaluating winner on {wm_reeval_seeds} fresh "
+            f"{config.evaluator} seeds..."
+        )
 
         # `reward` is the max over outer iterations, all evaluated at rollout
         # seed 0 — it carries selection optimism (winner's curse) plus that one
@@ -408,6 +437,10 @@ class Baseline(Strategy):
         result["wm_reeval_rewards"] = reeval_rewards
         result["wm_reeval_mean"] = sum(reeval_rewards) / len(reeval_rewards)
         result["wm_reeval_minus_mc"] = result["wm_reeval_mean"] - mc_trajectory.reward
+        print(
+            f"[run] wm_reeval_mean={result['wm_reeval_mean']:.2f} "
+            f"(reeval_minus_mc={result['wm_reeval_minus_mc']:+.2f})"
+        )
 
     # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives in cost.rollout_seconds / mc_rollout_seconds
     result["elapsed_seconds"] = time.perf_counter() - experiment_start
@@ -415,6 +448,9 @@ class Baseline(Strategy):
     if config.out_json:
         os.makedirs(Path(config.out_json).parent, exist_ok=True)
         Path(config.out_json).write_text(json.dumps(result, indent=2, default=str))
+        print(f"[run] results -> {config.out_json}")
+
+    print(f"[run] done in {result['elapsed_seconds']:.1f}s")
 
     return result
 
@@ -492,6 +528,12 @@ if __name__ == "__main__":
         type=int,
         default=5,
         help="seed/action budget (default: 5).",
+    )
+    parser.add_argument(
+        "--budget-pct",
+        type=float,
+        default=None,
+        help="seed budget as a percent of the graph's num_nodes; overrides --budget, e.g. 1 -> k=16 on netscience (default: None).",
     )
     parser.add_argument(
         "--horizon",
@@ -583,6 +625,7 @@ if __name__ == "__main__":
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,
         budget=args.budget,
+        budget_pct=args.budget_pct,
         horizon=args.horizon,
         windows=args.windows,
         outer_iters=args.outer_iters,
