@@ -31,6 +31,7 @@ class MonteCarloEnvironment:
         rng = np.random.default_rng(seed)
 
         final_counts = []
+        final_infected_freq = np.zeros(self.graph.num_nodes)
         representative_states = []
         representative_actions = []
         representative_counts = []
@@ -65,6 +66,7 @@ class MonteCarloEnvironment:
                     break
 
             final_counts.append(float(len(state.infected)))
+            final_infected_freq[list(state.infected)] += 1.0
 
             # Keep the first run as the representative trajectory
             if run == 0:
@@ -95,4 +97,5 @@ class MonteCarloEnvironment:
                 "reward_se": reward_se,
                 "rollout_seconds": time.perf_counter() - start,
             },
+            final_marginals=(final_infected_freq / self.mc_runs).round(3).tolist(),
         )

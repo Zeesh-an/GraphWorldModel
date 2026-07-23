@@ -5,13 +5,15 @@ Baselines -
 
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --method one_shot --strategy-mode free \ 
+    --evaluator world_model --budget 5 --horizon 10 --compare \
     --baseline degree_discount --outer-iters 1 \
     --out-json coding_agent/results/baseline_degree_discount.json
 
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --method one_shot --strategy-mode free \ 
+    --evaluator world_model --budget 5 --horizon 10 --compare \
     --baseline celf_pp --outer-iters 1 \
     --out-json coding_agent/results/baseline_celf_pp.json
 
@@ -21,7 +23,8 @@ Graph algorithm routing (LLM picks from a list of graph algorithms, no synthesis
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --model claude-sonnet-5 \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --method one_shot --strategy-mode free \ 
+    --evaluator world_model --budget 5 --horizon 10 --compare \
     --routing --outer-iters 1 \
     --out-json coding_agent/results/routing.json
     
@@ -30,10 +33,23 @@ Oracle -
 
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --model claude-sonnet-5 \
-    --method one_shot --evaluator oracle --budget 5 --horizon 10 --compare \
+    --method one_shot --strategy-mode free \ 
+    --evaluator oracle --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
     --mc-runs 200 --n-samples 50 \
     --outer-iters 5 --out-json coding_agent/results/oracle_run.json
+
+
+Scored mode + evolve (agent edits algorithm internals, population search) -
+
+python -m coding_agent.run --data-dir data/output/sbm40_marg_structured \
+    --model claude-sonnet-5 \
+    --wm-results-json world_model/checkpoints/sbm40_marg_structured/sage_IC.json \
+    --method evolve --strategy-mode scored 
+    --evaluator world_model --budget 5 --horizon 10 --compare \
+    --allowed-ops add_node remove_node \
+    --outer-iters 10 --n-samples 50 \
+    --out-json coding_agent/results/evolve_scored.json
 
 
 Coding Agent (One-shot) -
@@ -41,7 +57,8 @@ Coding Agent (One-shot) -
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --model claude-sonnet-5 \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
+    --method one_shot --strategy-mode free \ 
+    --evaluator world_model --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
     --mc-runs 200 --n-samples 50 \
     --outer-iters 5 --out-json coding_agent/results/llm_run_5.json
@@ -62,6 +79,7 @@ from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
 from coding_agent.methods.base import OuterLoopMethod, summarize
+from coding_agent.methods.evolve import EvolveSearch
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
 from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
@@ -81,7 +99,10 @@ wm_reeval_seeds = 3
 
 @dataclass
 class ExperimentConfig:
-    method: str = "one_shot"  # one_shot | per_step | windowed
+    method: str = "one_shot"  # one_shot | per_step | windowed | evolve
+    strategy_mode: str = (
+        "free"  # free (whole Strategy) | scored (score/schedule hooks only)
+    )
     evaluator: str = "world_model"  # world_model | monte_carlo | oracle
     model: str = "claude-sonnet-5"  # gateway model name
     temperature: float | None = (
@@ -127,7 +148,12 @@ def build_method(name: str) -> OuterLoopMethod:
     if name == "windowed":
         return WindowedOnline()
 
-    raise ValueError(f"unknown method {name!r}; choose one_shot|per_step|windowed")
+    if name == "evolve":
+        return EvolveSearch()
+
+    raise ValueError(
+        f"unknown method {name!r}; choose one_shot|per_step|windowed|evolve"
+    )
 
 
 def _load_graph(config: ExperimentConfig) -> GraphInfo:
@@ -256,6 +282,15 @@ class Baseline(Strategy):
     else:
         provider_label = config.model
 
+    # Canned/baseline scripts are whole free-form Strategies (they call
+    # algorithms.*), so they always run in free mode regardless of the flag
+    effective_mode = "free" if canned_script is not None else config.strategy_mode
+    if effective_mode == "scored" and config.method in ("per_step", "windowed"):
+        raise ValueError(
+            "strategy_mode='scored' generates plan_horizon-only strategies; "
+            "use --method one_shot or evolve"
+        )
+
     provider = (
         _CannedProvider(canned_script)
         if canned_script
@@ -269,7 +304,14 @@ class Baseline(Strategy):
 
     if config.method == "one_shot":
         method = OneShotSuperAlgorithm(
-            outer_iters=config.outer_iters, credit=config.credit
+            outer_iters=config.outer_iters,
+            credit=config.credit,
+            strategy_mode=effective_mode,
+        )
+
+    if config.method == "evolve":
+        method = EvolveSearch(
+            outer_iters=config.outer_iters, strategy_mode=effective_mode
         )
 
     # Optimize the method with the outer-loop coding agent iteration loop to find the best strategy and trajectory result
@@ -291,7 +333,7 @@ class Baseline(Strategy):
         "evaluator": config.evaluator,
         "model": provider_label,
         "reward": trajectory.reward,
-        "summary": summarize(trajectory),
+        "summary": summarize(trajectory, graph),
         # For per_step this is the last timestep's script (one is generated per step)
         "script": strategy.source_script,
         "cost": trajectory.cost,
@@ -406,8 +448,15 @@ if __name__ == "__main__":
         "--method",
         type=str,
         default="one_shot",
-        choices=["one_shot", "per_step", "windowed"],
-        help="outer-loop method (default: one_shot).",
+        choices=["one_shot", "per_step", "windowed", "evolve"],
+        help="outer-loop method; evolve = population edits with refine/restructure operators (default: one_shot).",
+    )
+    parser.add_argument(
+        "--strategy-mode",
+        type=str,
+        default="free",
+        choices=["free", "scored"],
+        help="what the agent writes: free = whole Strategy program; scored = only score()/schedule() hooks inside the fixed ScoredStrategy harness, no algorithms.* (default: free).",
     )
     parser.add_argument(
         "--evaluator",
@@ -515,6 +564,7 @@ if __name__ == "__main__":
         routing=args.routing,
         allowed_ops=tuple(args.allowed_ops),
         method=args.method,
+        strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,
         budget=args.budget,

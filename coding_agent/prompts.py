@@ -1,5 +1,10 @@
 from coding_agent.types import GraphInfo, TaskSpec
-from coding_agent.tools.library_api import build_algorithm_menu, build_api_reference
+from coding_agent.executor import scored_blocked_primitives
+from coding_agent.tools.library_api import (
+    build_algorithm_menu,
+    build_api_reference,
+    build_primitives_reference,
+)
 
 # Shared system-prompt preamble containing common rules for the coding agent
 common_rules = """\
@@ -85,7 +90,24 @@ class MyStrategy(Strategy):
 }
 
 
-def build_user_prompt(method: str, task: TaskSpec, graph: GraphInfo) -> str:
+def build_user_prompt(
+    method: str, task: TaskSpec, graph: GraphInfo, strategy_mode: str = "free"
+) -> str:
+    if strategy_mode == "scored":
+        # Library source is inspiration, not callable — ideas must be written
+        # out inside score()/schedule(), where they can be mutated
+        reference = (
+            "PRIMITIVES API (available as `primitives`; spread-simulation "
+            "functions are NOT available):\n"
+            f"{build_primitives_reference(exclude=scored_blocked_primitives)}\n\n"
+            "ALGORITHM IDEAS (NOT callable — steal the ideas into your score()):\n"
+            f"{build_algorithm_menu()}"
+        )
+        final_line = "Write the ScoredStrategy subclass now."
+    else:
+        reference = f"LIBRARY API:\n{build_api_reference()}"
+        final_line = f"Write the Strategy now (method = {method})."
+
     return f"""\
 TASK: {task.task} — {task.objective}
 diffusion_model = {task.diffusion_model}
@@ -98,10 +120,104 @@ num_nodes = {graph.num_nodes}
 num_edges = {graph.edge_index.shape[1]}
 directed = {graph.directed}
 
-LIBRARY API:
-{build_api_reference()}
+{reference}
 
-Write the Strategy now (method = {method})."""
+{final_line}"""
+
+
+# Scored mode: the agent edits an algorithm's internals (score/schedule hooks),
+# never whole programs and never compositions over the library
+scored_system = """\
+You are designing the SCORING RULE of an Influence Maximization algorithm — not a whole program.
+
+A fixed harness (ScoredStrategy.plan_horizon) greedily picks the highest-score node
+until the budget is spent, then calls schedule() to place the picked seeds across
+timesteps. You may override ONLY these two methods:
+
+- score(self, node, selected, graph) -> float
+    Called for every candidate node at every pick; `selected` is the tuple of
+    already-chosen seeds. Higher score = picked sooner. This is where your
+    algorithm lives: combine structural signals, penalize redundancy, adapt to
+    what the diagnostics reveal.
+- schedule(self, seeds, graph, horizon) -> list[list[ActionOp]]   (optional)
+    Element t is the action bag applied at timestep t. Default: all seeds at t=0.
+
+RULES:
+- Overriding plan_horizon is REJECTED by the executor.
+- `algorithms.*` does NOT exist here. Write your own scoring logic from graph
+  structure and `primitives` (spread-simulation primitives are unavailable).
+- Reply with exactly ONE fenced ```python block containing ONE class subclassing
+  ScoredStrategy. No imports, no module-level code, no prose.
+- `ActionOp(op, target, destination=None, weight=None)`; `GraphInfo` has
+  .num_nodes, .out_neighbors(node), .in_neighbors(node), .degree(node),
+  .edge_index, .ic_probs.
+
+REPLY SHAPE (adapt the logic — improve on it, do not return it unchanged):
+```python
+class MyScorer(ScoredStrategy):
+    def score(self, node, selected, graph):
+        overlap = len(set(graph.out_neighbors(node)) & set(selected))
+        return graph.degree(node) - 2.0 * overlap
+```
+"""
+
+
+def build_system_prompt(method: str, strategy_mode: str = "free") -> str:
+    if strategy_mode == "scored":
+        if method in ("one_shot", "evolve"):
+            return scored_system
+
+        raise ValueError(
+            f"strategy_mode='scored' is not supported for method {method!r}; "
+            f"use one_shot or evolve"
+        )
+
+    # evolve generates plan_horizon strategies under the same contract as one_shot
+    return system_prompts["one_shot" if method == "evolve" else method]
+
+
+# Evolve method: each generation is an EDIT of a parent from the population
+evolve_operator_instructions = {
+    "refine": (
+        "Make a SMALL, targeted improvement to the PARENT: tune a weight, add or "
+        "adjust one term, fix one weakness the diagnostics expose. Keep its "
+        "overall approach."
+    ),
+    "restructure": (
+        "REDESIGN the approach: keep the same contract but change the core idea — "
+        "different structural signals, different selection logic. Do not just "
+        "re-tune the parent."
+    ),
+}
+
+
+def build_evolve_prompt(
+    operator: str,
+    parent: dict,
+    inspirations: list[dict],
+    error: str | None = None,
+) -> str:
+    inspiration_text = "".join(
+        f"\nALTERNATIVE from the population (reward={record['reward']:.2f}):\n"
+        f"```python\n{record['script']}\n```\n"
+        for record in inspirations
+    )
+    error_text = (
+        f"\nYour previous attempt failed with:\n{error}\n" if error else ""
+    )
+
+    return f"""
+You are evolving a population of strategies. Produce a NEW candidate by modifying the PARENT.
+
+PARENT (reward={parent["reward"]:.2f}):
+```python
+{parent["script"]}
+```
+Parent rollout diagnostics:
+{parent["summary"]}
+{inspiration_text}{error_text}
+OPERATION — {operator.upper()}: {evolve_operator_instructions[operator]}
+Reply with one ```python block."""
 
 
 # GA-routing baseline: the LLM selects from the pool but never synthesizes code

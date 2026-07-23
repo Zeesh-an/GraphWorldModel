@@ -60,10 +60,31 @@ affordable.
 
 The refinement loop adjusts **the algorithm (the skill), never the LLM's weights**.
 The outer loop searches over _programs_: propose an algorithm → roll its actions
-through the environment → feed the scalar reward (plus optional per-action credit
-and error tracebacks) back as a revision prompt → the agent rewrites the program.
-The world model's role is to make each candidate evaluation cheap enough that this
-program-level search is affordable.
+through the environment → feed the rollout diagnostics back as a revision prompt →
+the agent rewrites the program. The world model's role is to make each candidate
+evaluation cheap enough that this program-level search is affordable.
+
+The feedback per iteration (built by `methods/base.py::summarize` +
+`prompts.py::build_feedback_prompt`) contains:
+
+- **reward ± SE** — ensemble-mean final spread with its noise floor, so the agent
+  can tell a real improvement from sampling luck between iterations;
+- **infected + frontier curves** and, when the cascade dies before the horizon,
+  the death step ("actions scheduled after t=X did nothing");
+- **unreached-nodes report** — per-node `P(infected)` across the ensemble
+  (`Trajectory.final_marginals`, computed by every env) surfaces the nodes the
+  cascade rarely reaches, hubs first — descriptive spatial feedback about where
+  spread is being lost, without prescribing seeds;
+- **adjacent-seed-pairs report** — seeds with overlapping neighborhoods (likely
+  redundant budget);
+- **baseline anchor** — one `degree_discount` rollout in the same env at startup
+  ("REFERENCE: … scores 46.9 — beat it"), included in every prompt;
+- optional **per-action counterfactual credit** (`--credit`) and **error
+  tracebacks** on failed scripts.
+
+Feedback is deliberately descriptive, never prescriptive: the environments report
+where the cascade went and what each action bought, but never which node to pick —
+the algorithm design stays with the agent.
 
 ---
 
@@ -89,7 +110,7 @@ program-level search is affordable.
 | `agent.py`    | `LLMProvider` protocol, `GatewayProvider` (lab gateway), `extract_code_block`, `CodingAgent`                                                                                                             |
 | `prompts.py`  | system prompts per method (output contract + reply skeleton), user prompt (task/graph/API), feedback prompt                                                                                              |
 | `executor.py` | `build_strategy` (exec in controlled namespace), `call_strategy` (runtime-error conversion), `validate_actions`, `StrategyError`                                                                         |
-| `methods/`    | `one_shot.py`, `per_step.py`, `windowed.py` — all implement `OuterLoopMethod.optimize(agent, env, task, graph) → (Strategy, Trajectory)`                                                                 |
+| `methods/`    | `one_shot.py`, `per_step.py`, `windowed.py`, `evolve.py` — all implement `OuterLoopMethod.optimize(agent, env, task, graph) → (Strategy, Trajectory)`                                                    |
 | `envs/`       | `MonteCarloEnvironment` (NDlib ground truth), `WorldModelEnvironment` (trained GNN simulator) behind one `rollout(action_fn, horizon, budget, seed)` interface                                           |
 | `tools/`      | `primitives.py` (16 classical-IM building blocks), `algorithms.py` (30 named algorithms), `library_api.py` (auto-generated prompt reference)                                                             |
 | `credit.py`   | per-action counterfactual credit via paired ablation rollouts                                                                                                                                            |
@@ -158,16 +179,52 @@ Budget applies **per window call**.
   reframes the objective from a single terminal target into per-window objectives
   with state rolled forward between stages.
 
+### Method 4 — `evolve`: population search over algorithm edits (EvoX-lite)
+
+Every generation after the first is an **edit of a parent** from a population of
+all past candidates, never a fresh program. Each iteration: pick the population
+best as parent, attach up to 2 high-reward alternatives as inspiration, apply a
+**variation operator** — `refine` (small targeted change: tune a weight, adjust
+one term) or `restructure` (redesign the core idea, same contract) — and
+evaluate the result into the population. Operator choice is stagnation-driven:
+`stagnation_patience` (2) non-improving iterations force a `restructure`, which
+then opens a fresh refinement window. `--outer-iters` is the total generation
+count (10+ recommended). Failed scripts feed the error into the next generation
+prompt, like one_shot's repair turn.
+
+### `--strategy-mode`: what the agent is allowed to write
+
+Orthogonal to the method choice (supported for `one_shot` and `evolve`):
+
+- **`free`** (default): the agent writes a whole `Strategy` program with the
+  full library callable. Observed failure mode: portfolio composition — the
+  agent runs many library algorithms and picks the winner, editing nothing.
+- **`scored`**: the agent may only fill in the internals of an algorithm.
+  A fixed harness (`ScoredStrategy.plan_horizon`, `types.py`) greedily picks the
+  argmax of `score(node, selected, graph)` until budget is spent, then calls
+  `schedule(seeds, graph, horizon)` (default: all at t=0). The executor rejects
+  any override of `plan_horizon`; the exec namespace contains **no
+  `algorithms` module** and no simulation primitives (`mc_simulate_spread`,
+  `compute_marginal_gain`, `build_simulator` are hidden — otherwise the agent
+  re-derives CELF instead of inventing structural scoring logic). The library
+  appears in the prompt as an *ideas menu* only — any borrowed idea must be
+  written out inside `score()`, where it can be mutated. Canned/`--baseline`
+  scripts always run in free mode regardless of the flag.
+
+The intended experiment grid: `one_shot × scored` tests whether edit-level
+generation works at all; `evolve × scored` is the full population search over
+algorithm internals; `free` arms remain as the composition comparison.
+
 ### The trade-off spectrum
 
-|                              | Method 1 (`one_shot`)                       | Method 3 (`windowed`)                   | Method 2 (`per_step`)                    |
-| ---------------------------- | ------------------------------------------- | --------------------------------------- | ---------------------------------------- |
-| LLM/agent calls              | `outer_iters` (refinement only)             | 1 (designed once)                       | one per sample × timestep                |
-| Adaptivity to realized state | none (open-loop plan)                       | per-window                              | per-step                                 |
-| Cost                         | low                                         | low–medium                              | very high                                |
-| Novelty                      | highest (super-algorithm across time)       | moderate (classical algos, staged)      | adaptivity bound, not a practical method |
-| Loop type                    | open-loop plan + closed skill refinement    | closed-loop policy (window granularity) | closed-loop policy (LLM as policy)       |
-| Failure handling             | full repair loop (errors → revision prompt) | fail-fast                               | fail-fast                                |
+|                              | Method 1 (`one_shot`)                       | Method 3 (`windowed`)                   | Method 2 (`per_step`)                    | Method 4 (`evolve`)                            |
+| ---------------------------- | ------------------------------------------- | --------------------------------------- | ---------------------------------------- | ---------------------------------------------- |
+| LLM/agent calls              | `outer_iters` (refinement only)             | 1 (designed once)                       | one per sample × timestep                | `outer_iters` (population edits)               |
+| Adaptivity to realized state | none (open-loop plan)                       | per-window                              | per-step                                 | none (open-loop plan)                          |
+| Cost                         | low                                         | low–medium                              | very high                                | medium (many cheap WM rollouts)                |
+| Novelty                      | highest (super-algorithm across time)       | moderate (classical algos, staged)      | adaptivity bound, not a practical method | highest with `scored` (evolves algo internals) |
+| Loop type                    | open-loop plan + closed skill refinement    | closed-loop policy (window granularity) | closed-loop policy (LLM as policy)       | population evolution (parent + operator)       |
+| Failure handling             | full repair loop (errors → revision prompt) | fail-fast                               | fail-fast                                | error fed to next generation                   |
 
 ---
 
@@ -421,7 +478,10 @@ python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
 #   ... --temperature 0.0
 ```
 
-Key flags: `--method {one_shot,per_step,windowed}` · `--evaluator
+Key flags: `--method {one_shot,per_step,windowed,evolve}` ·
+`--strategy-mode {free,scored}` (scored = agent fills `score()`/`schedule()`
+hooks in the fixed `ScoredStrategy` harness; no `algorithms.*`; one_shot/evolve
+only) · `--evaluator
 {world_model,monte_carlo,oracle}` (`oracle` = true IC dynamics via the
 `structured_oracle` head — no checkpoint, IC-only, the model-based ceiling;
 `monte_carlo --mc-runs 1` = the native-agent condition, one real execution per

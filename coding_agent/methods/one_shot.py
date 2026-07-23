@@ -13,27 +13,47 @@ from coding_agent.executor import (
     StrategyError,
     build_strategy,
     call_strategy,
-    validate_actions,
 )
-from coding_agent.methods.base import OuterLoopMethod, summarize
+from coding_agent.methods.base import (
+    OuterLoopMethod,
+    baseline_anchor,
+    summarize,
+    validate_plan,
+)
 from coding_agent.prompts import (
     build_feedback_prompt,
+    build_system_prompt,
     build_user_prompt,
-    system_prompts,
 )
 from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
 
 
 class OneShotSuperAlgorithm(OuterLoopMethod):
-    def __init__(self, outer_iters: int = 3, credit: bool = False) -> None:
+    def __init__(
+        self,
+        outer_iters: int = 3,
+        credit: bool = False,
+        strategy_mode: str = "free",
+    ) -> None:
         self.outer_iters = outer_iters
         self.credit = credit
+        self.strategy_mode = strategy_mode
 
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
-        system = system_prompts["one_shot"]
-        base_user = build_user_prompt("one_shot", task, graph)
+        system = build_system_prompt("one_shot", self.strategy_mode)
+
+        # One extra rollout up front: a classical score in the same env, so
+        # "increase final spread" becomes a concrete target in every prompt
+        anchor = baseline_anchor(environment, task, graph)
+        tqdm.write(f"[one_shot] {anchor}")
+
+        base_user = (
+            build_user_prompt("one_shot", task, graph, self.strategy_mode)
+            + "\n\n"
+            + anchor
+        )
         user = base_user
         best = None
         last_error = None
@@ -47,23 +67,13 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 )
 
                 # Build the strategy object from the LLM generated code, and call it
-                strategy = build_strategy(agent.generate(system, user))
+                strategy = build_strategy(
+                    agent.generate(system, user), self.strategy_mode
+                )
                 plan = call_strategy(
                     strategy.plan_horizon, graph, task.budget, task.horizon
                 )
-                total_adds = 0
-
-                # Validate all actions in the plan and verify that the plan stayed under the budget nodes
-                for bag in plan:
-                    validate_actions(
-                        bag, graph.num_nodes, task.budget, task.allowed_ops
-                    )
-                    total_adds += sum(1 for action in bag if action.op == "add_node")
-
-                if total_adds > task.budget:
-                    raise StrategyError(
-                        f"plan adds {total_adds} seeds in total, exceeds budget {task.budget}"
-                    )
+                validate_plan(plan, task, graph)
 
                 # Bind the plan once into an ActionFn to avoid a late-binding closure bug
                 action_fn = partial(planned_action, plan)
@@ -116,7 +126,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 base_user
                 + "\n\n"
                 + build_feedback_prompt(
-                    trajectory.reward, summarize(trajectory), credit_report=report
+                    trajectory.reward, summarize(trajectory, graph), credit_report=report
                 )
             )
 

@@ -277,6 +277,10 @@ class WorldModelEnvironment:
 
         final_counts = [float(len(infected[sample])) for sample in range(num_samples)]
 
+        final_infected_freq = np.zeros(num_nodes)
+        for sample in range(num_samples):
+            final_infected_freq[list(infected[sample])] += 1.0
+
         # The reward is the mean of the final infected node counts
         reward = float(np.mean(final_counts)) if final_counts else 0.0
 
@@ -302,4 +306,5 @@ class WorldModelEnvironment:
                 "reward_se": reward_se,
                 "rollout_seconds": time.perf_counter() - start,
             },
+            final_marginals=(final_infected_freq / num_samples).round(3).tolist(),
         )

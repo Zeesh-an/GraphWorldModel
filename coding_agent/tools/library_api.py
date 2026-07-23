@@ -49,16 +49,24 @@ def build_algorithm_menu() -> str:
     return "\n".join(lines)
 
 
+def build_primitives_reference(exclude: tuple = ()) -> str:
+    """Return the primitives signature list, minus any excluded names (scored mode)."""
+    return "\n".join(
+        _signature_line(function)
+        for function in primitives_list
+        if function.__name__ not in exclude
+    )
+
+
 def build_api_reference() -> str:
     """Return a formatted reference of named algorithms + primitives."""
     algorithm_lines = [
         _signature_line(algorithms.algorithms[name]) for name in algorithm_names
     ]
-    primitive_lines = [_signature_line(function) for function in primitives_list]
 
     return (
         "NAMED ALGORITHMS  (from coding_agent.tools.algorithms, imported as `algorithms`)\n"
         + "\n".join(algorithm_lines)
         + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as `primitives`)\n"
-        + "\n".join(primitive_lines)
+        + build_primitives_reference()
     )

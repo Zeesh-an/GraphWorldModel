@@ -7,6 +7,7 @@ the coding agent; it may call one directly or compose several across timesteps.
 """
 
 import heapq
+import networkx as nx
 import numpy as np
 
 from coding_agent.types import GraphInfo
@@ -864,6 +865,193 @@ def community_celf(
     return _pad_seeds(seeds, graph, budget)
 
 
+def _neighbor_sets(graph: GraphInfo) -> list[set[int]]:
+    neighbors = [set() for _ in range(graph.num_nodes)]
+    for edge in range(graph.edge_index.shape[1]):
+        source = int(graph.edge_index[0, edge])
+        target = int(graph.edge_index[1, edge])
+        neighbors[source].add(target)
+        neighbors[target].add(source)
+
+    return neighbors
+
+
+def voterank(
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+) -> list[int]:
+    """VoteRank (Zhang et al. 2016): iterative voting where a winner's neighbors lose voting power — anti-overlap seed selection."""
+    neighbors = _neighbor_sets(graph)
+    voting_ability = np.ones(graph.num_nodes)
+    average_degree = max(
+        float(np.mean([len(nbrs) for nbrs in neighbors])), 1.0
+    )
+
+    chosen = []
+    for _ in range(min(budget, graph.num_nodes)):
+        votes = np.array(
+            [
+                sum(voting_ability[neighbor] for neighbor in neighbors[node])
+                for node in range(graph.num_nodes)
+            ]
+        )
+        votes[chosen] = float("-inf")
+
+        winner = int(np.argmax(votes))
+        chosen.append(winner)
+
+        # The winner stops voting; its neighbors' voting power decays by 1/<k>
+        voting_ability[winner] = 0.0
+        for neighbor in neighbors[winner]:
+            voting_ability[neighbor] = max(
+                0.0, voting_ability[neighbor] - 1.0 / average_degree
+            )
+
+    return chosen
+
+
+def kshell_seeds(
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+) -> list[int]:
+    """k-shell seeding (Kitsak et al. 2010): top-k by core number (degree breaks ties) — core position beats raw degree for spreading."""
+    neighbors = _neighbor_sets(graph)
+    degrees = np.array([len(nbrs) for nbrs in neighbors], dtype=np.int64)
+
+    # Standard peeling: repeatedly strip nodes of degree <= k, assign core = k
+    working_degrees = degrees.copy()
+    core = np.zeros(graph.num_nodes, dtype=np.int64)
+    remaining = set(range(graph.num_nodes))
+    shell = 0
+
+    while remaining:
+        shell = max(shell, int(working_degrees[list(remaining)].min()))
+        queue = [node for node in remaining if working_degrees[node] <= shell]
+
+        while queue:
+            node = queue.pop()
+            if node not in remaining:
+                continue
+
+            remaining.discard(node)
+            core[node] = shell
+
+            for neighbor in neighbors[node]:
+                if neighbor in remaining:
+                    working_degrees[neighbor] -= 1
+                    if working_degrees[neighbor] <= shell:
+                        queue.append(neighbor)
+
+    order = np.lexsort((-degrees, -core))
+    return [int(node) for node in order[:budget]]
+
+
+def collective_influence(
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    radius: int = 2,
+    **_,
+) -> list[int]:
+    """Collective Influence (Morone & Makse 2015): (k_i-1) * sum of (k_j-1) over the ball boundary at `radius`; adaptive removal."""
+    neighbors = _neighbor_sets(graph)
+    removed = set()
+    chosen = []
+
+    for _ in range(min(budget, graph.num_nodes)):
+        alive_degrees = {
+            node: len(neighbors[node] - removed)
+            for node in range(graph.num_nodes)
+            if node not in removed
+        }
+
+        best_node, best_score = -1, float("-inf")
+        for node in alive_degrees:
+            # BFS over alive nodes; the frontier at exact depth `radius` is the ball boundary
+            frontier = {node}
+            visited = {node}
+            for _ in range(radius):
+                frontier = {
+                    neighbor
+                    for member in frontier
+                    for neighbor in neighbors[member]
+                    if neighbor not in removed and neighbor not in visited
+                }
+                visited |= frontier
+
+            score = (alive_degrees[node] - 1) * sum(
+                alive_degrees[boundary_node] - 1 for boundary_node in frontier
+            )
+            if score > best_score:
+                best_node, best_score = node, score
+
+        chosen.append(best_node)
+        removed.add(best_node)
+
+    return chosen
+
+
+def irie(
+    graph: GraphInfo,
+    budget: int,
+    diffusion_model: str = "IC",
+    alpha: float = 0.7,
+    iterations: int = 20,
+    **_,
+) -> list[int]:
+    """IRIE (Jung et al. 2012, simplified): influence-rank iteration r = (1-AP)(1 + a*sum p*r), no MC inside."""
+    sources = graph.edge_index[0]
+    targets = graph.edge_index[1]
+    probs = graph.ic_probs.astype(np.float64)
+
+    activation = np.zeros(graph.num_nodes)
+    chosen = []
+
+    for _ in range(min(budget, graph.num_nodes)):
+        rank = np.ones(graph.num_nodes)
+        for _ in range(iterations):
+            spread_in = np.zeros(graph.num_nodes)
+            np.add.at(spread_in, sources, probs * rank[targets])
+            rank = (1.0 - activation) * (1.0 + alpha * spread_in)
+
+        rank[chosen] = float("-inf")
+        winner = int(np.argmax(rank))
+        chosen.append(winner)
+
+        # Damp future ranks by the new seed's one-hop activation probability
+        activation[winner] = 1.0
+        winner_edges = sources == winner
+        for target, prob in zip(targets[winner_edges], probs[winner_edges]):
+            activation[target] = 1.0 - (1.0 - activation[target]) * (1.0 - prob)
+
+    return chosen
+
+
+def random_seeds(
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 42, **_
+) -> list[int]:
+    """Uniform random seed set — the trivial floor baseline."""
+    rng = np.random.default_rng(seed)
+    count = min(budget, graph.num_nodes)
+
+    return [int(node) for node in rng.choice(graph.num_nodes, size=count, replace=False)]
+
+
+def betweenness_seeds(
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+) -> list[int]:
+    """Top-k betweenness-centrality nodes (bridge/broker positions between regions)."""
+    nx_graph = nx.DiGraph() if graph.directed else nx.Graph()
+    nx_graph.add_nodes_from(range(graph.num_nodes))
+    nx_graph.add_edges_from(
+        (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge]))
+        for edge in range(graph.edge_index.shape[1])
+    )
+
+    centrality = nx.betweenness_centrality(nx_graph)
+    scores = np.array([centrality[node] for node in range(graph.num_nodes)])
+
+    return _top_k_by_score(scores, budget)
+
+
 # Registry enumerated by the library API and README
 algorithms = {
     # degree
@@ -905,4 +1093,12 @@ algorithms = {
     "degree_ris_refine": degree_ris_refine,
     "celf_local_search": celf_local_search,
     "community_celf": community_celf,
+    # structure / diversity
+    "voterank": voterank,
+    "kshell_seeds": kshell_seeds,
+    "collective_influence": collective_influence,
+    "irie": irie,
+    # simple baselines
+    "random_seeds": random_seeds,
+    "betweenness_seeds": betweenness_seeds,
 }

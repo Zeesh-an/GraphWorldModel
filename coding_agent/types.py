@@ -97,6 +97,8 @@ class Trajectory:
     reward: float  # final spread (infected count)
     infected_counts: list[float]
     cost: dict = field(default_factory=dict)
+    # Per-node P(infected at end) across the ensemble (feedback, not serialized)
+    final_marginals: list[float] | None = None
 
 
 class Strategy(Protocol):
@@ -113,3 +115,45 @@ class Strategy(Protocol):
 
     # Methods 2 (Per-step algorithm generation) and 3 (Windowed algorithm generation)
     def act(self, state: State, graph: GraphInfo, timestep: int) -> list[ActionOp]: ...
+
+
+class ScoredStrategy:
+    """
+    Scored-mode contract: plan_horizon is a fixed greedy harness the agent cannot
+    override — generated code may only override score() and/or schedule(). This
+    forces edits to the algorithm's internals instead of free-form programs or
+    composition over the library.
+    """
+
+    def score(self, node: int, selected: tuple, graph: GraphInfo) -> float:
+        return float(graph.degree(node))
+
+    def schedule(
+        self, seeds: list[int], graph: GraphInfo, horizon: int
+    ) -> list[list[ActionOp]]:
+        return [[ActionOp("add_node", node) for node in seeds]] + [
+            [] for _ in range(horizon)
+        ]
+
+    def plan_horizon(
+        self, graph: GraphInfo, budget: int, horizon: int
+    ) -> list[list[ActionOp]]:
+        selected = []
+        for _ in range(min(budget, graph.num_nodes)):
+            best_node, best_score = -1, float("-inf")
+            for node in range(graph.num_nodes):
+                if node in selected:
+                    continue
+
+                node_score = float(self.score(node, tuple(selected), graph))
+                if node_score > best_score:
+                    best_node, best_score = node, node_score
+
+            selected.append(best_node)
+
+        # Normalize whatever schedule() returns to exactly horizon+1 bags
+        plan = [list(bag) for bag in self.schedule(selected, graph, horizon)]
+        plan = plan[: horizon + 1]
+        plan += [[] for _ in range(horizon + 1 - len(plan))]
+
+        return plan
