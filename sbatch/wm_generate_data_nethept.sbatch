@@ -1,0 +1,44 @@
+#!/bin/bash
+#SBATCH --job-name=wm_generate_data_nethept
+#SBATCH --output=logs/%x_%j.out
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+
+# Usage: sbatch sbatch/wm_generate_data_nethept.sbatch
+
+set -euo pipefail
+cd /home/rrishab/GraphWorldModel/
+source venv/bin/activate
+mkdir -p data/output logs
+
+# NetHEPT citation network (15,229 nodes, 62,752 directed edges) — the standard
+# IM scale benchmark. Auto-downloads on first use. ONE real graph: 50 rollouts
+# x 2 models x 3 algos = 300 episodes (fewer rollouts than the small graphs —
+# each 15K-node episode with 30 marginal draws per step is expensive).
+#
+# NO betweenness: exact Brandes is O(V*E) ~ 10^9 in pure networkx at this size
+# (hours). random/degree/pagerank still span diverse seed sets.
+
+# --budget-pct 1 -> ~152 seeds (1% of N). Use --budget 5 for strict jazz parity.
+
+# Node ops only, matching the BA recipe.
+# All-five alternative: --action-ops add_node remove_node add_edge remove_edge set_edge_weight
+
+python -m data.generate_wm_data \
+    --dataset nethept \
+    --models IC LT --prob-model weighted --budget-pct 1 \
+    --algorithms random degree pagerank \
+    --rollouts 50 --horizon 10 --inject-p 0.4 --cf-prob 0.4 --cf-branches 2 \
+    --action-ops add_node remove_node \
+    --weight-lo 0.0 --weight-hi 1.0 \
+    --mc-marginals 30 \
+    --split 0.7 0.15 0.15 --seed 42 \
+    --out-dir data/output/nethept_marg_structured
+
+python -m data.validate_wm_data --dir data/output/nethept_marg_structured
+
+python -c "import json; print('action_ops:', json.load(open('data/output/nethept_marg_structured/metadata.json'))['config']['action_ops'])"
+
+echo "[gen_data] done -> data/output/nethept_marg_structured"

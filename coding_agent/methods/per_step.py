@@ -1,7 +1,12 @@
 """Method 2: re-prompt the agent at every timestep on the current state."""
 
 from coding_agent.agent import CodingAgent
-from coding_agent.executor import StrategyError, build_strategy, call_strategy
+from coding_agent.executor import (
+    StrategyError,
+    build_strategy,
+    call_strategy,
+    validate_actions,
+)
 from coding_agent.methods.base import OuterLoopMethod
 from coding_agent.prompts import build_user_prompt, system_prompts
 from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
@@ -33,7 +38,10 @@ class PerStepReprompt(OuterLoopMethod):
             # Build the strategy object from the LLM generated code, and call it
             last_strategy = build_strategy(agent.generate(system, user))
 
-            return call_strategy(last_strategy.act, state, graph, timestep)
+            bag = call_strategy(last_strategy.act, state, graph, timestep)
+            validate_actions(bag, graph.num_nodes, task.budget, task.allowed_ops)
+
+            return bag
 
         # Roll the plan out and get the trajectory's reward, which is the score
         trajectory = environment.rollout(action_fn, task.horizon, task.budget)
