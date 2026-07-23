@@ -207,7 +207,7 @@ Orthogonal to the method choice (supported for `one_shot` and `evolve`):
   `algorithms` module** and no simulation primitives (`mc_simulate_spread`,
   `compute_marginal_gain`, `build_simulator` are hidden — otherwise the agent
   re-derives CELF instead of inventing structural scoring logic). The library
-  appears in the prompt as an *ideas menu* only — any borrowed idea must be
+  appears in the prompt as an _ideas menu_ only — any borrowed idea must be
   written out inside `score()`, where it can be mutated. Canned/`--baseline`
   scripts always run in free mode regardless of the flag.
 
@@ -489,7 +489,7 @@ candidate) · `--model` (gateway name; default `claude-sonnet-5`) ·
 `--temperature` (omit = provider default; `0.0` = greedy) · `--allowed-ops` ·
 `--baseline <algorithm>` (synthesizes the all-at-`t₀` special-case plan) ·
 `--routing` (GA-routing baseline: the LLM selects one pool algorithm from a
-name+summary menu — adaptive *selection* without synthesis; the pick is recorded
+name+summary menu — adaptive _selection_ without synthesis; the pick is recorded
 as `model: routing:<algo>` and the raw reply as `routing_reply`) ·
 `--budget` / `--horizon` / `--windows` / `--outer-iters` · `--mc-runs` (MC ensemble
 / compare size; default 200) · `--n-samples` (WM ensemble; default 20) ·
@@ -498,19 +498,21 @@ as `model: routing:<algo>` and the raw reply as `routing_reply`) ·
 
 ### Results JSON schema
 
-| Key                                               | Meaning                                                                                                                                                                |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `method`, `evaluator`, `model`                    | provenance; `model` is the gateway name, `baseline:<algo>`, `routing:<algo>`, or `canned`                                                                              |
-| `reward`                                          | ensemble-mean final spread under the inner-loop evaluator                                                                                                              |
-| `summary`                                         | one-line trajectory summary (final spread, steps, per-step counts)                                                                                                     |
-| `script`                                          | the exact source of the winning strategy (per_step: last generated script)                                                                                             |
-| `cost`                                            | `{n_samples                                                                                                                                                            | mc_runs, env, reward_se, rollout_seconds}` for the winning trajectory |
-| `timeline`                                        | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
-| `real_env_episodes`                               | cumulative real-environment episodes consumed by inner-loop feedback (0 for `world_model`/`oracle`; the `--compare` referee replay is excluded)                        |
-| `credit_base_reward`, `credit`                    | with `--credit`: paired-ablation base reward + per-action deltas                                                                                                       |
-| `mc_reward`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy                                                                                                          |
-| `wm_minus_mc`                                     | evaluator fidelity on this exact strategy — the trust meter                                                                                                            |
-| `elapsed_seconds`                                 | whole experiment including LLM calls                                                                                                                                   |
+| Key                                                                | Meaning                                                                                                                                                                |
+| ------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `method`, `evaluator`, `model`                                     | provenance; `model` is the gateway name, `baseline:<algo>`, `routing:<algo>`, or `canned`                                                                              |
+| `graph`                                                            | `{graph_id, num_nodes, num_edges, directed}`; `num_edges` counts directed arcs (edge_index columns), matching the prompt stats                                         |
+| `budget`, `budget_pct`                                             | the seed budget the run was constrained to, absolute and as % of `num_nodes`                                                                                           |
+| `reward`, `spread_pct`                                             | ensemble-mean final spread under the inner-loop evaluator, absolute and as % of `num_nodes`                                                                            |
+| `summary`                                                          | one-line trajectory summary (final spread, steps, per-step counts)                                                                                                     |
+| `script`                                                           | the exact source of the winning strategy (per_step: last generated script)                                                                                             |
+| `cost`                                                             | `{n_samples                                                                                                                                                            | mc_runs, env, reward_se, rollout_seconds}` for the winning trajectory |
+| `timeline`                                                         | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
+| `real_env_episodes`                                                | cumulative real-environment episodes consumed by inner-loop feedback (0 for `world_model`/`oracle`; the `--compare` referee replay is excluded)                        |
+| `credit_base_reward`, `credit`                                     | with `--credit`: paired-ablation base reward + per-action deltas                                                                                                       |
+| `mc_reward`, `mc_spread_pct`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy (absolute + % of `num_nodes`)                                                                            |
+| `wm_minus_mc`                                                      | evaluator fidelity on this exact strategy — the trust meter                                                                                                            |
+| `elapsed_seconds`                                                  | whole experiment including LLM calls                                                                                                                                   |
 
 Timing semantics: `cost.rollout_seconds` vs `mc_rollout_seconds` is the WM-vs-MC
 speed comparison on the same strategy (normalize by ensemble size:

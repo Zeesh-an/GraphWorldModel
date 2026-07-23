@@ -5,14 +5,14 @@ Baselines -
 
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --strategy-mode free \ 
+    --method one_shot --strategy-mode free \
     --evaluator world_model --budget 5 --horizon 10 --compare \
     --baseline degree_discount --outer-iters 1 \
     --out-json coding_agent/results/baseline_degree_discount.json
 
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --strategy-mode free \ 
+    --method one_shot --strategy-mode free \
     --evaluator world_model --budget 5 --horizon 10 --compare \
     --baseline celf_pp --outer-iters 1 \
     --out-json coding_agent/results/baseline_celf_pp.json
@@ -23,7 +23,7 @@ Graph algorithm routing (LLM picks from a list of graph algorithms, no synthesis
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --model claude-sonnet-5 \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --strategy-mode free \ 
+    --method one_shot --strategy-mode free \
     --evaluator world_model --budget 5 --horizon 10 --compare \
     --routing --outer-iters 1 \
     --out-json coding_agent/results/routing.json
@@ -33,7 +33,7 @@ Oracle -
 
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --model claude-sonnet-5 \
-    --method one_shot --strategy-mode free \ 
+    --method one_shot --strategy-mode free \
     --evaluator oracle --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
     --mc-runs 200 --n-samples 50 \
@@ -57,7 +57,7 @@ Coding Agent (One-shot) -
 python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
     --model claude-sonnet-5 \
     --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --strategy-mode free \ 
+    --method one_shot --strategy-mode free \
     --evaluator world_model --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
     --mc-runs 200 --n-samples 50 \
@@ -156,7 +156,7 @@ def build_method(name: str) -> OuterLoopMethod:
     )
 
 
-def _load_graph(config: ExperimentConfig) -> GraphInfo:
+def _load_graph(config: ExperimentConfig) -> tuple[GraphInfo, str]:
     if config.data_dir is None:
         raise ValueError(
             "config.data_dir is required unless a graph is passed directly"
@@ -165,7 +165,7 @@ def _load_graph(config: ExperimentConfig) -> GraphInfo:
     store = load_graph_store(config.data_dir)
     graph_id = config.graph_id or next(iter(store))
 
-    return GraphInfo.from_store_entry(store[graph_id])
+    return GraphInfo.from_store_entry(store[graph_id]), graph_id
 
 
 def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
@@ -227,8 +227,9 @@ def run_experiment(
 ) -> dict:
     experiment_start = time.perf_counter()
 
+    graph_id = config.graph_id
     if graph is None:
-        graph = _load_graph(config)
+        graph, graph_id = _load_graph(config)
 
     environment = _build_environment(config, graph)
 
@@ -332,7 +333,18 @@ class Baseline(Strategy):
         "method": config.method,
         "evaluator": config.evaluator,
         "model": provider_label,
+        # num_edges counts directed arcs (edge_index columns), matching the
+        # graph stats shown in the agent prompts
+        "graph": {
+            "graph_id": graph_id,
+            "num_nodes": graph.num_nodes,
+            "num_edges": int(graph.edge_index.shape[1]),
+            "directed": graph.directed,
+        },
+        "budget": config.budget,
+        "budget_pct": round(100.0 * config.budget / graph.num_nodes, 3),
         "reward": trajectory.reward,
+        "spread_pct": round(100.0 * trajectory.reward / graph.num_nodes, 2),
         "summary": summarize(trajectory, graph),
         # For per_step this is the last timestep's script (one is generated per step)
         "script": strategy.source_script,
@@ -375,6 +387,9 @@ class Baseline(Strategy):
 
         mc_trajectory = mc_environment.rollout(action_fn, config.horizon, config.budget)
         result["mc_reward"] = mc_trajectory.reward
+        result["mc_spread_pct"] = round(
+            100.0 * mc_trajectory.reward / graph.num_nodes, 2
+        )
         result["mc_reward_se"] = mc_trajectory.cost["reward_se"]
         result["mc_rollout_seconds"] = mc_trajectory.cost["rollout_seconds"]
         result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward

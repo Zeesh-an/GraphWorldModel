@@ -6,10 +6,12 @@ transition data for IM and write it as JSONL + a graph store
 import argparse
 import json
 import os
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
+from tqdm import tqdm
 
 from data.wm_actions import (
     counterfactual_actions,
@@ -327,16 +329,43 @@ def _episode_transitions(
 
 
 def run_generation(config: GenConfig) -> dict[str, object]:
+    generation_start = time.perf_counter()
     out_dir = Path(config.out_dir)
     os.makedirs(out_dir, exist_ok=True)
     graph_store = GraphStore(out_dir)
     base_rng = np.random.default_rng(config.seed)
 
+    graph_count = 1 if config.dataset in real_directed else config.num_graphs
+    total_episodes = (
+        graph_count * len(config.models) * len(config.algorithms) * config.rollouts
+    )
+
+    graphs_meta = []
     n_episodes = 0
+    progress_bar = tqdm(total=total_episodes, desc="episodes")
+
     with TransitionWriter(out_dir) as writer:
         for bundle in _iter_bundles(config):
             graph_store.save(bundle)
-            budget = _resolve_budget(config, bundle.nx_graph.number_of_nodes())
+
+            num_nodes = bundle.nx_graph.number_of_nodes()
+            num_edges = bundle.nx_graph.number_of_edges()
+            budget = _resolve_budget(config, num_nodes)
+            budget_pct = round(100.0 * budget / num_nodes, 3)
+
+            graphs_meta.append(
+                {
+                    "graph_id": bundle.graph_id,
+                    "num_nodes": num_nodes,
+                    "num_edges": num_edges,
+                    "budget_k": budget,
+                    "budget_pct": budget_pct,
+                }
+            )
+            tqdm.write(
+                f"[gen] {bundle.graph_id}: N={num_nodes} E={num_edges} "
+                f"budget k={budget} ({budget_pct}% of N)"
+            )
 
             for model in config.models:
                 for algorithm in config.algorithms:
@@ -354,16 +383,23 @@ def run_generation(config: GenConfig) -> dict[str, object]:
                             split,
                         )
                         n_episodes += 1
+                        progress_bar.update(1)
+                        progress_bar.set_postfix(graph=bundle.graph_id[:24])
 
         graph_store.flush()
+
+    progress_bar.close()
+    generation_seconds = time.perf_counter() - generation_start
 
     metadata = {
         "task": "IM_world_model_transitions",
         "config": config.__dict__,
         "n_episodes": n_episodes,
+        "generation_seconds": round(generation_seconds, 1),
+        "graphs": graphs_meta,
     }
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, default=str))
-    print(f"[done] {n_episodes} episodes -> {out_dir}")
+    print(f"[done] {n_episodes} episodes in {generation_seconds:.1f}s -> {out_dir}")
 
     return metadata
 
