@@ -11,7 +11,7 @@
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
-mkdir -p data/output logs
+mkdir -p results logs
 
 # BA-100 with 40 distinct graphs (index folded into the seed -> ba_n100_m3_s42..s61),
 # add_node and remove_node action ops, IC + LT, four cheap seed selectors
@@ -35,10 +35,10 @@ python -m data.generate_wm_data \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir data/output/ba40_marg_structured
+    --out-dir results/ba40/data
 
-python -m data.validate_wm_data --dir data/output/ba40_marg_structured
+python -m data.validate_wm_data --dir results/ba40/data
 
-python -c "import json; print('action_ops:', json.load(open('data/output/ba40_marg_structured/metadata.json'))['config']['action_ops'])"
+python -c "import json; print('action_ops:', json.load(open('results/ba40/data/metadata.json'))['config']['action_ops'])"
 
-echo "[gen_data] done -> data/output/ba40_marg_structured"
+echo "[gen_data] done -> results/ba40/data"

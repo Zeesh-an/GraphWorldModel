@@ -20,7 +20,7 @@ import numpy as np
 import scipy.sparse as sp
 
 digg_url = "https://datasets.syr.edu/uploads/1296588940/Digg-dataset.zip"
-data_dir = Path(__file__).resolve().parent.parent / "digg"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "digg"
 
 
 def download_digg() -> Path:

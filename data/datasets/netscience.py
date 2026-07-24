@@ -22,7 +22,7 @@ import numpy as np
 import scipy.sparse as sp
 
 netscience_url = "https://networks.skewed.de/net/netscience/files/netscience.csv.zip"
-data_dir = Path(__file__).resolve().parent.parent / "netscience"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "netscience"
 
 
 def download_netscience() -> Path:

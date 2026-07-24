@@ -11,7 +11,7 @@
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
-mkdir -p data/output logs
+mkdir -p results logs
 
 # NetScience coauthorship network (1,589 nodes, 2,742 edges, heavily fragmented:
 # 128 isolates + many small components — budget allocation across components is
@@ -33,10 +33,10 @@ python -m data.generate_wm_data \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir data/output/netscience_marg_structured
+    --out-dir results/netscience/data
 
-python -m data.validate_wm_data --dir data/output/netscience_marg_structured
+python -m data.validate_wm_data --dir results/netscience/data
 
-python -c "import json; print('action_ops:', json.load(open('data/output/netscience_marg_structured/metadata.json'))['config']['action_ops'])"
+python -c "import json; print('action_ops:', json.load(open('results/netscience/data/metadata.json'))['config']['action_ops'])"
 
-echo "[gen_data] done -> data/output/netscience_marg_structured"
+echo "[gen_data] done -> results/netscience/data"

@@ -183,7 +183,92 @@ they are targets for a future scalable-simulation pass, not day-one datasets.
 
 ---
 
-## Quick start
+## Quick start — the whole experiment in one command
+
+`pipeline/run.py` runs every stage end to end and writes a single
+`results/<tag>/report.md` with the tables and figures. Swapping datasets is a
+one-flag change.
+
+```bash
+source .venv/bin/activate
+
+# Everything: generate -> train the WM -> run all arms at 1/5/10/20% budgets
+# -> plot -> report
+python -m pipeline.run --dataset ba --tag ba40 --num-graphs 40 --syn-nodes 100 \
+    --evaluator world_model --compare
+
+# Same thing on a real graph — only the dataset changes
+python -m pipeline.run --dataset netscience --evaluator world_model --compare
+
+# Outer-loop development against the ground-truth ceiling: no world model is
+# trained, so the train stage is skipped automatically
+python -m pipeline.run --dataset sbm --tag sbm40 --num-graphs 40 --evaluator oracle
+```
+
+### Stages, resuming, and skipping
+
+`data → train → agent → plots → report`. Every stage writes its artifacts before
+the next begins, and a rerun **detects finished work on disk and skips it** — so a
+killed job resumes at the exact arm and budget it died on. LLM arms are the
+expensive part, and they are checkpointed one file per `(budget, arm)`.
+
+```bash
+# Only the reporting half of a finished run
+python -m pipeline.run --dataset ba --tag ba40 --start-stage plots
+
+# Re-run one stage from scratch
+python -m pipeline.run --dataset ba --tag ba40 \
+    --start-stage agent --end-stage agent --force
+
+# Reuse an existing world model, skip straight to the agent sweep
+python -m pipeline.run --dataset ba --tag ba40 --skip-stages data train
+```
+
+| flag | default | meaning |
+| ---- | ------- | ------- |
+| `--dataset` | — | synthetic family (`er ba ws sbm karate`) or real dataset name |
+| `--tag` | the dataset name | `results/<tag>/` directory to write |
+| `--start-stage` / `--end-stage` | `data` / `report` | inclusive stage range |
+| `--skip-stages` | none | stages to omit from that range |
+| `--force` | off | recompute stages whose outputs already exist |
+| `--evaluator` | `oracle` | `oracle` (ceiling, no training), `world_model`, or `monte_carlo` |
+| `--arms` | 5 conditions | `baseline:<algorithm>`, `routing`, or `<method>_<mode>` |
+| `--budget-pcts` | `1 5 10 20` | budget sweep as % of nodes; `--budgets` for absolute k |
+| `--compare` | off | replay each winner on Monte Carlo for a fidelity check |
+| `--llm-model` / `--outer-iters` | `claude-sonnet-5` / `5` | coding-agent model and refinement budget |
+
+Generation, training, and agent hyperparameters are all exposed too
+(`--rollouts`, `--mc-marginals`, `--wm-model`, `--head`, `--epochs`, `--n-samples`,
+…) — see `python -m pipeline.run --help`.
+
+### Where everything lands
+
+```
+results/<tag>/
+├── data/                    transitions + graph store        (stage: data)
+├── world_model/             wm_<model>_<dm>.pt, <model>_<dm>.json  (stage: train)
+├── agent/<budget>/<arm>.json  one file per condition          (stage: agent)
+├── plots/*.png              paper figures                    (stage: plots)
+├── report.md                tables + figures + winning program (stage: report)
+└── pipeline.json            full config and per-stage timings
+```
+
+Raw dataset downloads live outside the results tree, in `data/raw/<dataset>/`,
+since they are inputs shared across every run.
+
+### Figures produced
+
+`budget_vs_spread` (the headline: spread vs k per arm, with MC error bars),
+`budget_vs_spread_pct` (normalized), `evaluator_fidelity` (estimate vs Monte
+Carlo parity plot), `runtime` (per-rollout cost, the amortization claim),
+`convergence` (best-so-far reward per outer iteration), `cascade` (infected
+count over time), and — when a world model was trained — `wm_training`,
+`wm_one_step`, `wm_rollout`. Each is skipped silently when its inputs are absent,
+so a partial run just yields fewer figures.
+
+---
+
+## Running the stages individually
 
 ```bash
 source .venv/bin/activate
@@ -193,21 +278,21 @@ source .venv/bin/activate
 python -m data.generate_wm_data --dataset ba --num-graphs 20 \
     --action-ops add_node remove_node add_edge remove_edge set_edge_weight \
     --models IC LT --algorithms random degree pagerank betweenness \
-    --out-dir data/output/ba20_marg_structured
+    --out-dir results/ba40/data
 
 # 2. Train the world model — GraphSAGE, structured IC head
 python -m world_model.train_wm \
-    --data-dir data/output/ba20_marg_structured --diffusion-model IC \
+    --data-dir results/ba40/data --diffusion-model IC \
     --model sage --head structured --pos-weight off \
     --hidden-dim 64 --n-layers 3 --epochs 400 --batch-size 32 --patience 50 \
-    --seed 42 --device cuda --plan-demo \
-    --results world_model/checkpoints/ba20_marg_structured_sage_IC.json
+    --seed 42 --device cuda --plan-demo
+# checkpoint + results JSON default to results/ba40/world_model/
 
 # 3. (optional) re-evaluate a checkpoint without retraining
 python -m world_model.eval_rollout_ensemble \
-    --results world_model/checkpoints/ba20_marg_structured_sage_IC.json --device cpu
+    --results results/ba40/world_model/sage_IC.json --device cpu
 python -m world_model.eval_structured_oracle \
-    --data-dir data/output/ba20_marg_structured --diffusion-model IC --device cpu
+    --data-dir results/ba40/data --diffusion-model IC --device cpu
 ```
 
 ### Key training flags
@@ -268,6 +353,11 @@ above is the prerequisite this component was waiting on.
 
 ```
 GraphWorldModel/
+├── pipeline/
+│   ├── run.py                  # ← END-TO-END DRIVER: stages, resume, CLI
+│   ├── layout.py               # the results/<tag>/ directory contract
+│   ├── plots.py                # every paper figure
+│   └── report.py               # results/<tag>/report.md generator
 ├── data/
 │   ├── generate_wm_data.py     # action-conditioned WM data generator (orchestrator)
 │   ├── wm_simulator.py         # NDlib stepwise IC/LT sim + State/ActionOp + MC marginals
@@ -276,6 +366,7 @@ GraphWorldModel/
 │   ├── graph_utils.py          # adjacency → edge_index + IC/LT edge probs
 │   ├── validate_wm_data.py     # post-hoc gate-check harness
 │   ├── datasets/               # per-dataset download/load helpers
+│   ├── raw/                    # raw downloads (gitignored, shared across runs)
 │   ├── README.md               # ← data-generation technical reference
 │   └── old/                    # legacy diffusion-only CND/IM/SL generators (archived)
 ├── world_model/
@@ -288,8 +379,11 @@ GraphWorldModel/
 │   ├── eval_rollout_ensemble.py# recompute ensemble rollout on a checkpoint
 │   ├── eval_structured_oracle.py# IC structural-form oracle check
 │   ├── model/                  # 5 backbone encoders + model_utils (encoder files also retain unused legacy *ForwardModel classes)
-│   ├── checkpoints/            # trained weights, results JSONs, RESULTS.md
+│   ├── checkpoints/            # historical RESULTS.md (new runs write to results/)
 │   └── README.md               # ← world-model technical reference
+├── coding_agent/               # ← outer-loop coding agent (see its README)
+├── sbatch/                     # SLURM jobs; pipeline_*.sbatch run the whole thing
+├── results/                    # ALL generated artifacts, one subtree per --tag
 ├── baselines/DeepIM/           # external DeepIM baseline (reference)
 └── requirements.txt
 ```

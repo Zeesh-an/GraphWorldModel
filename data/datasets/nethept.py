@@ -28,7 +28,7 @@ nethept_attribute_url = (
     "https://raw.githubusercontent.com/SparklyYS/Simultaneous-IMM/"
     "master/nethept/attribute.txt"
 )
-data_dir = Path(__file__).resolve().parent.parent / "nethept"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "nethept"
 
 
 def download_nethept() -> Path:

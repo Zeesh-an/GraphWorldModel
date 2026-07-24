@@ -39,6 +39,8 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         self.outer_iters = outer_iters
         self.credit = credit
         self.strategy_mode = strategy_mode
+        # Per-iteration rewards, read back by run.py for the convergence plot
+        self.history = []
 
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
@@ -95,6 +97,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 trajectory = environment.rollout(action_fn, task.horizon, task.budget)
             except StrategyError as error:
                 last_error = str(error)
+                self.history.append(
+                    {"iteration": iteration + 1, "reward": None, "error": last_error}
+                )
 
                 # Log the first line of any StrategyError
                 tqdm.write(
@@ -114,6 +119,14 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             # Keep the best strategy and trajectory pair by reward
             if best is None or trajectory.reward > best[1].reward:
                 best = (strategy, trajectory)
+
+            self.history.append(
+                {
+                    "iteration": iteration + 1,
+                    "reward": trajectory.reward,
+                    "best": best[1].reward,
+                }
+            )
 
             tqdm.write(
                 f"[one_shot] iter {iteration + 1}: reward={trajectory.reward:.2f} "

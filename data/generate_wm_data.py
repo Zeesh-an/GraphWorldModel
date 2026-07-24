@@ -29,6 +29,7 @@ from data.wm_simulator import ActionOp, Simulator, State, valid_action_ops
 
 synthetic_families = ("er", "ba", "ws", "sbm", "karate")
 seed_upper_bound = 2**31 - 1
+results_root = Path("results")
 
 # Default k-sweep band: spans the 1%/5%/10%/20%-of-N budgets the learning-based
 # IM literature reports, so one checkpoint covers the whole sweep
@@ -628,8 +629,10 @@ def parse_args() -> GenConfig:
 
     args = parser.parse_args()
 
+    # Every generated artifact lives under results/<tag>/; the pipeline passes
+    # --out-dir explicitly, this default is for standalone invocations
     if args.out_dir is None:
-        args.out_dir = str(Path(__file__).resolve().parent / "output" / args.dataset)
+        args.out_dir = str(results_root / args.dataset / "data")
 
     if args.smoke:
         args.dataset, args.num_graphs, args.syn_nodes, args.er_p = "er", 1, 40, 0.1

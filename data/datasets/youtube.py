@@ -23,7 +23,7 @@ import scipy.sparse as sp
 youtube_url = (
     "https://snap.stanford.edu/data/bigdata/communities/com-youtube.ungraph.txt.gz"
 )
-data_dir = Path(__file__).resolve().parent.parent / "youtube"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "youtube"
 
 
 def download_youtube() -> Path:

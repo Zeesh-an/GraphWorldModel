@@ -20,7 +20,7 @@ import numpy as np
 import scipy.sparse as sp
 
 cora_ml_url = "https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz"
-data_dir = Path(__file__).resolve().parent.parent / "cora_ml"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "cora_ml"
 
 
 def download_cora_ml() -> Path:

@@ -1,20 +1,22 @@
 """
 Autoregressive action-conditioned world-model training (teacher-forced one-step).
 
-python world_model/train_wm.py \
-    --data-dir data/output/er_node --diffusion-model IC \
-    --model gcn --hidden-dim 64 --n-layers 3 \
-    --epochs 300 --lr 1e-3 --weight-decay 5e-4 --batch-size 16 \
-    --pos-weight auto --patience 40 --seed 42 \
-    --device cuda --plan-demo \
-    --ckpt-dir world_model/checkpoints \
-    --results world_model/checkpoints/er_node_gcn_IC.json
+Checkpoints and the results JSON land next to the data by default:
+results/<tag>/data -> results/<tag>/world_model/{wm_<model>_<dm>.pt, <model>_<dm>.json}
+
+python -m world_model.train_wm \
+    --data-dir results/ba40/data --diffusion-model IC \
+    --model sage --head structured_residual --hidden-dim 64 --n-layers 3 \
+    --epochs 400 --lr 1e-3 --weight-decay 5e-4 --batch-size 32 \
+    --pos-weight off --patience 50 --seed 42 \
+    --device cuda --plan-demo
 """
 
 import argparse
 import json
 import os
 import time
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 import numpy as np
@@ -33,6 +35,35 @@ from world_model.wm_eval import (
 
 pos_weight_min = 1.0
 pos_weight_max = 50.0
+
+
+@dataclass
+class TrainConfig:
+    """Field names are the results-JSON `config` schema that world_model_env reads back."""
+
+    data_dir: str
+    diffusion_model: str = "IC"
+    model: str = "gcn"
+    head: str = "linear"
+    hidden_dim: int = 64
+    n_layers: int = 3
+    n_heads: int = 4
+    ffn_dim: int = 128
+    gcnii_alpha: float = 0.1
+    gcnii_lamda: float = 0.5
+    dropout: float = 0.1
+    epochs: int = 200
+    lr: float = 1e-3
+    weight_decay: float = 5e-4
+    batch_size: int = 16
+    pos_weight: str = "auto"
+    patience: int = 30
+    seed: int = 42
+    device: str = "cpu"
+    ckpt_dir: str | None = None
+    results: str | None = None
+    plan_demo: bool = False
+    plan_graphs: int = 5
 
 
 def _clamp_pos_weight(value: float) -> float:
@@ -60,6 +91,168 @@ def compute_pos_weight(
         torch.tensor([_clamp_pos_weight(weight_infected)], device=device),
         torch.tensor([_clamp_pos_weight(weight_frontier)], device=device),
     )
+
+
+def resolve_paths(config: TrainConfig) -> TrainConfig:
+    """Default the checkpoint dir and results JSON to siblings of the data dir."""
+    if config.ckpt_dir is None:
+        config.ckpt_dir = str(Path(config.data_dir).resolve().parent / "world_model")
+
+    if config.results is None:
+        config.results = str(
+            Path(config.ckpt_dir) / f"{config.model}_{config.diffusion_model}.json"
+        )
+
+    return config
+
+
+def train_world_model(config: TrainConfig) -> dict:
+    config = resolve_paths(config)
+
+    torch.manual_seed(config.seed)
+    np.random.seed(config.seed)
+
+    device = torch.device(config.device)
+    diffusion_model = config.diffusion_model
+
+    train_dataset = TransitionDataset(config.data_dir, diffusion_model, "train")
+    validation_dataset = TransitionDataset(config.data_dir, diffusion_model, "val")
+    test_dataset = TransitionDataset(config.data_dir, diffusion_model, "test")
+
+    collate_fn = partial(
+        collate_transitions, diffusion_model=diffusion_model, device=device
+    )
+
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=config.batch_size,
+        shuffle=True,
+        collate_fn=collate_fn,
+    )
+
+    backbone_kwargs = {
+        "n_heads": config.n_heads,
+        "ffn_dim": config.ffn_dim,
+        "alpha": config.gcnii_alpha,
+        "lamda": config.gcnii_lamda,
+    }
+
+    model = WorldModel(
+        config.model,
+        in_channels=in_channels,
+        hidden_dim=config.hidden_dim,
+        n_layers=config.n_layers,
+        dropout=config.dropout,
+        head_type=config.head,
+        diffusion_model=diffusion_model,
+        **backbone_kwargs,
+    ).to(device)
+
+    optimizer = torch.optim.Adam(
+        params=model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+    )
+
+    if config.pos_weight == "auto":
+        pos_weight_infected, pos_weight_frontier = compute_pos_weight(
+            train_dataset, device
+        )
+    else:
+        pos_weight_infected = pos_weight_frontier = None
+
+    infected_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight_infected)
+    frontier_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight_frontier)
+
+    os.makedirs(config.ckpt_dir, exist_ok=True)
+    checkpoint_path = (
+        Path(config.ckpt_dir) / f"wm_{config.model}_{diffusion_model}.pt"
+    )
+    best_delta_f1, epochs_since_best = -1.0, 0
+    train_start = time.perf_counter()
+
+    # Per-epoch curve for the training-diagnostics plot
+    history = []
+
+    for epoch in range(config.epochs):
+        model.train()
+        progress_bar = tqdm(train_dataloader, desc=f"epoch {epoch}")
+        epoch_loss, n_batches = 0.0, 0
+
+        for batch in progress_bar:
+            optimizer.zero_grad()
+
+            logits = model(batch["X"], batch["graph"])
+            loss = infected_loss(logits[:, 0], batch["y_inf"]) + frontier_loss(
+                logits[:, 1], batch["y_fr"]
+            )
+
+            loss.backward()
+            optimizer.step()
+
+            loss_value = loss.item()
+            epoch_loss += loss_value
+            n_batches += 1
+            progress_bar.set_postfix(loss=f"{loss_value:.6f}")
+
+        val_metrics = evaluate_one_step(
+            model, validation_dataset, diffusion_model, device
+        )
+        history.append(
+            {
+                "epoch": epoch,
+                "train_loss": epoch_loss / max(n_batches, 1),
+                "val_delta_f1": val_metrics["delta_f1"],
+                "val_new_infection_f1": val_metrics["new_infection_f1"],
+            }
+        )
+
+        if val_metrics["delta_f1"] > best_delta_f1:
+            best_delta_f1, epochs_since_best = val_metrics["delta_f1"], 0
+            torch.save(model.state_dict(), checkpoint_path)
+        else:
+            epochs_since_best += 1
+            if epochs_since_best >= config.patience:
+                print(
+                    f"[early-stop] epoch {epoch}, best val delta_f1={best_delta_f1:.4f}"
+                )
+                break
+
+    train_seconds = time.perf_counter() - train_start
+    print(f"[train] total training time: {train_seconds:.1f}s")
+
+    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    results = {
+        "config": vars(config),
+        "train_seconds": train_seconds,
+        "best_val_delta_f1": best_delta_f1,
+        "history": history,
+        "test": evaluate_one_step(model, test_dataset, diffusion_model, device),
+    }
+    results["rollout"] = rollout_ensemble(
+        model,
+        config.data_dir,
+        diffusion_model,
+        train_dataset.store,
+        device,
+        "test",
+        seed=config.seed,
+    )
+
+    if config.plan_demo:
+        results["planning"] = planning_regret_multi(
+            model,
+            train_dataset.store,
+            diffusion_model,
+            device,
+            n_graphs=config.plan_graphs,
+            seed=config.seed,
+        )
+
+    os.makedirs(Path(config.results).parent, exist_ok=True)
+    Path(config.results).write_text(json.dumps(results, indent=2, default=str))
+    print(f"[train] checkpoint -> {checkpoint_path}")
+    print(f"[train] results -> {config.results}")
+
+    return results
 
 
 if __name__ == "__main__":
@@ -175,11 +368,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--ckpt-dir",
         type=str,
-        default=str(Path(__file__).resolve().parent / "checkpoints"),
-        help="checkpoint directory (default: world_model/checkpoints).",
+        default=None,
+        help="checkpoint directory (default: <data-dir>/../world_model).",
     )
     parser.add_argument(
-        "--results", type=str, default=None, help="results JSON path (default: None)."
+        "--results",
+        type=str,
+        default=None,
+        help="results JSON path (default: <ckpt-dir>/<model>_<diffusion-model>.json).",
     )
     parser.add_argument(
         "--plan-demo",
@@ -194,129 +390,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-
-    device = torch.device(args.device)
-    diffusion_model = args.diffusion_model
-
-    train_dataset = TransitionDataset(args.data_dir, diffusion_model, "train")
-    validation_dataset = TransitionDataset(args.data_dir, diffusion_model, "val")
-    test_dataset = TransitionDataset(args.data_dir, diffusion_model, "test")
-
-    collate_fn = partial(
-        collate_transitions, diffusion_model=diffusion_model, device=device
-    )
-
-    train_dataloader = DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True, collate_fn=collate_fn
-    )
-
-    backbone_kwargs = {
-        "n_heads": args.n_heads,
-        "ffn_dim": args.ffn_dim,
-        "alpha": args.gcnii_alpha,
-        "lamda": args.gcnii_lamda,
-    }
-
-    model = WorldModel(
-        args.model,
-        in_channels=in_channels,
-        hidden_dim=args.hidden_dim,
-        n_layers=args.n_layers,
-        dropout=args.dropout,
-        head_type=args.head,
-        diffusion_model=diffusion_model,
-        **backbone_kwargs,
-    ).to(device)
-
-    optimizer = torch.optim.Adam(
-        params=model.parameters(), lr=args.lr, weight_decay=args.weight_decay
-    )
-
-    if args.pos_weight == "auto":
-        pos_weight_infected, pos_weight_frontier = compute_pos_weight(
-            train_dataset, device
-        )
-    else:
-        pos_weight_infected = pos_weight_frontier = None
-
-    infected_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight_infected)
-    frontier_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight_frontier)
-
-    os.makedirs(args.ckpt_dir, exist_ok=True)
-    checkpoint_path = Path(args.ckpt_dir) / f"wm_{args.model}_{diffusion_model}.pt"
-    best_delta_f1, epochs_since_best = -1.0, 0
-    train_start = time.perf_counter()
-
-    for epoch in range(args.epochs):
-        model.train()
-        progress_bar = tqdm(train_dataloader, desc=f"epoch {epoch}")
-
-        for batch in progress_bar:
-            optimizer.zero_grad()
-
-            logits = model(batch["X"], batch["graph"])
-            loss = infected_loss(logits[:, 0], batch["y_inf"]) + frontier_loss(
-                logits[:, 1], batch["y_fr"]
-            )
-
-            loss.backward()
-            optimizer.step()
-
-            loss_value = loss.item()
-            progress_bar.set_postfix(loss=f"{loss_value:.6f}")
-
-        val_metrics = evaluate_one_step(
-            model, validation_dataset, diffusion_model, device
-        )
-
-        if val_metrics["delta_f1"] > best_delta_f1:
-            best_delta_f1, epochs_since_best = val_metrics["delta_f1"], 0
-            torch.save(model.state_dict(), checkpoint_path)
-        else:
-            epochs_since_best += 1
-            if epochs_since_best >= args.patience:
-                print(
-                    f"[early-stop] epoch {epoch}, best val delta_f1={best_delta_f1:.4f}"
-                )
-                break
-
-    train_seconds = time.perf_counter() - train_start
-    print(f"[train] total training time: {train_seconds:.1f}s")
-
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
-    results = {
-        "config": vars(args),
-        "train_seconds": train_seconds,
-        "test": evaluate_one_step(model, test_dataset, diffusion_model, device),
-    }
-    results["rollout"] = rollout_ensemble(
-        model,
-        args.data_dir,
-        diffusion_model,
-        train_dataset.store,
-        device,
-        "test",
-        seed=args.seed,
-    )
-
-    if args.plan_demo:
-        results["planning"] = planning_regret_multi(
-            model,
-            train_dataset.store,
-            diffusion_model,
-            device,
-            n_graphs=args.plan_graphs,
-            seed=args.seed,
-        )
-
-    results_path = args.results or str(
-        Path(args.ckpt_dir) / f"results_{args.model}_{diffusion_model}.json"
-    )
-    os.makedirs(Path(results_path).parent, exist_ok=True)
-    Path(results_path).write_text(json.dumps(results, indent=2, default=str))
+    results = train_world_model(TrainConfig(**vars(args)))
 
     print(
         json.dumps(

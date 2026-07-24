@@ -22,7 +22,7 @@ import numpy as np
 import scipy.sparse as sp
 
 weibo_page_url = "https://www.aminer.cn/influencelocality"
-data_dir = Path(__file__).resolve().parent.parent / "weibo"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "weibo"
 
 
 def download_weibo() -> Path:

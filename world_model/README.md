@@ -29,7 +29,7 @@ at inference time.
 
 ```
 JSONL transitions ──▶ TransitionDataset ──▶ collate (block-diagonal batch)
-   (data/output/…)        │                       │
+   (results/<tag>/data)        │                       │
                           ▼                       ▼
                    build_features            build_graph_input
                    X:(N,6), y_inf,y_fr       adj_norm, edge_index, edge_weight
@@ -240,20 +240,30 @@ loss   = BCEWithLogits(logits[:,0], y_inf)                # next-infected
   the best **val `delta_f1`**; early-stop after `--patience` epochs without
   improvement.
 - **Final report.** Reload the best checkpoint and write a results JSON with
-  three blocks: `test` (one-step), `rollout` (stochastic ensemble), and (with
-  `--plan-demo`) `planning` (multi-graph regret). Checkpoint saved to
+  four blocks: `history` (per-epoch train loss + val `delta_f1`), `test`
+  (one-step), `rollout` (stochastic ensemble), and (with `--plan-demo`)
+  `planning` (multi-graph regret). Checkpoint saved to
   `wm_<model>_<diffusion>.pt`.
+
+**Output paths.** `--ckpt-dir` defaults to a sibling of the data directory —
+`results/<tag>/data` puts the checkpoint and results JSON in
+`results/<tag>/world_model/`. `--results` defaults to
+`<ckpt-dir>/<model>_<diffusion>.json`. Pass either explicitly to override.
 
 Example:
 
 ```bash
 python -m world_model.train_wm \
-    --data-dir data/output/ba20_marg_structured --diffusion-model IC \
+    --data-dir results/ba40/data --diffusion-model IC \
     --model sage --head structured --pos-weight off \
     --hidden-dim 64 --n-layers 3 --epochs 400 --batch-size 32 --patience 50 \
-    --seed 42 --device cuda --plan-demo --plan-graphs 5 \
-    --results world_model/checkpoints/ba20_marg_structured_sage_IC.json
+    --seed 42 --device cuda --plan-demo --plan-graphs 5
+# -> results/ba40/world_model/{wm_sage_IC.pt, sage_IC.json}
 ```
+
+`train_world_model(TrainConfig(...))` is the importable form — it is what
+`pipeline/run.py` calls for the train stage, and it returns the same results dict
+it writes to disk.
 
 ---
 

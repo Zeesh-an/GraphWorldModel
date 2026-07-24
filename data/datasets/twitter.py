@@ -20,7 +20,7 @@ import numpy as np
 import scipy.sparse as sp
 
 twitter_url = "https://snap.stanford.edu/data/twitter_combined.txt.gz"
-data_dir = Path(__file__).resolve().parent.parent / "twitter"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "twitter"
 
 
 def download_twitter() -> Path:

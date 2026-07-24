@@ -442,34 +442,50 @@ model exists to undercut in the outer loop.
 
 ## 9. Running experiments
 
+> **For a full sweep, use the pipeline instead.** `python -m pipeline.run` runs
+> every arm at every budget, resumes what it already finished, and writes the
+> plots and `results/<tag>/report.md`. One arm at one budget is one file at
+> `results/<tag>/agent/<budget>/<arm>.json` — exactly what the commands below
+> produce, so the two are interchangeable:
+>
+> ```bash
+> python -m pipeline.run --dataset ba --tag ba40 --evaluator oracle \
+>     --arms baseline:degree_discount baseline:celf_pp routing one_shot_free evolve_scored \
+>     --budget-pcts 1 5 10 20 --outer-iters 5 --compare
+> ```
+>
+> Arm names: `baseline:<algorithm>`, `routing`, or `<method>_<mode>`
+> (`one_shot_free`, `one_shot_scored`, `evolve_scored`, `per_step_free`,
+> `windowed_free`).
+
 ```bash
 # LLM run: node-ops game, WM evaluator, MC compare, credit feedback
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
-    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+python -m coding_agent.run --data-dir results/ba40/data \
+    --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
     --model claude-sonnet-5 --outer-iters 3 --credit \
-    --out-json coding_agent/results/run.json
+    --out-json results/ba40/agent/pct5/run.json
 
 # Classical baseline through the identical pipeline (no LLM, no .env needed)
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
-    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+python -m coding_agent.run --data-dir results/ba40/data \
+    --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
-    --baseline celf --outer-iters 1 --out-json coding_agent/results/baseline_celf.json
+    --baseline celf --outer-iters 1 --out-json results/ba40/agent/pct5/baseline_celf.json
 
 # GA routing: one LLM call picks a library algorithm (no code synthesis),
 # then it runs through the identical --baseline canned path
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+python -m coding_agent.run --data-dir results/ba40/data \
     --model claude-sonnet-5 \
-    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+    --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
-    --routing --outer-iters 1 --out-json coding_agent/results/routing.json
+    --routing --outer-iters 1 --out-json results/ba40/agent/pct5/routing.json
 
 # Oracle-dynamics ceiling: true IC transitions, no checkpoint / --wm-results-json
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+python -m coding_agent.run --data-dir results/ba40/data \
     --model claude-sonnet-5 \
     --method one_shot --evaluator oracle --budget 5 --horizon 10 --compare \
-    --outer-iters 5 --out-json coding_agent/results/oracle_run.json
+    --outer-iters 5 --out-json results/ba40/agent/pct5/oracle_run.json
 
 # Native coding agent: one real execution per candidate, episodes counted
 #   ... --evaluator monte_carlo --mc-runs 1
@@ -511,6 +527,8 @@ same resolution rule as data generation) / `--horizon` / `--windows` /
 | `cost`                                                             | `{n_samples                                                                                                                                                            | mc_runs, env, reward_se, rollout_seconds}` for the winning trajectory |
 | `timeline`                                                         | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
 | `real_env_episodes`                                                | cumulative real-environment episodes consumed by inner-loop feedback (0 for `world_model`/`oracle`; the `--compare` referee replay is excluded)                        |
+| `history`                                                          | per-outer-iteration `{iteration, reward, best}` (evolve also logs `operator`; failed iterations carry `reward: null` and `error`). Empty for baseline/routing arms. Drives the convergence plot |
+| `arm`, `budget_label`                                              | added when the run came from `pipeline.run`: which condition and which point of the budget sweep                                                                       |
 | `credit_base_reward`, `credit`                                     | with `--credit`: paired-ablation base reward + per-action deltas                                                                                                       |
 | `mc_reward`, `mc_spread_pct`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy (absolute + % of `num_nodes`)                                                                            |
 | `wm_minus_mc`                                                      | evaluator fidelity on this exact strategy — the trust meter                                                                                                            |

@@ -1,67 +1,51 @@
 """
-Top-level driver: run the coding-agent outer loop over the inner-loop environment
+Top-level driver: run the coding-agent outer loop over the inner-loop environment.
+
+For a full dataset sweep (all arms x all budgets, plots and report) use
+`python -m pipeline.run` instead; this module is the single-run entry point.
 
 Baselines -
 
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
-    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+python -m coding_agent.run --data-dir results/ba40/data \
+    --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --strategy-mode free \
     --evaluator world_model --budget 5 --horizon 10 --compare \
     --baseline degree_discount --outer-iters 1 \
-    --out-json coding_agent/results/baseline_degree_discount.json
-
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
-    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --strategy-mode free \
-    --evaluator world_model --budget 5 --horizon 10 --compare \
-    --baseline celf_pp --outer-iters 1 \
-    --out-json coding_agent/results/baseline_celf_pp.json
+    --out-json results/ba40/agent/pct5.0/baseline_degree_discount.json
 
 
 Graph algorithm routing (LLM picks from a list of graph algorithms, no synthesis) -
 
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+python -m coding_agent.run --data-dir results/ba40/data \
     --model claude-sonnet-5 \
-    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
+    --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --strategy-mode free \
     --evaluator world_model --budget 5 --horizon 10 --compare \
     --routing --outer-iters 1 \
-    --out-json coding_agent/results/routing.json
-    
+    --out-json results/ba40/agent/pct5.0/routing.json
 
-Oracle - 
 
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
+Oracle -
+
+python -m coding_agent.run --data-dir results/ba40/data \
     --model claude-sonnet-5 \
     --method one_shot --strategy-mode free \
     --evaluator oracle --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
     --mc-runs 200 --n-samples 50 \
-    --outer-iters 5 --out-json coding_agent/results/oracle_run.json
+    --outer-iters 5 --out-json results/ba40/agent/pct5.0/one_shot_free.json
 
 
 Scored mode + evolve (agent edits algorithm internals, population search) -
 
-python -m coding_agent.run --data-dir data/output/sbm40_marg_structured \
+python -m coding_agent.run --data-dir results/sbm40/data \
     --model claude-sonnet-5 \
-    --wm-results-json world_model/checkpoints/sbm40_marg_structured/sage_IC.json \
-    --method evolve --strategy-mode scored 
+    --wm-results-json results/sbm40/world_model/sage_IC.json \
+    --method evolve --strategy-mode scored \
     --evaluator world_model --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
     --outer-iters 10 --n-samples 50 \
-    --out-json coding_agent/results/evolve_scored.json
-
-
-Coding Agent (One-shot) -
-
-python -m coding_agent.run --data-dir data/output/ba40_marg_structured \
-    --model claude-sonnet-5 \
-    --wm-results-json world_model/checkpoints/ba40_marg_structured/sage_IC.json \
-    --method one_shot --strategy-mode free \
-    --evaluator world_model --budget 5 --horizon 10 --compare \
-    --allowed-ops add_node remove_node \
-    --mc-runs 200 --n-samples 50 \
-    --outer-iters 5 --out-json coding_agent/results/llm_run_5.json
+    --out-json results/sbm40/agent/pct5.0/evolve_scored.json
 """
 
 import argparse
@@ -368,6 +352,8 @@ class Baseline(Strategy):
         # For per_step this is the last timestep's script (one is generated per step)
         "script": strategy.source_script,
         "cost": trajectory.cost,
+        # Per-outer-iteration rewards (empty for baseline/routing arms)
+        "history": getattr(method, "history", []),
         # Inner-loop real-environment episodes only (0 for model-based
         # evaluators); the --compare referee replay is deliberately excluded
         "real_env_episodes": getattr(environment, "episodes_used", 0),

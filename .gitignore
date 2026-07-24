@@ -32,19 +32,15 @@ __pycache__/
 *.pkl
 *.SG
 
-# Action-conditioned world-model generated data
-data/output/
+# Everything the pipeline generates: transitions, checkpoints, agent runs,
+# plots, reports. Keep the tree local — it is reproducible from the sbatch files.
+results/
 
 # Raw real-dataset downloads (written by the data/datasets/ loaders)
-data/cora_ml/
-data/digg/
-data/twitter/
-data/jazz/
-data/netscience/
-data/power_grid/
-data/nethept/
-data/weibo/
-data/youtube/
+data/raw/
+
+# Pre-reorganization locations, kept ignored so old trees do not get committed
+data/output/
 
 # Jupyter
 .ipynb_checkpoints/

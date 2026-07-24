@@ -21,7 +21,7 @@ import numpy as np
 import scipy.sparse as sp
 
 jazz_url = "https://nrvis.com/download/data/misc/arenas-jazz.zip"
-data_dir = Path(__file__).resolve().parent.parent / "jazz"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "jazz"
 
 
 def download_jazz() -> Path:

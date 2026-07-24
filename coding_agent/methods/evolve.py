@@ -39,6 +39,8 @@ class EvolveSearch(OuterLoopMethod):
         self.strategy_mode = strategy_mode
         self.stagnation_patience = stagnation_patience
         self.inspiration_count = inspiration_count
+        # Per-generation rewards, read back by run.py for the convergence plot
+        self.history = []
 
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
@@ -118,6 +120,14 @@ class EvolveSearch(OuterLoopMethod):
             except StrategyError as error:
                 last_error = str(error)
                 stagnation += 1
+                self.history.append(
+                    {
+                        "iteration": iteration + 1,
+                        "reward": None,
+                        "operator": operator,
+                        "error": last_error,
+                    }
+                )
                 tqdm.write(
                     f"[evolve] iter {iteration + 1}: script failed — "
                     f"{last_error.splitlines()[0]}"
@@ -145,6 +155,14 @@ class EvolveSearch(OuterLoopMethod):
             else:
                 stagnation += 1
 
+            self.history.append(
+                {
+                    "iteration": iteration + 1,
+                    "reward": trajectory.reward,
+                    "best": best[1].reward,
+                    "operator": operator,
+                }
+            )
             tqdm.write(
                 f"[evolve] iter {iteration + 1}: reward={trajectory.reward:.2f} "
                 f"(best={best[1].reward:.2f}, stagnation={stagnation})"

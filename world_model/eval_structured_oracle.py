@@ -4,8 +4,8 @@ with q = the TRUE edge transmission prob (no learning, encoder ignored) and run 
 ensemble rollout. This must give ens_count_bias ~ 0 and ens_final_count_model ~ true,
 confirming the IC structural form fixes saturation BEFORE we train a learned head.
 
-python world_model/eval_structured_oracle.py \
-    --data-dir data/output/ba20_marg --diffusion-model IC \
+python -m world_model.eval_structured_oracle \
+    --data-dir results/ba40/data --diffusion-model IC \
     --n-samples 20 --max-episodes 50 --device cpu
 """
 

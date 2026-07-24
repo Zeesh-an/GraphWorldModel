@@ -21,7 +21,7 @@ import numpy as np
 import scipy.sparse as sp
 
 power_grid_url = "https://nrvis.com/download/data/misc/opsahl-powergrid.zip"
-data_dir = Path(__file__).resolve().parent.parent / "power_grid"
+data_dir = Path(__file__).resolve().parent.parent / "raw" / "power_grid"
 
 
 def download_power_grid() -> Path:

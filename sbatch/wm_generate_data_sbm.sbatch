@@ -11,7 +11,7 @@
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
-mkdir -p data/output logs
+mkdir -p results logs
 
 # SBM-100 with 40 distinct graphs, 4 planted communities each (25 nodes per block,
 # p_in 0.15 / p_out 0.01). Same scale/recipe as the BA run so the only variable is
@@ -34,10 +34,10 @@ python -m data.generate_wm_data \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir data/output/sbm40_marg_structured
+    --out-dir results/sbm40/data
 
-python -m data.validate_wm_data --dir data/output/sbm40_marg_structured
+python -m data.validate_wm_data --dir results/sbm40/data
 
-python -c "import json; print('action_ops:', json.load(open('data/output/sbm40_marg_structured/metadata.json'))['config']['action_ops'])"
+python -c "import json; print('action_ops:', json.load(open('results/sbm40/data/metadata.json'))['config']['action_ops'])"
 
-echo "[gen_data] done -> data/output/sbm40_marg_structured"
+echo "[gen_data] done -> results/sbm40/data"

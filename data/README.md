@@ -29,6 +29,14 @@ See the design spec:
 
 ## Quick start
 
+> Generation is stage 1 of `python -m pipeline.run`, which also trains the world
+> model, runs every agent arm, plots, and writes a report. Use the commands below
+> when you want data generation on its own.
+
+**Where things go.** Generated datasets land in `results/<tag>/data/`
+(`--out-dir`, defaulting to `results/<dataset>/data`). Raw downloads land in
+`data/raw/<dataset>/` and are shared across every run — both are gitignored.
+
 ```bash
 source .venv/bin/activate
 
@@ -53,7 +61,7 @@ python -m data.generate_wm_data --dataset ba --num-graphs 1 \
 python -m data.generate_wm_data --dataset ba --num-graphs 20 \
     --action-ops add_node remove_node add_edge remove_edge set_edge_weight --models IC LT \
     --algorithms random degree pagerank betweenness \
-    --out-dir data/output/ba20_marg_structured
+    --out-dir results/ba40/data
 
 # Real dataset (downloads on first use)
 python -m data.generate_wm_data --dataset jazz --action-ops add_node remove_node add_edge remove_edge set_edge_weight
@@ -62,7 +70,7 @@ python -m data.generate_wm_data --dataset jazz --action-ops add_node remove_node
 python -m data.generate_wm_data --smoke --out-dir /tmp/wm_smoke
 
 # Validate a produced dataset (gate checks)
-python -m data.validate_wm_data --dir data/output/ba
+python -m data.validate_wm_data --dir results/ba40/data
 ```
 
 ---

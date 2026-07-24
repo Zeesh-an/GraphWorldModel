@@ -7,20 +7,25 @@
 #SBATCH --mem=16G
 #SBATCH --gres=gpu:1
 
+# Train one world model on already-generated data. For the whole experiment use
+# sbatch/pipeline_*.sbatch; this is for retraining a single backbone in place.
+#
 # Usage: sbatch sbatch/wm_train.sbatch <model> <diffusion_model> <data_dir>
-# Usage: sbatch sbatch/wm_train.sbatch sage IC data/output/sbm40_marg_structured
+#        sbatch sbatch/wm_train.sbatch sage IC results/sbm40/data
+#
+# The checkpoint and results JSON land beside the data, in results/<tag>/world_model/.
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
-mkdir -p world_model/checkpoints logs
+mkdir -p results logs
 
-# model           = gcn | sage | gt | gat | gcnii  (default sage)
-# diffusion_model = IC | LT                        (default IC)
-# data_dir        = a data/output/<...> directory  (default data/output/ba_all)
+# model           = gcn | sage | gt | gat | gcnii   (default sage)
+# diffusion_model = IC | LT                         (default IC)
+# data_dir        = a results/<tag>/data directory  (default results/ba40/data)
 MODEL="${1:-sage}"
 DM="${2:-IC}"
-DATA="${3:-data/output/ba_all}"
+DATA="${3:-results/ba40/data}"
 
 # Backbone-specific architecture flags
 case "$MODEL" in
@@ -30,9 +35,6 @@ case "$MODEL" in
   *)     EXTRA="--n-layers 3" ;; # gcn, sage
 esac
 
-CKPT_DIR="world_model/checkpoints/$(basename "$DATA")"
-mkdir -p "$CKPT_DIR"
-
 # Confirm the job actually got a GPU
 python -c "import torch; print('CUDA:', torch.cuda.is_available(), '|', (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU-ONLY'))"
 
@@ -41,8 +43,6 @@ python -m world_model.train_wm \
     --model "$MODEL" --head structured_residual --hidden-dim 64 $EXTRA \
     --epochs 400 --lr 1e-3 --weight-decay 5e-4 --batch-size 32 \
     --pos-weight off --patience 50 --seed 42 \
-    --device cuda --plan-demo \
-    --ckpt-dir "$CKPT_DIR" \
-    --results "$CKPT_DIR/${MODEL}_${DM}.json"
+    --device cuda --plan-demo
 
 echo "[train] done: model=$MODEL dm=$DM data=$DATA"

@@ -7,8 +7,8 @@ training run — so like the rollout-threshold sweep, recomputing it should relo
 the checkpoint rather than retrain. Use this after changing how planning is
 measured (e.g. single-graph -> multi-graph averaging).
 
-python world_model/eval_planning.py \
-    --results world_model/checkpoints/ba20_all_*_IC.json \
+python -m world_model.eval_planning \
+    --results results/ba40/world_model/sage_IC.json \
     --plan-graphs 5 --device cpu
 """
 

@@ -11,7 +11,7 @@
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
-mkdir -p data/output logs
+mkdir -p results logs
 
 # NetHEPT citation network (15,229 nodes, 62,752 directed edges) — the standard
 # IM scale benchmark. Auto-downloads on first use. ONE real graph: 50 rollouts
@@ -38,10 +38,10 @@ python -m data.generate_wm_data \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir data/output/nethept_marg_structured
+    --out-dir results/nethept/data
 
-python -m data.validate_wm_data --dir data/output/nethept_marg_structured
+python -m data.validate_wm_data --dir results/nethept/data
 
-python -c "import json; print('action_ops:', json.load(open('data/output/nethept_marg_structured/metadata.json'))['config']['action_ops'])"
+python -c "import json; print('action_ops:', json.load(open('results/nethept/data/metadata.json'))['config']['action_ops'])"
 
-echo "[gen_data] done -> data/output/nethept_marg_structured"
+echo "[gen_data] done -> results/nethept/data"

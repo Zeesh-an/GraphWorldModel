@@ -7,8 +7,8 @@ trajectories, and compares the model's marginal/count distribution to the TRUE
 simulator's MC trajectory under the same recorded actions. Tests whether the
 rollout saturation is mostly a thresholding artifact.
 
-python world_model/eval_rollout_ensemble.py \
-    --results world_model/checkpoints/ba20_marg_sage_IC_structured.json \
+python -m world_model.eval_rollout_ensemble \
+    --results results/ba40/world_model/sage_IC.json \
     --n-samples 20 --max-episodes 50 --device cpu
 """
 
