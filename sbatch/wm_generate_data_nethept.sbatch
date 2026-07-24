@@ -21,14 +21,17 @@ mkdir -p data/output logs
 # NO betweenness: exact Brandes is O(V*E) ~ 10^9 in pure networkx at this size
 # (hours). random/degree/pagerank still span diverse seed sets.
 
-# --budget-pct 1 -> ~152 seeds (1% of N). Use --budget 5 for strict jazz parity.
+# k ~ U(1%, 20% of N) per episode -> 152..3,046 seeds here. One checkpoint covers
+# the whole budget sweep instead of only the k it was generated at. The high end
+# is the expensive one: 3K seeds saturate this graph fast, so most of the cost is
+# the 30 marginal draws per step, not the horizon.
 
 # Node ops only, matching the BA recipe.
 # All-five alternative: --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
 python -m data.generate_wm_data \
     --dataset nethept \
-    --models IC LT --prob-model weighted --budget-pct 1 \
+    --models IC LT --prob-model weighted --budget-pct-range 1 20 \
     --algorithms random degree pagerank \
     --rollouts 50 --horizon 10 --inject-p 0.4 --cf-prob 0.4 --cf-branches 2 \
     --action-ops add_node remove_node \

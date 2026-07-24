@@ -74,11 +74,11 @@ python -m data.validate_wm_data --dir data/output/ba
 ```
 for each graph G in the dataset:                 # _iter_bundles
     save G once to graphs/<graph_id>.npz         # GraphStore.save
-    k = resolve seed budget (--budget / --budget-pct)
     for model in {IC, LT}:                        # --models
         for algorithm in spine selectors:        # --algorithms
             for rollout in range(--rollouts):     # independent episodes
                 split = assign train/val/test     # --split, RNG draw
+                k = resolve seed budget           # _resolve_budget, per episode
                 run one episode -> write transitions   # _episode_transitions
 write graphs_index.json + metadata.json
 ```
@@ -255,7 +255,9 @@ per dynamics (see `world_model/README.md`).
 | `--models`                        | `IC LT`         | which dynamics to generate transitions for                                                                 |
 | `--prob-model {weighted,uniform}` | `weighted`      | IC prob: `weighted` = 1/in_degree(v); `uniform` = constant `--uniform-p`                                   |
 | `--uniform-p`                     | `0.1`           | the constant IC prob (and LT weight) when `--prob-model uniform`                                           |
-| `--budget` / `--budget-pct`       | `5` / `None`    | seed-set size k (pct overrides absolute)                                                                   |
+| `--budget-pct-range LO HI`        | `1 20`          | **default** — draw k ~ U(LO%, HI% of N) per episode, so one WM covers a whole budget sweep                  |
+| `--no-budget-range`               | `False`         | disable the range and use the two flags below instead                                                      |
+| `--budget` / `--budget-pct`       | `5` / `None`    | fixed seed-set size k for the whole run; only consulted with `--no-budget-range` (pct overrides absolute)   |
 | `--algorithms`                    | all 6 spine     | which seed selectors to roll out                                                                           |
 | `--rollouts` / `--horizon`        | `10` / `10`     | episodes per (graph, model, algo) / max timesteps                                                          |
 | `--inject-p`                      | `0.3`           | P(an intermediate step injects an action at all vs NULL)                                                   |

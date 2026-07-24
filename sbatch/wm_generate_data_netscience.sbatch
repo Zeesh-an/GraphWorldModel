@@ -18,15 +18,15 @@ mkdir -p data/output logs
 # the decision that matters). Auto-downloads on first use. ONE real graph, so
 # episode diversity comes from rollouts: 100 x 2 models x 4 algos = 800 episodes.
 
-# --budget-pct 1 -> ~16 seeds (1% of N); 5 absolute seeds on 1,589 nodes would
-# leave episodes nearly empty. Use --budget 5 instead for strict jazz parity.
+# k ~ U(1%, 20% of N) per episode -> 16..318 seeds here. One checkpoint covers
+# the whole budget sweep instead of only the k it was generated at.
 
 # Node ops only, matching the BA recipe.
 # All-five alternative: --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
 python -m data.generate_wm_data \
     --dataset netscience \
-    --models IC LT --prob-model weighted --budget-pct 1 \
+    --models IC LT --prob-model weighted --budget-pct-range 1 20 \
     --algorithms random degree pagerank betweenness \
     --rollouts 100 --horizon 10 --inject-p 0.4 --cf-prob 0.4 --cf-branches 2 \
     --action-ops add_node remove_node \

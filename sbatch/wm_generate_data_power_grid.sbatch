@@ -18,14 +18,15 @@ mkdir -p data/output logs
 # ONE real graph: 100 rollouts x 2 models x 4 algos = 800 episodes.
 # betweenness on ~5K sparse nodes takes a few minutes, computed once — fine.
 
-# --budget-pct 1 -> ~49 seeds (1% of N). Use --budget 5 for strict jazz parity.
+# k ~ U(1%, 20% of N) per episode -> 49..988 seeds here. One checkpoint covers
+# the whole budget sweep instead of only the k it was generated at.
 
 # Node ops only, matching the BA recipe.
 # All-five alternative: --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
 python -m data.generate_wm_data \
     --dataset power_grid \
-    --models IC LT --prob-model weighted --budget-pct 1 \
+    --models IC LT --prob-model weighted --budget-pct-range 1 20 \
     --algorithms random degree pagerank betweenness \
     --rollouts 100 --horizon 10 --inject-p 0.4 --cf-prob 0.4 --cf-branches 2 \
     --action-ops add_node remove_node \

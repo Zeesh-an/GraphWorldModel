@@ -30,6 +30,10 @@ from data.wm_simulator import ActionOp, Simulator, State, valid_action_ops
 synthetic_families = ("er", "ba", "ws", "sbm", "karate")
 seed_upper_bound = 2**31 - 1
 
+# Default k-sweep band: spans the 1%/5%/10%/20%-of-N budgets the learning-based
+# IM literature reports, so one checkpoint covers the whole sweep
+default_budget_pct_range = (1.0, 20.0)
+
 
 # Storage
 def build_record(
@@ -153,6 +157,7 @@ class GenConfig:
     uniform_p: float
     budget: int
     budget_pct: float | None
+    budget_pct_range: tuple[float, float] | None
     algorithms: list[str]
     rollouts: int
     horizon: int
@@ -198,7 +203,13 @@ def _iter_bundles(config: GenConfig) -> Iterator[GraphBundle]:
         )
 
 
-def _resolve_budget(config: GenConfig, num_nodes: int) -> int:
+def _resolve_budget(config: GenConfig, num_nodes: int, rng: np.random.Generator) -> int:
+    # A range draws a fresh k per episode, so one checkpoint covers a whole
+    # k-sweep instead of only the single budget it was generated at
+    if config.budget_pct_range is not None:
+        pct = rng.uniform(*config.budget_pct_range)
+        return max(1, round(num_nodes * pct / 100))
+
     if config.budget_pct is not None:
         return max(1, round(num_nodes * config.budget_pct / 100))
 
@@ -350,27 +361,25 @@ def run_generation(config: GenConfig) -> dict[str, object]:
 
             num_nodes = bundle.nx_graph.number_of_nodes()
             num_edges = bundle.nx_graph.number_of_edges()
-            budget = _resolve_budget(config, num_nodes)
-            budget_pct = round(100.0 * budget / num_nodes, 3)
+            episode_budgets = []
 
-            graphs_meta.append(
-                {
-                    "graph_id": bundle.graph_id,
-                    "num_nodes": num_nodes,
-                    "num_edges": num_edges,
-                    "budget_k": budget,
-                    "budget_pct": budget_pct,
-                }
+            budget_label = (
+                f"k ~ U({config.budget_pct_range[0]}%, "
+                f"{config.budget_pct_range[1]}% of N) per episode"
+                if config.budget_pct_range is not None
+                else f"k={_resolve_budget(config, num_nodes, base_rng)}"
             )
             tqdm.write(
                 f"[gen] {bundle.graph_id}: N={num_nodes} E={num_edges} "
-                f"budget k={budget} ({budget_pct}% of N)"
+                f"budget {budget_label}"
             )
 
             for model in config.models:
                 for algorithm in config.algorithms:
                     for rollout in range(config.rollouts):
                         split = _assign_split(base_rng, config.split)
+                        budget = _resolve_budget(config, num_nodes, base_rng)
+                        episode_budgets.append(budget)
                         _episode_transitions(
                             bundle,
                             model,
@@ -385,6 +394,22 @@ def run_generation(config: GenConfig) -> dict[str, object]:
                         n_episodes += 1
                         progress_bar.update(1)
                         progress_bar.set_postfix(graph=bundle.graph_id[:24])
+
+            graphs_meta.append(
+                {
+                    "graph_id": bundle.graph_id,
+                    "num_nodes": num_nodes,
+                    "num_edges": num_edges,
+                    "budget_k_min": min(episode_budgets),
+                    "budget_k_max": max(episode_budgets),
+                    "budget_pct_min": round(
+                        100.0 * min(episode_budgets) / num_nodes, 3
+                    ),
+                    "budget_pct_max": round(
+                        100.0 * max(episode_budgets) / num_nodes, 3
+                    ),
+                }
+            )
 
         graph_store.flush()
 
@@ -503,6 +528,19 @@ def parse_args() -> GenConfig:
         help="seed budget as percent of nodes (default: None).",
     )
     parser.add_argument(
+        "--budget-pct-range",
+        type=float,
+        nargs=2,
+        default=default_budget_pct_range,
+        metavar=("LO", "HI"),
+        help=f"sample the seed budget per episode from this percent-of-nodes range; takes precedence over --budget and --budget-pct (default: {default_budget_pct_range[0]} {default_budget_pct_range[1]}).",
+    )
+    parser.add_argument(
+        "--no-budget-range",
+        action="store_true",
+        help="disable per-episode budget sampling and fall back to --budget / --budget-pct (default: False).",
+    )
+    parser.add_argument(
         "--algorithms",
         type=str,
         nargs="+",
@@ -616,6 +654,9 @@ def parse_args() -> GenConfig:
         uniform_p=args.uniform_p,
         budget=args.budget,
         budget_pct=args.budget_pct,
+        budget_pct_range=(
+            None if args.no_budget_range else tuple(args.budget_pct_range)
+        ),
         algorithms=args.algorithms,
         rollouts=args.rollouts,
         horizon=args.horizon,

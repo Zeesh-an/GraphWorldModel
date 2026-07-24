@@ -21,10 +21,13 @@ mkdir -p data/output logs
 # Node ops only, matching the BA recipe.
 # All-five alternative: --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
+# k ~ U(1%, 20% of N) per episode -> 1..20 seeds here. One checkpoint covers the
+# whole budget sweep instead of only the k it was generated at.
+
 python -m data.generate_wm_data \
     --dataset sbm --num-graphs 40 --syn-nodes 100 \
     --sbm-blocks 4 --sbm-p-in 0.15 --sbm-p-out 0.01 \
-    --models IC LT --prob-model weighted --budget 5 \
+    --models IC LT --prob-model weighted --budget-pct-range 1 20 \
     --algorithms random degree pagerank betweenness \
     --rollouts 20 --horizon 10 --inject-p 0.4 --cf-prob 0.4 --cf-branches 2 \
     --action-ops add_node remove_node \
