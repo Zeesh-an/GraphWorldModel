@@ -23,6 +23,7 @@ condition_colors = {
     4: "#CCB974",
     5: "#55A868",
     6: "#4C72B0",
+    7: "#9370DB",
 }
 
 
@@ -118,6 +119,76 @@ def plot_budget_vs_spread(
     axes.set_title(f"{title_prefix}: influence spread vs seed budget")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=8)
+
+    return _save(figure, out_path)
+
+
+def plot_ours_vs_baselines(
+    results: list[dict], out_path: Path, title_prefix: str, normalize: bool = False
+) -> Path | None:
+    """
+    The paper's headline figure: our method against every baseline across the
+    budget sweep.
+
+    Ours (condition 6) is drawn heavy and solid; published external methods
+    (condition 7) dashed; classical library algorithms (condition 1) thin and
+    faded. All series use the ground-truth MC replay so the curves are
+    commensurable.
+    """
+    if not results:
+        return None
+
+    ours = [result for result in results if result.get("condition") == 6]
+    if not ours:
+        # Without our own arm this is just budget_vs_spread under another name
+        return None
+
+    figure, axes = plt.subplots(figsize=(7.6, 4.8))
+
+    for index, arm in enumerate(_sorted_arms(results)):
+        runs = _by_arm(results, arm)
+        if len(runs) < 1:
+            continue
+
+        condition = _condition_of(results, arm)
+        nodes = [run["graph"]["num_nodes"] for run in runs]
+        x_values = [run["budget_pct"] if normalize else run["budget"] for run in runs]
+        y_values = [
+            100.0 * ground_truth_reward(run) / count if normalize
+            else ground_truth_reward(run)
+            for run, count in zip(runs, nodes, strict=True)
+        ]
+
+        if condition == 6:
+            style = {"linewidth": 3.0, "linestyle": "-", "zorder": 5, "alpha": 1.0}
+            label = f"OURS — {arm}"
+        elif condition == 7:
+            style = {"linewidth": 2.0, "linestyle": "--", "zorder": 4, "alpha": 0.95}
+            label = f"published — {arm.replace('external_', '')}"
+        elif condition == 1:
+            style = {"linewidth": 1.2, "linestyle": ":", "zorder": 2, "alpha": 0.7}
+            label = f"classical — {arm.replace('baseline_', '')}"
+        else:
+            style = {"linewidth": 1.5, "linestyle": "-.", "zorder": 3, "alpha": 0.8}
+            label = arm
+
+        axes.plot(
+            x_values,
+            y_values,
+            marker=marker_cycle[index % len(marker_cycle)],
+            markersize=5,
+            color=condition_colors.get(condition),
+            label=label,
+            **style,
+        )
+
+    axes.set_xlabel("seed budget (% of nodes)" if normalize else "seed budget k")
+    axes.set_ylabel(
+        "final spread (% of nodes)" if normalize else _reward_label(results)
+    )
+    axes.set_title(f"{title_prefix}: our method vs all baselines")
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
 
     return _save(figure, out_path)
 
@@ -504,13 +575,22 @@ def build_plots(
     title_prefix: str,
 ) -> list[Path]:
     os.makedirs(plots_dir, exist_ok=True)
-    figures = [
+    builders = [
         plot_budget_vs_spread(
             agent_results, plots_dir / "budget_vs_spread.png", title_prefix
         ),
         plot_budget_vs_spread(
             agent_results,
             plots_dir / "budget_vs_spread_pct.png",
+            title_prefix,
+            normalize=True,
+        ),
+        plot_ours_vs_baselines(
+            agent_results, plots_dir / "ours_vs_baselines.png", title_prefix
+        ),
+        plot_ours_vs_baselines(
+            agent_results,
+            plots_dir / "ours_vs_baselines_pct.png",
             title_prefix,
             normalize=True,
         ),
@@ -529,10 +609,10 @@ def build_plots(
     ]
 
     if wm_results is not None:
-        figures += [
+        builders += [
             plot_wm_training(wm_results, plots_dir / "wm_training.png", title_prefix),
             plot_wm_one_step(wm_results, plots_dir / "wm_one_step.png", title_prefix),
             plot_wm_rollout(wm_results, plots_dir / "wm_rollout.png", title_prefix),
         ]
 
-    return [figure for figure in figures if figure is not None]
+    return [figure for figure in builders if figure is not None]

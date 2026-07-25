@@ -35,6 +35,8 @@ from world_model.wm_eval import (
 
 pos_weight_min = 1.0
 pos_weight_max = 50.0
+# Flush the training curve to disk this often so a killed job keeps its history
+history_flush_epochs = 5
 
 
 @dataclass
@@ -169,15 +171,24 @@ def train_world_model(config: TrainConfig) -> dict:
     best_delta_f1, epochs_since_best = -1.0, 0
     train_start = time.perf_counter()
 
-    # Per-epoch curve for the training-diagnostics plot
+    # Per-epoch curve for the training-diagnostics plot, flushed as it grows
     history = []
+    history_path = Path(config.ckpt_dir) / f"history_{config.model}_{diffusion_model}.json"
 
-    for epoch in range(config.epochs):
+    print(
+        f"[train] {config.model}/{config.head} on {diffusion_model}: "
+        f"{len(train_dataset)} train / {len(validation_dataset)} val / "
+        f"{len(test_dataset)} test transitions, up to {config.epochs} epochs "
+        f"(patience {config.patience}) on {device}"
+    )
+
+    progress_bar = tqdm(range(config.epochs), desc=f"train {config.model}/{diffusion_model}")
+    for epoch in progress_bar:
         model.train()
-        progress_bar = tqdm(train_dataloader, desc=f"epoch {epoch}")
+        batch_bar = tqdm(train_dataloader, desc=f"  epoch {epoch}", leave=False)
         epoch_loss, n_batches = 0.0, 0
 
-        for batch in progress_bar:
+        for batch in batch_bar:
             optimizer.zero_grad()
 
             logits = model(batch["X"], batch["graph"])
@@ -191,7 +202,7 @@ def train_world_model(config: TrainConfig) -> dict:
             loss_value = loss.item()
             epoch_loss += loss_value
             n_batches += 1
-            progress_bar.set_postfix(loss=f"{loss_value:.6f}")
+            batch_bar.set_postfix(loss=f"{loss_value:.6f}")
 
         val_metrics = evaluate_one_step(
             model, validation_dataset, diffusion_model, device
@@ -203,6 +214,16 @@ def train_world_model(config: TrainConfig) -> dict:
                 "val_delta_f1": val_metrics["delta_f1"],
                 "val_new_infection_f1": val_metrics["new_infection_f1"],
             }
+        )
+
+        # Persist the curve as it is produced: a crash or a SLURM timeout at
+        # epoch 380/400 otherwise loses every epoch of history
+        if epoch % history_flush_epochs == 0 or epoch == config.epochs - 1:
+            Path(history_path).write_text(json.dumps(history, indent=2))
+
+        progress_bar.set_postfix(
+            val_delta_f1=f"{val_metrics['delta_f1']:.4f}",
+            best=f"{max(best_delta_f1, val_metrics['delta_f1']):.4f}",
         )
 
         if val_metrics["delta_f1"] > best_delta_f1:

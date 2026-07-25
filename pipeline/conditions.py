@@ -40,6 +40,7 @@ valid_modes = ("free", "scored")
 pure_ga_condition = 1
 routing_condition = 2
 evaluator_conditions = {native: 3, monte_carlo: 4, oracle: 5, world_model: 6}
+external_condition = 7
 
 condition_names = {
     1: "Pure GA",
@@ -48,6 +49,7 @@ condition_names = {
     4: "Agent + MC simulation",
     5: "Agent + oracle dynamics",
     6: "Ours: agent + learned GWM",
+    7: "Published baseline (external repo)",
 }
 
 # Conditions 1 and 2 have no refinement loop, so their evaluator only decides how
@@ -79,13 +81,14 @@ default_arms = (
 @dataclass
 class Arm:
     spec: str  # exactly what the user typed
-    name: str  # filesystem-safe; becomes agent/<budget>/<name>.json
+    name: str  # filesystem-safe; becomes <budget>/<name>.json
     method: str
     strategy_mode: str
     evaluator: str
     condition: int
     baseline: str | None = None
     routing: bool = False
+    external: str | None = None  # registered name in baselines/registry.py
 
     @property
     def condition_name(self) -> str:
@@ -94,7 +97,7 @@ class Arm:
     @property
     def is_agent(self) -> bool:
         """True when an LLM actually synthesises code (conditions 3-6)."""
-        return self.baseline is None and not self.routing
+        return self.baseline is None and not self.routing and self.external is None
 
 
 def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
@@ -103,6 +106,25 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
     if separator and explicit not in valid_evaluators:
         raise ValueError(
             f"arm {spec!r} names evaluator {explicit!r}; choose one of {valid_evaluators}"
+        )
+
+    # An external published method is scored on ground truth like the other
+    # no-refinement conditions; only its SEED SET crosses the process boundary
+    if body.startswith("external:"):
+        name = body.split(":", 1)[1]
+        if not name:
+            raise ValueError(f"arm {spec!r} is missing a name after 'external:'")
+
+        evaluator = explicit or selection_evaluator
+
+        return Arm(
+            spec=spec,
+            name=f"external_{name}",
+            method="one_shot",
+            strategy_mode="free",
+            evaluator=evaluator,
+            condition=external_condition,
+            external=name,
         )
 
     # Conditions 1 and 2 have no refinement loop, so they default to ground truth

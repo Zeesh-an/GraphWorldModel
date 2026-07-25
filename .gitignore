@@ -39,6 +39,9 @@ results/
 # Raw real-dataset downloads (written by the data/datasets/ loaders)
 data/raw/
 
+# Third-party baseline repos, fetched by baselines/setup_baselines.py.
+baselines/external/
+
 # Pre-reorganization locations, kept ignored so old trees do not get committed
 data/output/
 

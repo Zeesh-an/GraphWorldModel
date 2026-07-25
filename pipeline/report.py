@@ -73,6 +73,7 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
         4: "does simulated lookahead by itself explain the gain?",
         5: "ceiling of model-based guidance — a perfect internal model",
         6: "does the *learned* model recover the true dynamics?",
+        7: "the original authors' code, seeds scored by our referee",
     }
 
     lines = [

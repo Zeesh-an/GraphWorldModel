@@ -41,6 +41,11 @@ class Layout:
         return self.root / "agent"
 
     @property
+    def baselines_dir(self) -> Path:
+        """External published baselines (condition 7), kept apart from our arms."""
+        return self.root / "baselines"
+
+    @property
     def plots_dir(self) -> Path:
         return self.root / "plots"
 
@@ -61,5 +66,13 @@ class Layout:
     def wm_checkpoint(self, model: str, diffusion_model: str) -> Path:
         return self.world_model_dir / f"wm_{model}_{diffusion_model}.pt"
 
-    def agent_result(self, label: str, arm: str) -> Path:
-        return self.agent_dir / label / f"{arm}.json"
+    def agent_result(self, label: str, arm: str, external: bool = False) -> Path:
+        root = self.baselines_dir if external else self.agent_dir
+
+        return root / label / f"{arm}.json"
+
+    def result_globs(self) -> list[Path]:
+        """Every result file, ours and external, in one list for plots/report."""
+        return sorted(self.agent_dir.glob("*/*.json")) + sorted(
+            self.baselines_dir.glob("*/*.json")
+        )

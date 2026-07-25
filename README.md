@@ -20,10 +20,17 @@ models — **Independent Cascade (IC)** and **Linear Threshold (LT)** — with n
 and edge-level interventions.
 
 > **Two-layer docs.** This README is the overview. The deep technical references
-> are [`data/README.md`](data/README.md) (data generation) and
+> are [`data/README.md`](data/README.md) (data generation),
 > [`world_model/README.md`](world_model/README.md) (features, models, training,
-> evaluation). Worked results are in
+> evaluation), and [`coding_agent/README.md`](coding_agent/README.md) (the outer
+> loop). Worked results are in
 > [`world_model/checkpoints/RESULTS.md`](world_model/checkpoints/RESULTS.md).
+>
+> **Prior work.** [`IM_RESEARCH.md`](IM_RESEARCH.md) is the unified Influence
+> Maximization literature review: every classical and learning-based method,
+> which published results are directly comparable to ours (and which are not,
+> because the graph versions differ), the full DeepIM/MOEIM/IRIE result tables,
+> and links to every paper and code repo.
 
 ---
 
@@ -244,6 +251,27 @@ python -m pipeline.run --dataset sbm --baselines celf_pp imm community_im \
 python -m pipeline.run --dataset ba --native-mc-runs 5 --compare
 ```
 
+### Progress and logging
+
+Every stage announces itself and reports progress:
+
+```
+========================================================================
+[pipeline] STAGE 3/5: AGENT   (elapsed 142s)
+========================================================================
+agent runs:  47%|████▋     | 7/15 [02:11<02:30, 18.8s/run, pct10/external_moeim]
+[agent] pct10/baseline_celf_pp: done in 4.1s -> spread 24.50 (40.8% of N)
+[agent] 15 results (10 reused, 5 new), 0 skipped
+[pipeline] stage agent done in 25.7s
+```
+
+`data` shows an episode bar, `train` shows an epoch bar with live
+`val_delta_f1` plus a nested batch bar, `agent` shows one bar over the whole
+(budget × arm) grid with ETA and the arm currently running, `plots` names each
+figure as it lands. `pipeline.json` marks each stage `running` → `done` (or
+`failed` with the exception), so an interrupted run is distinguishable from a
+clean one.
+
 ### Stages, resuming, and skipping
 
 `data → train → agent → plots → report`. Every stage writes its artifacts before
@@ -286,13 +314,26 @@ Generation, training, and agent hyperparameters are all exposed too
 
 ```
 results/<tag>/
-├── data/                    transitions + graph store        (stage: data)
-├── world_model/             wm_<model>_<dm>.pt, <model>_<dm>.json  (stage: train)
-├── agent/<budget>/<arm>.json  one file per condition          (stage: agent)
-├── plots/*.png              paper figures                    (stage: plots)
-├── report.md                tables + figures + winning program (stage: report)
-└── pipeline.json            full config and per-stage timings
+├── data/                        transitions + graph store          (stage: data)
+├── world_model/                 wm_<model>_<dm>.pt, <model>_<dm>.json,
+│                                history_<model>_<dm>.json          (stage: train)
+├── agent/<budget>/<arm>.json    our conditions 1-6                 (stage: agent)
+├── baselines/<budget>/<name>.json   external published baselines   (stage: agent)
+│   └── _runs/<name>/<budget>/   raw stdout/stderr per external run
+├── plots/*.png                  paper figures                      (stage: plots)
+├── summary.csv / summary.json   ONE FLAT ROW PER (arm, budget)     (stage: report)
+├── report.md                    tables + figures + winning program  (stage: report)
+├── pipeline.json                config + per-stage status/timings
+└── environment.json             git commit, host, python/torch/CUDA versions
 ```
+
+**Nothing is recomputed and nothing is lost.** `summary.csv` is rewritten after
+*every single arm*, so a killed sweep still leaves a readable table of everything
+finished. The training curve flushes every 5 epochs, so a SLURM timeout at epoch
+380/400 keeps the history. Per-node `final_marginals` (which cost `n_samples`
+rollouts to produce) are serialized rather than recomputed. `environment.json`
+records the git commit and library versions so a results tree stays
+self-describing after the working copy moves on.
 
 Raw dataset downloads live outside the results tree, in `data/raw/<dataset>/`,
 since they are inputs shared across every run.
@@ -428,7 +469,8 @@ GraphWorldModel/
 ├── coding_agent/               # ← outer-loop coding agent (see its README)
 ├── sbatch/                     # SLURM jobs; pipeline_*.sbatch run the whole thing
 ├── results/                    # ALL generated artifacts, one subtree per --tag
-├── baselines/DeepIM/           # external DeepIM baseline (reference)
+├── baselines/                  # published-baseline runners (registry + adapters);
+│                               # external repos fetched into baselines/external/
 └── requirements.txt
 ```
 

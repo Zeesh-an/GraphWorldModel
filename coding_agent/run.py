@@ -80,6 +80,10 @@ oracle = "oracle"
 # Fresh-seed WM re-evaluations of the winning strategy during --compare
 wm_reeval_seeds = 3
 
+# Above this node count the per-node marginal vector is dropped from the results
+# JSON — it would dominate the file (1M nodes ~ 7MB of floats per run)
+max_serialized_marginals = 200_000
+
 
 @dataclass
 class ExperimentConfig:
@@ -360,6 +364,16 @@ class Baseline(Strategy):
         "cost": trajectory.cost,
         # Per-outer-iteration rewards (empty for baseline/routing arms)
         "history": getattr(method, "history", []),
+        # Per-node P(infected at end) across the ensemble. Costs n_samples
+        # rollouts to produce, so it is serialized rather than recomputed — it
+        # is what any post-hoc spatial analysis (coverage, per-community reach)
+        # needs. Suppressed on very large graphs where the list dominates the file.
+        "final_marginals": (
+            trajectory.final_marginals
+            if trajectory.final_marginals is not None
+            and graph.num_nodes <= max_serialized_marginals
+            else None
+        ),
         # Inner-loop real-environment episodes only (0 for model-based
         # evaluators); the --compare referee replay is deliberately excluded
         "real_env_episodes": getattr(environment, "episodes_used", 0),

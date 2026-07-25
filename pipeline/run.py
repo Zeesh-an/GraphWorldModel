@@ -39,8 +39,16 @@ import json
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from dotenv import load_dotenv
+from tqdm import tqdm
 
+from baselines.registry import (
+    available_baselines,
+    external_baselines,
+    runnable_baselines,
+)
+from baselines.run_baseline import BaselineError, run_external_baseline, seed_script
 from coding_agent.run import ExperimentConfig, run_experiment
 from data.generate_wm_data import (
     GenConfig,
@@ -49,10 +57,12 @@ from data.generate_wm_data import (
     synthetic_families,
 )
 from coding_agent.tools.library_api import algorithm_names
+from coding_agent.types import GraphInfo
 from data.wm_simulator import valid_action_ops
 from pipeline.conditions import (
     Arm,
     condition_names,
+    ground_truth_reward,
     default_arms,
     default_baselines,
     needs_world_model,
@@ -63,7 +73,9 @@ from pipeline.conditions import (
 from pipeline.layout import Layout, budget_label
 from pipeline.plots import build_plots
 from pipeline.report import write_report
+from pipeline.summary import write_environment, write_summary
 from world_model.train_wm import TrainConfig, train_world_model
+from world_model.wm_data import load_graph_store
 from world_model.wm_model import backbones
 
 stages = ("data", "train", "agent", "plots", "report")
@@ -137,13 +149,50 @@ class PipelineConfig:
     end_stage: str = stages[-1]
     skip_stages: tuple = ()
     force: bool = False
+    baseline_timeout: int = 3600
     results_root: str = "results"
     stage_status: dict = field(default_factory=dict)
+    _graph: object = field(default=None, repr=False)
+
+
+def expand_baselines(names: tuple) -> list[str]:
+    """
+    Resolve --baselines into arm specs.
+
+    Accepts library algorithm names (condition 1), `external:<name>` for a
+    published repo (condition 7), and the aliases `all`, `all-classical`,
+    `all-external`. `all` deliberately expands external baselines to only those
+    actually installed, so a fresh checkout does not fail on missing repos.
+    """
+    specs = []
+
+    for name in names:
+        if name == "all-classical":
+            specs += [f"baseline:{algorithm}" for algorithm in default_baselines]
+        elif name == "all-external":
+            specs += [f"external:{baseline}" for baseline in available_baselines()]
+        elif name == "all":
+            specs += [f"baseline:{algorithm}" for algorithm in default_baselines]
+            installed = runnable_baselines()
+            specs += [f"external:{baseline}" for baseline in installed]
+
+            skipped = sorted(set(available_baselines()) - set(installed))
+            if skipped:
+                print(
+                    f"[pipeline] --baselines all: skipping not-installed external "
+                    f"baselines {skipped} (run: python -m baselines.setup_baselines --all)"
+                )
+        elif name.startswith("external:"):
+            specs.append(name)
+        else:
+            specs.append(f"baseline:{name}")
+
+    return specs
 
 
 def build_arms(config: PipelineConfig) -> list[Arm]:
-    """Classical pool (condition 1) plus the explicitly named conditions."""
-    specs = [f"baseline:{algorithm}" for algorithm in config.baselines]
+    """Classical pool + external published baselines + the named conditions."""
+    specs = expand_baselines(config.baselines)
     specs += list(config.arms)
 
     arms = [parse_arm(spec, default_evaluator=config.evaluator) for spec in specs]
@@ -185,8 +234,20 @@ def active_stages(config: PipelineConfig) -> list[str]:
 
 def stage_data(config: PipelineConfig, layout: Layout) -> dict:
     if layout.data_metadata().exists() and not config.force:
-        print(f"[data] reusing {layout.data_dir} (--force to regenerate)")
-        return json.loads(layout.data_metadata().read_text())
+        metadata = json.loads(layout.data_metadata().read_text())
+        print(
+            f"[data] reusing {layout.data_dir} "
+            f"({metadata.get('n_episodes')} episodes already generated; "
+            f"--force to regenerate)"
+        )
+        return metadata
+
+    print(
+        f"[data] generating: dataset={config.dataset} "
+        f"graphs={config.num_graphs} models={list(config.gen_models)} "
+        f"selectors={list(config.gen_algorithms)} rollouts={config.rollouts} "
+        f"mc_marginals={config.mc_marginals}"
+    )
 
     generation_config = GenConfig(
         dataset=config.dataset,
@@ -228,8 +289,13 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
     checkpoint_path = layout.wm_checkpoint(config.wm_model, config.diffusion_model)
 
     if results_path.exists() and checkpoint_path.exists() and not config.force:
-        print(f"[train] reusing {results_path} (--force to retrain)")
-        return json.loads(results_path.read_text())
+        existing = json.loads(results_path.read_text())
+        print(
+            f"[train] reusing {results_path} "
+            f"(delta_f1={existing.get('test', {}).get('delta_f1', '?')}, "
+            f"--force to retrain)"
+        )
+        return existing
 
     return train_world_model(
         TrainConfig(
@@ -256,6 +322,41 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
     )
 
 
+def _record_skip(layout: Layout, label: str, arm, reason: str) -> None:
+    """
+    Persist WHY an arm was skipped.
+
+    Without this a skipped arm is invisible on resume: the result file is
+    absent, so the next run retries it and fails identically. The marker also
+    keeps the report honest about what was attempted.
+    """
+    path = layout.baselines_dir / label / f"{arm.name}.skipped.json"
+    os.makedirs(path.parent, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "arm": arm.name,
+                "arm_spec": arm.spec,
+                "condition": arm.condition,
+                "budget_label": label,
+                "skipped": True,
+                "reason": reason,
+            },
+            indent=2,
+        )
+    )
+
+
+def _load_pipeline_graph(layout: Layout, config: PipelineConfig) -> GraphInfo:
+    """The graph external baselines are handed, cached on the config."""
+    if config._graph is None:
+        store = load_graph_store(str(layout.data_dir))
+        graph_id = config.graph_id or next(iter(store))
+        config._graph = GraphInfo.from_store_entry(store[graph_id])
+
+    return config._graph
+
+
 def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
     wm_results = layout.wm_results(config.wm_model, config.diffusion_model)
     arms = build_arms(config)
@@ -278,24 +379,61 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
 
     points = budget_points(config)
     completed = []
+    reused = failed = 0
+
+    # One bar over the whole (budget x arm) grid — this stage dominates wall
+    # clock and previously reported nothing but per-arm prints
+    progress_bar = tqdm(
+        total=len(points) * len(arms), desc="agent runs", unit="run"
+    )
 
     for label, budget_pct, budget in points:
         for arm in arms:
-            out_json = layout.agent_result(label, arm.name)
+            progress_bar.set_postfix_str(f"{label}/{arm.name}")
+            out_json = layout.agent_result(
+                label, arm.name, external=arm.external is not None
+            )
 
             if out_json.exists() and not config.force:
-                print(f"[agent] {label}/{arm.name}: reusing {out_json}")
+                tqdm.write(f"[agent] {label}/{arm.name}: reusing cached result")
                 completed.append(json.loads(out_json.read_text()))
+                reused += 1
+                progress_bar.update(1)
                 continue
 
             evaluator, mc_runs = resolve_evaluator(
                 arm, config.mc_runs, config.native_mc_runs
             )
-            print(
+            tqdm.write(
                 f"[agent] {label}/{arm.name}: running "
                 f"(condition {arm.condition} — {arm.condition_name}, "
                 f"evaluator={evaluator}, mc_runs={mc_runs})"
             )
+            arm_start = time.perf_counter()
+
+            # An external repo only hands back a seed set; wrapping it as a
+            # canned Strategy routes it through the identical scoring path
+            external_seeds = None
+            if arm.external is not None:
+                graph = _load_pipeline_graph(layout, config)
+                resolved = budget or max(
+                    1, round(graph.num_nodes * budget_pct / 100)
+                )
+                try:
+                    external_seeds = run_external_baseline(
+                        arm.external,
+                        graph,
+                        resolved,
+                        config.diffusion_model,
+                        work_dir=layout.baselines_dir / "_runs" / arm.external / label,
+                        timeout=config.baseline_timeout,
+                    )
+                except BaselineError as error:
+                    tqdm.write(f"[agent] {label}/{arm.name}: SKIPPED — {error}")
+                    _record_skip(layout, label, arm, str(error))
+                    failed += 1
+                    progress_bar.update(1)
+                    continue
 
             experiment = ExperimentConfig(
                 method=arm.method,
@@ -326,23 +464,63 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 out_json=str(out_json),
             )
 
-            result = run_experiment(experiment)
+            result = run_experiment(
+                experiment,
+                canned_script=(
+                    seed_script(external_seeds["seeds"]) if external_seeds else None
+                ),
+            )
             result["arm"] = arm.name
             result["arm_spec"] = arm.spec
             result["condition"] = arm.condition
             result["condition_name"] = arm.condition_name
             result["budget_label"] = label
+
+            if external_seeds is not None:
+                spec = external_baselines[arm.external]
+                result["external"] = {
+                    "name": arm.external,
+                    "title": spec.title,
+                    "venue": spec.venue,
+                    "kind": spec.kind,
+                    "repo": spec.repo,
+                    "paper": spec.paper,
+                    "seeds": external_seeds["seeds"],
+                    # Time the external repo itself spent selecting seeds; our
+                    # scoring time is in elapsed_seconds as for every other arm
+                    "selection_seconds": external_seeds["seconds"],
+                }
+                result["model"] = f"external:{arm.external}"
+
             out_json.write_text(json.dumps(result, indent=2, default=str))
             completed.append(result)
+
+            tqdm.write(
+                f"[agent] {label}/{arm.name}: done in "
+                f"{time.perf_counter() - arm_start:.1f}s -> "
+                f"spread {ground_truth_reward(result):.2f} "
+                f"({100.0 * ground_truth_reward(result) / result['graph']['num_nodes']:.1f}% of N)"
+            )
+            progress_bar.update(1)
+
+            # Refresh the flat table after EVERY run, so a killed sweep still
+            # leaves a readable summary of everything finished so far
+            write_summary(layout, completed)
+
+    progress_bar.close()
+    print(
+        f"[agent] {len(completed)} results ({reused} reused, "
+        f"{len(completed) - reused} new), {failed} skipped"
+    )
 
     return completed
 
 
 def load_agent_results(layout: Layout) -> list[dict]:
-    """Every agent JSON on disk, tagged with its arm and budget label."""
+    """Every result JSON on disk — our arms and external baselines together."""
     results = []
 
-    for path in sorted(layout.agent_dir.glob("*/*.json")):
+    for path in layout.result_globs():
         result = json.loads(path.read_text())
         result.setdefault("arm", path.stem)
         result.setdefault("budget_label", path.parent.name)
@@ -355,6 +533,25 @@ def load_wm_results(config: PipelineConfig, layout: Layout) -> dict | None:
     path = layout.wm_results(config.wm_model, config.diffusion_model)
 
     return json.loads(path.read_text()) if path.exists() else None
+
+
+def _write_manifest(layout: Layout, config: PipelineConfig) -> None:
+    """Config + per-stage status, rewritten whenever anything changes."""
+    layout.manifest_path.write_text(
+        json.dumps(
+            {
+                "config": {
+                    key: value
+                    for key, value in vars(config).items()
+                    if not key.startswith("_")
+                },
+                "stages": config.stage_status,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+            default=str,
+        )
+    )
 
 
 def run_pipeline(config: PipelineConfig) -> dict:
@@ -375,46 +572,74 @@ def run_pipeline(config: PipelineConfig) -> dict:
             f"{', '.join(members)}"
         )
 
-    for stage in selected:
+    # Provenance first: written before any work so even a stage-1 crash records
+    # which commit and machine produced the tree
+    write_environment(layout)
+
+    for index, stage in enumerate(selected, start=1):
         stage_start = time.perf_counter()
-        print(f"\n{'=' * 72}\n[pipeline] stage: {stage}\n{'=' * 72}")
+        print(
+            f"\n{'=' * 72}\n"
+            f"[pipeline] STAGE {index}/{len(selected)}: {stage.upper()}"
+            f"   (elapsed {time.perf_counter() - pipeline_start:.0f}s)\n"
+            f"{'=' * 72}"
+        )
 
-        if stage == "data":
-            stage_data(config, layout)
-        elif stage == "train":
-            stage_train(config, layout)
-        elif stage == "agent":
-            stage_agent(config, layout)
-        elif stage == "plots":
-            figures = build_plots(
-                load_agent_results(layout),
-                load_wm_results(config, layout),
-                layout.plots_dir,
-                title_prefix=config.tag,
-            )
-            print(f"[plots] wrote {len(figures)} figures -> {layout.plots_dir}")
-        elif stage == "report":
-            write_report(
-                config=vars(config),
-                layout=layout,
-                agent_results=load_agent_results(layout),
-                wm_results=load_wm_results(config, layout),
-            )
-            print(f"[report] -> {layout.report_path}")
+        # Mark the stage in-flight so a killed run is distinguishable from a
+        # clean one when the manifest is read back
+        config.stage_status[stage] = {"status": "running", "seconds": None}
+        _write_manifest(layout, config)
 
+        try:
+            if stage == "data":
+                stage_data(config, layout)
+            elif stage == "train":
+                stage_train(config, layout)
+            elif stage == "agent":
+                stage_agent(config, layout)
+            elif stage == "plots":
+                results = load_agent_results(layout)
+                print(f"[plots] building figures from {len(results)} results...")
+                figures = build_plots(
+                    results,
+                    load_wm_results(config, layout),
+                    layout.plots_dir,
+                    title_prefix=config.tag,
+                )
+                for figure in figures:
+                    print(f"[plots]   {figure.name}")
+                print(f"[plots] wrote {len(figures)} figures -> {layout.plots_dir}")
+            elif stage == "report":
+                results = load_agent_results(layout)
+                csv_path, json_path = write_summary(layout, results)
+                print(f"[report] summary table -> {csv_path} ({len(results)} rows)")
+                print(f"[report] summary json  -> {json_path}")
+                write_report(
+                    config=vars(config),
+                    layout=layout,
+                    agent_results=results,
+                    wm_results=load_wm_results(config, layout),
+                )
+                print(f"[report] markdown      -> {layout.report_path}")
+        except Exception as error:
+            config.stage_status[stage] = {
+                "status": "failed",
+                "seconds": round(time.perf_counter() - stage_start, 1),
+                "error": f"{type(error).__name__}: {error}",
+            }
+            _write_manifest(layout, config)
+            print(f"[pipeline] stage {stage} FAILED — manifest updated, re-run to resume")
+            raise
+
+        seconds = time.perf_counter() - stage_start
         config.stage_status[stage] = {
             "status": "done",
-            "seconds": round(time.perf_counter() - stage_start, 1),
+            "seconds": round(seconds, 1),
         }
+        print(f"[pipeline] stage {stage} done in {seconds:.1f}s")
 
         # Manifest is rewritten after each stage so a crash still leaves a record
-        layout.manifest_path.write_text(
-            json.dumps(
-                {"config": vars(config), "stages": config.stage_status},
-                indent=2,
-                default=str,
-            )
-        )
+        _write_manifest(layout, config)
 
     elapsed = time.perf_counter() - pipeline_start
     print(f"\n[pipeline] done in {elapsed:.1f}s -> {layout.root}")
@@ -670,9 +895,22 @@ if __name__ == "__main__":
         type=str,
         nargs="*",
         default=list(default_baselines),
-        choices=algorithm_names,
-        help="condition 1 (Pure GA): classical algorithms to run, each as its own "
-        f"arm scored on ground truth (default: {' '.join(default_baselines)}).",
+        choices=(
+            list(algorithm_names)
+            + [f"external:{name}" for name in external_baselines]
+            + ["all", "all-classical", "all-external"]
+        ),
+        metavar="NAME",
+        help="baselines to run: a library algorithm (condition 1), "
+        "'external:<name>' for a published repo (condition 7), or the aliases "
+        "'all' / 'all-classical' / 'all-external'. 'all' includes only external "
+        f"baselines already installed (default: {' '.join(default_baselines)}).",
+    )
+    parser.add_argument(
+        "--baseline-timeout",
+        type=int,
+        default=3600,
+        help="seconds before an external baseline subprocess is killed (default: 3600).",
     )
     parser.add_argument(
         "--arms",
@@ -853,6 +1091,7 @@ if __name__ == "__main__":
         end_stage=args.end_stage,
         skip_stages=tuple(args.skip_stages),
         force=args.force,
+        baseline_timeout=args.baseline_timeout,
         results_root=args.results_root,
     )
 
