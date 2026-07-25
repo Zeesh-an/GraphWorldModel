@@ -18,6 +18,7 @@ from coding_agent.executor import (
 from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
+    reference_diff,
     summarize,
     validate_plan,
 )
@@ -35,10 +36,14 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         outer_iters: int = 3,
         credit: bool = False,
         strategy_mode: str = "free",
+        use_anchor: bool = True,
     ) -> None:
         self.outer_iters = outer_iters
         self.credit = credit
         self.strategy_mode = strategy_mode
+        # Canned arms (classical baselines, routing) never read a prompt, so the
+        # anchor rollout would be pure cost — real episodes under an MC evaluator
+        self.use_anchor = use_anchor
         # Per-iteration rewards, read back by run.py for the convergence plot
         self.history = []
 
@@ -49,14 +54,14 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
 
         # One extra rollout up front: a classical score in the same env, so
         # "increase final spread" becomes a concrete target in every prompt
-        anchor = baseline_anchor(environment, task, graph)
-        tqdm.write(f"[one_shot] {anchor}")
+        base_user = build_user_prompt("one_shot", task, graph, self.strategy_mode)
+        anchor_trajectory = None
 
-        base_user = (
-            build_user_prompt("one_shot", task, graph, self.strategy_mode)
-            + "\n\n"
-            + anchor
-        )
+        if self.use_anchor:
+            anchor, anchor_trajectory = baseline_anchor(environment, task, graph)
+            tqdm.write(f"[one_shot] {anchor}")
+            base_user += "\n\n" + anchor
+
         user = base_user
         best = None
         last_error = None
@@ -155,6 +160,12 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     trajectory.reward,
                     summarize(trajectory, graph),
                     credit_report=report,
+                    # Free: both marginal vectors are already paid for
+                    reference_report=(
+                        reference_diff(trajectory, anchor_trajectory, graph)
+                        if anchor_trajectory is not None
+                        else None
+                    ),
                 )
             )
 

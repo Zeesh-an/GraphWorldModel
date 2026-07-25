@@ -36,11 +36,13 @@ python -m pipeline.run \
     --budget-pct-range 1 20 --rollouts 20 --gen-horizon 10 --mc-marginals 30 \
     --wm-model sage --head structured_residual --hidden-dim 64 --n-layers 3 \
     --epochs 400 --batch-size 32 --pos-weight off --patience 50 \
-    --evaluator world_model --diffusion-model IC \
-    --arms baseline:degree_discount baseline:celf_pp routing one_shot_free evolve_scored \
+    --diffusion-model IC \
+    --baselines high_degree degree_discount pagerank_seeds celf_pp imm random_seeds \
+    --arms routing one_shot_free@native one_shot_free@monte_carlo \
+           one_shot_free@oracle one_shot_free@world_model \
     --budget-pcts 1 5 10 20 \
     --llm-model claude-sonnet-5 --outer-iters 5 \
-    --horizon 10 --n-samples 50 --mc-runs 200 --compare \
+    --horizon 10 --n-samples 50 --mc-runs 200 --native-mc-runs 1 --compare \
     --allowed-ops add_node remove_node \
     --device cuda --seed 42 \
     --start-stage "$START" --end-stage "$END"

@@ -99,6 +99,9 @@ class ExperimentConfig:
     windows: int = 3
     outer_iters: int = 3
     mc_runs: int = 200
+    # Runs for the --compare ground-truth replay; None -> mc_runs. Kept separate
+    # so a native arm (mc_runs=1 inner loop) is still judged on a clean average
+    referee_mc_runs: int | None = None
     n_samples: int = 20
     seed: int = 42
     device: str = "cpu"
@@ -306,6 +309,9 @@ class Baseline(Strategy):
             outer_iters=config.outer_iters,
             credit=config.credit,
             strategy_mode=effective_mode,
+            # A canned script ignores its prompt, so the anchor rollout would only
+            # burn real episodes and wall clock without informing anything
+            use_anchor=canned_script is None,
         )
 
     if config.method == "evolve":
@@ -374,11 +380,17 @@ class Baseline(Strategy):
         result["credit"] = entries
 
     # When the compare flag is enabled, build a Monte Carlo environment and rollout with Monte Carlo simulation to compare against the world model
-    if config.compare and config.evaluator in (world_model, oracle):
-        print(f"[run] MC compare replay ({config.mc_runs} runs)...")
+    # Every evaluator gets this replay, not just the model-based ones: it is the
+    # single ground-truth referee that makes rewards comparable ACROSS conditions.
+    # A native arm's own reward is one noisy episode; a monte_carlo arm's carries
+    # the winner's curse from being the max over outer iterations.
+    if config.compare:
+        referee_runs = config.referee_mc_runs or config.mc_runs
+        result["referee_mc_runs"] = referee_runs
+        print(f"[run] MC compare replay ({referee_runs} runs)...")
 
         mc_environment = MonteCarloEnvironment(
-            graph, config.diffusion_model, mc_runs=config.mc_runs
+            graph, config.diffusion_model, mc_runs=referee_runs
         )
         plan = (
             strategy.plan_horizon(graph, config.budget, config.horizon)
@@ -404,29 +416,35 @@ class Baseline(Strategy):
             f"±{mc_trajectory.cost['reward_se']:.2f} "
             f"(wm_minus_mc={result['wm_minus_mc']:+.2f})"
         )
-        print(
-            f"[run] re-evaluating winner on {wm_reeval_seeds} fresh "
-            f"{config.evaluator} seeds..."
-        )
+        # Fidelity re-evaluation only means something for a model-based evaluator:
+        # it measures how far the MODEL is from truth. For a monte_carlo evaluator
+        # the "model" is the simulator itself, so there is nothing to measure.
+        if config.evaluator in (world_model, oracle):
+            print(
+                f"[run] re-evaluating winner on {wm_reeval_seeds} fresh "
+                f"{config.evaluator} seeds..."
+            )
 
-        # `reward` is the max over outer iterations, all evaluated at rollout
-        # seed 0 — it carries selection optimism (winner's curse) plus that one
-        # seed's persistent luck. Re-evaluating the winner on fresh seeds gives
-        # the unbiased WM estimate: judge evaluator fidelity by
-        # wm_reeval_minus_mc, not wm_minus_mc.
-        reeval_rewards = [
-            environment.rollout(
-                action_fn, config.horizon, config.budget, seed=reeval_seed
-            ).reward
-            for reeval_seed in range(1, wm_reeval_seeds + 1)
-        ]
-        result["wm_reeval_rewards"] = reeval_rewards
-        result["wm_reeval_mean"] = sum(reeval_rewards) / len(reeval_rewards)
-        result["wm_reeval_minus_mc"] = result["wm_reeval_mean"] - mc_trajectory.reward
-        print(
-            f"[run] wm_reeval_mean={result['wm_reeval_mean']:.2f} "
-            f"(reeval_minus_mc={result['wm_reeval_minus_mc']:+.2f})"
-        )
+            # `reward` is the max over outer iterations, all evaluated at rollout
+            # seed 0 — it carries selection optimism (winner's curse) plus that one
+            # seed's persistent luck. Re-evaluating the winner on fresh seeds gives
+            # the unbiased WM estimate: judge evaluator fidelity by
+            # wm_reeval_minus_mc, not wm_minus_mc.
+            reeval_rewards = [
+                environment.rollout(
+                    action_fn, config.horizon, config.budget, seed=reeval_seed
+                ).reward
+                for reeval_seed in range(1, wm_reeval_seeds + 1)
+            ]
+            result["wm_reeval_rewards"] = reeval_rewards
+            result["wm_reeval_mean"] = sum(reeval_rewards) / len(reeval_rewards)
+            result["wm_reeval_minus_mc"] = (
+                result["wm_reeval_mean"] - mc_trajectory.reward
+            )
+            print(
+                f"[run] wm_reeval_mean={result['wm_reeval_mean']:.2f} "
+                f"(reeval_minus_mc={result['wm_reeval_minus_mc']:+.2f})"
+            )
 
     # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives in cost.rollout_seconds / mc_rollout_seconds
     result["elapsed_seconds"] = time.perf_counter() - experiment_start
@@ -546,6 +564,12 @@ if __name__ == "__main__":
         help="Monte Carlo simulator runs; ~(spread_std/target_se)^2, dial down for large graphs with --evaluator monte_carlo (default: 200).",
     )
     parser.add_argument(
+        "--referee-mc-runs",
+        type=int,
+        default=None,
+        help="runs for the --compare ground-truth replay; keep this high even when --mc-runs is 1 for a native-agent condition (default: --mc-runs).",
+    )
+    parser.add_argument(
         "--n-samples",
         type=int,
         default=20,
@@ -616,6 +640,7 @@ if __name__ == "__main__":
         windows=args.windows,
         outer_iters=args.outer_iters,
         mc_runs=args.mc_runs,
+        referee_mc_runs=args.referee_mc_runs,
         n_samples=args.n_samples,
         seed=args.seed,
         device=args.device,

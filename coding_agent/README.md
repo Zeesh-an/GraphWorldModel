@@ -79,6 +79,10 @@ The feedback per iteration (built by `methods/base.py::summarize` +
   redundant budget);
 - **baseline anchor** — one `degree_discount` rollout in the same env at startup
   ("REFERENCE: … scores 46.9 — beat it"), included in every prompt;
+- **reference diff** — that anchor rollout's per-node marginals diffed against
+  the agent's, so the feedback names the specific nodes the classical algorithm
+  reaches that this strategy misses (and vice versa) plus the net expected-spread
+  gap. Costs no extra rollouts: both marginal vectors already exist;
 - optional **per-action counterfactual credit** (`--credit`) and **error
   tracebacks** on failed scripts.
 
@@ -268,17 +272,68 @@ fenced ```python block, one `Strategy` subclass, no imports, no module-level cod
 the injected-names documentation; the action rules; the method's interface
 (`plan_horizon`vs`act`); and a concrete **reply skeleton** (small models follow
 scaffolds far more reliably than prose rules). The user prompt carries: task and
-objective strings, `diffusion_model`, `budget`, `horizon`, `allowed_ops`, the graph
-as **three aggregate numbers only** (`num_nodes`, `num_edges`, `directed`), the full
-auto-generated **library API reference** (every algorithm and primitive signature
-with its first docstring line — docstrings in `tools/` are literally prompt text),
-and the closing instruction. Refinement turns append: previous reward, trajectory
-summary, the error traceback (repair path), and the credit report (`--credit`).
+objective strings, `diffusion_model`, `budget` (absolute and as % of nodes),
+`horizon`, `allowed_ops`, the **graph profile** (below), the full auto-generated
+**library API reference** (every algorithm and primitive signature with its first
+docstring line — docstrings in `tools/` are literally prompt text), and the
+closing instruction. Refinement turns append: previous reward, trajectory summary,
+the **reference diff** (below), the error traceback (repair path), and the credit
+report (`--credit`).
 
 The LLM never sees raw topology. By design, the _generated code_ gets the real
 graph at runtime (`GraphInfo` with full `edge_index`, `ic_probs`, neighbor/degree
 accessors); the LLM's job is to write an algorithm that inspects the graph
-programmatically, not to reason over an adjacency list in context.
+programmatically, not to reason over an adjacency list in context. Serializing
+edges into the prompt would ask the model to eyeball what its own program computes
+exactly, would let it hardcode node ids for one instance instead of writing an
+algorithm that generalizes, and would not fit past a few thousand edges anyway.
+
+#### The graph profile (`tools/graph_profile.py`)
+
+Aggregate structure instead of topology — what a human expert uses to choose an
+approach, computed once and cached on the `GraphInfo`:
+
+- **degree distribution** — mean/median/max/p90/p99, plus `cv` and `max/mean`.
+  Measured on 100-node families: `ba` cv=0.95, `sbm` 0.46, `er` 0.40, `ws` 0.11,
+  so the `heavy_tail_cv = 0.7` cutoff separates hub-dominated graphs cleanly.
+- **components** — count, largest-component share, isolate count. On netscience
+  that is 396 components with the largest holding 23.9% and 128 isolates, which
+  is *the* strategic fact about that graph and was previously invisible.
+- **k-core**, **clustering**, **degree assortativity**, **density**, and
+  **reciprocity** (directed only).
+- **communities** — label propagation count, modularity, largest sizes. Above
+  modularity 0.3 the profile says outright that budget should be allocated across
+  communities rather than by global score.
+- **IC transmission** — edge-probability stats plus per-node expected
+  out-transmission. Note the *mean* is pinned to exactly 1.0 by the
+  weighted-cascade construction (`p = 1/in_degree` makes every in-sum 1), so it
+  carries no information; the profile reports the **median** and the fraction of
+  supercritical nodes instead.
+
+Above `heavy_stats_max_arcs` (200k arcs) clustering switches to a sampled
+estimate and assortativity/communities are skipped — and the profile *says so*
+rather than silently omitting them. netscience profiles in 0.04s.
+
+#### The reference diff (`methods/base.py::reference_diff`)
+
+`baseline_anchor` already rolls out `degree_discount` in the same environment for
+a score to beat; it now also returns that trajectory, so its per-node marginals
+can be diffed against the agent's. **Zero extra rollouts** — both vectors are
+already paid for. Refinement turns get:
+
+```
+REFERENCE DIFF (your cascade vs degree_discount's, same evaluator, per-node
+P(infected)). Listed nodes are DECISIVE flips only (one side >= 50%, the other
+< 10%); the net line below sums every node, so it is larger:
+  it reaches 3 nodes you miss — top by degree: 13(d=8, ref P=0.57 vs yours 0.07), …
+  net expected spread vs the reference: -15.34 nodes
+```
+
+The double threshold keeps threshold-straddling nodes out of the list. In
+`evolve` the diff is appended to each population record's summary, so it travels
+with a candidate whenever it is shown as parent or inspiration. Canned arms
+(classical baselines, routing) skip the anchor entirely — they never read a
+prompt, so the rollout would only burn real episodes.
 
 ### Extraction, execution, validation
 
@@ -443,20 +498,26 @@ model exists to undercut in the outer loop.
 ## 9. Running experiments
 
 > **For a full sweep, use the pipeline instead.** `python -m pipeline.run` runs
-> every arm at every budget, resumes what it already finished, and writes the
-> plots and `results/<tag>/report.md`. One arm at one budget is one file at
-> `results/<tag>/agent/<budget>/<arm>.json` — exactly what the commands below
-> produce, so the two are interchangeable:
+> every baseline condition at every budget, resumes what it already finished, and
+> writes the plots and `results/<tag>/report.md`. One arm at one budget is one
+> file at `results/<tag>/agent/<budget>/<arm>.json` — exactly what the commands
+> below produce, so the two are interchangeable:
 >
 > ```bash
-> python -m pipeline.run --dataset ba --tag ba40 --evaluator oracle \
->     --arms baseline:degree_discount baseline:celf_pp routing one_shot_free evolve_scored \
->     --budget-pcts 1 5 10 20 --outer-iters 5 --compare
+> python -m pipeline.run --dataset ba --tag ba40 --budget-pcts 1 5 10 20 \
+>     --outer-iters 5 --compare
 > ```
 >
-> Arm names: `baseline:<algorithm>`, `routing`, or `<method>_<mode>`
-> (`one_shot_free`, `one_shot_scored`, `evolve_scored`, `per_step_free`,
-> `windowed_free`).
+> That default expands to the six-condition taxonomy: `--baselines` names the
+> classical pool (condition 1), and `--arms` names `routing` (2) plus
+> `one_shot_free@{native,monte_carlo,oracle,world_model}` (3–6). An arm spec is
+> `baseline:<algorithm>`, `routing`, or `<method>_<mode>[@<evaluator>]`, where
+> the evaluator suffix is what makes conditions 3–6 differ in exactly one thing.
+> See `pipeline/conditions.py` for the grammar.
+>
+> `--compare` is what makes a multi-condition table valid: each arm's own reward
+> comes from its own evaluator, so only the shared ground-truth MC replay is
+> comparable across rows.
 
 ```bash
 # LLM run: node-ops game, WM evaluator, MC compare, credit feedback
@@ -528,7 +589,8 @@ same resolution rule as data generation) / `--horizon` / `--windows` /
 | `timeline`                                                         | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
 | `real_env_episodes`                                                | cumulative real-environment episodes consumed by inner-loop feedback (0 for `world_model`/`oracle`; the `--compare` referee replay is excluded)                        |
 | `history`                                                          | per-outer-iteration `{iteration, reward, best}` (evolve also logs `operator`; failed iterations carry `reward: null` and `error`). Empty for baseline/routing arms. Drives the convergence plot |
-| `arm`, `budget_label`                                              | added when the run came from `pipeline.run`: which condition and which point of the budget sweep                                                                       |
+| `referee_mc_runs`                                                  | with `--compare`: runs used by the ground-truth replay (`--referee-mc-runs`, else `--mc-runs`) — stays high even when a native arm's inner loop ran at `--mc-runs 1`   |
+| `arm`, `arm_spec`, `condition`, `condition_name`, `budget_label`   | added when the run came from `pipeline.run`: which arm, which of the six baseline conditions, and which point of the budget sweep                                       |
 | `credit_base_reward`, `credit`                                     | with `--credit`: paired-ablation base reward + per-action deltas                                                                                                       |
 | `mc_reward`, `mc_spread_pct`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy (absolute + % of `num_nodes`)                                                                            |
 | `wm_minus_mc`                                                      | evaluator fidelity on this exact strategy — the trust meter                                                                                                            |

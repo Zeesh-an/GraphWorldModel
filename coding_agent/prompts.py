@@ -1,5 +1,6 @@
 from coding_agent.types import GraphInfo, TaskSpec
 from coding_agent.executor import scored_blocked_primitives
+from coding_agent.tools.graph_profile import build_graph_profile
 from coding_agent.tools.library_api import (
     build_algorithm_menu,
     build_api_reference,
@@ -111,14 +112,11 @@ def build_user_prompt(
     return f"""\
 TASK: {task.task} — {task.objective}
 diffusion_model = {task.diffusion_model}
-budget = {task.budget}   (max seeds total)
+budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, max seeds total)
 horizon = {task.horizon} (timesteps)
 allowed_ops = {", ".join(task.allowed_ops)}   (any other op is REJECTED)
 
-GRAPH:
-num_nodes = {graph.num_nodes}
-num_edges = {graph.edge_index.shape[1]}
-directed = {graph.directed}
+{build_graph_profile(graph)}
 
 {reference}
 
@@ -234,13 +232,10 @@ def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
     return f"""\
 TASK: {task.task} — {task.objective}
 diffusion_model = {task.diffusion_model}
-budget = {task.budget}   (max seeds total)
+budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, max seeds total)
 horizon = {task.horizon} (timesteps)
 
-GRAPH:
-num_nodes = {graph.num_nodes}
-num_edges = {graph.edge_index.shape[1]}
-directed = {graph.directed}
+{build_graph_profile(graph)}
 
 ALGORITHM MENU:
 {build_algorithm_menu()}
@@ -253,10 +248,12 @@ def build_feedback_prompt(
     summary: str,
     error: str | None = None,
     credit_report: str | None = None,
+    reference_report: str | None = None,
 ) -> str:
     error_text = f"\nThe previous script raised an error:\n{error}\n" if error else ""
     credit_text = f"\n{credit_report}\n" if credit_report else ""
+    reference_text = f"\n{reference_report}\n" if reference_report else ""
     return f"""\
 Your previous strategy achieved final spread (reward) = {reward}.
-Trajectory summary: {summary}{error_text}{credit_text}
+Trajectory summary: {summary}{reference_text}{error_text}{credit_text}
 Revise the Strategy to increase final spread. Reply with one ```python block."""

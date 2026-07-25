@@ -192,17 +192,56 @@ one-flag change.
 ```bash
 source .venv/bin/activate
 
-# Everything: generate -> train the WM -> run all arms at 1/5/10/20% budgets
-# -> plot -> report
+# Everything: generate -> train the WM -> run all six baseline conditions at
+# 1/5/10/20% budgets -> plot -> report
 python -m pipeline.run --dataset ba --tag ba40 --num-graphs 40 --syn-nodes 100 \
-    --evaluator world_model --compare
+    --compare
 
 # Same thing on a real graph — only the dataset changes
-python -m pipeline.run --dataset netscience --evaluator world_model --compare
+python -m pipeline.run --dataset netscience --compare
 
-# Outer-loop development against the ground-truth ceiling: no world model is
-# trained, so the train stage is skipped automatically
-python -m pipeline.run --dataset sbm --tag sbm40 --num-graphs 40 --evaluator oracle
+# Outer-loop development without training a world model: drop the one arm that
+# needs it and the train stage is skipped automatically
+python -m pipeline.run --dataset sbm --tag sbm40 --num-graphs 40 --compare \
+    --arms routing one_shot_free@native one_shot_free@monte_carlo one_shot_free@oracle
+```
+
+### The six baseline conditions
+
+Two orthogonal axes — who designs the algorithm, and what feedback the designer
+gets while designing. Each condition is one **arm**; every arm carries its own
+evaluator, so they all land in one `report.md` table.
+
+| # | condition | arm spec | designer | inner-loop feedback |
+| --- | --- | --- | --- | --- |
+| 1 | Pure GA | `--baselines celf_pp …` | fixed algorithm | none |
+| 2 | GA routing | `routing` | LLM picks from the pool | none (one selection call) |
+| 3 | Native coding agent | `one_shot_free@native` | LLM writes code | real executions only |
+| 4 | Agent + MC simulation | `one_shot_free@monte_carlo` | LLM writes code | averaged simulator rollouts |
+| 5 | Agent + oracle dynamics | `one_shot_free@oracle` | LLM writes code | true transition dynamics |
+| 6 | **Ours: agent + learned GWM** | `one_shot_free@world_model` | LLM writes code | learned `f_θ` rollouts |
+
+Conditions 3–6 hold the method fixed, so the **only** thing varying down that
+ladder is the inner-loop evaluator — which is what makes it a clean ablation.
+`@native` means the real simulator at `--native-mc-runs` episode(s) per candidate:
+model-free trial and error that pays real experience for every noisy number it
+gets back. Swap `one_shot_free` for `evolve_scored` (or any
+`<method>_<mode>`) to run a different synthesis method down the same ladder.
+
+**`--compare` is effectively mandatory for a multi-condition sweep.** Each arm's
+own `reward` is measured by its own evaluator — a native arm's is one noisy
+episode, ours is a model estimate — so those numbers cannot be compared to each
+other. `--compare` replays every winning strategy on the same ground-truth Monte
+Carlo referee, and that replay is the number the tables and plots use. Without
+it the pipeline warns and the report is marked as not comparable.
+
+```bash
+# Add a classical baseline, drop an expensive one
+python -m pipeline.run --dataset sbm --baselines celf_pp imm community_im \
+    --arms one_shot_free@oracle one_shot_free@world_model --compare
+
+# Give the native agent a bigger real-episode budget per candidate
+python -m pipeline.run --dataset ba --native-mc-runs 5 --compare
 ```
 
 ### Stages, resuming, and skipping
@@ -231,10 +270,12 @@ python -m pipeline.run --dataset ba --tag ba40 --skip-stages data train
 | `--start-stage` / `--end-stage` | `data` / `report` | inclusive stage range |
 | `--skip-stages` | none | stages to omit from that range |
 | `--force` | off | recompute stages whose outputs already exist |
-| `--evaluator` | `oracle` | `oracle` (ceiling, no training), `world_model`, or `monte_carlo` |
-| `--arms` | 5 conditions | `baseline:<algorithm>`, `routing`, or `<method>_<mode>` |
+| `--baselines` | 6 classical | condition 1: which algorithms from the pool to run |
+| `--arms` | conditions 2–6 | `routing`, `<method>_<mode>[@<evaluator>]`, or extra `baseline:<algorithm>` |
+| `--evaluator` | `oracle` | fallback for arms that do not name one with `@` |
+| `--native-mc-runs` | `1` | real episodes per candidate for an `@native` arm |
 | `--budget-pcts` | `1 5 10 20` | budget sweep as % of nodes; `--budgets` for absolute k |
-| `--compare` | off | replay each winner on Monte Carlo for a fidelity check |
+| `--compare` | off | ground-truth referee replay — required for a valid cross-condition table |
 | `--llm-model` / `--outer-iters` | `claude-sonnet-5` / `5` | coding-agent model and refinement budget |
 
 Generation, training, and agent hyperparameters are all exposed too
@@ -259,12 +300,14 @@ since they are inputs shared across every run.
 ### Figures produced
 
 `budget_vs_spread` (the headline: spread vs k per arm, with MC error bars),
-`budget_vs_spread_pct` (normalized), `evaluator_fidelity` (estimate vs Monte
-Carlo parity plot), `runtime` (per-rollout cost, the amortization claim),
-`convergence` (best-so-far reward per outer iteration), `cascade` (infected
-count over time), and — when a world model was trained — `wm_training`,
-`wm_one_step`, `wm_rollout`. Each is skipped silently when its inputs are absent,
-so a partial run just yields fewer figures.
+`budget_vs_spread_pct` (normalized), `condition_comparison` (the baseline table
+as a grouped bar chart, coloured by condition), `sample_efficiency` (spread vs
+real-environment episodes burned — the axis the whole taxonomy hangs on),
+`evaluator_fidelity` (model estimate vs Monte Carlo parity), `runtime`
+(per-rollout cost by evaluator), `convergence` (best-so-far reward per outer
+iteration), `cascade` (infected count over time), and — when a world model was
+trained — `wm_training`, `wm_one_step`, `wm_rollout`. Each is skipped silently
+when its inputs are absent, so a partial run just yields fewer figures.
 
 ---
 
@@ -355,6 +398,7 @@ above is the prerequisite this component was waiting on.
 GraphWorldModel/
 ├── pipeline/
 │   ├── run.py                  # ← END-TO-END DRIVER: stages, resume, CLI
+│   ├── conditions.py           # the six-condition taxonomy + arm-spec grammar
 │   ├── layout.py               # the results/<tag>/ directory contract
 │   ├── plots.py                # every paper figure
 │   └── report.py               # results/<tag>/report.md generator

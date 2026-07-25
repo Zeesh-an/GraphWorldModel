@@ -11,7 +11,11 @@ from coding_agent.types import ActionOp, GraphInfo, Strategy, TaskSpec, Trajecto
 
 # Ensemble P(infected) below this counts as "unreached" in feedback
 unreached_threshold = 0.10
+# ...and above this as decisively reached. The gap between the two keeps the
+# reference diff from reporting nodes that merely straddle one threshold
+reached_threshold = 0.50
 max_listed_nodes = 20
+max_listed_diff_nodes = 10
 
 
 def summarize(trajectory: Trajectory, graph: GraphInfo | None = None) -> str:
@@ -93,8 +97,13 @@ def validate_plan(plan: list, task: TaskSpec, graph: GraphInfo) -> None:
 
 def baseline_anchor(
     environment: object, task: TaskSpec, graph: GraphInfo
-) -> str:
-    """One degree_discount rollout in the same env — a concrete score to beat."""
+) -> tuple[str, Trajectory]:
+    """
+    One degree_discount rollout in the same env — a concrete score to beat.
+
+    The trajectory is returned as well as the text: its per-node marginals are
+    what reference_diff() compares against, which costs no further rollouts.
+    """
     seeds = degree_discount(
         graph, task.budget, task.diffusion_model, horizon=task.horizon
     )
@@ -106,11 +115,87 @@ def baseline_anchor(
     )
     reward_se = trajectory.cost.get("reward_se", 0.0)
 
-    return (
+    text = (
         f"REFERENCE: classical degree_discount scores "
         f"{trajectory.reward:.2f} (±{reward_se:.2f} SE) on this graph under this "
         f"evaluator. Your strategy should beat it."
     )
+
+    return text, trajectory
+
+
+def _diff_node_list(
+    nodes: list[int], mine: list[float], theirs: list[float], graph: GraphInfo
+) -> str:
+    listed = ", ".join(
+        f"{node}(d={graph.degree(node)}, ref P={theirs[node]:.2f} vs yours "
+        f"{mine[node]:.2f})"
+        for node in nodes[:max_listed_diff_nodes]
+    )
+    overflow = (
+        f", … and {len(nodes) - max_listed_diff_nodes} more"
+        if len(nodes) > max_listed_diff_nodes
+        else ""
+    )
+
+    return listed + overflow
+
+
+def reference_diff(
+    trajectory: Trajectory,
+    reference: Trajectory,
+    graph: GraphInfo,
+    reference_name: str = "degree_discount",
+) -> str | None:
+    """
+    Where the reference algorithm's cascade went that yours did not, and vice versa.
+
+    Both marginal vectors already exist from rollouts that have been paid for, so
+    this is the richest feedback available at zero additional cost.
+    """
+    mine, theirs = trajectory.final_marginals, reference.final_marginals
+    if mine is None or theirs is None:
+        return None
+
+    missed = [
+        node
+        for node in range(graph.num_nodes)
+        if theirs[node] >= reached_threshold and mine[node] < unreached_threshold
+    ]
+    gained = [
+        node
+        for node in range(graph.num_nodes)
+        if mine[node] >= reached_threshold and theirs[node] < unreached_threshold
+    ]
+    missed.sort(key=graph.degree, reverse=True)
+    gained.sort(key=graph.degree, reverse=True)
+
+    lines = [
+        f"REFERENCE DIFF (your cascade vs {reference_name}'s, same evaluator, "
+        f"per-node P(infected)). Listed nodes are DECISIVE flips only "
+        f"(one side >= {reached_threshold:.0%}, the other < {unreached_threshold:.0%}); "
+        f"the net line below sums every node, so it is larger:"
+    ]
+
+    if missed:
+        lines.append(
+            f"  it reaches {len(missed)} nodes you miss — top by degree: "
+            f"{_diff_node_list(missed, mine, theirs, graph)}"
+        )
+    if gained:
+        lines.append(
+            f"  you reach {len(gained)} nodes it misses — top by degree: "
+            f"{_diff_node_list(gained, mine, theirs, graph)}"
+        )
+    if not missed and not gained:
+        lines.append("  no decisive flips either way")
+
+    lines.append(
+        f"  net expected spread vs the reference: "
+        f"{sum(mine) - sum(theirs):+.2f} nodes"
+    )
+
+    return "\n".join(lines)
 
 
 class OuterLoopMethod(Protocol):

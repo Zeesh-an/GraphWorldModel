@@ -14,6 +14,7 @@ from coding_agent.executor import StrategyError, build_strategy, call_strategy
 from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
+    reference_diff,
     summarize,
     validate_plan,
 )
@@ -47,7 +48,7 @@ class EvolveSearch(OuterLoopMethod):
     ) -> tuple[Strategy, Trajectory]:
         system = build_system_prompt("evolve", self.strategy_mode)
 
-        anchor = baseline_anchor(environment, task, graph)
+        anchor, anchor_trajectory = baseline_anchor(environment, task, graph)
         tqdm.write(f"[evolve] {anchor}")
         base_user = (
             build_user_prompt("evolve", task, graph, self.strategy_mode)
@@ -135,11 +136,15 @@ class EvolveSearch(OuterLoopMethod):
                 continue
 
             last_error = None
+            # The reference diff rides along in the summary, so it reaches the
+            # prompt wherever a population record is shown as parent or inspiration
+            diff = reference_diff(trajectory, anchor_trajectory, graph)
             population.append(
                 {
                     "script": strategy.source_script,
                     "reward": trajectory.reward,
-                    "summary": summarize(trajectory, graph),
+                    "summary": summarize(trajectory, graph)
+                    + (f"\n{diff}" if diff else ""),
                 }
             )
 

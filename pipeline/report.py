@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from pipeline.conditions import condition_names, ground_truth_reward, is_ground_truth
 from pipeline.layout import Layout
 
 # Config keys worth printing; the manifest JSON holds the exhaustive version
@@ -16,6 +17,7 @@ reported_config_keys = (
     "horizon",
     "n_samples",
     "mc_runs",
+    "native_mc_runs",
     "allowed_ops",
     "wm_model",
     "head",
@@ -58,45 +60,114 @@ def _graph_section(agent_results: list[dict], metadata: dict | None) -> list[str
     return lines + [""]
 
 
+def _taxonomy_section(agent_results: list[dict]) -> list[str]:
+    """Which conditions this run actually covers, and what each one isolates."""
+    present = sorted({result.get("condition", 99) for result in agent_results})
+    if not present:
+        return []
+
+    isolates = {
+        1: "classical floor — fixed expert algorithms, no LLM anywhere",
+        2: "is *choosing* from a pool enough, versus *generating* code?",
+        3: "do the gains come merely from having a coding agent?",
+        4: "does simulated lookahead by itself explain the gain?",
+        5: "ceiling of model-based guidance — a perfect internal model",
+        6: "does the *learned* model recover the true dynamics?",
+    }
+
+    lines = [
+        "## Conditions covered",
+        "",
+        "| # | condition | arms | what it isolates |",
+        "| --- | --- | --- | --- |",
+    ]
+
+    for condition in present:
+        arms = sorted(
+            {
+                result["arm"]
+                for result in agent_results
+                if result.get("condition") == condition
+            }
+        )
+        lines.append(
+            f"| {condition} | {condition_names.get(condition, '—')} "
+            f"| {', '.join(f'`{arm}`' for arm in arms)} "
+            f"| {isolates.get(condition, '—')} |"
+        )
+
+    return lines + [""]
+
+
 def _results_table(agent_results: list[dict]) -> list[str]:
     if not agent_results:
         return []
 
     has_mc = any(result.get("mc_reward") is not None for result in agent_results)
-    header = ["| budget k | % of N | arm | spread | % of N |"]
-    divider = ["| --- | --- | --- | --- | --- |"]
+    lines = ["## Results", ""]
 
     if has_mc:
-        header[0] += " MC spread | evaluator − MC |"
-        divider[0] += " --- | --- |"
+        lines += [
+            "**Spread** is the ground-truth Monte Carlo replay of each arm's winning "
+            "strategy — the only number comparable across conditions, since each "
+            "arm's own `reward` is measured by its own evaluator. **Estimate** is "
+            "what that arm's evaluator believed, so estimate − spread is its "
+            "fidelity error (zero by construction for a `monte_carlo` arm).",
+            "",
+        ]
+    else:
+        lines += [
+            "> **Warning:** `--compare` was off, so each row is scored by its own "
+            "evaluator and rows are NOT comparable across conditions. Re-run with "
+            "`--compare` for a valid table.",
+            "",
+        ]
 
-    header[0] += " seconds |"
-    divider[0] += " --- |"
+    header = "| # | budget k | % of N | arm | evaluator | spread | % of N |"
+    divider = "| --- | --- | --- | --- | --- | --- | --- |"
+
+    if has_mc:
+        header += " estimate | est − spread |"
+        divider += " --- | --- |"
+
+    header += " real episodes | seconds |"
+    divider += " --- | --- |"
 
     rows = []
     ordered = sorted(
-        agent_results, key=lambda result: (result["budget"], result["arm"])
+        agent_results,
+        key=lambda result: (
+            result["budget"],
+            result.get("condition", 99),
+            result["arm"],
+        ),
     )
 
     for result in ordered:
+        spread = ground_truth_reward(result)
+        nodes = result["graph"]["num_nodes"]
         row = (
-            f"| {result['budget']} | {_format_number(result['budget_pct'])} "
-            f"| `{result['arm']}` | {_format_number(result['reward'])} "
-            f"| {_format_number(result['spread_pct'])} |"
+            f"| {result.get('condition', '—')} | {result['budget']} "
+            f"| {_format_number(result['budget_pct'])} | `{result['arm']}` "
+            f"| `{result.get('evaluator', '—')}` | {_format_number(spread)} "
+            f"| {_format_number(100.0 * spread / nodes)} |"
         )
 
         if has_mc:
-            mc_reward = result.get("mc_reward")
-            gap = result.get("wm_reeval_minus_mc", result.get("wm_minus_mc"))
-            row += f" {_format_number(mc_reward)} |"
+            # The winner's-curse-free estimate when the arm produced one
+            estimate = result.get("wm_reeval_mean", result["reward"])
+            row += f" {_format_number(estimate)} |"
             row += (
-                f" {float(gap):+.2f} |" if isinstance(gap, (int, float)) else " — |"
+                f" {estimate - spread:+.2f} |"
+                if result.get("mc_reward") is not None
+                else " — |"
             )
 
+        row += f" {result.get('real_env_episodes', 0)} |"
         row += f" {_format_number(result.get('elapsed_seconds'), 1)} |"
         rows.append(row)
 
-    return ["## Results", ""] + header + divider + rows + [""]
+    return lines + [header, divider] + rows + [""]
 
 
 def _winner_section(agent_results: list[dict]) -> list[str]:
@@ -106,13 +177,18 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
 
     largest = max(result["budget"] for result in agent_results)
     at_largest = [result for result in agent_results if result["budget"] == largest]
-    winner = max(at_largest, key=lambda result: result["reward"])
+    winner = max(at_largest, key=ground_truth_reward)
+    spread = ground_truth_reward(winner)
 
+    judged = "ground-truth MC" if is_ground_truth(at_largest) else "its own evaluator"
     lines = [
         f"## Winning arm at k={largest}",
         "",
-        f"**`{winner['arm']}`** — spread {_format_number(winner['reward'])} "
-        f"({_format_number(winner['spread_pct'])}% of N), model `{winner.get('model')}`",
+        f"**`{winner['arm']}`** (condition {winner.get('condition', '—')} — "
+        f"{condition_names.get(winner.get('condition'), 'unknown')}) — spread "
+        f"{_format_number(spread)} "
+        f"({_format_number(100.0 * spread / winner['graph']['num_nodes'])}% of N) "
+        f"by {judged}, model `{winner.get('model')}`",
         "",
         "```",
         str(winner.get("summary", "")).strip(),
@@ -210,6 +286,7 @@ def write_report(
 
     lines += ["", f"Full config: [`pipeline.json`]({layout.manifest_path.name})", ""]
     lines += _graph_section(agent_results, metadata)
+    lines += _taxonomy_section(agent_results)
     lines += _results_table(agent_results)
     lines += _winner_section(agent_results)
     lines += _world_model_section(wm_results)

@@ -5,16 +5,25 @@ coding-agent arm at every budget -> plot -> write results/<tag>/report.md.
 Every stage writes its artifacts before the next one starts, so a crashed or killed
 run resumes exactly where it stopped (finished work is detected on disk and skipped).
 
-Full sweep on a synthetic family:
+All six baseline conditions in one sweep (the default arm set). Every arm carries
+its own evaluator, so conditions 3-6 differ in exactly one thing — the inner-loop
+feedback — and land in one report table:
 
 python -m pipeline.run --dataset ba --tag ba40 \
     --num-graphs 40 --syn-nodes 100 \
-    --budget-pcts 1 5 10 20 --evaluator oracle \
-    --llm-model claude-sonnet-5 --outer-iters 5 --compare
+    --budget-pcts 1 5 10 20 --compare \
+    --llm-model claude-sonnet-5 --outer-iters 5
 
-Oracle only, no world model (skips the train stage automatically):
+Just the classical pool and our method, at one budget:
 
-python -m pipeline.run --dataset netscience --tag netscience --evaluator oracle
+python -m pipeline.run --dataset netscience \
+    --baselines celf_pp degree_discount imm \
+    --arms one_shot_free@world_model --budget-pcts 5 --compare
+
+No world model anywhere (the train stage is then skipped automatically):
+
+python -m pipeline.run --dataset sbm --tag sbm40 --num-graphs 40 \
+    --arms routing one_shot_free@native one_shot_free@oracle --compare
 
 Resume just the reporting half of a finished run:
 
@@ -39,7 +48,18 @@ from data.generate_wm_data import (
     run_generation,
     synthetic_families,
 )
+from coding_agent.tools.library_api import algorithm_names
 from data.wm_simulator import valid_action_ops
+from pipeline.conditions import (
+    Arm,
+    condition_names,
+    default_arms,
+    default_baselines,
+    needs_world_model,
+    parse_arm,
+    resolve_evaluator,
+    valid_evaluators,
+)
 from pipeline.layout import Layout, budget_label
 from pipeline.plots import build_plots
 from pipeline.report import write_report
@@ -47,26 +67,7 @@ from world_model.train_wm import TrainConfig, train_world_model
 from world_model.wm_model import backbones
 
 stages = ("data", "train", "agent", "plots", "report")
-
-# The six-condition baseline taxonomy, minus the evaluator axis (--evaluator)
-default_arms = (
-    "baseline:degree_discount",
-    "baseline:celf_pp",
-    "routing",
-    "one_shot_free",
-    "evolve_scored",
-)
-valid_methods = ("one_shot", "per_step", "windowed", "evolve")
-valid_modes = ("free", "scored")
-
-
-@dataclass
-class Arm:
-    name: str
-    method: str
-    strategy_mode: str
-    baseline: str | None = None
-    routing: bool = False
+native_mc_runs_default = 1
 
 
 @dataclass
@@ -111,10 +112,12 @@ class PipelineConfig:
     plan_demo: bool = True
     plan_graphs: int = 5
     # agent stage
+    baselines: tuple = default_baselines
     arms: tuple = default_arms
     budget_pcts: tuple | None = (1.0, 5.0, 10.0, 20.0)
     budgets: tuple | None = None
     evaluator: str = "oracle"
+    native_mc_runs: int = native_mc_runs_default
     llm_model: str = "claude-sonnet-5"
     temperature: float | None = None
     diffusion_model: str = "IC"
@@ -138,27 +141,21 @@ class PipelineConfig:
     stage_status: dict = field(default_factory=dict)
 
 
-def parse_arm(name: str) -> Arm:
-    if name.startswith("baseline:"):
-        algorithm = name.split(":", 1)[1]
-        return Arm(
-            name=f"baseline_{algorithm}",
-            method="one_shot",
-            strategy_mode="free",
-            baseline=algorithm,
-        )
+def build_arms(config: PipelineConfig) -> list[Arm]:
+    """Classical pool (condition 1) plus the explicitly named conditions."""
+    specs = [f"baseline:{algorithm}" for algorithm in config.baselines]
+    specs += list(config.arms)
 
-    if name == "routing":
-        return Arm(name="routing", method="one_shot", strategy_mode="free", routing=True)
+    arms = [parse_arm(spec, default_evaluator=config.evaluator) for spec in specs]
 
-    method, _, mode = name.rpartition("_")
-    if method not in valid_methods or mode not in valid_modes:
+    duplicates = {arm.name for arm in arms if [a.name for a in arms].count(arm.name) > 1}
+    if duplicates:
         raise ValueError(
-            f"unknown arm {name!r}; expected 'baseline:<algorithm>', 'routing', "
-            f"or '<method>_<mode>' with method in {valid_methods} and mode in {valid_modes}"
+            f"arm names collide, so their results would overwrite each other: "
+            f"{sorted(duplicates)}"
         )
 
-    return Arm(name=name, method=method, strategy_mode=mode)
+    return arms
 
 
 def budget_points(config: PipelineConfig) -> list[tuple[str, float | None, int]]:
@@ -178,9 +175,9 @@ def active_stages(config: PipelineConfig) -> list[str]:
 
     selected = [stage for stage in stages[start : end + 1]]
 
-    # The world model is only needed when it is the evaluator
-    if config.evaluator != "world_model" and "train" in selected:
-        print(f"[pipeline] evaluator={config.evaluator}: skipping the train stage")
+    # Training is only needed when some arm actually evaluates against the world model
+    if "train" in selected and not needs_world_model(build_arms(config)):
+        print("[pipeline] no arm uses the world model: skipping the train stage")
         selected.remove("train")
 
     return [stage for stage in selected if stage not in config.skip_stages]
@@ -261,14 +258,25 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
 
 def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
     wm_results = layout.wm_results(config.wm_model, config.diffusion_model)
-    if config.evaluator == "world_model" and not wm_results.exists():
+    arms = build_arms(config)
+
+    if needs_world_model(arms) and not wm_results.exists():
         raise FileNotFoundError(
-            f"evaluator=world_model needs a trained checkpoint but {wm_results} is "
-            f"missing; run the train stage or switch to --evaluator oracle"
+            f"arms {[arm.spec for arm in arms if arm.evaluator == 'world_model']} "
+            f"evaluate against the world model but {wm_results} is missing; run the "
+            f"train stage or drop those arms"
+        )
+
+    # Rewards from different evaluators are not comparable, so a multi-condition
+    # sweep is only readable once every arm has been replayed on the same referee
+    if not config.compare and len({arm.evaluator for arm in arms}) > 1:
+        print(
+            "[agent] WARNING: arms span multiple evaluators without --compare, so "
+            "their rewards are measured by different judges and cannot be compared. "
+            "Re-run with --compare for a valid table."
         )
 
     points = budget_points(config)
-    arms = [parse_arm(name) for name in config.arms]
     completed = []
 
     for label, budget_pct, budget in points:
@@ -280,11 +288,19 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 completed.append(json.loads(out_json.read_text()))
                 continue
 
-            print(f"[agent] {label}/{arm.name}: running")
+            evaluator, mc_runs = resolve_evaluator(
+                arm, config.mc_runs, config.native_mc_runs
+            )
+            print(
+                f"[agent] {label}/{arm.name}: running "
+                f"(condition {arm.condition} — {arm.condition_name}, "
+                f"evaluator={evaluator}, mc_runs={mc_runs})"
+            )
+
             experiment = ExperimentConfig(
                 method=arm.method,
                 strategy_mode=arm.strategy_mode,
-                evaluator=config.evaluator,
+                evaluator=evaluator,
                 model=config.llm_model,
                 temperature=config.temperature,
                 diffusion_model=config.diffusion_model,
@@ -292,9 +308,10 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 budget_pct=budget_pct,
                 horizon=config.horizon,
                 windows=config.windows,
-                # Classical baselines are deterministic: one pass is the whole arm
-                outer_iters=1 if arm.baseline or arm.routing else config.outer_iters,
-                mc_runs=config.mc_runs,
+                # Conditions 1 and 2 have no refinement loop: one pass is the arm
+                outer_iters=1 if not arm.is_agent else config.outer_iters,
+                mc_runs=mc_runs,
+                referee_mc_runs=config.mc_runs,
                 n_samples=config.n_samples,
                 seed=config.seed,
                 device=config.device,
@@ -311,6 +328,9 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
 
             result = run_experiment(experiment)
             result["arm"] = arm.name
+            result["arm_spec"] = arm.spec
+            result["condition"] = arm.condition
+            result["condition_name"] = arm.condition_name
             result["budget_label"] = label
             out_json.write_text(json.dumps(result, indent=2, default=str))
             completed.append(result)
@@ -343,8 +363,17 @@ def run_pipeline(config: PipelineConfig) -> dict:
     os.makedirs(layout.root, exist_ok=True)
 
     selected = active_stages(config)
+    arms = build_arms(config)
     print(f"[pipeline] tag={config.tag} dataset={config.dataset} -> {layout.root}")
     print(f"[pipeline] stages: {' -> '.join(selected)}")
+    print(f"[pipeline] {len(arms)} arms x {len(budget_points(config))} budgets:")
+
+    for condition in sorted({arm.condition for arm in arms}):
+        members = [arm.name for arm in arms if arm.condition == condition]
+        print(
+            f"[pipeline]   {condition}. {condition_names[condition]}: "
+            f"{', '.join(members)}"
+        )
 
     for stage in selected:
         stage_start = time.perf_counter()
@@ -637,12 +666,30 @@ if __name__ == "__main__":
 
     # Agent stage
     parser.add_argument(
+        "--baselines",
+        type=str,
+        nargs="*",
+        default=list(default_baselines),
+        choices=algorithm_names,
+        help="condition 1 (Pure GA): classical algorithms to run, each as its own "
+        f"arm scored on ground truth (default: {' '.join(default_baselines)}).",
+    )
+    parser.add_argument(
         "--arms",
         type=str,
-        nargs="+",
+        nargs="*",
         default=list(default_arms),
-        help="conditions to evaluate: 'baseline:<algorithm>', 'routing', or "
-        f"'<method>_<mode>' (default: {' '.join(default_arms)}).",
+        help="conditions 2-6: 'routing', or '<method>_<mode>[@<evaluator>]' with "
+        f"evaluator in {valid_evaluators}; 'native' = the real simulator at "
+        f"--native-mc-runs episodes per candidate. Extra 'baseline:<algorithm>' "
+        f"entries are allowed too (default: {' '.join(default_arms)}).",
+    )
+    parser.add_argument(
+        "--native-mc-runs",
+        type=int,
+        default=native_mc_runs_default,
+        help="real episodes per candidate for a '@native' arm; 1 keeps it honestly "
+        f"model-free (default: {native_mc_runs_default}).",
     )
     parser.add_argument(
         "--budget-pcts",
@@ -662,8 +709,9 @@ if __name__ == "__main__":
         "--evaluator",
         type=str,
         default="oracle",
-        choices=["world_model", "monte_carlo", "oracle"],
-        help="inner-loop evaluator; oracle needs no trained checkpoint (default: oracle).",
+        choices=list(valid_evaluators),
+        help="default inner-loop evaluator for arms that do not name one with "
+        "@<evaluator> (default: oracle).",
     )
     parser.add_argument(
         "--llm-model",
@@ -781,10 +829,12 @@ if __name__ == "__main__":
         patience=args.patience,
         plan_demo=not args.no_plan_demo,
         plan_graphs=args.plan_graphs,
+        baselines=tuple(args.baselines),
         arms=tuple(args.arms),
         budget_pcts=tuple(args.budget_pcts),
         budgets=tuple(args.budgets) if args.budgets else None,
         evaluator=args.evaluator,
+        native_mc_runs=args.native_mc_runs,
         llm_model=args.llm_model,
         temperature=args.temperature,
         diffusion_model=args.diffusion_model,

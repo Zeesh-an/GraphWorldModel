@@ -27,6 +27,8 @@ class GraphInfo:
     _out_adjacency: dict[int, list[int]] | None = field(default=None, repr=False)
     _in_adjacency: dict[int, list[int]] | None = field(default=None, repr=False)
     _degrees: np.ndarray | None = field(default=None, repr=False)
+    # Prompt profile string, cached by tools.graph_profile.build_graph_profile
+    _profile: str | None = field(default=None, repr=False)
 
     @classmethod
     def from_store_entry(cls, entry: dict) -> "GraphInfo":
