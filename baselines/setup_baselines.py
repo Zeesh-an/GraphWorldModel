@@ -15,6 +15,7 @@ histories; MOEIM alone is ~128 MB. baselines/external/ is gitignored.
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -70,6 +71,31 @@ def build(name: str) -> None:
     _run(spec.build, cwd=spec.directory, timeout=install_timeout_seconds)
 
 
+def _create_venv(name: str, venv: Path) -> None:
+    """
+    Prefer `uv venv`.
+
+    stdlib `python -m venv` needs ensurepip, which Debian/Ubuntu ship in a
+    separate python3-venv package that is usually absent on a cluster node —
+    and asking for sudo on a shared machine is not a fix. uv bootstraps its own
+    pip, so it works where the stdlib path cannot.
+    """
+    uv = shutil.which("uv")
+
+    if uv is not None:
+        _run([uv, "venv", str(venv)])
+        return
+
+    try:
+        _run([sys.executable, "-m", "venv", str(venv)])
+    except RuntimeError as error:
+        raise RuntimeError(
+            f"could not create {venv}: stdlib venv needs ensurepip and uv is not "
+            f"on PATH. Install uv (curl -LsSf https://astral.sh/uv/install.sh | sh) "
+            f"or the system package python3-venv, then re-run."
+        ) from error
+
+
 def install(name: str) -> None:
     spec = external_baselines[name]
 
@@ -83,13 +109,27 @@ def install(name: str) -> None:
         return
 
     venv = spec.directory / ".venv"
-    if not venv.exists():
+    interpreter = venv / "bin" / "python"
+
+    # Test for the interpreter, not the directory: a venv creation that failed
+    # part-way leaves a directory behind with no python and no pip in it
+    if not interpreter.exists():
+        shutil.rmtree(venv, ignore_errors=True)
         print(f"[setup] {name}: creating venv")
-        _run([sys.executable, "-m", "venv", str(venv)])
+        _create_venv(name, venv)
 
     print(f"[setup] {name}: installing {spec.requirements}")
+    uv = shutil.which("uv")
+
+    # `uv venv` deliberately does not put pip inside the venv, so install
+    # through uv itself and point it at that interpreter
+    command = (
+        [uv, "pip", "install", "--python", str(interpreter)]
+        if uv is not None
+        else [str(venv / "bin" / "pip"), "install"]
+    )
     _run(
-        [str(venv / "bin" / "pip"), "install", "-q", "-r", str(requirements)],
+        command + ["-q", "-r", str(requirements)],
         timeout=install_timeout_seconds,
     )
 
@@ -152,5 +192,21 @@ if __name__ == "__main__":
         name for name, spec in external_baselines.items() if spec.status != "blocked"
     ]
 
+    # One repo's broken pins or missing toolchain must not stop the other ten
+    # from installing — the failures are reported together at the end
+    failures = {}
     for name in targets:
-        setup(name)
+        try:
+            setup(name)
+        except Exception as error:
+            failures[name] = f"{type(error).__name__}: {error}"
+            print(f"[setup] {name}: FAILED — {failures[name]}")
+
+    installed = [name for name in targets if external_baselines[name].installed()]
+    print(f"\n[setup] {len(installed)}/{len(targets)} present: {' '.join(installed)}")
+
+    if failures:
+        print(f"[setup] {len(failures)} failed:")
+        for name, reason in failures.items():
+            print(f"  {name}: {reason}")
+        raise SystemExit(1)
