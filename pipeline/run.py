@@ -12,7 +12,7 @@ feedback — and land in one report table:
 python -m pipeline.run --dataset ba --tag ba40 \
     --num-graphs 40 --syn-nodes 100 \
     --budget-pcts 1 5 10 20 --compare \
-    --llm-model claude-sonnet-5 --outer-iters 5
+    --llm-model gpt-5.6-terra --outer-iters 5
 
 Just the classical pool and our method, at one budget:
 
@@ -114,6 +114,10 @@ class PipelineConfig:
     head: str = "structured_residual"
     hidden_dim: int = 64
     n_layers: int = 3
+    n_heads: int = 4
+    ffn_dim: int = 128
+    gcnii_alpha: float = 0.1
+    gcnii_lamda: float = 0.5
     dropout: float = 0.1
     epochs: int = 400
     lr: float = 1e-3
@@ -130,7 +134,7 @@ class PipelineConfig:
     budgets: tuple | None = None
     evaluator: str = "oracle"
     native_mc_runs: int = native_mc_runs_default
-    llm_model: str = "claude-sonnet-5"
+    llm_model: str = "gpt-5.6-terra"
     temperature: float | None = None
     diffusion_model: str = "IC"
     horizon: int = 10
@@ -232,6 +236,36 @@ def active_stages(config: PipelineConfig) -> list[str]:
     return [stage for stage in selected if stage not in config.skip_stages]
 
 
+def needs_gpu(config: PipelineConfig) -> tuple[bool, str]:
+    """
+    Whether this exact invocation ever puts a tensor on a device.
+
+    The submit path reads this to choose between queueing with a GPU and
+    queueing CPU-only. Generation, plots, the report, every classical arm and
+    every C++ external repo are pure CPU — only training f_theta, rolling it
+    out, and the learned external baselines need one.
+    """
+    selected = active_stages(config)
+    arms = build_arms(config)
+
+    if "train" in selected:
+        return True, "the train stage fits f_theta"
+
+    if "agent" in selected:
+        if needs_world_model(arms):
+            return True, "a @world_model arm rolls f_theta out"
+
+        learned = sorted(
+            arm.external
+            for arm in arms
+            if arm.external and external_baselines[arm.external].kind == "learned"
+        )
+        if learned:
+            return True, f"learned external baselines: {' '.join(learned)}"
+
+    return False, f"no torch on a device in stages {selected}"
+
+
 def stage_data(config: PipelineConfig, layout: Layout) -> dict:
     if layout.data_metadata().exists() and not config.force:
         metadata = json.loads(layout.data_metadata().read_text())
@@ -305,6 +339,10 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
             head=config.head,
             hidden_dim=config.hidden_dim,
             n_layers=config.n_layers,
+            n_heads=config.n_heads,
+            ffn_dim=config.ffn_dim,
+            gcnii_alpha=config.gcnii_alpha,
+            gcnii_lamda=config.gcnii_lamda,
             dropout=config.dropout,
             epochs=config.epochs,
             lr=config.lr,
@@ -695,6 +733,12 @@ if __name__ == "__main__":
         help="recompute stages whose outputs already exist (default: False).",
     )
     parser.add_argument(
+        "--print-resources",
+        action="store_true",
+        help="print whether this run needs a GPU and exit without running "
+        "anything; the sbatch submit path reads it (default: False).",
+    )
+    parser.add_argument(
         "--results-root",
         type=str,
         default="results",
@@ -827,6 +871,14 @@ if __name__ == "__main__":
         default=30,
         help="Monte Carlo draws per step for the soft targets (default: 30).",
     )
+    parser.add_argument(
+        "--split",
+        type=float,
+        nargs=3,
+        default=[0.7, 0.15, 0.15],
+        metavar=("TRAIN", "VAL", "TEST"),
+        help="transition split fractions (default: 0.7 0.15 0.15).",
+    )
 
     # Train stage
     parser.add_argument(
@@ -848,6 +900,30 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--n-layers", type=int, default=3, help="encoder layers (default: 3)."
+    )
+    parser.add_argument(
+        "--n-heads",
+        type=int,
+        default=4,
+        help="attention heads; gat and gt only (default: 4).",
+    )
+    parser.add_argument(
+        "--ffn-dim",
+        type=int,
+        default=128,
+        help="feed-forward width; gt only (default: 128).",
+    )
+    parser.add_argument(
+        "--gcnii-alpha",
+        type=float,
+        default=0.1,
+        help="GCNII initial-residual strength; gcnii only (default: 0.1).",
+    )
+    parser.add_argument(
+        "--gcnii-lamda",
+        type=float,
+        default=0.5,
+        help="GCNII identity-mapping decay; gcnii only (default: 0.5).",
     )
     parser.add_argument(
         "--dropout", type=float, default=0.1, help="dropout probability (default: 0.1)."
@@ -954,8 +1030,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--llm-model",
         type=str,
-        default="claude-sonnet-5",
-        help="gateway model name for the coding agent (default: claude-sonnet-5).",
+        default="gpt-5.6-terra",
+        help="gateway model name for the coding agent (default: gpt-5.6-terra).",
     )
     parser.add_argument(
         "--temperature",
@@ -1054,10 +1130,15 @@ if __name__ == "__main__":
         cf_prob=args.cf_prob,
         cf_branches=args.cf_branches,
         mc_marginals=args.mc_marginals,
+        split=tuple(args.split),
         wm_model=args.wm_model,
         head=args.head,
         hidden_dim=args.hidden_dim,
         n_layers=args.n_layers,
+        n_heads=args.n_heads,
+        ffn_dim=args.ffn_dim,
+        gcnii_alpha=args.gcnii_alpha,
+        gcnii_lamda=args.gcnii_lamda,
         dropout=args.dropout,
         epochs=args.epochs,
         lr=args.lr,
@@ -1095,4 +1176,9 @@ if __name__ == "__main__":
         results_root=args.results_root,
     )
 
-    run_pipeline(config)
+    if args.print_resources:
+        gpu, reason = needs_gpu(config)
+        print(f"[resources] {'GPU' if gpu else 'CPU-only'}: {reason}")
+        print(f"gpu={int(gpu)}")
+    else:
+        run_pipeline(config)

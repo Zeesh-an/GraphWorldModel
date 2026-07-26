@@ -17,7 +17,7 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Graph algorithm routing (LLM picks from a list of graph algorithms, no synthesis) -
 
 python -m coding_agent.run --data-dir results/ba40/data \
-    --model claude-sonnet-5 \
+    --model gpt-5.6-terra \
     --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --strategy-mode free \
     --evaluator world_model --budget 5 --horizon 10 --compare \
@@ -28,7 +28,7 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Oracle -
 
 python -m coding_agent.run --data-dir results/ba40/data \
-    --model claude-sonnet-5 \
+    --model gpt-5.6-terra \
     --method one_shot --strategy-mode free \
     --evaluator oracle --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
@@ -39,7 +39,7 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Scored mode + evolve (agent edits algorithm internals, population search) -
 
 python -m coding_agent.run --data-dir results/sbm40/data \
-    --model claude-sonnet-5 \
+    --model gpt-5.6-terra \
     --wm-results-json results/sbm40/world_model/sage_IC.json \
     --method evolve --strategy-mode scored \
     --evaluator world_model --budget 5 --horizon 10 --compare \
@@ -71,6 +71,8 @@ from coding_agent.prompts import build_routing_prompt, routing_system
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo, TaskSpec
 from data.wm_simulator import valid_action_ops
+from pipeline.conditions import parse_arm
+from pipeline.layout import budget_label
 from world_model.wm_data import load_graph_store
 
 world_model = "world_model"
@@ -92,7 +94,7 @@ class ExperimentConfig:
         "free"  # free (whole Strategy) | scored (score/schedule hooks only)
     )
     evaluator: str = "world_model"  # world_model | monte_carlo | oracle
-    model: str = "claude-sonnet-5"  # gateway model name
+    model: str = "gpt-5.6-terra"  # gateway model name
     temperature: float | None = (
         None  # LLM sampling temperature; None -> provider default
     )
@@ -118,6 +120,11 @@ class ExperimentConfig:
     routing: bool = False  # GA routing: one LLM call picks a library algorithm
     allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
     out_json: str | None = None
+    # Arm spec this run represents; stamps the condition metadata into the
+    # results JSON so a standalone run is readable by plots/report exactly like
+    # a pipeline-produced one. The pipeline stamps these itself and leaves this
+    # unset.
+    arm_spec: str | None = None
 
 
 class _CannedProvider:
@@ -463,6 +470,14 @@ class Baseline(Strategy):
     # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives in cost.rollout_seconds / mc_rollout_seconds
     result["elapsed_seconds"] = time.perf_counter() - experiment_start
 
+    if config.arm_spec:
+        arm = parse_arm(config.arm_spec, default_evaluator=config.evaluator)
+        result["arm"] = arm.name
+        result["arm_spec"] = arm.spec
+        result["condition"] = arm.condition
+        result["condition_name"] = arm.condition_name
+        result["budget_label"] = budget_label(config.budget_pct, config.budget)
+
     if config.out_json:
         os.makedirs(Path(config.out_json).parent, exist_ok=True)
         Path(config.out_json).write_text(json.dumps(result, indent=2, default=str))
@@ -483,8 +498,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="claude-sonnet-5",
-        help="gateway model name, e.g. gpt-5.6-sol (default: claude-sonnet-5).",
+        default="gpt-5.6-terra",
+        help="gateway model name, e.g. gpt-5.6-sol (default: gpt-5.6-terra).",
     )
     parser.add_argument(
         "--temperature",
@@ -633,10 +648,29 @@ if __name__ == "__main__":
         "--out-json",
         type=str,
         default=None,
-        help="output JSON path (default: None).",
+        help="output JSON path (default: <data-dir>/../agent/<budget>/<arm>.json, "
+        "the same slot the pipeline writes).",
     )
 
     args = parser.parse_args()
+
+    # A standalone run costs the same LLM calls as a pipeline run, so it lands in
+    # the same slot by default instead of printing to stdout and evaporating
+    if args.baseline:
+        arm_spec = f"baseline:{args.baseline}"
+    elif args.routing:
+        arm_spec = "routing"
+    else:
+        arm_spec = f"{args.method}_{args.strategy_mode}@{args.evaluator}"
+
+    if args.out_json is None and args.data_dir:
+        arm = parse_arm(arm_spec, default_evaluator=args.evaluator)
+        args.out_json = str(
+            Path(args.data_dir).resolve().parent
+            / "agent"
+            / budget_label(args.budget_pct, args.budget)
+            / f"{arm.name}.json"
+        )
 
     config = ExperimentConfig(
         model=args.model,
@@ -664,6 +698,7 @@ if __name__ == "__main__":
         compare=args.compare,
         credit=args.credit,
         out_json=args.out_json,
+        arm_spec=arm_spec,
     )
 
     print(json.dumps(run_experiment(config), indent=2, default=str))

@@ -13,6 +13,15 @@ cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
 mkdir -p results logs
 
+# Results land in results/<tag>_<jobid>/data, the same way logs land in
+# logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
+# transitions. Set TAG_JOBID=0 for a stable results/<tag>/data — which is what
+# the train/agent scripts downstream expect to be told about.
+TAG="${TAG:-jazz}"
+TAG_JOBID="${TAG_JOBID:-1}"
+[ "$TAG_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && TAG="${TAG}_${SLURM_JOB_ID}"
+OUT="results/$TAG/data"
+
 # Jazz collaboration network (198 nodes, 2,742 edges, real community structure).
 # Auto-downloads on first use. ONE real graph, so episode diversity comes from
 # rollouts instead of graph count: 100 rollouts x 2 models x 4 algos = 800 episodes
@@ -24,6 +33,8 @@ mkdir -p results logs
 # k ~ U(1%, 20% of N) per episode -> 2..40 seeds here. One checkpoint covers the
 # whole budget sweep instead of only the k it was generated at.
 
+export OUT
+
 python -m data.generate_wm_data \
     --dataset jazz \
     --models IC LT --prob-model weighted --budget-pct-range 1 20 \
@@ -33,10 +44,11 @@ python -m data.generate_wm_data \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir results/jazz/data
+    --out-dir "$OUT"
 
-python -m data.validate_wm_data --dir results/jazz/data
+python -m data.validate_wm_data --dir "$OUT"
 
-python -c "import json; print('action_ops:', json.load(open('results/jazz/data/metadata.json'))['config']['action_ops'])"
+python -c "import json, os; print('action_ops:', json.load(open(os.environ['OUT'] + '/metadata.json'))['config']['action_ops'])"
 
-echo "[gen_data] done -> results/jazz/data"
+echo "[gen_data] done -> $OUT"
+echo "[gen_data] train on it with: sbatch sbatch/wm_train.sbatch sage IC $OUT"

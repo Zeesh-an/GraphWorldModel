@@ -11,6 +11,7 @@ python data/validate_wm_data.py --dir <output_dir>
 
 import argparse
 import json
+import os
 from collections import defaultdict
 from pathlib import Path
 import numpy as np
@@ -130,7 +131,18 @@ if __name__ == "__main__":
         required=True,
         help="output dir produced by generate_wm_data (default: required).",
     )
+    parser.add_argument(
+        "--out-json",
+        type=str,
+        default=None,
+        help="output JSON path (default: <dir>/validation.json).",
+    )
     args = parser.parse_args()
 
     checks = compute_checks(Path(args.dir))
     print(json.dumps(checks, indent=2))
+
+    out_json = Path(args.out_json or Path(args.dir) / "validation.json")
+    os.makedirs(out_json.parent, exist_ok=True)
+    out_json.write_text(json.dumps(checks, indent=2, default=str))
+    print(f"[validate] checks -> {out_json}")

@@ -10,7 +10,10 @@ python -m world_model.eval_structured_oracle \
 """
 
 import argparse
+import json
+import os
 import torch
+from pathlib import Path
 
 from world_model.wm_data import in_channels, load_graph_store
 from world_model.wm_eval import rollout_ensemble
@@ -61,7 +64,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--device", type=str, default="cpu", help="torch device string (default: cpu)."
     )
+    parser.add_argument(
+        "--out-json",
+        type=str,
+        default=None,
+        help="output JSON path (default: <data-dir>/../world_model/oracle_<dm>.json).",
+    )
     args = parser.parse_args()
+
+    # This check costs a full ensemble rollout, so it lands beside the trained
+    # checkpoints rather than only on stdout
+    if args.out_json is None:
+        args.out_json = str(
+            Path(args.data_dir).resolve().parent
+            / "world_model"
+            / f"oracle_{args.diffusion_model}.json"
+        )
 
     if args.diffusion_model != "IC":
         raise ValueError(
@@ -102,3 +120,11 @@ if __name__ == "__main__":
     print(
         "(expect count_bias ~ 0 and model_cnt ~ true_cnt if the structural form is correct)"
     )
+
+    os.makedirs(Path(args.out_json).parent, exist_ok=True)
+    Path(args.out_json).write_text(
+        json.dumps(
+            {"config": vars(args), "rollout_ensemble": ensemble}, indent=2, default=str
+        )
+    )
+    print(f"[oracle] results -> {args.out_json}")

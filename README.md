@@ -304,11 +304,36 @@ python -m pipeline.run --dataset ba --tag ba40 --skip-stages data train
 | `--native-mc-runs` | `1` | real episodes per candidate for an `@native` arm |
 | `--budget-pcts` | `1 5 10 20` | budget sweep as % of nodes; `--budgets` for absolute k |
 | `--compare` | off | ground-truth referee replay — required for a valid cross-condition table |
-| `--llm-model` / `--outer-iters` | `claude-sonnet-5` / `5` | coding-agent model and refinement budget |
+| `--llm-model` / `--outer-iters` | `gpt-5.6-terra` / `5` | coding-agent model and refinement budget |
 
 Generation, training, and agent hyperparameters are all exposed too
 (`--rollouts`, `--mc-marginals`, `--wm-model`, `--head`, `--epochs`, `--n-samples`,
 …) — see `python -m pipeline.run --help`.
+
+### On SLURM
+
+`sbatch/pipeline.sbatch` is the only job script. Run it directly and it queues
+**itself**, with every one of the 67 pipeline flags reachable as an environment
+variable:
+
+```bash
+DATASET=ba TAG=ba40 ./sbatch/pipeline.sbatch                    # everything
+DATASET=sbm ARMS=one_shot_free@oracle BASELINES=none ./sbatch/pipeline.sbatch
+DATASET=ba TAG=ba40 START_STAGE=plots ./sbatch/pipeline.sbatch  # re-plot only
+DATASET=ba TAG=ba40 DRY_RUN=1 ./sbatch/pipeline.sbatch          # show, submit nothing
+```
+
+**GPU is requested only when the run needs one.** Before submitting, the script
+asks `pipeline.run --print-resources` whether these flags ever put a tensor on a
+device: training `f_θ`, any `@world_model` arm, or a learned external repo get
+`--gres=gpu:1`; data generation, plots, the classical pool, and the
+`routing`/`native`/`monte_carlo`/`oracle` arms queue CPU-only and start sooner.
+`DEVICE` follows the same decision. Override with `GRES=gpu:2` or `GRES=none`.
+
+Its header carries copy-pasteable templates for every scenario — full run,
+oracle-only, evaluator ablation, baselines-only, specific baselines, no
+baselines, single stages, plots-only, every LLM knob, every world-model knob,
+every generation knob, LT, absolute budgets, and resume.
 
 ### Where everything lands
 
@@ -467,7 +492,7 @@ GraphWorldModel/
 │   ├── checkpoints/            # historical RESULTS.md (new runs write to results/)
 │   └── README.md               # ← world-model technical reference
 ├── coding_agent/               # ← outer-loop coding agent (see its README)
-├── sbatch/                     # SLURM jobs; pipeline_*.sbatch run the whole thing
+├── sbatch/pipeline.sbatch      # the single SLURM entry point (self-submitting)
 ├── results/                    # ALL generated artifacts, one subtree per --tag
 ├── baselines/                  # published-baseline runners (registry + adapters);
 │                               # external repos fetched into baselines/external/

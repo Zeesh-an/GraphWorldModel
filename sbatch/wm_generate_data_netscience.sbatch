@@ -13,6 +13,15 @@ cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
 mkdir -p results logs
 
+# Results land in results/<tag>_<jobid>/data, the same way logs land in
+# logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
+# transitions. Set TAG_JOBID=0 for a stable results/<tag>/data — which is what
+# the train/agent scripts downstream expect to be told about.
+TAG="${TAG:-netscience}"
+TAG_JOBID="${TAG_JOBID:-1}"
+[ "$TAG_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && TAG="${TAG}_${SLURM_JOB_ID}"
+OUT="results/$TAG/data"
+
 # NetScience coauthorship network (1,589 nodes, 2,742 edges, heavily fragmented:
 # 128 isolates + many small components — budget allocation across components is
 # the decision that matters). Auto-downloads on first use. ONE real graph, so
@@ -24,6 +33,8 @@ mkdir -p results logs
 # Node ops only, matching the BA recipe.
 # All-five alternative: --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
+export OUT
+
 python -m data.generate_wm_data \
     --dataset netscience \
     --models IC LT --prob-model weighted --budget-pct-range 1 20 \
@@ -33,10 +44,11 @@ python -m data.generate_wm_data \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
     --split 0.7 0.15 0.15 --seed 42 \
-    --out-dir results/netscience/data
+    --out-dir "$OUT"
 
-python -m data.validate_wm_data --dir results/netscience/data
+python -m data.validate_wm_data --dir "$OUT"
 
-python -c "import json; print('action_ops:', json.load(open('results/netscience/data/metadata.json'))['config']['action_ops'])"
+python -c "import json, os; print('action_ops:', json.load(open(os.environ['OUT'] + '/metadata.json'))['config']['action_ops'])"
 
-echo "[gen_data] done -> results/netscience/data"
+echo "[gen_data] done -> $OUT"
+echo "[gen_data] train on it with: sbatch sbatch/wm_train.sbatch sage IC $OUT"
