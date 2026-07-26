@@ -43,22 +43,42 @@ def clone(name: str) -> Path:
     os.makedirs(external_root, exist_ok=True)
 
     if spec.installed():
-        print(f"[setup] {name}: already present at {spec.directory}")
-        return spec.directory
+        print(f"[setup] {name}: already present at {spec.root}")
+        return spec.root
 
     if spec.fetch == "manual":
         raise ManualFetch(
             f"{name} is not on git — download it from {spec.repo} and unpack it "
-            f"into {spec.directory}, then re-run setup to build it."
+            f"into {spec.root}, then re-run setup to build it."
         )
 
     print(f"[setup] {name}: cloning {spec.repo}")
     _run(
-        ["git", "clone", "--depth", "1", f"{spec.repo}.git", str(spec.directory)],
+        ["git", "clone", "--depth", "1", f"{spec.repo}.git", str(spec.root)],
         timeout=clone_timeout_seconds,
     )
 
-    return spec.directory
+    return spec.root
+
+
+def unpack(name: str) -> None:
+    """A couple of repos track a release zip rather than the source itself."""
+    spec = external_baselines[name]
+    if not spec.unpack:
+        return
+
+    archive = spec.root / spec.unpack
+    if not archive.exists():
+        raise FileNotFoundError(f"{name}: expected {archive} in the clone")
+
+    # spec.directory is what the archive is supposed to produce, so its presence
+    # means a previous run already expanded this
+    if spec.directory.exists():
+        print(f"[setup] {name}: already unpacked at {spec.directory}")
+        return
+
+    print(f"[setup] {name}: unpacking {spec.unpack}")
+    shutil.unpack_archive(str(archive), str(spec.root))
 
 
 def build(name: str) -> None:
@@ -67,7 +87,15 @@ def build(name: str) -> None:
     if not spec.build:
         return
 
-    print(f"[setup] {name}: building ({' '.join(spec.build)})")
+    unpack(name)
+
+    if not spec.directory.exists():
+        raise FileNotFoundError(
+            f"{name}: build directory {spec.directory} does not exist — the "
+            f"repo layout changed, check the spec's subdir"
+        )
+
+    print(f"[setup] {name}: building ({' '.join(spec.build)}) in {spec.directory}")
     _run(spec.build, cwd=spec.directory, timeout=install_timeout_seconds)
 
 
@@ -103,13 +131,13 @@ def install(name: str) -> None:
         print(f"[setup] {name}: no Python requirements ({spec.entry}) — build manually")
         return
 
-    requirements = spec.directory / spec.requirements
+    requirements = spec.root / spec.requirements
     if not requirements.exists():
         print(f"[setup] {name}: no {spec.requirements} in the repo, skipping install")
         return
 
-    venv = spec.directory / ".venv"
-    interpreter = venv / "bin" / "python"
+    venv = spec.root / ".venv"
+    interpreter = spec.venv_python
 
     # Test for the interpreter, not the directory: a venv creation that failed
     # part-way leaves a directory behind with no python and no pip in it

@@ -57,6 +57,13 @@ class ExternalBaseline:
     # tarball (SourceForge), so setup prints instructions instead of guessing
     fetch: str = "git"
     build: list | None = None  # e.g. ["make"] for the C++ baselines
+    # Some repos do not put the Makefile / entry point at the top level (OPIM
+    # ships OPIM1.0 and OPIM1.1 side by side), so the build and run directory is
+    # not always the clone directory
+    subdir: str | None = None
+    # ...and some ship a zip instead of source (SSA), which must be expanded
+    # inside the clone before anything can be built
+    unpack: str | None = None
     # (graph, work_dir, budget, diffusion_model) -> dict of extra command args
     export: object = None
     # (work_dir, budget, diffusion_model, extras) -> list[str] argv
@@ -67,11 +74,21 @@ class ExternalBaseline:
     extra_env: dict = field(default_factory=dict)
 
     @property
-    def directory(self) -> Path:
+    def root(self) -> Path:
+        """Where the repo is cloned, and where a per-baseline venv lives."""
         return external_root / self.name
 
+    @property
+    def directory(self) -> Path:
+        """Where the build runs and the entry point lives — usually the root."""
+        return self.root / self.subdir if self.subdir else self.root
+
+    @property
+    def venv_python(self) -> Path:
+        return self.root / ".venv" / "bin" / "python"
+
     def installed(self) -> bool:
-        return self.directory.exists() and any(self.directory.iterdir())
+        return self.root.exists() and any(self.root.iterdir())
 
 
 # Shared helpers -------------------------------------------------------------
@@ -339,9 +356,13 @@ def _glie_command(
 
 def _ssa_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
     """
-    SSA's `format` tool wants: first line `n m`, then `src dst weight` per line,
-    with node indices starting at ONE. Our nodes are 0-indexed, so every id is
-    shifted by +1 here and shifted back in _ssa_parse.
+    SSA's `el2bin` converter wants: first line `n m`, then `src dst weight` per
+    line, with node indices starting at ONE. Our nodes are 0-indexed, so every
+    id is shifted by +1 here and shifted back in _ssa_parse.
+
+    Not to be confused with the repo's `format` tool, which is the OPTIONAL
+    step 0 that derives edge probabilities. We supply our own IC probabilities,
+    so that step is skipped entirely.
     """
     spec = external_baselines["ssa"]
     text_path = work_dir / "graph.txt"
@@ -355,15 +376,16 @@ def _ssa_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dic
             target = int(graph.edge_index[1, column]) + 1
             handle.write(f"{source} {target} {float(graph.ic_probs[column]):.6f}\n")
 
-    formatter = spec.directory / "format"
-    if not formatter.exists():
+    converter = spec.directory / "el2bin"
+    if not converter.exists():
         raise FileNotFoundError(
-            f"SSA's `format` binary is missing at {formatter} — run "
+            f"SSA's `el2bin` binary is missing at {converter} — run "
             f"`make` in {spec.directory} (setup_baselines does this)"
         )
 
+    # el2bin takes exactly two arguments: text in, binary out
     subprocess.run(
-        [str(formatter), str(text_path), str(binary_path), "1"],
+        [str(converter), str(text_path), str(binary_path)],
         cwd=spec.directory,
         check=True,
         capture_output=True,
@@ -667,6 +689,10 @@ external_baselines: dict[str, ExternalBaseline] = {
         status="needs_setup",
         requirements=None,
         build=["make"],
+        # The repo root holds OPIM1.0 and OPIM1.1 side by side with no top-level
+        # Makefile; 1.1 is the current release. Its Makefile writes a binary
+        # literally named OPIM1.1.o, which is why _opim_binary globs "*.o".
+        subdir="OPIM1.1",
         export=partial(_opim_export, "opim"),
         command=partial(_opim_command, "opim"),
         parse_seeds=partial(_opim_parse, "opim"),
@@ -687,6 +713,10 @@ external_baselines: dict[str, ExternalBaseline] = {
         status="needs_setup",
         requirements=None,
         build=["make"],
+        # The repo tracks only release zips, no source. The 2.1 zip expands to a
+        # directory named SSA_release_2.0 (the authors' own inconsistency).
+        unpack="SSA_release_2.1.zip",
+        subdir="SSA_release_2.0/SSA",
         export=_ssa_export,
         command=_ssa_command,
         parse_seeds=_ssa_parse,

@@ -31,7 +31,7 @@ class BaselineError(RuntimeError):
 
 def _interpreter(spec) -> str:
     """The baseline's own venv python, falling back to ours if it has no venv."""
-    venv_python = spec.directory / ".venv" / "bin" / "python"
+    venv_python = spec.venv_python
 
     return str(venv_python) if venv_python.exists() else sys.executable
 
