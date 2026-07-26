@@ -383,9 +383,15 @@ def _ssa_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dic
             f"`make` in {spec.directory} (setup_baselines does this)"
         )
 
-    # el2bin takes exactly two arguments: text in, binary out
+    # el2bin takes exactly two arguments: text in, binary out. Everything here is
+    # resolved because cwd is the repo directory, and a relative path would be
+    # re-resolved against it after subprocess chdirs.
     subprocess.run(
-        [str(converter), str(text_path), str(binary_path)],
+        [
+            str(converter.resolve()),
+            str(text_path.resolve()),
+            str(binary_path.resolve()),
+        ],
         cwd=spec.directory,
         check=True,
         capture_output=True,
@@ -436,33 +442,55 @@ def _opim_export(
     graph_name = "gwm"
     graph_path = spec.directory / "graphInfo" / graph_name
     os.makedirs(graph_path.parent, exist_ok=True)
+    arcs = graph.edge_index.shape[1]
 
+    # graphBase.h reads `numV numE` off the first line and then exactly numE
+    # edges. Omitting the header makes it size the adjacency from the first edge
+    # and index out of bounds — a segfault, not an error message.
     with open(graph_path, "w") as handle:
-        for column in range(graph.edge_index.shape[1]):
+        handle.write(f"{graph.num_nodes} {arcs}\n")
+        for column in range(arcs):
             source = int(graph.edge_index[0, column])
             target = int(graph.edge_index[1, column])
             weight = float(graph.ic_probs[column])
             handle.write(f"{source} {target} {weight:.6f}\n")
 
     # -func=0 converts the edgelist into the .vec.rvs.graph binary the selector
-    # reads; it must run before -func=1 and is cheap enough to redo each time
+    # reads; it must run before -func=1 and is cheap enough to redo each time.
+    # -mode=w means "with edge property": read our third column instead of
+    # overwriting every weight with OPIM's own 1/in_degree WC setting.
     binary = _opim_binary(spec.directory)
-    subprocess.run(
-        [str(binary), "-func=0", f"-gname={graph_name}"],
+    # NOT check=True: OPIM.cpp ends the format function with `return 1`, so a
+    # successful format exits non-zero. The artifact is the real signal.
+    formatted = subprocess.run(
+        [str(binary), "-func=0", f"-gname={graph_name}", "-mode=w"],
         cwd=spec.directory,
-        check=True,
         capture_output=True,
+        text=True,
     )
+    artifact = graph_path.with_suffix(".vec.rvs.graph")
+
+    if not artifact.exists():
+        raise FileNotFoundError(
+            f"{name}: -func=0 did not produce {artifact} "
+            f"(exit {formatted.returncode})\n{formatted.stdout}{formatted.stderr}"
+        )
 
     return {"graph_name": graph_name, "binary": binary.name}
 
 
 def _opim_binary(directory: Path) -> Path:
-    """Find the compiled selector; OPIM and SubSIM name their binaries differently."""
+    """
+    Find the compiled selector; OPIM and SubSIM name their binaries differently.
+
+    Returned ABSOLUTE: every caller execs it through subprocess with cwd set to
+    the repo directory, and POSIX chdirs before exec — so a relative path would
+    be resolved a second time against that cwd and vanish.
+    """
     for pattern in ("*.o", "OPIM*", "subsim*", "SUBSIM*"):
         for candidate in sorted(directory.glob(pattern)):
             if candidate.is_file() and os.access(candidate, os.X_OK):
-                return candidate
+                return candidate.resolve()
 
     raise FileNotFoundError(
         f"no compiled binary found in {directory} — run `make` there "
@@ -487,14 +515,88 @@ def _opim_command(
     ]
 
 
+def _subsim_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
+    """
+    SubSIM is a fork of OPIM and reads the SAME `numV numE` + edges layout, but
+    its CLI diverged: -func takes the strings format|im rather than 0|1, there
+    is no -mode, and the weight column is selected with -pdist=weights. It also
+    returns 0 from the format step where OPIM returns 1.
+    """
+    spec = external_baselines["subsim"]
+    graph_name = "gwm"
+    graph_path = spec.directory / "graphInfo" / graph_name
+    os.makedirs(graph_path.parent, exist_ok=True)
+    arcs = graph.edge_index.shape[1]
+
+    with open(graph_path, "w") as handle:
+        handle.write(f"{graph.num_nodes} {arcs}\n")
+        for column in range(arcs):
+            source = int(graph.edge_index[0, column])
+            target = int(graph.edge_index[1, column])
+            weight = float(graph.ic_probs[column])
+            handle.write(f"{source} {target} {weight:.6f}\n")
+
+    binary = _opim_binary(spec.directory)
+    formatted = subprocess.run(
+        [str(binary), "-func=format", f"-gname={graph_name}", "-pdist=weights"],
+        cwd=spec.directory,
+        capture_output=True,
+        text=True,
+    )
+    artifact = graph_path.with_suffix(".vec.rvs.graph")
+
+    if not artifact.exists():
+        raise FileNotFoundError(
+            f"subsim: -func=format did not produce {artifact} "
+            f"(exit {formatted.returncode})\n{formatted.stdout}{formatted.stderr}"
+        )
+
+    return {"graph_name": graph_name, "binary": binary.name}
+
+
+def _subsim_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    return [
+        f"./{extras['binary']}",
+        "-func=im",
+        f"-gname={extras['graph_name']}",
+        f"-seedsize={budget}",
+        "-eps=0.01",
+        "-pdist=weights",
+    ]
+
+
 def _opim_parse(name: str, work_dir: Path, stdout: str, budget: int) -> list[int]:
+    """
+    Read the seed file this budget produced.
+
+    OPIM writes result/seed/seed_<graph>_<alg>_<mode>_k<budget>_<pdist>, and a
+    budget sweep leaves every previous run's file in that directory. A plain
+    sorted() returns k16 for k=79 and k=318 alike (string order), so the budget
+    has to be matched explicitly; mtime is the fallback if the naming changes.
+    """
     spec = external_baselines[name]
 
-    for seed_file in sorted(spec.directory.rglob("*seed*")):
-        if seed_file.is_file() and seed_file.stat().st_size > 0:
-            numbers = re.findall(r"\d+", seed_file.read_text())
-            if numbers:
-                return [int(token) for token in numbers][:budget]
+    def usable(paths):
+        return [
+            path
+            for path in paths
+            if path.is_file() and path.stat().st_size > 0
+        ]
+
+    candidates = usable(spec.directory.rglob(f"*seed*_k{budget}_*"))
+    if not candidates:
+        candidates = sorted(
+            usable(spec.directory.rglob("*seed*")),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        )
+
+    for seed_file in candidates:
+        numbers = re.findall(r"\d+", seed_file.read_text())
+        if numbers:
+            return [int(token) for token in numbers][:budget]
 
     return parse_seed_integers(stdout, budget)
 
@@ -737,8 +839,8 @@ external_baselines: dict[str, ExternalBaseline] = {
         status="needs_setup",
         requirements=None,
         build=["make"],
-        export=partial(_opim_export, "subsim"),
-        command=partial(_opim_command, "subsim"),
+        export=_subsim_export,
+        command=_subsim_command,
         parse_seeds=partial(_opim_parse, "subsim"),
         notes=(
             "Third of the three RIS methods in DeepIM's table (IMM / OPIM / "
