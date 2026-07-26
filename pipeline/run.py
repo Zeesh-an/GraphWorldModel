@@ -70,7 +70,7 @@ from pipeline.conditions import (
     resolve_evaluator,
     valid_evaluators,
 )
-from pipeline.layout import Layout, budget_label
+from pipeline.layout import Layout, budget_label, skip_marker_suffix
 from pipeline.plots import build_plots
 from pipeline.report import write_report
 from pipeline.summary import write_environment, write_summary
@@ -368,7 +368,7 @@ def _record_skip(layout: Layout, label: str, arm, reason: str) -> None:
     absent, so the next run retries it and fails identically. The marker also
     keeps the report honest about what was attempted.
     """
-    path = layout.baselines_dir / label / f"{arm.name}.skipped.json"
+    path = layout.baselines_dir / label / f"{arm.name}{skip_marker_suffix}"
     os.makedirs(path.parent, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -567,6 +567,32 @@ def load_agent_results(layout: Layout) -> list[dict]:
     return results
 
 
+def load_skips(layout: Layout) -> list[dict]:
+    """The `.skipped.json` markers — what was attempted and did not produce a row."""
+    return [json.loads(path.read_text()) for path in layout.skip_globs()]
+
+
+def report_skips(layout: Layout) -> None:
+    """
+    An arm that skipped is invisible in the figures, so say so out loud.
+
+    Silence here reads as "everything ran", which is exactly the wrong
+    impression when an external repo failed on every budget.
+    """
+    skips = load_skips(layout)
+    if not skips:
+        return
+
+    reasons = {}
+    for skip in skips:
+        reasons.setdefault(skip["arm"], []).append(skip.get("budget_label", "?"))
+
+    print(f"[plots] {len(skips)} skipped run(s) excluded from the figures:")
+    for arm, labels in sorted(reasons.items()):
+        reason = next(s["reason"] for s in skips if s["arm"] == arm)
+        print(f"[plots]   {arm} ({', '.join(labels)}): {reason.splitlines()[0]}")
+
+
 def load_wm_results(config: PipelineConfig, layout: Layout) -> dict | None:
     path = layout.wm_results(config.wm_model, config.diffusion_model)
 
@@ -638,6 +664,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
             elif stage == "plots":
                 results = load_agent_results(layout)
                 print(f"[plots] building figures from {len(results)} results...")
+                report_skips(layout)
                 figures = build_plots(
                     results,
                     load_wm_results(config, layout),

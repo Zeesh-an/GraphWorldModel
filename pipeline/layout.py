@@ -17,6 +17,10 @@ from pathlib import Path
 
 results_root = Path("results")
 
+# Written next to the results when an arm could not run; same directory and same
+# extension, so every reader must filter on it
+skip_marker_suffix = ".skipped.json"
+
 
 def budget_label(budget_pct: float | None, budget: int) -> str:
     """Directory name for one point of the budget sweep."""
@@ -72,7 +76,21 @@ class Layout:
         return root / label / f"{arm}.json"
 
     def result_globs(self) -> list[Path]:
-        """Every result file, ours and external, in one list for plots/report."""
-        return sorted(self.agent_dir.glob("*/*.json")) + sorted(
-            self.baselines_dir.glob("*/*.json")
+        """
+        Every result file, ours and external, in one list for plots/report.
+
+        `<arm>.skipped.json` markers live in the same directories and match the
+        same glob, but they record why an arm did NOT run and carry none of the
+        result fields — so they are excluded here rather than at every reader.
+        """
+        return [
+            path
+            for path in sorted(self.agent_dir.glob("*/*.json"))
+            + sorted(self.baselines_dir.glob("*/*.json"))
+            if not path.name.endswith(skip_marker_suffix)
+        ]
+
+    def skip_globs(self) -> list[Path]:
+        return sorted(self.baselines_dir.glob(f"*/*{skip_marker_suffix}")) + sorted(
+            self.agent_dir.glob(f"*/*{skip_marker_suffix}")
         )
