@@ -15,9 +15,29 @@ gateway_retries = 3
 
 
 class LLMProvider(Protocol):
-    def complete(self, system: str, user: str) -> str:
-        """Return the model's raw text completion for the given prompts."""
+    def complete(self, messages: list[dict]) -> str:
+        """Return the model's raw text completion for a full message thread."""
         ...
+
+
+def fold_system(messages: list[dict]) -> list[dict]:
+    """
+    Merge a leading system message into the first user turn.
+
+    The gateway silently drops the system role, so the contract has to ride in
+    as user text. Isolated here so that only this function changes if the
+    gateway ever starts honouring it.
+    """
+    if not messages or messages[0]["role"] != "system":
+        return list(messages)
+
+    system, rest = messages[0]["content"], messages[1:]
+    if not rest:
+        return [{"role": "user", "content": system}]
+
+    return [
+        {"role": "user", "content": f"{system}\n\n{rest[0]['content']}"}
+    ] + rest[1:]
 
 
 class GatewayProvider:
@@ -41,11 +61,8 @@ class GatewayProvider:
         # None -> provider default sampling; 0.0 -> greedy decoding
         self.temperature = temperature
 
-    def complete(self, system: str, user: str) -> str:
-        # Add the system prompt in the user turn since the gateway drops system prompts
-        messages = [
-            {"role": "user", "content": f"{system}\n\n{user}"},
-        ]
+    def complete(self, messages: list[dict]) -> str:
+        messages = fold_system(messages)
 
         sampling_kwargs = (
             {} if self.temperature is None else {"temperature": self.temperature}
@@ -96,15 +113,68 @@ class CodingAgent:
     def __init__(self, provider: LLMProvider) -> None:
         self.provider = provider
 
-    def generate(self, system: str, user: str) -> str:
-        """Call the provider and return the extracted Python script."""
+    def generate(self, messages: list[dict]) -> str:
+        """Call the provider on a message thread and return the extracted script."""
         start = time.perf_counter()
-        reply = self.provider.complete(system, user)
+        reply = self.provider.complete(messages)
         script = extract_code_block(reply)
 
         print(
             f"[agent] response received in {time.perf_counter() - start:.1f}s "
-            f"({len(reply)} chars -> script of {len(script.splitlines())} lines)"
+            f"({len(reply)} chars -> script of {len(script.splitlines())} lines, "
+            f"thread of {len(messages)} messages)"
         )
 
         return script
+
+
+# Opening turn (task + graph profile + anchor) plus this many recent exchanges
+# are sent; the middle is dropped so a long refinement loop cannot grow context
+# without bound. 6 exchanges covers every default --outer-iters we run.
+default_history_exchanges = 6
+
+
+class Conversation:
+    """
+    A multi-turn refinement thread with one model.
+
+    The point of keeping a thread rather than rebuilding one prompt per
+    iteration: the agent's previous script is the previous ASSISTANT turn, so
+    the model can see what it wrote and edit it, instead of regenerating a
+    program from the task description and a scalar reward every round.
+
+    Only the extracted script is stored back as the assistant turn, not the raw
+    prose reply — it is the artifact the next turn edits, and it keeps the
+    thread compact.
+    """
+
+    def __init__(
+        self,
+        agent: CodingAgent,
+        system: str,
+        history_exchanges: int = default_history_exchanges,
+    ) -> None:
+        self.agent = agent
+        self.history_exchanges = history_exchanges
+        self.messages = [{"role": "system", "content": system}]
+
+    def send(self, user_text: str) -> str:
+        self.messages.append({"role": "user", "content": user_text})
+        script = self.agent.generate(self.window())
+        self.messages.append(
+            {"role": "assistant", "content": f"```python\n{script}\n```"}
+        )
+
+        return script
+
+    def reset(self) -> None:
+        """Drop everything but the system turn — a fresh episode, same contract."""
+        del self.messages[1:]
+
+    def window(self) -> list[dict]:
+        """System turn + opening task turn + the most recent exchanges."""
+        kept = 2 + 2 * self.history_exchanges
+        if len(self.messages) <= kept:
+            return list(self.messages)
+
+        return self.messages[:2] + self.messages[-(2 * self.history_exchanges) :]

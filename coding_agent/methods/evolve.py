@@ -8,7 +8,7 @@ import time
 from functools import partial
 from tqdm import tqdm
 
-from coding_agent.agent import CodingAgent
+from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.credit import planned_action
 from coding_agent.executor import StrategyError, build_strategy, call_strategy
 from coding_agent.methods.base import (
@@ -56,6 +56,10 @@ class EvolveSearch(OuterLoopMethod):
             + anchor
         )
 
+        # The thread lets the model see the generations it already produced;
+        # build_evolve_prompt still names the PARENT explicitly because the
+        # parent is the population best, which is usually NOT the last turn
+        conversation = Conversation(agent, system)
         population = []
         best = None
         stagnation = 0
@@ -70,7 +74,10 @@ class EvolveSearch(OuterLoopMethod):
                     if last_error
                     else ""
                 )
-                user = base_user + error_text
+                # Opening turn carries the task; a retry after a failed seed only
+                # needs the error, since the thread still holds everything else
+                user = base_user + error_text if iteration == 0 else error_text
+                user = user or base_user
             else:
                 operator = (
                     "restructure"
@@ -87,7 +94,8 @@ class EvolveSearch(OuterLoopMethod):
                     reverse=True,
                 )[: self.inspiration_count]
 
-                user = base_user + build_evolve_prompt(
+                # No base_user here: the task is already the thread's opening turn
+                user = build_evolve_prompt(
                     operator, parent, inspirations, error=last_error
                 )
 
@@ -98,7 +106,7 @@ class EvolveSearch(OuterLoopMethod):
 
             try:
                 strategy = build_strategy(
-                    agent.generate(system, user), self.strategy_mode
+                    conversation.send(user), self.strategy_mode
                 )
 
                 plan_start = time.perf_counter()

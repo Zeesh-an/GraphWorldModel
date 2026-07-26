@@ -133,7 +133,7 @@ class _CannedProvider:
     def __init__(self, script: str) -> None:
         self.script = script
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, messages: list[dict]) -> str:
         return f"```python\n{self.script}\n```"
 
 
@@ -261,7 +261,10 @@ def run_experiment(
 
         router = GatewayProvider(config.model, temperature=config.temperature)
         routing_reply = router.complete(
-            routing_system, build_routing_prompt(task, graph)
+            [
+                {"role": "system", "content": routing_system},
+                {"role": "user", "content": build_routing_prompt(task, graph)},
+            ]
         )
         config.baseline = _parse_routing_choice(routing_reply)
         print(f"[run] routing picked {config.baseline!r}")

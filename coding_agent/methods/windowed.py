@@ -1,6 +1,6 @@
 """Method 3: design one online algorithm; re-apply it per time window."""
 
-from coding_agent.agent import CodingAgent
+from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.executor import build_strategy, call_strategy, validate_actions
 from coding_agent.methods.base import OuterLoopMethod
 from coding_agent.prompts import build_user_prompt, system_prompts
@@ -18,8 +18,9 @@ class WindowedOnline(OuterLoopMethod):
         user = build_user_prompt("windowed", task, graph)
         print("[windowed] requesting online algorithm script...")
 
-        # Build the strategy object from the LLM generated code, and call it
-        strategy = build_strategy(agent.generate(system, user))  # designed once
+        # Designed once: the online algorithm is consulted at window boundaries by
+        # the generated code, not by the LLM, so this thread is a single turn
+        strategy = build_strategy(Conversation(agent, system).send(user))
 
         window_length = max(1, (task.horizon + 1) // self.windows)
         print(f"[windowed] rolling out {self.windows} windows of {window_length} steps")

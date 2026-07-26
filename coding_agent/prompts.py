@@ -249,11 +249,28 @@ def build_feedback_prompt(
     error: str | None = None,
     credit_report: str | None = None,
     reference_report: str | None = None,
+    script: str | None = None,
 ) -> str:
+    """
+    `script` is the code that produced this reward.
+
+    It is also the previous assistant turn in the conversation, so this is
+    deliberately redundant — but the echo is what makes the instruction "EDIT
+    this" concrete, and it survives history trimming and any gateway that
+    mangles multi-turn threads.
+    """
     error_text = f"\nThe previous script raised an error:\n{error}\n" if error else ""
     credit_text = f"\n{credit_report}\n" if credit_report else ""
     reference_text = f"\n{reference_report}\n" if reference_report else ""
+    script_text = (
+        f"\nTHE SCRIPT THAT PRODUCED THIS RESULT:\n```python\n{script}\n```\n"
+        if script
+        else ""
+    )
+
     return f"""\
 Your previous strategy achieved final spread (reward) = {reward}.
-Trajectory summary: {summary}{reference_text}{error_text}{credit_text}
-Revise the Strategy to increase final spread. Reply with one ```python block."""
+Trajectory summary: {summary}{reference_text}{error_text}{credit_text}{script_text}
+EDIT that script to increase final spread — change what the diagnostics say is
+weak and keep what is working, rather than starting a new design from scratch.
+Reply with one ```python block containing the complete updated script."""

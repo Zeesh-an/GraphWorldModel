@@ -4,7 +4,7 @@ import time
 from functools import partial
 from tqdm import tqdm
 
-from coding_agent.agent import CodingAgent
+from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.credit import (
     counterfactual_credit,
     format_credit_report,
@@ -62,9 +62,13 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             tqdm.write(f"[one_shot] {anchor}")
             base_user += "\n\n" + anchor
 
-        user = base_user
+        # One thread for the whole refinement, so the base prompt is sent once and
+        # every later turn is an edit against the script the model can still see
+        conversation = Conversation(agent, system)
+        pending = base_user
         best = None
         last_error = None
+        last_script = None
 
         progress_bar = tqdm(range(self.outer_iters), desc="one_shot refinement")
         for iteration in progress_bar:
@@ -76,8 +80,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
 
                 # Build the strategy object from the LLM generated code, and call it
                 strategy = build_strategy(
-                    agent.generate(system, user), self.strategy_mode
+                    conversation.send(pending), self.strategy_mode
                 )
+                last_script = strategy.source_script
 
                 # The generated algorithm's own computation — with free-mode
                 # composition scripts this internal planning dominates wall-clock
@@ -112,11 +117,10 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     f"{last_error.splitlines()[0]}"
                 )
 
-                # Rebuild the user prompt with the feedback containing a reward of 0.0 and the full error text
-                user = (
-                    base_user
-                    + "\n\n"
-                    + build_feedback_prompt(0.0, "script failed", error=last_error)
+                # The thread already carries the task, so the next turn is only
+                # the failure — plus the script that failed, when we got that far
+                pending = build_feedback_prompt(
+                    0.0, "script failed", error=last_error, script=last_script
                 )
 
                 continue
@@ -152,21 +156,19 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 )
                 report = format_credit_report(base_reward, entries)
 
-            # Rebuild the user prompt with the feedback containing this iteration's trajectory reward, summary report, and credit report
-            user = (
-                base_user
-                + "\n\n"
-                + build_feedback_prompt(
-                    trajectory.reward,
-                    summarize(trajectory, graph),
-                    credit_report=report,
-                    # Free: both marginal vectors are already paid for
-                    reference_report=(
-                        reference_diff(trajectory, anchor_trajectory, graph)
-                        if anchor_trajectory is not None
-                        else None
-                    ),
-                )
+            # Next turn: this iteration's reward, diagnostics, credit report, and
+            # the script itself as the explicit edit target
+            pending = build_feedback_prompt(
+                trajectory.reward,
+                summarize(trajectory, graph),
+                credit_report=report,
+                # Free: both marginal vectors are already paid for
+                reference_report=(
+                    reference_diff(trajectory, anchor_trajectory, graph)
+                    if anchor_trajectory is not None
+                    else None
+                ),
+                script=strategy.source_script,
             )
 
         if best is None:
