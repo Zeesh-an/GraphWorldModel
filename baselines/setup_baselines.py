@@ -61,6 +61,28 @@ def clone(name: str) -> Path:
     return spec.root
 
 
+def patch(name: str) -> None:
+    """Apply the spec's compatibility edits; a no-op once they are in place."""
+    spec = external_baselines[name]
+    if not spec.patches:
+        return
+
+    for relative, old, new in spec.patches:
+        path = spec.root / relative
+        if not path.exists():
+            raise FileNotFoundError(
+                f"{name}: cannot patch {path} — the repo layout changed"
+            )
+
+        text = path.read_text()
+        if old not in text:
+            print(f"[setup] {name}: patch already applied to {relative}")
+            continue
+
+        path.write_text(text.replace(old, new))
+        print(f"[setup] {name}: patched {relative} ({old} -> {new})")
+
+
 def unpack(name: str) -> None:
     """A couple of repos track a release zip rather than the source itself."""
     spec = external_baselines[name]
@@ -177,6 +199,7 @@ def setup(name: str) -> None:
         print(f"[setup] {name}: MANUAL — {error}")
         return
 
+    patch(name)
     install(name)
     build(name)
     print(f"[setup] {name}: ready at {spec.directory}")

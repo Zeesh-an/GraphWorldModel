@@ -30,7 +30,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import networkx as nx
 
-baselines_root = Path("baselines")
+# ABSOLUTE, anchored on this file. Every external baseline is launched with
+# cwd set to its own repo directory, and POSIX resolves a relative argv[0] or
+# interpreter path against that cwd — so a relative root silently becomes
+# <repo>/baselines/external/<name>/baselines/external/<name>/... and vanishes.
+baselines_root = Path(__file__).resolve().parent
 external_root = baselines_root / "external"
 
 classical = "classical"
@@ -64,6 +68,11 @@ class ExternalBaseline:
     # ...and some ship a zip instead of source (SSA), which must be expanded
     # inside the clone before anything can be built
     unpack: str | None = None
+    # (relative_path, old_text, new_text) compatibility edits applied after
+    # clone. For repos abandoned against a library version that no longer
+    # exists, where the alternative is installing a second multi-GB torch just
+    # to pin an old networkx. Idempotent: re-running setup is a no-op.
+    patches: list | None = None
     # (graph, work_dir, budget, diffusion_model) -> dict of extra command args
     export: object = None
     # (work_dir, budget, diffusion_model, extras) -> list[str] argv
@@ -233,6 +242,7 @@ def _touplegdd_export(graph, work_dir: Path, budget: int, diffusion_model: str) 
 def _touplegdd_command(
     work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
 ) -> list[str]:
+    # main.py has no --output: runner.test() prints the selected set to stdout
     return [
         "python",
         "main.py",
@@ -243,15 +253,21 @@ def _touplegdd_command(
         extras["graph_file"],
         "--budget",
         str(budget),
-        "--output",
-        str((work_dir / "seeds.txt").resolve()),
     ]
 
 
 def _touplegdd_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
-    seed_file = work_dir / "seeds.txt"
-    if seed_file.exists():
-        return [int(token) for token in seed_file.read_text().split()][:budget]
+    """
+    runner.test() prints `Seeds: [3, 17, 42] | Reward: 88.1` per trial, twice
+    over: once for the one-shot generation pass and again for the incremental
+    one. Take the first line so the arm is deterministic rather than dependent
+    on which pass happened to score better.
+    """
+    match = re.search(r"Seeds:\s*\[([^\]]*)\]", stdout)
+    if match:
+        seeds = [int(token) for token in re.findall(r"\d+", match.group(1))]
+        if seeds:
+            return seeds[:budget]
 
     return parse_seed_integers(stdout, budget)
 
@@ -386,16 +402,26 @@ def _ssa_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dic
     # el2bin takes exactly two arguments: text in, binary out. Everything here is
     # resolved because cwd is the repo directory, and a relative path would be
     # re-resolved against it after subprocess chdirs.
-    subprocess.run(
+    #
+    # NOT check=True: el2bin.cpp ends with `return 1`, so a successful
+    # conversion exits non-zero — the same quirk OPIM's format step has. The
+    # produced .bin is the real signal.
+    converted = subprocess.run(
         [
             str(converter.resolve()),
             str(text_path.resolve()),
             str(binary_path.resolve()),
         ],
         cwd=spec.directory,
-        check=True,
         capture_output=True,
+        text=True,
     )
+
+    if not binary_path.exists() or binary_path.stat().st_size == 0:
+        raise FileNotFoundError(
+            f"ssa: el2bin did not produce {binary_path} "
+            f"(exit {converted.returncode})\n{converted.stdout}{converted.stderr}"
+        )
 
     return {"binary": str(binary_path.resolve())}
 
@@ -652,6 +678,16 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2305.02200",
         entry="genim.py (after building .SG with baselines/deepim_data.py)",
         status="needs_setup",
+        # networkx 3.0 removed from_scipy_sparse_matrix in favour of
+        # from_scipy_sparse_array; the signature is unchanged. Two call sites,
+        # both reached only at the final spread-evaluation step.
+        patches=[
+            (
+                "main/utils.py",
+                "nx.from_scipy_sparse_matrix",
+                "nx.from_scipy_sparse_array",
+            )
+        ],
         export=_deepim_export,
         command=_deepim_command,
         parse_seeds=_deepim_parse,
