@@ -234,18 +234,43 @@ def _moeim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
 # ToupleGDD ------------------------------------------------------------------
 
 
+relabel_filename = "relabel.json"
+
+
 def _touplegdd_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
-    """ToupleGDD reads a weighted edgelist: `src dst prob` per line."""
+    """
+    ToupleGDD reads a weighted edgelist: `src dst prob` per line.
+
+    Its Graph class builds the node set from the EDGES only, then sets
+    num_nodes = len(nodes) while continuing to index tensors by RAW id. Any
+    graph with isolated nodes therefore addresses past the end of its own
+    embedding table — on GPU that surfaces as a device-side assert rather than
+    an IndexError. NetScience has 128 isolates out of 1589.
+
+    So the ids handed over are relabelled to a contiguous 0..M-1 over the nodes
+    that actually appear in an edge, and mapped back in _touplegdd_parse.
+    Dropping isolates costs nothing: a degree-0 node influences only itself.
+    """
     spec = external_baselines["touplegdd"]
     path = spec.directory / "test_data" / "gwm_graph.txt"
     os.makedirs(path.parent, exist_ok=True)
+    arcs = graph.edge_index.shape[1]
+
+    endpoints = sorted(
+        {int(graph.edge_index[0, column]) for column in range(arcs)}
+        | {int(graph.edge_index[1, column]) for column in range(arcs)}
+    )
+    forward = {node: index for index, node in enumerate(endpoints)}
 
     with open(path, "w") as handle:
-        for column in range(graph.edge_index.shape[1]):
-            source = int(graph.edge_index[0, column])
-            target = int(graph.edge_index[1, column])
+        for column in range(arcs):
+            source = forward[int(graph.edge_index[0, column])]
+            target = forward[int(graph.edge_index[1, column])]
             probability = float(graph.ic_probs[column])
             handle.write(f"{source} {target} {probability:.6f}\n")
+
+    os.makedirs(work_dir, exist_ok=True)
+    (work_dir / relabel_filename).write_text(json.dumps(endpoints))
 
     return {"graph_file": "test_data/gwm_graph.txt"}
 
@@ -275,12 +300,19 @@ def _touplegdd_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
     on which pass happened to score better.
     """
     match = re.search(r"Seeds:\s*\[([^\]]*)\]", stdout)
-    if match:
-        seeds = [int(token) for token in re.findall(r"\d+", match.group(1))]
-        if seeds:
-            return seeds[:budget]
+    seeds = (
+        [int(token) for token in re.findall(r"\d+", match.group(1))] if match else []
+    )
+    if not seeds:
+        seeds = parse_seed_integers(stdout, budget)
 
-    return parse_seed_integers(stdout, budget)
+    # Undo the contiguous relabelling applied in _touplegdd_export
+    relabel_path = work_dir / relabel_filename
+    if relabel_path.exists():
+        endpoints = json.loads(relabel_path.read_text())
+        seeds = [endpoints[node] for node in seeds if node < len(endpoints)]
+
+    return seeds[:budget]
 
 
 # DeepIM ---------------------------------------------------------------------
