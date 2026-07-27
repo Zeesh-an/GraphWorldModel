@@ -168,13 +168,16 @@ def _moeim_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> d
         node: index for index, community in enumerate(communities) for node in community
     }
 
+    # Header must be exactly `node,comm` (influence_maximization.py reads
+    # df["comm"]), and the label must be 1-BASED because it indexes with
+    # comm_[i]-1. Every node needs a row, isolates included.
     community_path = repo / "data/graphs/graph_communities" / f"{graph_name}.csv"
     os.makedirs(community_path.parent, exist_ok=True)
     with open(community_path, "w", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["node", "community"])
-        for node in sorted(membership):
-            writer.writerow([node, membership[node]])
+        writer.writerow(["node", "comm"])
+        for node in range(graph.num_nodes):
+            writer.writerow([node, membership.get(node, 0) + 1])
 
     return {"graph_name": graph_name}
 
@@ -203,32 +206,35 @@ def _moeim_command(
         "100",
         "--experimental_setup",
         "setting2",
+        # Trailing separator is required: create_folder does
+        # '{0}{1}-{2}...'.format(out_dir, graph_name, ...) with no separator of
+        # its own, so without it the results land in a SIBLING of work_dir
         "--out_dir",
-        str(work_dir.resolve()),
+        f"{work_dir.resolve()}{os.sep}",
     ]
 
 
 def _moeim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
-    # MOEIM writes its non-dominated front to JSON/CSV under out_dir; take the
-    # solution with the highest spread whose seed count fits the budget
-    candidates = sorted(work_dir.rglob("*.json")) + sorted(work_dir.rglob("*.csv"))
+    """
+    Read the non-dominated front from `run-N-population_default.csv`.
 
-    for path in candidates:
-        if path.suffix == ".json":
-            payload = json.loads(path.read_text())
-            fronts = payload if isinstance(payload, list) else payload.get("front", [])
-            best, best_spread = None, float("-inf")
+    src/utils.py::to_csv2 writes columns n_nodes, influence, nodes — where
+    `nodes` is str(list) of the seed set. Take the highest-influence row that
+    fits the budget; MOEIM is many-objective, so the front trades spread
+    against seed count and the largest admissible set is not always the best.
+    """
+    best, best_influence = [], float("-inf")
 
-            for entry in fronts:
-                seeds = entry.get("seeds") or entry.get("solution")
-                spread = entry.get("spread", entry.get("influence", 0))
-                if seeds and len(seeds) <= budget and float(spread) > best_spread:
-                    best, best_spread = [int(node) for node in seeds], float(spread)
+    for path in sorted(work_dir.rglob("*_default.csv")):
+        with open(path, newline="") as handle:
+            for row in csv.DictReader(handle):
+                seeds = [int(token) for token in re.findall(r"\d+", row.get("nodes", ""))]
+                influence = float(row.get("influence") or 0.0)
 
-            if best:
-                return best
+                if seeds and len(seeds) <= budget and influence > best_influence:
+                    best, best_influence = seeds, influence
 
-    return parse_seed_integers(stdout, budget)
+    return best or parse_seed_integers(stdout, budget)
 
 
 # ToupleGDD ------------------------------------------------------------------
@@ -364,7 +370,19 @@ def _deepim_command(
 
 
 def _deepim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
-    # genim.py prints the decoded seed set; fall back to scraping stdout
+    """
+    Read the `Seeds: [...]` line the genim.py patch adds.
+
+    Anchoring on that prefix matters: the run prints 300 lines of
+    `Iteration: N \t Total Loss:0.81` beforehand, so a bare integer scrape
+    would return iteration numbers and losses.
+    """
+    match = re.search(r"Seeds:\s*\[([^\]]*)\]", stdout)
+    if match:
+        seeds = [int(token) for token in re.findall(r"\d+", match.group(1))]
+        if seeds:
+            return seeds[:budget]
+
     return parse_seed_integers(stdout, budget)
 
 
@@ -682,6 +700,25 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2403.18755",
         entry="influence_maximization.py",
         status="needs_setup",
+        patches=[
+            # --graph is restricted to the ten datasets the authors shipped, so
+            # any other name is rejected by argparse before main() is reached
+            (
+                "influence_maximization.py",
+                "choices=['facebook_combined_un', 'email_di', 'soc-epinions_di', "
+                "'gnutella_di', 'wiki-vote_di','CA-HepTh_un', 'lastfm_un',"
+                "'power_grid_un', 'jazz_un', 'cora-ml_un'],",
+                "",
+            ),
+            # setting2 discards --k and hardcodes 20% of the graph, which would
+            # give the same seed-set size at every budget in our sweep. Reading
+            # --k here preserves the published default exactly (it is 0.2).
+            (
+                "influence_maximization.py",
+                'args["k"] = int(0.2 * G.number_of_nodes())',
+                'args["k"] = int(args["k"] * G.number_of_nodes())',
+            ),
+        ],
         export=_moeim_export,
         command=_moeim_command,
         parse_seeds=_moeim_parse,
@@ -729,7 +766,16 @@ external_baselines: dict[str, ExternalBaseline] = {
                 "main/utils.py",
                 "nx.from_scipy_sparse_matrix",
                 "nx.from_scipy_sparse_array",
-            )
+            ),
+            # genim.py computes `seed` and then only ever prints the spread it
+            # achieves, so the seed set — the one thing we need — never leaves
+            # the process. Emit it in a form parse_seed_integers can read.
+            (
+                "genim.py",
+                "influence = diffusion_evaluation(adj, seed",
+                "print('Seeds: {}'.format([int(node) for node in seed]))\n"
+                "influence = diffusion_evaluation(adj, seed",
+            ),
         ],
         export=_deepim_export,
         command=_deepim_command,
