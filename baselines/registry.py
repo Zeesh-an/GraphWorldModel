@@ -735,6 +735,19 @@ external_baselines: dict[str, ExternalBaseline] = {
                 'args["k"] = int(0.2 * G.number_of_nodes())',
                 'args["k"] = int(args["k"] * G.number_of_nodes())',
             ),
+            # ea_global_low_deg_mutation weights genes by 1 - degree/max(degree)
+            # so it prefers mutating LOW-degree genes. When every gene in a
+            # candidate has the same degree those weights are all zero and
+            # random.choices raises. Common on NetScience, where most nodes have
+            # degree 1-2. Uniform is the right fallback: if no gene is
+            # lower-degree than another, all are equally preferred.
+            (
+                "src/ea/mutators.py",
+                "\tprobs = np.array(probs) / max(probs)\n\tprobs = 1 - probs\n",
+                "\tprobs = np.array(probs) / max(probs)\n\tprobs = 1 - probs\n"
+                "\tif probs.sum() == 0:\n"
+                "\t\tprobs = np.ones(len(probs))\n",
+            ),
         ],
         export=_moeim_export,
         command=_moeim_command,

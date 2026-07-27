@@ -23,6 +23,7 @@ import argparse
 import os
 import pickle
 from pathlib import Path
+import networkx as nx
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -57,12 +58,47 @@ def build_inverse_pairs(
     samples: int,
     seed: int = 42,
 ) -> torch.Tensor:
-    """One (seed vector, influenced vector) row per simulated cascade."""
+    """
+    One (seed vector, influenced vector) row per simulated cascade.
+
+    The seed sets are drawn from a MIXTURE of samplers, not uniformly at
+    random. DeepIM autoencodes seed vectors and then optimises in that latent
+    space, so the reachable solutions are only as good as the sets the
+    autoencoder was trained on. Train it on uniform-random 16-subsets and the
+    manifold contains nothing but random-quality answers — the optimisation
+    converges to seeds that score at or below the random baseline, which is
+    exactly what we measured. Degree- and PageRank-biased draws put
+    high-influence sets inside the manifold; the uniform third keeps the
+    forward model honest about what a bad set looks like.
+    """
     rng = np.random.default_rng(seed)
     pairs = np.zeros((samples, graph.num_nodes, 2), dtype=np.float32)
 
+    degrees = np.array(
+        [float(graph.degree(node)) for node in range(graph.num_nodes)]
+    )
+    view = nx.Graph()
+    view.add_nodes_from(range(graph.num_nodes))
+    view.add_edges_from(zip(graph.edge_index[0], graph.edge_index[1], strict=True))
+    ranks = nx.pagerank(view)
+    pagerank = np.array([ranks.get(node, 0.0) for node in range(graph.num_nodes)])
+
+    def normalize(weights):
+        total = weights.sum()
+
+        return weights / total if total > 0 else None
+
+    samplers = [None, normalize(degrees), normalize(pagerank)]
+
     for index in tqdm(range(samples), desc=f"deepim pairs k={budget}"):
-        seeds = rng.choice(graph.num_nodes, size=budget, replace=False)
+        weights = samplers[index % len(samplers)]
+        # A biased draw needs at least `budget` nodes with non-zero weight
+        if weights is not None and int((weights > 0).sum()) < budget:
+            weights = None
+
+        seeds = rng.choice(
+            graph.num_nodes, size=budget, replace=False, p=weights
+        )
 
         simulator = Simulator(
             bundle_graph, ic_prob_map=ic_prob_map, seed=int(rng.integers(0, 2**31 - 1))
