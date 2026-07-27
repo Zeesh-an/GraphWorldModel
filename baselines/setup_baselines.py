@@ -20,7 +20,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from baselines.registry import external_baselines, external_root
+from baselines.registry import (
+    available_baselines,
+    external_baselines,
+    external_root,
+    unwired_baselines,
+)
 
 clone_timeout_seconds = 1800
 install_timeout_seconds = 1800
@@ -239,9 +244,20 @@ if __name__ == "__main__":
                 print(f"{'':<12} └─ blocked: {spec.blocker.splitlines()[0]}")
         raise SystemExit(0)
 
-    targets = args.only or [
-        name for name, spec in external_baselines.items() if spec.status != "blocked"
-    ]
+    # --all installs what can actually be RUN. A repo with no adapter would be
+    # cloned, fail its install on some abandoned pin, and still be undriveable —
+    # so it is skipped unless named explicitly with --only.
+    if args.only:
+        targets = args.only
+    else:
+        targets = available_baselines()
+        unwired = unwired_baselines()
+        if unwired:
+            print(
+                f"[setup] skipping {len(unwired)} registered baseline(s) with no "
+                f"adapter: {' '.join(unwired)}"
+            )
+            print("[setup]   (install one anyway with --only <name>)")
 
     # One repo's broken pins or missing toolchain must not stop the other ten
     # from installing — the failures are reported together at the end

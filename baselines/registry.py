@@ -99,6 +99,17 @@ class ExternalBaseline:
     def installed(self) -> bool:
         return self.root.exists() and any(self.root.iterdir())
 
+    @property
+    def wired(self) -> bool:
+        """
+        Whether an adapter exists to actually drive this repo.
+
+        A registered repo with no command is documentation, not a baseline: it
+        can be cloned but never run, so it is excluded from `all` rather than
+        installed and then failing at the first budget.
+        """
+        return self.command is not None
+
 
 # Shared helpers -------------------------------------------------------------
 
@@ -971,17 +982,25 @@ external_baselines: dict[str, ExternalBaseline] = {
 
 
 def available_baselines(kind: str | None = None) -> list[str]:
+    """Registered, not blocked, and with an adapter that can drive it."""
     return sorted(
         name
         for name, spec in external_baselines.items()
-        if spec.status != "blocked" and (kind is None or spec.kind == kind)
+        if spec.status != "blocked"
+        and spec.wired
+        and (kind is None or spec.kind == kind)
     )
 
 
 def runnable_baselines() -> list[str]:
-    """Registered, not blocked, AND actually present on disk."""
+    """...and actually present on disk."""
+    return sorted(name for name in available_baselines() if external_baselines[name].installed())
+
+
+def unwired_baselines() -> list[str]:
+    """Cloned-but-undriveable: registered, not blocked, no adapter."""
     return sorted(
         name
         for name, spec in external_baselines.items()
-        if spec.status != "blocked" and spec.installed()
+        if spec.status != "blocked" and not spec.wired
     )
