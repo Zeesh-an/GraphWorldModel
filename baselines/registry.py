@@ -24,6 +24,7 @@ import csv
 import json
 from functools import partial
 import os
+import pickle
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -339,6 +340,22 @@ def _deepim_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> 
     # genim.py only accepts the four rates it was written for; snap to the nearest
     rate = min(seed_rates, key=lambda candidate: abs(candidate - percentage))
     target = spec.directory / "data" / f"{dataset}_mean_{diffusion_model}{10 * rate}.SG"
+
+    # genim.py addresses the .SG by a fixed name encoding only dataset, dynamics
+    # and rate — NOT the graph. A file left behind by a different dataset is
+    # therefore reused silently, and its seeds are indices into the wrong node
+    # set; run_baseline drops the out-of-range ones, leaving a handful that
+    # score below random. Rebuild whenever the cached graph disagrees.
+    if target.exists():
+        with open(target, "rb") as handle:
+            cached_nodes = pickle.load(handle)["adj"].shape[0]
+
+        if cached_nodes != graph.num_nodes:
+            print(
+                f"[baseline:deepim] {target.name} holds a {cached_nodes}-node "
+                f"graph but this one has {graph.num_nodes} — rebuilding"
+            )
+            target.unlink()
 
     if not target.exists():
         build_sg_file(
@@ -775,6 +792,15 @@ external_baselines: dict[str, ExternalBaseline] = {
                 "influence = diffusion_evaluation(adj, seed",
                 "print('Seeds: {}'.format([int(node) for node in seed]))\n"
                 "influence = diffusion_evaluation(adj, seed",
+            ),
+            # seed_num was read off a STALE x_hat left over from the training
+            # loop above, so the number of seeds returned had nothing to do with
+            # the requested budget — it varied run to run and produced a
+            # non-monotonic spread curve. seed_rate IS the budget percentage.
+            (
+                "genim.py",
+                "seed_num = int(x_hat.sum().item())",
+                "seed_num = max(1, round(args.seed_rate * 0.01 * x_hat.shape[-1]))",
             ),
         ],
         export=_deepim_export,

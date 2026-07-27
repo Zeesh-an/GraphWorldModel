@@ -38,6 +38,7 @@ import argparse
 import json
 import os
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from dotenv import load_dotenv
@@ -360,6 +361,14 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
     )
 
 
+def _skip_path(layout: Layout, label: str, arm) -> Path:
+    return layout.baselines_dir / label / f"{arm.name}{skip_marker_suffix}"
+
+
+def _clear_skip(layout: Layout, label: str, arm) -> None:
+    _skip_path(layout, label, arm).unlink(missing_ok=True)
+
+
 def _record_skip(layout: Layout, label: str, arm, reason: str) -> None:
     """
     Persist WHY an arm was skipped.
@@ -368,7 +377,7 @@ def _record_skip(layout: Layout, label: str, arm, reason: str) -> None:
     absent, so the next run retries it and fails identically. The marker also
     keeps the report honest about what was attempted.
     """
-    path = layout.baselines_dir / label / f"{arm.name}{skip_marker_suffix}"
+    path = _skip_path(layout, label, arm)
     os.makedirs(path.parent, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -513,6 +522,11 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             result["condition"] = arm.condition
             result["condition_name"] = arm.condition_name
             result["budget_label"] = label
+
+            # This arm skipped on an earlier run and works now, so retract the
+            # marker. Nothing else deletes them, and a stale one makes the run
+            # claim a failure that the results table simultaneously disproves.
+            _clear_skip(layout, label, arm)
 
             if external_seeds is not None:
                 spec = external_baselines[arm.external]
