@@ -120,8 +120,21 @@ def run_external_baseline(
         )
 
     try:
-        seeds = spec.parse_seeds(work_dir, completed.stdout, budget)
-        seeds = [int(node) for node in seeds if 0 <= int(node) < graph.num_nodes]
+        raw = [int(node) for node in spec.parse_seeds(work_dir, completed.stdout, budget)]
+        seeds = [node for node in raw if 0 <= node < graph.num_nodes]
+
+        # Out-of-range ids mean the repo was handed, or cached, a different
+        # graph. Dropping them quietly leaves a short seed set that loses the
+        # comparison for a reason that looks like poor method quality.
+        if len(seeds) != len(raw):
+            raise BaselineError(
+                f"baseline {name!r} returned {len(raw) - len(seeds)} of "
+                f"{len(raw)} seeds outside [0, {graph.num_nodes}) — it was run "
+                f"on a different graph than the one being scored (stale cached "
+                f"input?). Logs in {work_dir}."
+            )
+    except BaselineError:
+        raise
     except Exception as error:
         raise BaselineError(
             f"baseline {name!r} ran but its seed output could not be parsed "
@@ -139,6 +152,16 @@ def run_external_baseline(
             f"baseline {name!r} returned {len(seeds)} seeds, exceeding budget {budget}"
         )
 
+    # Under-spending the budget is not an error — some methods legitimately
+    # stop early — but it is never visible in the spread column, where it just
+    # looks like a weak method. Say it out loud and record it.
+    if len(seeds) < budget:
+        print(
+            f"[baseline:{name}] WARNING: returned {len(seeds)} seeds for budget "
+            f"{budget} — it is being scored on {budget - len(seeds)} fewer seeds "
+            f"than every other arm at this budget"
+        )
+
     print(f"[baseline:{name}] {len(seeds)} seeds in {elapsed:.1f}s")
 
     return {
@@ -146,6 +169,10 @@ def run_external_baseline(
         "seeds": seeds,
         "seconds": round(elapsed, 2),
         "work_dir": str(work_dir),
+        # Persisted so an under-spent budget stays visible in the results JSON,
+        # not just in a log line that scrolls past
+        "budget": budget,
+        "seeds_returned": len(seeds),
     }
 
 

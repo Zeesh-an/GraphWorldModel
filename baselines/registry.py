@@ -813,7 +813,15 @@ external_baselines: dict[str, ExternalBaseline] = {
             (
                 "genim.py",
                 "seed_num = int(x_hat.sum().item())",
+                "seed_num = max(1, round(args.seed_rate * 0.01 * adj.shape[0]))",
+            ),
+            # Upgrade path for clones patched with the earlier form: x_hat is a
+            # leftover from the training loop, so its shape depends on how that
+            # loop happened to end. adj is (N, N) and unambiguous.
+            (
+                "genim.py",
                 "seed_num = max(1, round(args.seed_rate * 0.01 * x_hat.shape[-1]))",
+                "seed_num = max(1, round(args.seed_rate * 0.01 * adj.shape[0]))",
             ),
         ],
         export=_deepim_export,

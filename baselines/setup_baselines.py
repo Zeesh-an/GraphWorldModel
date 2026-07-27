@@ -80,7 +80,11 @@ def patch(name: str) -> None:
             )
 
         text = path.read_text()
-        if old not in text:
+
+        # Test for `new` BEFORE `old`. A patch that prepends a line keeps the
+        # original text inside its replacement, so `old in text` stays true
+        # forever and the edit would be applied again on every setup run.
+        if new in text or old not in text:
             print(f"[setup] {name}: patch already applied to {relative}")
             continue
 
