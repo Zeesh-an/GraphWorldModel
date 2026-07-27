@@ -84,7 +84,9 @@ def patch(name: str) -> None:
         # Test for `new` BEFORE `old`. A patch that prepends a line keeps the
         # original text inside its replacement, so `old in text` stays true
         # forever and the edit would be applied again on every setup run.
-        if new in text or old not in text:
+        # `new` must be non-empty to be a valid marker: a deletion patch has
+        # new == "", and "" is in every string, which would skip it forever.
+        if (new and new in text) or old not in text:
             print(f"[setup] {name}: patch already applied to {relative}")
             continue
 

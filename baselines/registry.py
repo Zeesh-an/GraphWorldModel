@@ -368,6 +368,25 @@ def _deepim_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> 
             graph=graph,
         )
 
+    # genim.py sizes its whole model from this file, so a mismatch here is the
+    # difference between real seeds and indices into someone else's graph.
+    # Stated every run rather than inferred later from out-of-range ids.
+    with open(target, "rb") as handle:
+        payload = pickle.load(handle)
+
+    nodes, pairs = payload["adj"].shape[0], tuple(payload["inverse_pairs"].shape)
+    print(
+        f"[baseline:deepim] {target.name}: adj {nodes}x{nodes}, "
+        f"inverse_pairs {pairs}, graph {graph.num_nodes} nodes"
+    )
+
+    if nodes != graph.num_nodes or pairs[1] != graph.num_nodes:
+        raise ValueError(
+            f"{target} describes a {nodes}-node graph (pairs {pairs}) but the "
+            f"graph being scored has {graph.num_nodes} nodes. Delete it and "
+            f"re-run: rm {target}"
+        )
+
     return {"dataset": dataset, "seed_rate": rate}
 
 
