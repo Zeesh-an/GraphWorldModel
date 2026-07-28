@@ -827,6 +827,18 @@ external_baselines: dict[str, ExternalBaseline] = {
                 "args = parser.parse_args(args=[])",
                 "args = parser.parse_args()",
             ),
+            # The latent search — the step that actually picks the seeds — never
+            # zeroes its gradients, so all 300 iterations accumulate into one
+            # running sum and z_hat is driven away from its (good) initial
+            # value in a direction dominated by the earliest steps. The symptom
+            # is a loss that random-walks instead of descending. zero_grad is
+            # present in the VAE loop above, so this is an omission, not intent.
+            (
+                "genim.py",
+                "for i in range(300):\n    \n    x_hat = decoder(z_hat)",
+                "for i in range(300):\n    z_optimizer.zero_grad()\n"
+                "    x_hat = decoder(z_hat)",
+            ),
             (
                 "main/utils.py",
                 "nx.from_scipy_sparse_matrix",
