@@ -413,9 +413,14 @@ def _deepim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
     `Iteration: N \t Total Loss:0.81` beforehand, so a bare integer scrape
     would return iteration numbers and losses.
     """
-    match = re.search(r"Seeds:\s*\[([^\]]*)\]", stdout)
+    match = re.search(r"GWM_SEEDS n=(\d+)\s*\[([^\]]*)\]", stdout)
     if match:
-        seeds = [int(token) for token in re.findall(r"\d+", match.group(1))]
+        model_nodes = int(match.group(1))
+        seeds = [int(token) for token in re.findall(r"\d+", match.group(2))]
+        print(
+            f"[baseline:deepim] model reported n={model_nodes}, "
+            f"{len(seeds)} seeds, max id {max(seeds) if seeds else -1}"
+        )
         if seeds:
             return seeds[:budget]
 
@@ -811,6 +816,17 @@ external_baselines: dict[str, ExternalBaseline] = {
         # from_scipy_sparse_array; the signature is unchanged. Two call sites,
         # both reached only at the final spread-evaluation step.
         patches=[
+            # THE one that mattered: genim.py calls parse_args(args=[]), which
+            # parses an EMPTY argv and silently discards -d/-dm/-sp. Every run
+            # therefore used the defaults (cora_ml, LT, rate 1) and loaded
+            # cora_ml_mean_LT10.SG — a 2810-node graph — no matter which graph
+            # we handed it. A notebook leftover, where bare parse_args() would
+            # choke on Jupyter's argv.
+            (
+                "genim.py",
+                "args = parser.parse_args(args=[])",
+                "args = parser.parse_args()",
+            ),
             (
                 "main/utils.py",
                 "nx.from_scipy_sparse_matrix",
@@ -819,11 +835,23 @@ external_baselines: dict[str, ExternalBaseline] = {
             # genim.py computes `seed` and then only ever prints the spread it
             # achieves, so the seed set — the one thing we need — never leaves
             # the process. Emit it in a form parse_seed_integers can read.
+            # A UNIQUE marker, not "Seeds:" — that token also appears in DeepIM's
+            # own output, and re.search would then read whichever list came
+            # first. Print the graph size alongside so a size mismatch is
+            # self-evident in the log instead of inferred from bad indices.
             (
                 "genim.py",
                 "influence = diffusion_evaluation(adj, seed",
-                "print('Seeds: {}'.format([int(node) for node in seed]))\n"
+                "print('GWM_SEEDS n={} {}'.format(adj.shape[0], "
+                "[int(node) for node in seed]))\n"
                 "influence = diffusion_evaluation(adj, seed",
+            ),
+            # Upgrade clones carrying the earlier, ambiguous marker
+            (
+                "genim.py",
+                "print('Seeds: {}'.format([int(node) for node in seed]))",
+                "print('GWM_SEEDS n={} {}'.format(adj.shape[0], "
+                "[int(node) for node in seed]))",
             ),
             # seed_num was read off a STALE x_hat left over from the training
             # loop above, so the number of seeds returned had nothing to do with
