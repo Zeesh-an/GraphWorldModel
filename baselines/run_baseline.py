@@ -15,7 +15,9 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from baselines.registry import external_baselines
@@ -27,6 +29,76 @@ default_timeout_seconds = 3600
 
 class BaselineError(RuntimeError):
     """Raised when an external baseline cannot run or produced no usable seeds."""
+
+
+@dataclass
+class _Completed:
+    """The subset of CompletedProcess the caller uses."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def _stream(
+    argv: list[str],
+    cwd: Path,
+    timeout: int,
+    env: dict,
+    name: str,
+    log_path: Path,
+) -> _Completed:
+    """
+    Run a baseline with its output echoed live, and captured.
+
+    subprocess.run(capture_output=True) holds everything in memory until the
+    process exits, so a baseline that trains for hours contributes nothing to
+    the job log until it is over — a hang and steady progress look identical.
+    Here each line is written to the log file, flushed, and echoed with the
+    baseline's name so interleaved arms stay attributable.
+
+    stderr is merged into stdout: these repos print progress to both, and
+    keeping two streams in order would need a second reader thread.
+    """
+    os.makedirs(log_path.parent, exist_ok=True)
+    process = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+
+    # A watchdog rather than a per-line deadline check: a child that hangs
+    # without printing would never reach the check.
+    killed = threading.Event()
+
+    def kill() -> None:
+        killed.set()
+        process.kill()
+
+    watchdog = threading.Timer(timeout, kill)
+    watchdog.start()
+    lines = []
+
+    try:
+        with open(log_path, "w") as log:
+            for line in process.stdout:
+                lines.append(line)
+                log.write(line)
+                log.flush()
+                print(f"[{name}] {line.rstrip()}", flush=True)
+
+        process.wait()
+    finally:
+        watchdog.cancel()
+
+    if killed.is_set():
+        raise subprocess.TimeoutExpired(argv, timeout)
+
+    return _Completed(process.returncode, "".join(lines), "")
 
 
 def _interpreter(spec) -> str:
@@ -82,14 +154,14 @@ def run_external_baseline(
         argv = spec.command(work_dir, budget, diffusion_model, extras, graph)
         argv[0] = _interpreter(spec) if argv[0] == "python" else argv[0]
 
-        print(f"[baseline:{name}] {' '.join(argv)}")
-        completed = subprocess.run(
+        print(f"[baseline:{name}] {' '.join(argv)}", flush=True)
+        completed = _stream(
             argv,
             cwd=spec.directory,
-            capture_output=True,
-            text=True,
             timeout=timeout,
             env={**os.environ, **spec.extra_env},
+            name=name,
+            log_path=work_dir / "stdout.log",
         )
     except subprocess.TimeoutExpired as error:
         raise BaselineError(
@@ -110,13 +182,11 @@ def run_external_baseline(
 
     elapsed = time.perf_counter() - start
 
-    (work_dir / "stdout.log").write_text(completed.stdout)
-    (work_dir / "stderr.log").write_text(completed.stderr)
 
     if completed.returncode != 0:
         raise BaselineError(
             f"baseline {name!r} exited {completed.returncode}. Logs in {work_dir}. "
-            f"stderr tail:\n{completed.stderr[-1500:]}"
+            f"output tail:\n{completed.stdout[-1500:]}"
         )
 
     try:

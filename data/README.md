@@ -257,7 +257,7 @@ per dynamics (see `world_model/README.md`).
 
 | Flag                              | Default         | What it controls                                                                                           |
 | --------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------- |
-| `--dataset`                       | `cora_ml`       | real (`cora_ml, digg, twitter, jazz, netscience, power_grid, nethept, weibo, youtube`) or synthetic (`er, ba, ws, sbm, karate`); `weibo` needs a manual AMiner download (see `data/datasets/weibo.py`) |
+| `--dataset`                       | `cora_ml`       | real (`jazz, email_eu_core, netscience, cora_ml, facebook, power_grid, ca_grqc, wiki_vote, lastfm_asia, nethept, netphy, twitter, digg, youtube, weibo`) or synthetic (`er, ba, ws, sbm, karate`); the choices list is derived from `wm_graphs.real_directed`, so adding a loader adds a choice. `weibo` needs a manual AMiner download (see `data/datasets/weibo.py`). Full catalogue: `IM_DATASETS.md` |
 | `--num-graphs`                    | `1`             | number of synthetic graph instances (folded into the seed)                                                 |
 | `--syn-nodes`                     | `100`           | nodes per synthetic graph                                                                                  |
 | `--models`                        | `IC LT`         | which dynamics to generate transitions for                                                                 |

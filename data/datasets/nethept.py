@@ -1,14 +1,23 @@
 """
 NetHEPT Dataset Loader
 
-Downloads and loads the NetHEPT high-energy physics theory citation network.
+Downloads and loads the NetHEPT high-energy-physics-theory COLLABORATION network.
 
 Source: https://github.com/SparklyYS/Simultaneous-IMM (mirror of Wei Chen's data)
-    - 15,229 nodes (papers), 62,752 directed edges (citations)
-    - Directed: edge (a, b) means paper a cites paper b
+    - 15,229 nodes (authors), 62,752 arcs = 31,376 undirected co-authorships
+    - Undirected in nature; the mirror stores both arcs, so we load it as a
+      directed graph with a symmetric adjacency (identical IC/LT behaviour,
+      since p(u→v) = 1/in-degree(v) and in-degree == out-degree == degree here)
     - Standard benchmark for Influence Maximization
     - No inherent node features — uses log(1 + total degree) as synthetic features
     - No node labels
+
+Wei Chen's original `hep.txt` (see `netphy.py`, same archive) declares
+15,233 nodes / 58,891 edge LINES; deduplicating its multi-edges and dropping
+39 self-loops gives 31,359 undirected edges. This mirror has 31,376 — the same
+graph to within 17 edges (0.05%). The "31.4K undirected" in the SSA/D-SSA
+benchmark table is this count; the "58,891" in IRIE's table is the raw line
+count. See IM_DATASETS.md §6.1.
 
 Original paper: Wei Chen et al., "Efficient Influence Maximization
     in Social Networks," KDD 2009
@@ -54,8 +63,8 @@ def download_nethept() -> Path:
 
 def load_nethept(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
     """
-    Load NetHEPT citation network. Edges are 0-indexed space-separated pairs.
-    Kept as a directed graph (like Cora-ML).
+    Load the NetHEPT collaboration network. Edges are 0-indexed space-separated
+    pairs, both directions present. Kept as a directed graph (like Cora-ML).
 
     Returns
     -------

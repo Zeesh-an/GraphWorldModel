@@ -9,6 +9,79 @@ from collections import defaultdict
 from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
+import scipy.sparse.csgraph as csgraph
+
+
+def edges_to_adjacency(
+    sources: np.ndarray,
+    destinations: np.ndarray,
+    num_nodes: int,
+    directed: bool,
+) -> sp.csr_matrix:
+    """
+    Binary adjacency from an edge list; undirected graphs get both arcs.
+
+    Multi-edges collapse because the csr conversion sums duplicates and we then
+    binarize — collaboration files (NetHEPT, NetPHY) list a pair once per
+    co-authored paper, so this is what turns their raw line count into an edge
+    count.
+    """
+    if not directed:
+        sources, destinations = (
+            np.concatenate([sources, destinations]),
+            np.concatenate([destinations, sources]),
+        )
+
+    values = np.ones(sources.shape[0], dtype=np.float32)
+    adjacency = sp.csr_matrix(
+        (values, (sources, destinations)), shape=(num_nodes, num_nodes)
+    )
+    adjacency = (adjacency > 0).astype(np.float32)
+    adjacency.setdiag(0)
+    adjacency.eliminate_zeros()
+
+    return adjacency
+
+
+def degree_features(adjacency: sp.csr_matrix, directed: bool) -> np.ndarray:
+    """log1p(degree) node features — total degree (in + out) when directed."""
+    out_degrees = np.array(adjacency.sum(axis=1)).flatten()
+
+    if directed:
+        degrees = np.array(adjacency.sum(axis=0)).flatten() + out_degrees
+    else:
+        degrees = out_degrees
+
+    return np.log1p(degrees).reshape(-1, 1).astype(np.float32)  # shape: (N, 1)
+
+
+def largest_connected_component(
+    adjacency: sp.csr_matrix,
+) -> tuple[sp.csr_matrix, np.ndarray]:
+    """
+    Restrict to the biggest connected component.
+
+    Returns the restricted adjacency and the surviving node indices, so the
+    caller can subset features and labels the same way. Several papers report
+    the LCC rather than the raw file (see IM_DATASETS.md §2) — this is what
+    reproduces their node counts.
+    """
+    _, membership = csgraph.connected_components(adjacency, directed=False)
+    keep = np.flatnonzero(membership == np.bincount(membership).argmax())
+
+    return adjacency[keep][:, keep], keep
+
+
+def remap_to_contiguous(raw_edges: np.ndarray) -> tuple[np.ndarray, int]:
+    """
+    Map arbitrary node ids onto 0..N-1, preserving sort order.
+
+    SNAP edge lists carry the original sparse ids (ca-GrQc runs to 26,196 for
+    5,242 nodes); everything downstream indexes arrays by node id.
+    """
+    all_ids = np.unique(raw_edges)
+
+    return np.searchsorted(all_ids, raw_edges), int(all_ids.shape[0])
 
 
 def build_edge_index(

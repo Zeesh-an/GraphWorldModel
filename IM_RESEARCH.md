@@ -2,7 +2,10 @@
 
 Unified reference for the IM literature relevant to this project: every method we
 might baseline against, every paper that reports results on a dataset or synthetic
-family we use, with published numbers, dataset metadata, budgets, links, and code.
+family we use, with published numbers, budgets, links, and code.
+
+**Dataset metadata lives in [`IM_DATASETS.md`](IM_DATASETS.md)** — node/edge counts,
+source URLs, per-paper usage matrix, and version forensics.
 
 ---
 
@@ -23,159 +26,28 @@ Every number below marked [verified] was read from the paper's own table.
 
 ---
 
-## 1. Dataset cross-reference — what we use vs. what the literature uses
+## 1. Datasets — see `IM_DATASETS.md`
 
-**This is the most important table in the file.** "Cora-ML" and "NetScience" do
-not denote a single graph in this literature — different papers use different
-versions with substantially different edge counts. Comparing our spread numbers
-to a published table without matching the graph version is invalid.
+**All dataset metadata now lives in [`IM_DATASETS.md`](IM_DATASETS.md)**: node and
+edge counts, source URLs, directedness, per-paper usage matrix, name collisions,
+and the version forensics that used to sit in this section.
 
-| Dataset        | **Our version** (nodes / edges) | Literature version                | Match?                             | Who uses it                     |
-| -------------- | ------------------------------- | --------------------------------- | ---------------------------------- | ------------------------------- |
-| **Jazz**       | 198 / 2,742                     | 198 / 2,742                       | ✅ **exact**                       | DeepIM, MOEIM                   |
-| **Power Grid** | 4,941 / 6,594                   | 4,941 / 6,594                     | ✅ **exact**                       | DeepIM, MOEIM                   |
-| **Cora-ML**    | 2,995 / 8,416                   | 2,810 / 7,981                     | ⚠️ **differs** (+6.6% nodes)       | DeepIM, MOEIM                   |
-| **NetScience** | 1,589 / 2,742                   | 1,565 / **13,532**                | ❌ **very different** (4.9× edges) | DeepIM                          |
-| **NetHEPT**    | 15,229 / 62,752                 | 15,233 / 58,891 ("Arxiv"/NetHEPT) | ⚠️ close, +6.6% edges              | IRIE, PMIA, TIM, IMM, SSA, CELF |
-| **YouTube**    | 1,134,890 / 2,987,624           | 1.13M / 3M                        | ✅ **matches**                     | ToupleGDD                       |
-| **Digg**       | 116,893 / ≈2.6M                 | 279,613 / 1,170,689               | ❌ **different graph**             | DeepIM, IMINFECTOR              |
-| **Weibo**      | 1,787,443 / ≈216M               | 2,251,166 / 225,877,808           | ⚠️ differs (−21% nodes)            | DeepIM, IMINFECTOR              |
-| **Twitter**    | 81,306 / ≈1.3M                  | 0.8k / 1k (ToupleGDD's "Twitter") | ❌ **unrelated graph**             | —                               |
+The two facts from that file you need while reading the result tables below:
 
-**Practical consequence.** **Jazz** and **Power Grid** support a direct
-number-for-number comparison against the published DeepIM/MOEIM tables today, and
-**Cora-ML** joins them the moment we add largest-connected-component extraction
-(§1.1 — their graph is provably ours after `standardize()`). NetHEPT is close
-enough for trend comparison with a footnote. NetScience, Digg, and Twitter are
-_not_ comparable — either adopt the literature's version of the graph, or report
-ours as a self-contained result and say so.
+1. **Only Jazz and Power Grid are byte-identical to the graphs DeepIM and MOEIM
+   report.** Cora-ML becomes identical after LCC extraction (a ~10-line loader
+   change). NetHEPT is the standard NetHEPT — the apparent edge-count gap was an
+   arcs-vs-edges convention, now resolved. NetScience, Digg, and Twitter are
+   **different graphs** from the same-named ones in the literature.
+
+2. **Seven dataset names denote more than one graph** across these papers
+   (Epinions, DBLP, Twitter, Wiki-Vote, Digg, Weibo, LiveJournal). Comparing a
+   published number without matching the version is invalid.
 
 Synthetic families in the literature: **ER**, **BA**, **WS** are all standard
 (GCOMB, ToupleGDD, DeepIM, S2V-DQN). **SBM** and **Karate** are, as far as this
 review found, **not** used as IM benchmarks in the major learning-based papers —
 our SBM experiments have no published baseline to compare against.
-
-### 1.1 Why the numbers differ — root cause per dataset
-
-Each discrepancy was traced to its source. Three distinct causes, and they have
-very different implications: one is a trivial preprocessing switch we can flip,
-two are genuinely different graphs that happen to share a name.
-
-| Dataset        | Cause                                                                     | Status                       |
-| -------------- | ------------------------------------------------------------------------- | ---------------------------- |
-| **Cora-ML**    | **Largest-connected-component extraction.** Same source file.             | ✅ **solved — reproducible** |
-| **Digg**       | **Different source repository** (Syracuse vs ISI/Lerman)                  | ❌ different graph           |
-| **Twitter**    | **Different repository AND different graph** (SNAP vs Network Repository) | ❌ unrelated graph           |
-| **Weibo**      | Same source (AMiner), different graph construction                        | ⚠️ derived vs raw            |
-| **NetHEPT**    | Different mirrors / dedup of Wei Chen's file                              | ⚠️ minor                     |
-| **NetScience** | Same cited source, but their numbers match neither the source nor its LCC | ❓ **unresolved**            |
-
-#### Cora-ML — solved, and we can match them exactly
-
-Both we and DeepIM use **the same file**: `cora_ml.npz` from
-[Bojchevski & Günnemann's graph2gauss](https://github.com/abojchevski/graph2gauss)
-(our `data/datasets/cora_ml.py` downloads it directly). DeepIM loads it through
-that project's `SparseGraph` class —
-[`data/sparsegraph.py`](https://github.com/triplej0079/DeepIM/blob/main/data/sparsegraph.py)
-in their repo — and calls `standardize()`, whose signature is:
-
-```python
-def standardize(self, make_unweighted=True, make_undirected=True,
-                no_self_loops=True, select_lcc=True) -> "SparseGraph":
-```
-
-`select_lcc=True` is the **default**. Verified empirically on our own downloaded file:
-
-```
-raw adjacency:                 2,995 nodes,  8,416 directed arcs   <- our version
-as undirected simple graph:    2,995 nodes,  8,158 edges
-connected components:          61, largest = 2,810 nodes
-largest connected component:   2,810 nodes,  7,981 edges           <- DeepIM's Table 1, exactly
-```
-
-DeepIM's "2,810 / 7,981" is our graph with `standardize()` applied. **Applying
-symmetrize → drop self-loops → keep LCC to our loader reproduces their graph
-bit-for-bit**, which makes Cora-ML a directly comparable dataset instead of a
-caveated one.
-
-#### Digg — different source repository
-
-Two unrelated collections are both called "Digg":
-
-|                         | Source                                                                                       | Nodes / Edges       |
-| ----------------------- | -------------------------------------------------------------------------------------------- | ------------------- |
-| **Ours**                | [Syracuse data repository](https://datasets.syr.edu/datasets/Digg.html) — `Digg-dataset.zip` | 116,893 / ≈2.6M     |
-| **DeepIM & IMINFECTOR** | [ISI / Lerman, "Digg 2009"](https://www.isi.edu/~lerman/downloads/digg2009.html)             | 279,613 / 1,170,689 |
-
-Confirmed from the [IMINFECTOR README](https://github.com/geopanag/IMINFECTOR),
-which names the ISI URL as its Digg source; DeepIM cites Panagopoulos et al.
-(IMINFECTOR) for its Digg graph. The ISI version also carries **diffusion
-cascades**, which is why IMINFECTOR could use it — ours is a friendship graph only.
-
-#### Twitter — different repository, unrelated graph
-
-|               | Source                                                                                        | Nodes / Edges  |
-| ------------- | --------------------------------------------------------------------------------------------- | -------------- |
-| **Ours**      | [SNAP ego-Twitter](https://snap.stanford.edu/data/ego-Twitter.html) `twitter_combined.txt.gz` | 81,306 / ≈1.3M |
-| **ToupleGDD** | [Network Repository](https://networkrepository.com) (Rossi & Ahmed, AAAI'15)                  | 0.8k / 1k      |
-
-ToupleGDD's §VI-A states: _"Twitter, Wiki-1, caGr and Buzznet are from [37],
-while Wiki-2, Epinions and Youtube are available on [38]"_, where **[37] = Rossi &
-Ahmed, Network Repository, AAAI 2015** and **[38] = Leskovec & Krevl, SNAP**
-(verified in their reference list). A 800-node Network-Repository graph and SNAP's
-81k-node ego-network share nothing but the word "Twitter".
-
-This same reference split **explains the YouTube match**: their YouTube comes from
-[38] = SNAP, which is exactly the `com-Youtube` file our loader downloads.
-
-#### Weibo — same source, different construction
-
-Both trace to AMiner's ["Influence Locality"](https://www.aminer.cn/influencelocality)
-release (`aminer.cn` and `aminer.org` are the same site). Ours reads
-`weibo_network.txt` directly → **1,787,443 users**, the raw file's own count.
-DeepIM's 2,251,166 comes via IMINFECTOR, which builds its graph as the **union of
-the follower network and every user appearing in the cascade files** — so it has
-more nodes than the network file alone. Same underlying release, different graph
-construction.
-
-#### NetHEPT — mirrors of the same file
-
-Ours is a [mirror of Wei Chen's original NetHEPT](https://github.com/SparklyYS/Simultaneous-IMM)
-(15,229 / 62,752); the classical papers report 15,233 / 58,891. The node counts
-agree to 0.03%; the edge gap is consistent with different multi-edge/self-loop
-dedup. Fine for trend comparison, worth a footnote in a table.
-
-#### NetScience — unresolved, and the evidence is contradictory
-
-**Our graph is provably the one DeepIM cites.** DeepIM attributes Network Science
-to Rossi & Ahmed (Network Repository). Our loader pulls from
-[Netzschleuder](https://networks.skewed.de/net/netscience), and its statistics
-match [networkrepository.com/netscience.php](https://networkrepository.com/netscience.php)
-on four independent measures:
-
-| Statistic      | Network Repository | Ours (computed) |
-| -------------- | ------------------ | --------------- |
-| Nodes / Edges  | 1.6K / 2.7K        | 1,589 / 2,742   |
-| Max degree     | 34                 | 34              |
-| Density        | 0.00217332         | 0.00217         |
-| Avg clustering | 0.637791           | 0.638           |
-
-Both are M. Newman's 2006 co-authorship network. But DeepIM reports **1,565 /
-13,532** — 4.9× the edges. Two hypotheses were tested and **both fail**:
-
-- _Not LCC extraction._ The LCC of this graph is **379 nodes**, not 1,565.
-  (`ca-netscience` on Network Repository is exactly that 379/914 component.)
-- _Not a typo._ Their Table 1 avg-degree column reads 17.28, and
-  2 × 13,532 / 1,565 = 17.29 — internally consistent, so it describes a real
-  graph they actually ran on.
-
-**Conclusion: DeepIM's "Network Science" is a denser graph than the Newman
-network it cites, and the paper does not say how it was produced.** Resolving it
-requires their `netscience_25c.SG` pickle, which is not in the public repo
-([`main/utils.py::load_dataset`](https://github.com/triplej0079/DeepIM/blob/main/main/utils.py)
-reads `data/<name>_25c.SG`, and that folder ships empty).
-
-Until then, our NetScience results cannot be compared to their column.
 
 ---
 
@@ -491,7 +363,8 @@ CELF / degree-discount    ← cheap strong baselines, tie at high budget
    into a paper alongside DeepIM's.
 
 2. **Fix the Cora-ML and NetScience versions** if we want those rows to be
-   comparable. Ours differ (§1); DeepIM's Network Science has **4.9× more edges**
+   comparable. Ours differ (`IM_DATASETS.md` §6); DeepIM's Network Science has
+   **4.9× more edges**
    than ours. Either switch to their version or report ours as self-contained.
 
 3. **The saturation problem is confirmed by the literature, not unique to us.**
@@ -573,12 +446,9 @@ Honest list of what this review could **not** establish:
 - **NetHEPT under the percentage-budget convention** — no learning-based paper
   reports NetHEPT at 1/5/10/20%. Our numbers there will have no direct precedent.
 - **SBM and Karate** — no IM baselines found in any surveyed paper.
-- **Our Twitter/Digg versions** — traced to different source repositories
-  (§1.1); the literature's graphs of those names are different graphs, so no
-  usable published baseline exists unless we switch sources.
-- **DeepIM's Network Science graph** — 1,565 / 13,532 matches neither the source
-  it cites nor that source's LCC, and their data folder ships empty (§1.1). The
-  only way to close this is to obtain their `netscience_25c.SG` file.
-- **GCOMB, GLIE, LeNSE per-dataset tables** — identified and linked, but their
-  result tables were not transcribed (they benchmark on YouTube, Stack, and
-  billion-edge graphs largely disjoint from ours).
+- **Dataset-version gaps** — Twitter, Digg, and DeepIM's Network Science are all
+  unresolved or unmatched; see `IM_DATASETS.md` §10 for the full list.
+- **GCOMB, GLIE, LeNSE per-dataset *result* tables** — identified and linked, but
+  their result cells were not transcribed (they benchmark on YouTube, Stack, and
+  billion-edge graphs largely disjoint from ours). Their *dataset* tables **are**
+  transcribed, in `IM_DATASETS.md` §4.

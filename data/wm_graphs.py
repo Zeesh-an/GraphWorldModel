@@ -14,15 +14,22 @@ import scipy.sparse as sp
 from data.graph_utils import build_edge_index
 
 real_directed = {
-    "cora_ml": True,
     "digg": True,
     "twitter": True,
     "nethept": True,
     "weibo": True,
+    "wiki_vote": True,
+    "email_eu_core": True,
+    # Cora-ML is symmetrized by standardize(), matching DeepIM/MOEIM
+    "cora_ml": False,
     "jazz": False,
     "netscience": False,
     "power_grid": False,
     "youtube": False,
+    "netphy": False,
+    "facebook": False,
+    "ca_grqc": False,
+    "lastfm_asia": False,
 }
 
 

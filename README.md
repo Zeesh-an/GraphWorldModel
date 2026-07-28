@@ -172,21 +172,37 @@ settings are simply which ops you enable via `--action-ops` (omit = diffusion-on
 **Real** (downloaded on first use via `data/datasets/`; Weibo needs a manual
 AMiner download — see `data/datasets/weibo.py`):
 
-| Dataset        | Nodes     | Edges     | Type                             | Node Features          |
-| -------------- | --------- | --------- | -------------------------------- | ---------------------- |
-| **Cora-ML**    | 2,995     | 8,416     | Directed (citations)             | 2,879-dim bag-of-words |
-| **Jazz**       | 198       | 2,742     | Undirected (collaborations)      | log(1 + degree)        |
-| **NetScience** | 1,589     | 2,742     | Undirected (coauthorship)        | log(1 + degree)        |
-| **Power Grid** | 4,941     | 6,594     | Undirected (power lines)         | log(1 + degree)        |
-| **NetHEPT**    | 15,229    | 62,752    | Directed (citations)             | log(1 + total degree)  |
-| **Twitter**    | 81,306    | ≈1.3M     | Undirected (follows, symmetrized)| log(1 + degree)        |
-| **Digg**       | 116,893   | ≈2.6M     | Undirected (friendships)         | log(1 + degree)        |
-| **YouTube**    | 1,134,890 | 2,987,624 | Undirected (friendships)         | log(1 + degree)        |
-| **Weibo**      | 1,787,443 | ≈216M     | Directed (influence u→v)         | log(1 + total degree)  |
+| `--dataset`       | Nodes     | Edges     | Type                              | Node features                       |
+| ----------------- | --------- | --------- | --------------------------------- | ----------------------------------- |
+| `jazz`            | 198       | 2,742     | Undirected (collaborations)       | log(1 + degree)                     |
+| `email_eu_core`   | 1,005     | 24,929    | Directed (emails)                 | log(1 + total degree) · **42 department labels** |
+| `netscience`      | 1,589     | 2,742     | Undirected (coauthorship)         | log(1 + degree)                     |
+| `cora_ml`         | 2,810     | 7,981     | Undirected (citations, standardized) | 2,879-dim bag-of-words, 7 labels    |
+| `facebook`        | 4,039     | 88,234    | Undirected (friendships)          | log(1 + degree)                     |
+| `power_grid`      | 4,941     | 6,594     | Undirected (power lines)          | log(1 + degree)                     |
+| `ca_grqc`         | 5,242     | 14,484    | Undirected (coauthorship)         | log(1 + degree)                     |
+| `wiki_vote`       | 7,115     | 103,689   | Directed (adminship votes)        | log(1 + total degree)               |
+| `lastfm_asia`     | 7,624     | 27,806    | Undirected (mutual follows)       | log(1 + degree) · **18 country labels** |
+| `nethept`         | 15,229    | 62,752    | Directed (coauthorship, both arcs)| log(1 + total degree)               |
+| `netphy`          | 37,154    | 174,161   | Undirected (coauthorship)         | log(1 + degree)                     |
+| `twitter`         | 81,306    | ≈1.3M     | Undirected (follows, symmetrized) | log(1 + degree)                     |
+| `digg`            | 116,893   | ≈2.6M     | Undirected (friendships)          | log(1 + degree)                     |
+| `youtube`         | 1,134,890 | 2,987,624 | Undirected (friendships)          | log(1 + degree)                     |
+| `weibo`           | 1,787,443 | ≈216M     | Directed (influence u→v)          | log(1 + total degree)               |
+
+Undirected rows quote undirected edges; directed rows quote arcs. `cora_ml` is
+loaded through graph2gauss's `standardize()` (symmetrize → drop self-loops →
+largest connected component), so it is byte-for-byte the graph DeepIM and MOEIM
+report; the raw 2,995-node file is not comparable to any published table.
 
 The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what
 the current NDlib rollout + selector pipeline can simulate in reasonable time —
 they are targets for a future scalable-simulation pass, not day-one datasets.
+
+**[`IM_DATASETS.md`](IM_DATASETS.md)** is the full catalogue: every graph in the
+IM literature with source URLs and exact counts, which paper uses which, the
+seven dataset names that denote more than one graph, what to add next, and the
+loader contract for adding one.
 
 ---
 
