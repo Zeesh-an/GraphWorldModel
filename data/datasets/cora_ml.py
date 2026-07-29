@@ -20,7 +20,7 @@ DeepIM and MOEIM load this same `cora_ml.npz` through that class, so their
 published "2,810 / 7,981" is exactly what this loader produces — which is the
 whole reason Cora-ML is in this repo. The raw 2,995-node graph is not comparable
 to any published table, and its 185 extra nodes sit in ~60 tiny fragments that
-only add noise to a spread metric. See IM_DATASETS.md §6.2.
+only add noise to a spread metric. See research/influence_maximization.md §6.4.2.
 
 Original paper: A. McCallum et al., "Automating the Construction of
     Internet Portals with Machine Learning," Information Retrieval (2000)

@@ -10,7 +10,7 @@ Everything we compare against, in two layers:
    **condition 7 (Published baseline)**.
 
 For the literature itself — what each method published, and which of their
-numbers are comparable to ours — see [`../IM_RESEARCH.md`](../IM_RESEARCH.md).
+numbers are comparable to ours — see [`../research/influence_maximization.md`](../research/influence_maximization.md).
 
 ---
 
@@ -28,7 +28,7 @@ design decision here.
 
 A paper's reported spread depends on its simulator, its edge probabilities, its
 MC count, its horizon, and sometimes its own version of the graph
-(see `IM_RESEARCH.md` §1.1 — "Cora-ML" alone means two different graphs). Those
+(see `research/influence_maximization.md` §6.3 — "Cora-ML" alone means two different graphs). Those
 numbers are **not** comparable to ours. Their _seed set_ is. Running every
 method's seeds through one referee is the only apples-to-apples comparison
 available, and it means external baselines need no special result format: the
@@ -130,7 +130,7 @@ These are **not** "not done yet" — each has a concrete, stated reason:
 the model needs those preprocessed SparseGraph files plus a full training run
 before it can select seeds. Unblocking means obtaining the `.SG` files from the
 authors or reimplementing their preprocessing. **Its published tables are
-transcribed in `IM_RESEARCH.md` §4 and are directly comparable on Jazz and Power
+transcribed in `research/influence_maximization.md` §5.1 and are directly comparable on Jazz and Power
 Grid**, so a numeric comparison against DeepIM is available from the paper even
 while its code is blocked.
 
@@ -159,7 +159,7 @@ campaigns with feedback that updates edge weights between rounds, whereas ours i
 single-shot seeding. Even with code, the comparison would need care.
 
 All five appear in DeepIM's published tables, which are transcribed in
-[`../IM_RESEARCH.md`](../IM_RESEARCH.md) §4 — so numeric comparison against them
+[`../research/influence_maximization.md`](../research/influence_maximization.md) §5.1 — so numeric comparison against them
 is available from the paper on Jazz and Power Grid even with their code blocked.
 
 ---
@@ -176,17 +176,17 @@ python -m baselines.setup_baselines --only moeim touplegdd
 
 # Run one directly, outside the pipeline
 python -m baselines.run_baseline --name moeim \
-    --data-dir results/ba40/data --budget 5 --diffusion-model IC
+    --data-dir results/influence_maximization/ba/default/data --budget 5 --diffusion-model IC
 ```
 
 In the pipeline, external baselines are just another `--baselines` entry:
 
 ```bash
 # Everything: classical library + every installed external repo + our conditions
-python -m pipeline.run --dataset ba --tag ba40 --baselines all --compare
+python -m pipeline.run --dataset ba --baselines all --compare
 
 # Only the external published methods
-python -m pipeline.run --dataset ba --tag ba40 --baselines all-external --compare
+python -m pipeline.run --dataset ba --baselines all-external --compare
 
 # Hand-picked
 python -m pipeline.run --dataset jazz --compare \
@@ -207,7 +207,7 @@ aborting the whole sweep.
 ## Where results land
 
 ```
-results/<tag>/
+results/<task>/<dataset>/<run>/
 ├── agent/<budget>/<arm>.json          our conditions 1-6
 ├── baselines/<budget>/<name>.json     external published baselines (condition 7)
 └── baselines/_runs/<name>/<budget>/   raw stdout/stderr + artifacts per run

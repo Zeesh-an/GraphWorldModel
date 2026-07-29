@@ -1,6 +1,7 @@
 """
 One command, whole experiment: generate data -> train the world model -> run every
-coding-agent arm at every budget -> plot -> write results/<tag>/report.md.
+coding-agent arm at every budget -> plot -> write
+results/<task>/<dataset>/<run>/report.md.
 
 Every stage writes its artifacts before the next one starts, so a crashed or killed
 run resumes exactly where it stopped (finished work is detected on disk and skipped).
@@ -9,8 +10,7 @@ All six baseline conditions in one sweep (the default arm set). Every arm carrie
 its own evaluator, so conditions 3-6 differ in exactly one thing — the inner-loop
 feedback — and land in one report table:
 
-python -m pipeline.run --dataset ba --tag ba40 \
-    --num-graphs 40 --syn-nodes 100 \
+python -m pipeline.run --dataset ba --num-graphs 40 --syn-nodes 100 \
     --budget-pcts 1 5 10 20 --compare \
     --llm-model gpt-5.6-terra --outer-iters 5
 
@@ -22,16 +22,20 @@ python -m pipeline.run --dataset netscience \
 
 No world model anywhere (the train stage is then skipped automatically):
 
-python -m pipeline.run --dataset sbm --tag sbm40 --num-graphs 40 \
+python -m pipeline.run --dataset sbm --num-graphs 40 \
     --arms routing one_shot_free@native one_shot_free@oracle --compare
 
 Resume just the reporting half of a finished run:
 
-python -m pipeline.run --dataset ba --tag ba40 --start-stage plots
+python -m pipeline.run --dataset ba --start-stage plots
 
 Re-run one stage from scratch:
 
-python -m pipeline.run --dataset ba --tag ba40 --start-stage agent --end-stage agent --force
+python -m pipeline.run --dataset ba --start-stage agent --end-stage agent --force
+
+Hold two variants of the same (task, dataset) side by side:
+
+python -m pipeline.run --dataset jazz --run gcnii_ablation --wm-model gcnii --n-layers 8
 """
 
 import argparse
@@ -72,6 +76,7 @@ from pipeline.conditions import (
     valid_evaluators,
 )
 from pipeline.layout import Layout, budget_label, skip_marker_suffix
+from pipeline.tasks import default_run, require_runnable, task_names
 from pipeline.plots import build_plots
 from pipeline.report import write_report
 from pipeline.summary import write_environment, write_summary
@@ -86,7 +91,8 @@ native_mc_runs_default = 1
 @dataclass
 class PipelineConfig:
     dataset: str
-    tag: str
+    task: str = "influence_maximization"
+    run: str = default_run
     # data stage
     num_graphs: int = 1
     syn_nodes: int = 100
@@ -160,7 +166,7 @@ class PipelineConfig:
     _graph: object = field(default=None, repr=False)
 
 
-def expand_baselines(names: tuple) -> list[str]:
+def expand_baselines(names: tuple, task: str) -> list[str]:
     """
     Resolve --baselines into arm specs.
 
@@ -175,13 +181,16 @@ def expand_baselines(names: tuple) -> list[str]:
         if name == "all-classical":
             specs += [f"baseline:{algorithm}" for algorithm in default_baselines]
         elif name == "all-external":
-            specs += [f"external:{baseline}" for baseline in available_baselines()]
+            specs += [
+                f"external:{baseline}"
+                for baseline in available_baselines(task=task)
+            ]
         elif name == "all":
             specs += [f"baseline:{algorithm}" for algorithm in default_baselines]
-            installed = runnable_baselines()
+            installed = runnable_baselines(task=task)
             specs += [f"external:{baseline}" for baseline in installed]
 
-            skipped = sorted(set(available_baselines()) - set(installed))
+            skipped = sorted(set(available_baselines(task=task)) - set(installed))
             if skipped:
                 print(
                     f"[pipeline] --baselines all: skipping not-installed external "
@@ -197,7 +206,7 @@ def expand_baselines(names: tuple) -> list[str]:
 
 def build_arms(config: PipelineConfig) -> list[Arm]:
     """Classical pool + external published baselines + the named conditions."""
-    specs = expand_baselines(config.baselines)
+    specs = expand_baselines(config.baselines, config.task)
     specs += list(config.arms)
 
     arms = [parse_arm(spec, default_evaluator=config.evaluator) for spec in specs]
@@ -634,12 +643,14 @@ def _write_manifest(layout: Layout, config: PipelineConfig) -> None:
 
 def run_pipeline(config: PipelineConfig) -> dict:
     pipeline_start = time.perf_counter()
-    layout = Layout(config.tag, root=config.results_root)
+    layout = Layout(
+        config.task, config.dataset, config.run, root=config.results_root
+    )
     os.makedirs(layout.root, exist_ok=True)
 
     selected = active_stages(config)
     arms = build_arms(config)
-    print(f"[pipeline] tag={config.tag} dataset={config.dataset} -> {layout.root}")
+    print(f"[pipeline] {layout.label} -> {layout.root}")
     print(f"[pipeline] stages: {' -> '.join(selected)}")
     print(f"[pipeline] {len(arms)} arms x {len(budget_points(config))} budgets:")
 
@@ -683,7 +694,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
                     results,
                     load_wm_results(config, layout),
                     layout.plots_dir,
-                    title_prefix=config.tag,
+                    title_prefix=layout.label,
                 )
                 for figure in figures:
                     print(f"[plots]   {figure.name}")
@@ -723,7 +734,13 @@ def run_pipeline(config: PipelineConfig) -> dict:
     elapsed = time.perf_counter() - pipeline_start
     print(f"\n[pipeline] done in {elapsed:.1f}s -> {layout.root}")
 
-    return {"tag": config.tag, "stages": config.stage_status, "seconds": elapsed}
+    return {
+        "task": config.task,
+        "dataset": config.dataset,
+        "run": config.run,
+        "stages": config.stage_status,
+        "seconds": elapsed,
+    }
 
 
 if __name__ == "__main__":
@@ -741,10 +758,20 @@ if __name__ == "__main__":
         help="graph dataset or synthetic family (default: required).",
     )
     parser.add_argument(
-        "--tag",
+        "--task",
         type=str,
-        default=None,
-        help="results/<tag> directory name (default: the dataset name).",
+        default="influence_maximization",
+        choices=task_names(),
+        help="graph task; the first level of the results tree and the name of "
+        "its literature review in research/ "
+        "(default: influence_maximization).",
+    )
+    parser.add_argument(
+        "--run",
+        type=str,
+        default=default_run,
+        help="run label under results/<task>/<dataset>/, for holding several "
+        f"variants of one dataset side by side (default: {default_run}).",
     )
     parser.add_argument(
         "--start-stage",
@@ -783,7 +810,8 @@ if __name__ == "__main__":
         "--results-root",
         type=str,
         default="results",
-        help="top-level results directory (default: results).",
+        help="top-level results directory; the tree below it is "
+        "<task>/<dataset>/<run> (default: results).",
     )
     parser.add_argument(
         "--seed", type=int, default=42, help="random seed (default: 42)."
@@ -1141,6 +1169,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Fail before any stage runs: a planned task has no head, no simulator, or
+    # no data, and the message names which
+    require_runnable(args.task)
+
     if args.dataset not in synthetic_families and args.num_graphs != 1:
         raise ValueError(
             f"--num-graphs {args.num_graphs} only applies to synthetic families "
@@ -1149,7 +1181,8 @@ if __name__ == "__main__":
 
     config = PipelineConfig(
         dataset=args.dataset,
-        tag=args.tag or args.dataset,
+        task=args.task,
+        run=args.run,
         num_graphs=args.num_graphs,
         syn_nodes=args.syn_nodes,
         er_p=args.er_p,

@@ -1,26 +1,29 @@
 #!/bin/bash
-#SBATCH --job-name=wm_generate_data_ba
+#SBATCH --job-name=gen_in_ba
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 
-# Usage: sbatch sbatch/wm_generate_data_ba.sbatch
+# Usage: sbatch sbatch/influence_maximization/generate_data_ba.sbatch
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
 mkdir -p results logs
 
-# Results land in results/<tag>_<jobid>/data, the same way logs land in
+# Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
 # logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
-# transitions. Set TAG_JOBID=0 for a stable results/<tag>/data — which is what
+# transitions. Set RUN_JOBID=0 for a stable
+# results/<task>/<dataset>/<run>/data — which is what
 # the train/agent scripts downstream expect to be told about.
-TAG="${TAG:-ba40}"
-TAG_JOBID="${TAG_JOBID:-1}"
-[ "$TAG_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && TAG="${TAG}_${SLURM_JOB_ID}"
-OUT="results/$TAG/data"
+TASK="${TASK:-influence_maximization}"
+DATASET=ba
+RUN="${RUN:-default}"
+RUN_JOBID="${RUN_JOBID:-1}"
+[ "$RUN_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && RUN="${RUN}_${SLURM_JOB_ID}"
+OUT="results/$TASK/$DATASET/$RUN/data"
 
 # BA-100 with 40 distinct graphs (index folded into the seed -> ba_n100_m3_s42..s61),
 # add_node and remove_node action ops, IC + LT, four cheap seed selectors

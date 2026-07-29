@@ -2,7 +2,8 @@
 Autoregressive action-conditioned world-model training (teacher-forced one-step).
 
 Checkpoints and the results JSON land next to the data by default:
-results/<tag>/data -> results/<tag>/world_model/{wm_<model>_<dm>.pt, <model>_<dm>.json}
+<run>/data -> <run>/world_model/{wm_<model>_<dm>.pt, <model>_<dm>.json}, where
+<run> is results/<task>/<dataset>/<run> (see pipeline/layout.py)
 
 python -m world_model.train_wm \
     --data-dir results/ba40/data --diffusion-model IC \

@@ -54,6 +54,10 @@ class ExternalBaseline:
     repo: str
     paper: str
     entry: str  # what setup/run drives, for the README table
+    # Which graph task this baseline solves; a key of pipeline.tasks.tasks.
+    # Every entry today is influence_maximization, which is exactly why the
+    # field exists — a blocking or CND baseline must not join an IM sweep.
+    task: str = "influence_maximization"
     status: str = "needs_setup"
     blocker: str | None = None
     python: str = "3.10"
@@ -896,7 +900,8 @@ external_baselines: dict[str, ExternalBaseline] = {
             "from OUR graphs. Note genim.py then TRAINS a VAE + SpGAT per "
             "(dataset, diffusion model, budget) — it is not an inference-only "
             "baseline, so budget its runtime accordingly. Published tables are "
-            "in IM_RESEARCH.md §4 and are directly comparable on Jazz and "
+            "in research/influence_maximization.md §5.1 and are directly "
+                "comparable on Jazz and "
             "Power Grid."
         ),
     ),
@@ -934,7 +939,7 @@ external_baselines: dict[str, ExternalBaseline] = {
             "Our BA/SBM/ER graphs are synthetic and Jazz/Power Grid/NetScience "
             "ship no cascade logs, so there is nothing for it to train on. It "
             "can only run on Digg/Weibo/MAG, which our pipeline cannot simulate "
-            "at scale (see IM_RESEARCH.md §1.1)."
+            "at scale (see research/influence_maximization.md §6.1)."
         ),
         notes=(
             "Included in the registry for completeness and to document exactly "
@@ -1138,7 +1143,7 @@ external_baselines: dict[str, ExternalBaseline] = {
         ),
         notes=(
             "Appears in DeepIM's comparison table; those published numbers are "
-            "transcribed in IM_RESEARCH.md §4."
+            "transcribed in research/influence_maximization.md §5.1."
         ),
     ),
     "oim": ExternalBaseline(
@@ -1159,13 +1164,15 @@ external_baselines: dict[str, ExternalBaseline] = {
         ),
         notes=(
             "Appears in DeepIM's IC table (and is out-of-memory on Weibo there); "
-            "numbers transcribed in IM_RESEARCH.md §4."
+            "numbers transcribed in research/influence_maximization.md §5.1."
         ),
     ),
 }
 
 
-def available_baselines(kind: str | None = None) -> list[str]:
+def available_baselines(
+    kind: str | None = None, task: str | None = None
+) -> list[str]:
     """Registered, not blocked, and with an adapter that can drive it."""
     return sorted(
         name
@@ -1173,12 +1180,24 @@ def available_baselines(kind: str | None = None) -> list[str]:
         if spec.status != "blocked"
         and spec.wired
         and (kind is None or spec.kind == kind)
+        and (task is None or spec.task == task)
     )
 
 
-def runnable_baselines() -> list[str]:
+def runnable_baselines(task: str | None = None) -> list[str]:
     """...and actually present on disk."""
-    return sorted(name for name in available_baselines() if external_baselines[name].installed())
+    return sorted(
+        name
+        for name in available_baselines(task=task)
+        if external_baselines[name].installed()
+    )
+
+
+def baselines_for_task(task: str) -> list[str]:
+    """Every registered baseline for one task, blocked ones included."""
+    return sorted(
+        name for name, spec in external_baselines.items() if spec.task == task
+    )
 
 
 def unwired_baselines() -> list[str]:

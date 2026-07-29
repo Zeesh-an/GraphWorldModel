@@ -12,7 +12,8 @@ Source: https://snap.stanford.edu/data/wiki-Vote.html
     - No node labels
 
 ToupleGDD reports this graph as "Wiki-2"; its "Wiki-1" is a DIFFERENT 889-node
-graph from Network Repository (IM_DATASETS.md §2). MOEIM reports the largest
+graph from Network Repository (research/influence_maximization.md §6.3).
+MOEIM reports the largest
 connected component, 7,066 / 103,663.
 
 Original paper: Leskovec et al., "Signed Networks in Social Media," CHI 2010

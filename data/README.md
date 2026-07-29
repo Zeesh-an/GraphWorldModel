@@ -33,7 +33,7 @@ See the design spec:
 > model, runs every agent arm, plots, and writes a report. Use the commands below
 > when you want data generation on its own.
 
-**Where things go.** Generated datasets land in `results/<tag>/data/`
+**Where things go.** Generated datasets land in `results/<task>/<dataset>/<run>/data/`
 (`--out-dir`, defaulting to `results/<dataset>/data`). Raw downloads land in
 `data/raw/<dataset>/` and are shared across every run — both are gitignored.
 
@@ -61,7 +61,7 @@ python -m data.generate_wm_data --dataset ba --num-graphs 1 \
 python -m data.generate_wm_data --dataset ba --num-graphs 20 \
     --action-ops add_node remove_node add_edge remove_edge set_edge_weight --models IC LT \
     --algorithms random degree pagerank betweenness \
-    --out-dir results/ba40/data
+    --out-dir results/influence_maximization/ba/default/data
 
 # Real dataset (downloads on first use)
 python -m data.generate_wm_data --dataset jazz --action-ops add_node remove_node add_edge remove_edge set_edge_weight
@@ -70,7 +70,7 @@ python -m data.generate_wm_data --dataset jazz --action-ops add_node remove_node
 python -m data.generate_wm_data --smoke --out-dir /tmp/wm_smoke
 
 # Validate a produced dataset (gate checks)
-python -m data.validate_wm_data --dir results/ba40/data
+python -m data.validate_wm_data --dir results/influence_maximization/ba/default/data
 ```
 
 ---
@@ -257,7 +257,7 @@ per dynamics (see `world_model/README.md`).
 
 | Flag                              | Default         | What it controls                                                                                           |
 | --------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------- |
-| `--dataset`                       | `cora_ml`       | real (`jazz, email_eu_core, netscience, cora_ml, facebook, power_grid, ca_grqc, wiki_vote, lastfm_asia, nethept, netphy, twitter, digg, youtube, weibo`) or synthetic (`er, ba, ws, sbm, karate`); the choices list is derived from `wm_graphs.real_directed`, so adding a loader adds a choice. `weibo` needs a manual AMiner download (see `data/datasets/weibo.py`). Full catalogue: `IM_DATASETS.md` |
+| `--dataset`                       | `cora_ml`       | real (`jazz, email_eu_core, netscience, cora_ml, facebook, power_grid, ca_grqc, wiki_vote, lastfm_asia, nethept, netphy, twitter, digg, youtube, weibo`) or synthetic (`er, ba, ws, sbm, karate`); the choices list is derived from `wm_graphs.real_directed`, so adding a loader adds a choice. `weibo` needs a manual AMiner download (see `data/datasets/weibo.py`). Full catalogue: `research/influence_maximization.md` §6 |
 | `--num-graphs`                    | `1`             | number of synthetic graph instances (folded into the seed)                                                 |
 | `--syn-nodes`                     | `100`           | nodes per synthetic graph                                                                                  |
 | `--models`                        | `IC LT`         | which dynamics to generate transitions for                                                                 |

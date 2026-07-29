@@ -30,6 +30,7 @@ from data.wm_simulator import ActionOp, Simulator, State, valid_action_ops
 synthetic_families = ("er", "ba", "ws", "sbm", "karate")
 seed_upper_bound = 2**31 - 1
 results_root = Path("results")
+default_task = "influence_maximization"
 
 # Default k-sweep band: spans the 1%/5%/10%/20%-of-N budgets the learning-based
 # IM literature reports, so one checkpoint covers the whole sweep
@@ -622,6 +623,20 @@ def parse_args() -> GenConfig:
         "--out-dir", type=str, default=None, help="output directory (default: None)."
     )
     parser.add_argument(
+        "--task",
+        type=str,
+        default=default_task,
+        help="graph task, used only to place the default --out-dir "
+        f"(default: {default_task}).",
+    )
+    parser.add_argument(
+        "--run",
+        type=str,
+        default="default",
+        help="run label, used only to place the default --out-dir "
+        "(default: default).",
+    )
+    parser.add_argument(
         "--smoke",
         action="store_true",
         help="tiny end-to-end run (er-40, 1 graph, 2 rollouts, horizon 4) (default: False).",
@@ -629,10 +644,13 @@ def parse_args() -> GenConfig:
 
     args = parser.parse_args()
 
-    # Every generated artifact lives under results/<tag>/; the pipeline passes
-    # --out-dir explicitly, this default is for standalone invocations
+    # Every generated artifact lives under results/<task>/<dataset>/<run>/;
+    # the pipeline passes --out-dir explicitly, this default is for standalone
+    # invocations and must match pipeline.layout.Layout
     if args.out_dir is None:
-        args.out_dir = str(results_root / args.dataset / "data")
+        args.out_dir = str(
+            results_root / args.task / args.dataset / args.run / "data"
+        )
 
     if args.smoke:
         args.dataset, args.num_graphs, args.syn_nodes, args.er_p = "er", 1, 40, 0.1

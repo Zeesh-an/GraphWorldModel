@@ -26,11 +26,13 @@ and edge-level interventions.
 > loop). Worked results are in
 > [`world_model/checkpoints/RESULTS.md`](world_model/checkpoints/RESULTS.md).
 >
-> **Prior work.** [`IM_RESEARCH.md`](IM_RESEARCH.md) is the unified Influence
-> Maximization literature review: every classical and learning-based method,
-> which published results are directly comparable to ours (and which are not,
-> because the graph versions differ), the full DeepIM/MOEIM/IRIE result tables,
-> and links to every paper and code repo.
+> **Prior work.** [`research/`](research/) holds one literature review per graph
+> task, all in the same format.
+> [`research/influence_maximization.md`](research/influence_maximization.md)
+> covers what we run today: every classical and learning-based method, which
+> published results are directly comparable to ours (and which are not, because
+> the graph versions differ), the full DeepIM/MOEIM/IRIE result tables, the
+> dataset catalogue, and links to every paper and code repo.
 
 ---
 
@@ -199,7 +201,7 @@ The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what
 the current NDlib rollout + selector pipeline can simulate in reasonable time —
 they are targets for a future scalable-simulation pass, not day-one datasets.
 
-**[`IM_DATASETS.md`](IM_DATASETS.md)** is the full catalogue: every graph in the
+**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the
 IM literature with source URLs and exact counts, which paper uses which, the
 seven dataset names that denote more than one graph, what to add next, and the
 loader contract for adding one.
@@ -209,7 +211,7 @@ loader contract for adding one.
 ## Quick start — the whole experiment in one command
 
 `pipeline/run.py` runs every stage end to end and writes a single
-`results/<tag>/report.md` with the tables and figures. Swapping datasets is a
+`results/<task>/<dataset>/<run>/report.md` with the tables and figures. Swapping datasets is a
 one-flag change.
 
 ```bash
@@ -217,7 +219,7 @@ source .venv/bin/activate
 
 # Everything: generate -> train the WM -> run all six baseline conditions at
 # 1/5/10/20% budgets -> plot -> report
-python -m pipeline.run --dataset ba --tag ba40 --num-graphs 40 --syn-nodes 100 \
+python -m pipeline.run --dataset ba --num-graphs 40 --syn-nodes 100 \
     --compare
 
 # Same thing on a real graph — only the dataset changes
@@ -225,7 +227,7 @@ python -m pipeline.run --dataset netscience --compare
 
 # Outer-loop development without training a world model: drop the one arm that
 # needs it and the train stage is skipped automatically
-python -m pipeline.run --dataset sbm --tag sbm40 --num-graphs 40 --compare \
+python -m pipeline.run --dataset sbm --num-graphs 40 --compare \
     --arms routing one_shot_free@native one_shot_free@monte_carlo one_shot_free@oracle
 ```
 
@@ -297,20 +299,21 @@ expensive part, and they are checkpointed one file per `(budget, arm)`.
 
 ```bash
 # Only the reporting half of a finished run
-python -m pipeline.run --dataset ba --tag ba40 --start-stage plots
+python -m pipeline.run --dataset ba --start-stage plots
 
 # Re-run one stage from scratch
-python -m pipeline.run --dataset ba --tag ba40 \
+python -m pipeline.run --dataset ba \
     --start-stage agent --end-stage agent --force
 
 # Reuse an existing world model, skip straight to the agent sweep
-python -m pipeline.run --dataset ba --tag ba40 --skip-stages data train
+python -m pipeline.run --dataset ba --skip-stages data train
 ```
 
 | flag | default | meaning |
 | ---- | ------- | ------- |
 | `--dataset` | — | synthetic family (`er ba ws sbm karate`) or real dataset name |
-| `--tag` | the dataset name | `results/<tag>/` directory to write |
+| `--task` | `influence_maximization` | graph task; first level of the results tree, and the name of its review in `research/` |
+| `--run` | `default` | run label under `results/<task>/<dataset>/`, for holding variants side by side |
 | `--start-stage` / `--end-stage` | `data` / `report` | inclusive stage range |
 | `--skip-stages` | none | stages to omit from that range |
 | `--force` | off | recompute stages whose outputs already exist |
@@ -333,10 +336,10 @@ Generation, training, and agent hyperparameters are all exposed too
 variable:
 
 ```bash
-DATASET=ba TAG=ba40 ./sbatch/pipeline.sbatch                    # everything
+DATASET=ba ./sbatch/pipeline.sbatch                    # everything
 DATASET=sbm ARMS=one_shot_free@oracle BASELINES=none ./sbatch/pipeline.sbatch
-DATASET=ba TAG=ba40 START_STAGE=plots ./sbatch/pipeline.sbatch  # re-plot only
-DATASET=ba TAG=ba40 DRY_RUN=1 ./sbatch/pipeline.sbatch          # show, submit nothing
+DATASET=ba START_STAGE=plots ./sbatch/pipeline.sbatch  # re-plot only
+DATASET=ba DRY_RUN=1 ./sbatch/pipeline.sbatch          # show, submit nothing
 ```
 
 **GPU is requested only when the run needs one.** Before submitting, the script
@@ -351,10 +354,40 @@ oracle-only, evaluator ablation, baselines-only, specific baselines, no
 baselines, single stages, plots-only, every LLM knob, every world-model knob,
 every generation knob, LT, absolute budgets, and resume.
 
+### Tasks
+
+Every run is scoped to a **graph task**. `pipeline/tasks.py` is the registry —
+name, status, objective sense, dynamics, action ops, and for anything not yet
+runnable, the one thing blocking it. The task name is both the first level of the
+results tree and the filename of its literature review in
+[`research/`](research/), so the two can never drift apart.
+
+```bash
+python -m pipeline.run --dataset jazz                          # influence_maximization
+python -m pipeline.run --dataset jazz --run gcnii_ablation \
+    --wm-model gcnii --n-layers 8                              # a second variant
+python -c "from pipeline.tasks import tasks; print(sorted(tasks))"
+```
+
+**Only `influence_maximization` runs today.** The other twelve are catalogued
+with a status and a blocker; `pipeline.run` refuses them up front with that
+blocker and a pointer to the research doc, instead of failing mid-stage:
+
+```
+$ python -m pipeline.run --dataset ba --task influence_blocking
+ValueError: task 'influence_blocking' is planned, not runnable by this pipeline.
+NDlib ships no competitive model ... See research/influence_blocking.md for the
+full analysis. Runnable today: ['influence_maximization']
+```
+
+Adding one is a registry entry plus whatever its `blocker` names — usually a head
+in `wm_model.py` and a simulator branch in `wm_simulator.py`. The stages, feature
+builder, encoders, collate, plots, and report are task-agnostic.
+
 ### Where everything lands
 
 ```
-results/<tag>/
+results/<task>/<dataset>/<run>/
 ├── data/                        transitions + graph store          (stage: data)
 ├── world_model/                 wm_<model>_<dm>.pt, <model>_<dm>.json,
 │                                history_<model>_<dm>.json          (stage: train)
@@ -403,21 +436,21 @@ source .venv/bin/activate
 python -m data.generate_wm_data --dataset ba --num-graphs 20 \
     --action-ops add_node remove_node add_edge remove_edge set_edge_weight \
     --models IC LT --algorithms random degree pagerank betweenness \
-    --out-dir results/ba40/data
+    --out-dir results/influence_maximization/ba/default/data
 
 # 2. Train the world model — GraphSAGE, structured IC head
 python -m world_model.train_wm \
-    --data-dir results/ba40/data --diffusion-model IC \
+    --data-dir results/influence_maximization/ba/default/data --diffusion-model IC \
     --model sage --head structured --pos-weight off \
     --hidden-dim 64 --n-layers 3 --epochs 400 --batch-size 32 --patience 50 \
     --seed 42 --device cuda --plan-demo
-# checkpoint + results JSON default to results/ba40/world_model/
+# checkpoint + results JSON default to results/influence_maximization/ba/default/world_model/
 
 # 3. (optional) re-evaluate a checkpoint without retraining
 python -m world_model.eval_rollout_ensemble \
-    --results results/ba40/world_model/sage_IC.json --device cpu
+    --results results/influence_maximization/ba/default/world_model/sage_IC.json --device cpu
 python -m world_model.eval_structured_oracle \
-    --data-dir results/ba40/data --diffusion-model IC --device cpu
+    --data-dir results/influence_maximization/ba/default/data --diffusion-model IC --device cpu
 ```
 
 ### Key training flags
@@ -481,9 +514,10 @@ GraphWorldModel/
 ├── pipeline/
 │   ├── run.py                  # ← END-TO-END DRIVER: stages, resume, CLI
 │   ├── conditions.py           # the six-condition taxonomy + arm-spec grammar
-│   ├── layout.py               # the results/<tag>/ directory contract
+│   ├── tasks.py                # the graph-task registry: status, ops, blockers
+│   ├── layout.py               # the results/<task>/<dataset>/<run>/ directory contract
 │   ├── plots.py                # every paper figure
-│   └── report.py               # results/<tag>/report.md generator
+│   └── report.py               # results/<task>/<dataset>/<run>/report.md generator
 ├── data/
 │   ├── generate_wm_data.py     # action-conditioned WM data generator (orchestrator)
 │   ├── wm_simulator.py         # NDlib stepwise IC/LT sim + State/ActionOp + MC marginals
@@ -508,8 +542,11 @@ GraphWorldModel/
 │   ├── checkpoints/            # historical RESULTS.md (new runs write to results/)
 │   └── README.md               # ← world-model technical reference
 ├── coding_agent/               # ← outer-loop coding agent (see its README)
-├── sbatch/pipeline.sbatch      # the single SLURM entry point (self-submitting)
-├── results/                    # ALL generated artifacts, one subtree per --tag
+├── sbatch/
+│   ├── pipeline.sbatch         # the task-agnostic SLURM entry point (self-submitting)
+│   └── <task>/                 # per-dataset generation + training scripts
+├── research/                   # ← one literature review per graph task (see its README)
+├── results/                    # ALL generated artifacts, <task>/<dataset>/<run>/
 ├── baselines/                  # published-baseline runners (registry + adapters);
 │                               # external repos fetched into baselines/external/
 └── requirements.txt

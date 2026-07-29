@@ -1,26 +1,29 @@
 #!/bin/bash
-#SBATCH --job-name=wm_generate_data_nethept
+#SBATCH --job-name=gen_in_nethept
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 
-# Usage: sbatch sbatch/wm_generate_data_nethept.sbatch
+# Usage: sbatch sbatch/influence_maximization/generate_data_nethept.sbatch
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
 mkdir -p results logs
 
-# Results land in results/<tag>_<jobid>/data, the same way logs land in
+# Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
 # logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
-# transitions. Set TAG_JOBID=0 for a stable results/<tag>/data — which is what
+# transitions. Set RUN_JOBID=0 for a stable
+# results/<task>/<dataset>/<run>/data — which is what
 # the train/agent scripts downstream expect to be told about.
-TAG="${TAG:-nethept}"
-TAG_JOBID="${TAG_JOBID:-1}"
-[ "$TAG_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && TAG="${TAG}_${SLURM_JOB_ID}"
-OUT="results/$TAG/data"
+TASK="${TASK:-influence_maximization}"
+DATASET=nethept
+RUN="${RUN:-default}"
+RUN_JOBID="${RUN_JOBID:-1}"
+[ "$RUN_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && RUN="${RUN}_${SLURM_JOB_ID}"
+OUT="results/$TASK/$DATASET/$RUN/data"
 
 # NetHEPT citation network (15,229 nodes, 62,752 directed edges) — the standard
 # IM scale benchmark. Auto-downloads on first use. ONE real graph: 50 rollouts

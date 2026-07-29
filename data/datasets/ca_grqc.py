@@ -15,7 +15,7 @@ Source: https://snap.stanford.edu/data/ca-GrQc.html
 
 ToupleGDD reports this graph as "caGr" at 4.2k / 13.4k, which is its largest
 connected component (4,158 / 13,422); GLIE reports "GR Colab" at 5,242 / 28,980,
-counting the raw lines (IM_DATASETS.md §2).
+counting the raw lines (research/influence_maximization.md §6.3).
 
 Original paper: Leskovec et al., "Graph Evolution: Densification and Shrinking
     Diameters," ACM TKDD 2007

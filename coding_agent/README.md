@@ -499,12 +499,12 @@ model exists to undercut in the outer loop.
 
 > **For a full sweep, use the pipeline instead.** `python -m pipeline.run` runs
 > every baseline condition at every budget, resumes what it already finished, and
-> writes the plots and `results/<tag>/report.md`. One arm at one budget is one
-> file at `results/<tag>/agent/<budget>/<arm>.json` — exactly what the commands
+> writes the plots and `results/<task>/<dataset>/<run>/report.md`. One arm at one budget is one
+> file at `results/<task>/<dataset>/<run>/agent/<budget>/<arm>.json` — exactly what the commands
 > below produce, so the two are interchangeable:
 >
 > ```bash
-> python -m pipeline.run --dataset ba --tag ba40 --budget-pcts 1 5 10 20 \
+> python -m pipeline.run --dataset ba --budget-pcts 1 5 10 20 \
 >     --outer-iters 5 --compare
 > ```
 >
@@ -521,32 +521,32 @@ model exists to undercut in the outer loop.
 
 ```bash
 # LLM run: node-ops game, WM evaluator, MC compare, credit feedback
-python -m coding_agent.run --data-dir results/ba40/data \
-    --wm-results-json results/ba40/world_model/sage_IC.json \
+python -m coding_agent.run --data-dir results/influence_maximization/ba/default/data \
+    --wm-results-json results/influence_maximization/ba/default/world_model/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
     --model gpt-5.6-terra --outer-iters 3 --credit \
-    --out-json results/ba40/agent/pct5/run.json
+    --out-json results/influence_maximization/ba/default/agent/pct5/run.json
 
 # Classical baseline through the identical pipeline (no LLM, no .env needed)
-python -m coding_agent.run --data-dir results/ba40/data \
-    --wm-results-json results/ba40/world_model/sage_IC.json \
+python -m coding_agent.run --data-dir results/influence_maximization/ba/default/data \
+    --wm-results-json results/influence_maximization/ba/default/world_model/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
-    --baseline celf --outer-iters 1 --out-json results/ba40/agent/pct5/baseline_celf.json
+    --baseline celf --outer-iters 1 --out-json results/influence_maximization/ba/default/agent/pct5/baseline_celf.json
 
 # GA routing: one LLM call picks a library algorithm (no code synthesis),
 # then it runs through the identical --baseline canned path
-python -m coding_agent.run --data-dir results/ba40/data \
+python -m coding_agent.run --data-dir results/influence_maximization/ba/default/data \
     --model gpt-5.6-terra \
-    --wm-results-json results/ba40/world_model/sage_IC.json \
+    --wm-results-json results/influence_maximization/ba/default/world_model/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
-    --routing --outer-iters 1 --out-json results/ba40/agent/pct5/routing.json
+    --routing --outer-iters 1 --out-json results/influence_maximization/ba/default/agent/pct5/routing.json
 
 # Oracle-dynamics ceiling: true IC transitions, no checkpoint / --wm-results-json
-python -m coding_agent.run --data-dir results/ba40/data \
+python -m coding_agent.run --data-dir results/influence_maximization/ba/default/data \
     --model gpt-5.6-terra \
     --method one_shot --evaluator oracle --budget 5 --horizon 10 --compare \
-    --outer-iters 5 --out-json results/ba40/agent/pct5/oracle_run.json
+    --outer-iters 5 --out-json results/influence_maximization/ba/default/agent/pct5/oracle_run.json
 
 # Native coding agent: one real execution per candidate, episodes counted
 #   ... --evaluator monte_carlo --mc-runs 1

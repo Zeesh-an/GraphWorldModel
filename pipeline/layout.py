@@ -1,19 +1,27 @@
 """
-Where every artifact lives. One tag -> one directory tree under results/.
+Where every artifact lives. One (task, dataset, run) -> one directory tree.
 
-results/<tag>/
+results/<task>/<dataset>/<run>/
     data/                       generated transitions + graph store (stage: data)
         graphs/, graphs_index.json, transitions_<dm>_<split>.jsonl, metadata.json
     world_model/                checkpoints + training results (stage: train)
         wm_<model>_<dm>.pt, <model>_<dm>.json
     agent/<budget_label>/       one JSON per arm (stage: agent)
         baseline_degree_discount.json, evolve_scored.json, ...
+    baselines/<budget_label>/   external published baselines (condition 7)
     plots/                      paper figures (stage: plots)
     report.md                   final write-up (stage: report)
     pipeline.json               run manifest: config + per-stage status
+
+`task` is a key of `pipeline.tasks.tasks`, so the results tree and
+`research/<task>.md` are always spelled the same way. `run` separates variants of
+the same (task, dataset) — backbones, ablations, seeds — and defaults to
+`default`.
 """
 
 from pathlib import Path
+
+from pipeline.tasks import default_run
 
 results_root = Path("results")
 
@@ -28,9 +36,32 @@ def budget_label(budget_pct: float | None, budget: int) -> str:
 
 
 class Layout:
-    def __init__(self, tag: str, root: Path | str = results_root) -> None:
-        self.root = Path(root) / tag
-        self.tag = tag
+    def __init__(
+        self,
+        task: str,
+        dataset: str,
+        run: str = default_run,
+        root: Path | str = results_root,
+    ) -> None:
+        self.task = task
+        self.dataset = dataset
+        self.run = run
+        self.root = Path(root) / task / dataset / run
+
+    @property
+    def label(self) -> str:
+        """`task/dataset/run` — what a log line or report title should say."""
+        return f"{self.task}/{self.dataset}/{self.run}"
+
+    @property
+    def task_dir(self) -> Path:
+        """All runs of this task, across datasets — what a cross-dataset table reads."""
+        return self.root.parent.parent
+
+    @property
+    def dataset_dir(self) -> Path:
+        """All runs of this (task, dataset) — what an ablation comparison reads."""
+        return self.root.parent
 
     @property
     def data_dir(self) -> Path:
@@ -94,3 +125,13 @@ class Layout:
         return sorted(self.baselines_dir.glob(f"*/*{skip_marker_suffix}")) + sorted(
             self.agent_dir.glob(f"*/*{skip_marker_suffix}")
         )
+
+
+def discover_runs(task: str, root: Path | str = results_root) -> list[Layout]:
+    """Every finished run of one task, for cross-dataset comparison tables."""
+    task_root = Path(root) / task
+
+    return [
+        Layout(task, manifest.parent.parent.name, manifest.parent.name, root=root)
+        for manifest in sorted(task_root.glob("*/*/pipeline.json"))
+    ]

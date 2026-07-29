@@ -10,16 +10,19 @@
 # Train one world model on already-generated data. For the whole experiment use
 # sbatch/pipeline.sbatch; this is for retraining a single backbone in place.
 #
-# Usage: sbatch sbatch/wm_train.sbatch <model> <diffusion_model> <data_dir>
-#        sbatch sbatch/wm_train.sbatch sage IC results/sbm40_918273/data
+# Usage: sbatch sbatch/influence_maximization/train.sbatch <model> <diffusion_model> <data_dir>
+#        sbatch sbatch/influence_maximization/train.sbatch sage IC \
+#            results/influence_maximization/sbm/default/data
 #
 # The checkpoint and results JSON land beside the data they were trained on, in
-# results/<tag>/world_model/ — NOT in a per-job directory. That coupling is
+# results/<task>/<dataset>/<run>/world_model/ — NOT in a per-job directory.
+# That coupling is
 # deliberate: every downstream reader (eval_planning, eval_rollout_ensemble, the
 # agent stage) locates a checkpoint from its data dir, and the filenames already
 # carry the backbone (wm_<model>_<dm>.pt), so five backbones on one dataset do
 # not collide. Pass CKPT_DIR to override, e.g. per-job checkpoints:
-#   CKPT_DIR=results/ba40/world_model_$SLURM_JOB_ID sbatch sbatch/wm_train.sbatch
+#   CKPT_DIR=results/influence_maximization/ba/default/world_model_$SLURM_JOB_ID \
+#       sbatch sbatch/influence_maximization/train.sbatch
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
@@ -28,10 +31,11 @@ mkdir -p results logs
 
 # model           = gcn | sage | gt | gat | gcnii   (default sage)
 # diffusion_model = IC | LT                         (default IC)
-# data_dir        = a results/<tag>/data directory  (default results/ba40/data)
+# data_dir        = any run's data/ directory
+#                   (default results/influence_maximization/ba/default/data)
 MODEL="${1:-sage}"
 DM="${2:-IC}"
-DATA="${3:-${DATA:-results/ba40/data}}"
+DATA="${3:-${DATA:-results/influence_maximization/ba/default/data}}"
 
 CKPT=()
 [ -n "${CKPT_DIR:-}" ] && CKPT=(--ckpt-dir "$CKPT_DIR")

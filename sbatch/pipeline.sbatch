@@ -17,7 +17,7 @@
 #
 # Run it directly and it queues ITSELF with the right allocation:
 #
-#     DATASET=ba TAG=ba40 ./sbatch/pipeline.sbatch
+#     DATASET=ba ./sbatch/pipeline.sbatch
 #
 # Every `python -m pipeline.run` flag is an environment variable. Ordinary
 # shell quoting, so a list value is just a quoted string:
@@ -38,15 +38,21 @@
 # So an oracle-only or baselines-only sweep queues CPU-only and starts sooner,
 # and DEVICE follows the same decision. See it without submitting anything:
 #
-#     DATASET=ba TAG=ba40 DRY_RUN=1 ./sbatch/pipeline.sbatch
+#     DATASET=ba DRY_RUN=1 ./sbatch/pipeline.sbatch
 #
 # Override it if you need to: GRES=gpu:2, or GRES=none to force CPU.
 #
-# RESULTS GO IN results/<tag>_<jobid>/, the same way logs go to logs/%x_%j.out,
-# so two jobs on the same dataset can never overwrite each other. The job id is
-# printed on the first line of the .out, along with the exact command to resume
-# that run. Set TAG_JOBID=0 for a stable results/<tag>/ that every rerun appends
-# to — which is what you want when you are deliberately resuming or chaining.
+# RESULTS GO IN results/<task>/<dataset>/<run>_<jobid>/, the same way logs go to
+# logs/%x_%j.out, so two jobs on the same dataset can never overwrite each
+# other. The job id is printed on the first line of the .out, along with the
+# exact command to resume that run. Set RUN_JOBID=0 for a stable
+# results/<task>/<dataset>/<run>/ that every rerun appends to — which is what
+# you want when you are deliberately resuming or chaining.
+#
+# TASK selects the graph task and is the first results level. Only
+# influence_maximization is runnable today; `python -c "from pipeline.tasks
+# import tasks; print(sorted(tasks))"` lists them, and research/<task>.md is
+# the literature review for each.
 #
 # Rules for the env vars:
 #   * list-valued vars are space-separated inside quotes:  GEN_MODELS="IC LT"
@@ -58,14 +64,14 @@
 # and SBATCH_ARGS for anything else to pass through verbatim.
 #
 # ============================================================================
-# TEMPLATES  (replace <dataset> / <tag>; every one is copy-pasteable)
+# TEMPLATES  (replace <dataset>; every one is copy-pasteable)
 # ============================================================================
 #
 # --- 1. FULL PIPELINE -------------------------------------------------------
 # All five stages, all seven conditions, four budgets. The headline run.
 # Requests a GPU (it trains f_theta).
 #
-#   DATASET=ba TAG=ba40 ./sbatch/pipeline.sbatch
+#   DATASET=ba ./sbatch/pipeline.sbatch
 #
 #   DATASET=nethept MEM=64G TIME=48:00:00 ./sbatch/pipeline.sbatch
 #
@@ -75,7 +81,7 @@
 # train stage drops itself and this queues CPU-only. The ceiling, and the
 # fastest way to iterate on the agent itself.
 #
-#   DATASET=sbm TAG=sbm40 ARMS=one_shot_free@oracle BASELINES=none \
+#   DATASET=sbm ARMS=one_shot_free@oracle BASELINES=none \
 #       ./sbatch/pipeline.sbatch
 #
 #
@@ -83,7 +89,7 @@
 # The evaluator ablation proper: conditions 4, 5, 6 with the method held fixed,
 # so the ONLY thing that varies is the inner-loop feedback. GPU.
 #
-#   DATASET=sbm TAG=sbm40 \
+#   DATASET=sbm \
 #   ARMS="one_shot_free@monte_carlo one_shot_free@oracle one_shot_free@world_model" \
 #       ./sbatch/pipeline.sbatch
 #
@@ -91,7 +97,7 @@
 # --- 4. WORLD MODEL ONLY ----------------------------------------------------
 # Just our method (condition 6), nothing to compare against. GPU.
 #
-#   DATASET=ba TAG=ba40 ARMS=one_shot_free@world_model BASELINES=none \
+#   DATASET=ba ARMS=one_shot_free@world_model BASELINES=none \
 #       ./sbatch/pipeline.sbatch
 #
 #
@@ -99,7 +105,7 @@
 # Condition 4 alone: averaged simulator rollouts as feedback. CPU-only.
 # MC_RUNS sets both its cost and its noise.
 #
-#   DATASET=sbm TAG=sbm40 ARMS=one_shot_free@monte_carlo BASELINES=none \
+#   DATASET=sbm ARMS=one_shot_free@monte_carlo BASELINES=none \
 #   MC_RUNS=200 ./sbatch/pipeline.sbatch
 #
 #
@@ -108,7 +114,7 @@
 # Keep it at 1 for the honestly model-free baseline — the whole point of this
 # arm is that every number the agent sees costs a real episode. CPU-only.
 #
-#   DATASET=sbm TAG=sbm40 ARMS=one_shot_free@native BASELINES=none \
+#   DATASET=sbm ARMS=one_shot_free@native BASELINES=none \
 #   NATIVE_MC_RUNS=1 ./sbatch/pipeline.sbatch
 #
 #
@@ -150,23 +156,23 @@
 #
 # --- 8. NO BASELINES --------------------------------------------------------
 # Conditions 2-6 only, nothing classical. For when the baseline numbers for
-# this tag are already on disk and only the agent side changed.
+# this dataset are already on disk and only the agent side changed.
 #
-#   DATASET=ba TAG=ba40 BASELINES=none ./sbatch/pipeline.sbatch
+#   DATASET=ba BASELINES=none ./sbatch/pipeline.sbatch
 #
 #
 # --- 9. SKIP WM TRAINING, USE ORACLE ----------------------------------------
 # Two ways, and they mean different things:
 #
 #   (a) no world-model arm at all -> train removes itself, queues CPU-only:
-#   DATASET=sbm TAG=sbm40 \
+#   DATASET=sbm \
 #   ARMS="routing one_shot_free@native one_shot_free@monte_carlo one_shot_free@oracle" \
 #       ./sbatch/pipeline.sbatch
 #
 #   (b) keep a @world_model arm but reuse a checkpoint trained earlier:
-#   DATASET=ba TAG=ba40 SKIP_STAGES=train ./sbatch/pipeline.sbatch
+#   DATASET=ba SKIP_STAGES=train ./sbatch/pipeline.sbatch
 #   (b) still asks for a GPU, because the arm rolls f_theta out. It fails
-#   loudly if results/<tag>/world_model/ has no checkpoint — it reuses, it
+#   loudly if the run's world_model/ has no checkpoint — it reuses, it
 #   does not silently fall back to the oracle.
 #
 #
@@ -179,7 +185,7 @@
 #   START_STAGE=train END_STAGE=train retrain the world model and stop
 #   START_STAGE=agent END_STAGE=agent run the sweep, no plots or report
 #
-#   DATASET=ba TAG=ba40 START_STAGE=agent ./sbatch/pipeline.sbatch
+#   DATASET=ba START_STAGE=agent ./sbatch/pipeline.sbatch
 #
 # Data generation alone (CPU-only — this is what the old wm_generate_data_*
 # scripts did):
@@ -189,7 +195,7 @@
 #
 # Training alone on already-generated data (what wm_train.sbatch did):
 #
-#   DATASET=ba TAG=ba40 START_STAGE=train END_STAGE=train WM_MODEL=sage \
+#   DATASET=ba START_STAGE=train END_STAGE=train WM_MODEL=sage \
 #       ./sbatch/pipeline.sbatch
 #
 # Finished stages are detected on disk and reused, so re-running the whole
@@ -201,18 +207,18 @@
 # Regenerate every figure from results already on disk. Seconds, CPU-only, no
 # LLM calls. PLOTS then REPORT is the usual pair.
 #
-#   DATASET=ba TAG=ba40 START_STAGE=plots END_STAGE=plots ./sbatch/pipeline.sbatch
-#   DATASET=ba TAG=ba40 START_STAGE=plots ./sbatch/pipeline.sbatch
+#   DATASET=ba START_STAGE=plots END_STAGE=plots ./sbatch/pipeline.sbatch
+#   DATASET=ba START_STAGE=plots ./sbatch/pipeline.sbatch
 #
 # Fast enough to just run on the login node instead:
-#   python -m pipeline.run --dataset ba --tag ba40 --start-stage plots
+#   python -m pipeline.run --dataset ba --start-stage plots
 #
 #
 # --- 12. CODING AGENT ONLY, ALL LLM KNOBS -----------------------------------
 # START_STAGE=agent END_STAGE=agent reuses the data and the checkpoint and
 # only re-runs the sweep. Every agent-side parameter:
 #
-#   DATASET=sbm TAG=sbm40 START_STAGE=agent END_STAGE=agent FORCE=1 \
+#   DATASET=sbm START_STAGE=agent END_STAGE=agent FORCE=1 \
 #   ARMS=evolve_scored@world_model \
 #   LLM_MODEL=gpt-5.6-terra TEMPERATURE=0.7 OUTER_ITERS=20 \
 #   BUDGET_PCTS="1 5 10 20" HORIZON=10 N_SAMPLES=50 MC_RUNS=200 \
@@ -251,15 +257,15 @@
 #   GRAPH_ID        evaluate on a specific graph in the store
 #   BASELINE_TIMEOUT seconds before an external repo subprocess is killed
 #
-# Comparing two LLMs on the same data, as two jobs into two tags:
+# Comparing two LLMs on the same data, as two jobs into two runs:
 #
-#   DATASET=sbm TAG=sbm40_sonnet LLM_MODEL=gpt-5.6-terra ./sbatch/pipeline.sbatch
-#   DATASET=sbm TAG=sbm40_gpt    LLM_MODEL=gpt-5.6-sol     ./sbatch/pipeline.sbatch
+#   DATASET=sbm RUN=sonnet LLM_MODEL=gpt-5.6-terra ./sbatch/pipeline.sbatch
+#   DATASET=sbm RUN=gpt    LLM_MODEL=gpt-5.6-sol     ./sbatch/pipeline.sbatch
 #
 #
 # --- 13. ALL WORLD-MODEL TRAINING KNOBS -------------------------------------
 #
-#   DATASET=ba TAG=ba40_gt START_STAGE=train END_STAGE=train FORCE=1 \
+#   DATASET=ba RUN=gt START_STAGE=train END_STAGE=train FORCE=1 \
 #   WM_MODEL=gt HEAD=structured_residual HIDDEN_DIM=128 N_LAYERS=3 \
 #   N_HEADS=4 FFN_DIM=256 DROPOUT=0.1 \
 #   EPOCHS=400 LR=1e-3 WEIGHT_DECAY=5e-4 BATCH_SIZE=32 \
@@ -280,21 +286,21 @@
 #   POS_WEIGHT   auto | off
 #   NO_PLAN_DEMO 1 skips the multi-graph planning demo after training
 #
-# Backbone sweep, five jobs into five tags sharing one dataset — generate the
+# Backbone sweep, five jobs into five runs sharing one dataset — generate the
 # data once, then each job reuses it:
 #
-#   DATASET=ba TAG=ba40 START_STAGE=data END_STAGE=data ./sbatch/pipeline.sbatch
+#   DATASET=ba START_STAGE=data END_STAGE=data ./sbatch/pipeline.sbatch
 #   for M in gcn sage gat gt gcnii; do
-#     DATASET=ba TAG=ba40 WM_MODEL=$M START_STAGE=train JOB_NAME=gwm_$M \
+#     DATASET=ba WM_MODEL=$M START_STAGE=train JOB_NAME=gwm_$M \
 #         ./sbatch/pipeline.sbatch
 #   done
-#   (all five share results/ba40/data; checkpoints are named per backbone, so
-#    they do not collide)
+#   (all five share results/influence_maximization/ba/default/data; checkpoints
+#    are named per backbone, so they do not collide)
 #
 #
 # --- 14. ALL DATA-GENERATION KNOBS ------------------------------------------
 #
-#   DATASET=sbm TAG=sbm_dense START_STAGE=data END_STAGE=data \
+#   DATASET=sbm RUN=dense START_STAGE=data END_STAGE=data \
 #   NUM_GRAPHS=40 SYN_NODES=200 SBM_BLOCKS=4 SBM_P_IN=0.2 SBM_P_OUT=0.005 \
 #   GEN_MODELS="IC LT" GEN_ALGORITHMS="random degree pagerank betweenness celf" \
 #   GEN_ACTION_OPS="add_node remove_node" PROB_MODEL=weighted \
@@ -333,7 +339,7 @@
 # both the transition file and the structured head. Generate both dynamics up
 # front and either can be run later without regenerating.
 #
-#   DATASET=ba TAG=ba40_lt DIFFUSION_MODEL=LT ./sbatch/pipeline.sbatch
+#   DATASET=ba RUN=lt DIFFUSION_MODEL=LT ./sbatch/pipeline.sbatch
 #
 #
 # --- 16. ABSOLUTE BUDGETS ---------------------------------------------------
@@ -343,29 +349,30 @@
 #
 #
 # --- 17. RESUME AFTER A CRASH -----------------------------------------------
-# Results live in results/<tag>_<jobid>/, so resuming means naming the tree the
-# dead job created — a bare resubmit would start a FRESH one. The dead job's
-# .out prints the line to use, verbatim:
+# Results live in results/<task>/<dataset>/<run>_<jobid>/, so resuming means
+# naming the tree the dead job created — a bare resubmit would start a FRESH
+# one. The dead job's .out prints the line to use, verbatim:
 #
-#   [sbatch] resume this run with: TAG=ba40_918273 TAG_JOBID=0 .../pipeline.sbatch
+#   [sbatch] resume this run with: RUN=default_918273 RUN_JOBID=0 .../pipeline.sbatch
 #
-#   DATASET=ba TAG=ba40_918273 TAG_JOBID=0 ./sbatch/pipeline.sbatch
+#   DATASET=ba RUN=918273 RUN_JOBID=0 ./sbatch/pipeline.sbatch
 #
 # Every finished stage, every finished (budget, arm) result, and every skipped
 # external baseline is on disk and gets reused; only the missing work runs.
 # Check what is done first:
 #
-#   cat results/<tag>/pipeline.json                       # stage status + timings
-#   column -s, -t results/<tag>/summary.csv | less -S     # every finished arm
+#   R=results/influence_maximization/ba/default
+#   cat $R/pipeline.json                       # stage status + timings
+#   column -s, -t $R/summary.csv | less -S     # every finished arm
 #
 # For a long-lived experiment you keep adding to, drop the job id entirely and
 # always resume into the same tree:
 #
-#   DATASET=ba TAG=ba40 TAG_JOBID=0 ./sbatch/pipeline.sbatch
+#   DATASET=ba RUN_JOBID=0 ./sbatch/pipeline.sbatch
 #
 # To redo one stage from scratch instead of resuming it:
 #
-#   DATASET=ba TAG=ba40_918273 TAG_JOBID=0 \
+#   DATASET=ba RUN=918273 RUN_JOBID=0 \
 #   START_STAGE=agent END_STAGE=agent FORCE=1 ./sbatch/pipeline.sbatch
 #
 #
@@ -373,12 +380,12 @@
 # Print the resolved sbatch line and the full pipeline command, submit
 # nothing. Always do this before a long run.
 #
-#   DATASET=ba TAG=ba40 DRY_RUN=1 ./sbatch/pipeline.sbatch
+#   DATASET=ba DRY_RUN=1 ./sbatch/pipeline.sbatch
 #
 # To also validate the flags against the real parser and see the arm plan
 # without executing a stage, on the login node:
 #
-#   python -m pipeline.run --dataset ba --tag ba40 \
+#   python -m pipeline.run --dataset ba \
 #       --skip-stages data train agent plots report
 #
 #
@@ -386,7 +393,7 @@
 # Prove the whole path end to end in a couple of minutes on a tiny graph
 # before burning an allocation. Login node, no sbatch.
 #
-#   python -m pipeline.run --dataset ba --tag smoke \
+#   python -m pipeline.run --dataset ba --run smoke \
 #       --num-graphs 2 --syn-nodes 60 --rollouts 2 --mc-marginals 3 \
 #       --epochs 3 --gen-models IC \
 #       --baselines high_degree --arms one_shot_free@oracle \
@@ -408,9 +415,10 @@ mkdir -p results logs
 # DEFAULTS
 # ---------------------------------------------------------------------------
 DATASET="${DATASET:?DATASET is required, e.g. DATASET=ba ./sbatch/pipeline.sbatch}"
-TAG="${TAG:-$DATASET}"
+TASK="${TASK:-influence_maximization}"
+RUN="${RUN:-default}"
 # Append _<jobid> to the results directory, the same way logs get _%j
-TAG_JOBID="${TAG_JOBID:-1}"
+RUN_JOBID="${RUN_JOBID:-1}"
 
 # Dataset class drives the settings that genuinely cannot share a default:
 # graph population, seed selectors, encoder width, and memory.
@@ -585,7 +593,7 @@ if [ -z "${SLURM_JOB_ID:-}" ]; then
   fi
 
   submit=(
-    --job-name="${JOB_NAME:-gwm_$TAG}"
+    --job-name="${JOB_NAME:-gwm_${DATASET}_${RUN}}"
     --cpus-per-task="${CPUS:-4}"
     --mem="${MEM:-$class_mem}"
     --time="${TIME:-$class_time}"
@@ -619,21 +627,21 @@ fi
 DEVICE="${DEVICE:-$(python -c "import torch; print('cuda' if torch.cuda.is_available() else 'cpu')")}"
 flags+=(--device "$DEVICE")
 
-# The job id only exists in here, which is why --tag is appended now rather
+# The job id only exists in here, which is why --run is appended now rather
 # than in the array above. One job -> one results tree, exactly like one job ->
 # one .out file, so concurrent jobs on the same dataset cannot overwrite each
-# other. RESUMING A JOB MEANS PASSING ITS TAG BACK: TAG=ba40_12345, or set
-# TAG_JOBID=0 to get a stable tag that every rerun appends to.
-run_tag="$TAG"
-[ "$TAG_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && run_tag="${TAG}_${SLURM_JOB_ID}"
-flags+=(--tag "$run_tag")
+# other. RESUMING A JOB MEANS PASSING ITS RUN BACK: RUN=default_12345, or set
+# RUN_JOBID=0 to get a stable run label that every rerun appends to.
+run_label="$RUN"
+[ "$RUN_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && run_label="${RUN}_${SLURM_JOB_ID}"
+flags+=(--task "$TASK" --run "$run_label")
 
 echo "[sbatch] job=${SLURM_JOB_NAME:-local} id=${SLURM_JOB_ID:-none} host=$(hostname)"
-echo "[sbatch] dataset=$DATASET tag=$run_tag device=$DEVICE stages=$START_STAGE..$END_STAGE"
-echo "[sbatch] resume this run with: TAG=$run_tag TAG_JOBID=0 $script_path"
+echo "[sbatch] task=$TASK dataset=$DATASET run=$run_label device=$DEVICE stages=$START_STAGE..$END_STAGE"
+echo "[sbatch] resume this run with: RUN=$run_label RUN_JOBID=0 $script_path"
 python -c "import torch; print('[sbatch] CUDA:', torch.cuda.is_available(), '|', (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU-ONLY'))"
 echo "[sbatch] python -m pipeline.run ${flags[*]}"
 
 python -m pipeline.run "${flags[@]}"
 
-echo "[sbatch] done -> $RESULTS_ROOT/$run_tag/report.md"
+echo "[sbatch] done -> $RESULTS_ROOT/$TASK/$DATASET/$run_label/report.md"

@@ -1,42 +1,45 @@
 #!/bin/bash
-#SBATCH --job-name=wm_generate_data_netscience
+#SBATCH --job-name=gen_in_jazz
 #SBATCH --output=logs/%x_%j.out
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
 
-# Usage: sbatch sbatch/wm_generate_data_netscience.sbatch
+# Usage: sbatch sbatch/influence_maximization/generate_data_jazz.sbatch
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/
 source venv/bin/activate
 mkdir -p results logs
 
-# Results land in results/<tag>_<jobid>/data, the same way logs land in
+# Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
 # logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
-# transitions. Set TAG_JOBID=0 for a stable results/<tag>/data — which is what
+# transitions. Set RUN_JOBID=0 for a stable
+# results/<task>/<dataset>/<run>/data — which is what
 # the train/agent scripts downstream expect to be told about.
-TAG="${TAG:-netscience}"
-TAG_JOBID="${TAG_JOBID:-1}"
-[ "$TAG_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && TAG="${TAG}_${SLURM_JOB_ID}"
-OUT="results/$TAG/data"
+TASK="${TASK:-influence_maximization}"
+DATASET=jazz
+RUN="${RUN:-default}"
+RUN_JOBID="${RUN_JOBID:-1}"
+[ "$RUN_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && RUN="${RUN}_${SLURM_JOB_ID}"
+OUT="results/$TASK/$DATASET/$RUN/data"
 
-# NetScience coauthorship network (1,589 nodes, 2,742 edges, heavily fragmented:
-# 128 isolates + many small components — budget allocation across components is
-# the decision that matters). Auto-downloads on first use. ONE real graph, so
-# episode diversity comes from rollouts: 100 x 2 models x 4 algos = 800 episodes.
-
-# k ~ U(1%, 20% of N) per episode -> 16..318 seeds here. One checkpoint covers
-# the whole budget sweep instead of only the k it was generated at.
+# Jazz collaboration network (198 nodes, 2,742 edges, real community structure).
+# Auto-downloads on first use. ONE real graph, so episode diversity comes from
+# rollouts instead of graph count: 100 rollouts x 2 models x 4 algos = 800 episodes
+# (BA/SBM get 6,400 from 40 graphs x 20 rollouts).
 
 # Node ops only, matching the BA recipe.
 # All-five alternative: --action-ops add_node remove_node add_edge remove_edge set_edge_weight
 
+# k ~ U(1%, 20% of N) per episode -> 2..40 seeds here. One checkpoint covers the
+# whole budget sweep instead of only the k it was generated at.
+
 export OUT
 
 python -m data.generate_wm_data \
-    --dataset netscience \
+    --dataset jazz \
     --models IC LT --prob-model weighted --budget-pct-range 1 20 \
     --algorithms random degree pagerank betweenness \
     --rollouts 100 --horizon 10 --inject-p 0.4 --cf-prob 0.4 --cf-branches 2 \

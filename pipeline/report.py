@@ -8,8 +8,9 @@ from pipeline.layout import Layout
 
 # Config keys worth printing; the manifest JSON holds the exhaustive version
 reported_config_keys = (
+    "task",
     "dataset",
-    "tag",
+    "run",
     "evaluator",
     "diffusion_model",
     "llm_model",
@@ -270,7 +271,7 @@ def write_report(
     metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else None
 
     lines = [
-        f"# {config['tag']} — Graph World Model results",
+        f"# {layout.label} — Graph World Model results",
         "",
         f"Dataset `{config['dataset']}`, evaluator `{config['evaluator']}`, "
         f"dynamics `{config['diffusion_model']}`.",
