@@ -15,19 +15,28 @@ seed_upper_bound = 1 << 30
 
 class MonteCarloEnvironment:
     def __init__(
-        self, graph: GraphInfo, diffusion_model: str, mc_runs: int = 30
+        self,
+        graph: GraphInfo,
+        diffusion_model: str,
+        mc_runs: int = 30,
+        base_seed: int = 0,
     ) -> None:
         self.graph = graph
         self.diffusion_model = diffusion_model
         self.mc_runs = mc_runs
+        # Seed every rollout uses unless one is named explicitly. Shared across
+        # candidates on purpose: common random numbers make the DIFFERENCE
+        # between two strategies far better resolved than either absolute score.
+        self.base_seed = base_seed
         # Cumulative real-environment episodes across all rollout calls — the
         # sample-efficiency axis for the native-agent condition (--mc-runs 1)
         self.episodes_used = 0
 
     def rollout(
-        self, action_fn: ActionFn, horizon: int, budget: int, seed: int = 0
+        self, action_fn: ActionFn, horizon: int, budget: int, seed: int | None = None
     ) -> Trajectory:
         start = time.perf_counter()
+        seed = self.base_seed if seed is None else seed
         rng = np.random.default_rng(seed)
 
         final_counts = []
@@ -94,6 +103,9 @@ class MonteCarloEnvironment:
             cost={
                 "mc_runs": self.mc_runs,
                 "env": "monte_carlo",
+                # The seed this rollout ran under: every per-episode simulator
+                # seed is drawn from it, so replaying it reproduces the number
+                "seed": int(seed),
                 "reward_se": reward_se,
                 "rollout_seconds": time.perf_counter() - start,
             },

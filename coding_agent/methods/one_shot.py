@@ -2,8 +2,10 @@
 
 import time
 from functools import partial
+from pathlib import Path
 from tqdm import tqdm
 
+from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.credit import (
     counterfactual_credit,
@@ -46,12 +48,16 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         use_anchor: bool = True,
         allow_mc_algorithms: bool = False,
         max_repairs: int = default_max_repairs,
+        checkpoint_path: Path | None = None,
+        checkpoint_fingerprint: dict | None = None,
     ) -> None:
         self.outer_iters = outer_iters
         self.credit = credit
         self.strategy_mode = strategy_mode
         self.allow_mc_algorithms = allow_mc_algorithms
         self.max_repairs = max_repairs
+        self.checkpoint_path = checkpoint_path
+        self.checkpoint_fingerprint = checkpoint_fingerprint
         # Canned arms (classical baselines, routing) never read a prompt, so the
         # anchor rollout would be pure cost — real episodes under an MC evaluator
         self.use_anchor = use_anchor
@@ -74,8 +80,20 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         )
         anchor_trajectory = None
         anchor_name = ""
+        anchor = ""
 
-        if self.use_anchor:
+        resumed = checkpoint.load(self.checkpoint_path, self.checkpoint_fingerprint)
+
+        # The anchor rollouts are the expensive part of startup, so a resume
+        # replays the recorded table rather than re-running the baselines
+        if resumed is not None and resumed["anchor"] is not None:
+            anchor = resumed["anchor"]["text"]
+            anchor_name = resumed["anchor"]["name"]
+            anchor_trajectory = checkpoint.trajectory_from_dict(
+                resumed["anchor"]["trajectory"]
+            )
+            base_user += "\n\n" + anchor
+        elif self.use_anchor:
             anchor, anchor_trajectory, anchor_name = baseline_anchor(
                 environment, task, graph
             )
@@ -95,7 +113,36 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         repairs = 0
         iteration = 0
 
-        progress_bar = tqdm(total=self.outer_iters, desc="one_shot refinement")
+        if resumed is not None:
+            conversation.restore(resumed["messages"], resumed["transcript"])
+            self.history = resumed["history"]
+            pending = resumed["pending"]
+            last_script = resumed["last_script"]
+            last_error = resumed["last_error"]
+            evaluations = resumed["evaluations"]
+            repairs = resumed["repairs"]
+            iteration = resumed["iteration"]
+
+            if resumed["best"] is not None:
+                best = (
+                    build_strategy(
+                        resumed["best"]["script"],
+                        self.strategy_mode,
+                        self.allow_mc_algorithms,
+                    ),
+                    checkpoint.trajectory_from_dict(resumed["best"]["trajectory"]),
+                )
+
+            best_text = "none yet" if best is None else f"{best[1].reward:.2f}"
+            tqdm.write(
+                f"[one_shot] resumed from {self.checkpoint_path}: evaluation "
+                f"{evaluations + 1}/{self.outer_iters}, repairs "
+                f"{repairs}/{self.max_repairs}, best {best_text}"
+            )
+
+        progress_bar = tqdm(
+            total=self.outer_iters, initial=evaluations, desc="one_shot refinement"
+        )
         while evaluations < self.outer_iters:
             iteration += 1
             try:
@@ -171,6 +218,22 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     incumbent_reward=best[1].reward if best else None,
                 )
 
+                # After `pending` is built, so a resume re-sends the repair turn
+                # rather than the prompt that already failed
+                self._checkpoint(
+                    iteration,
+                    conversation,
+                    best,
+                    pending,
+                    last_script,
+                    last_error,
+                    evaluations,
+                    repairs,
+                    anchor,
+                    anchor_name,
+                    anchor_trajectory,
+                )
+
                 continue
 
             evaluations += 1
@@ -239,6 +302,20 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 ),
             )
 
+            self._checkpoint(
+                iteration,
+                conversation,
+                best,
+                pending,
+                last_script,
+                last_error,
+                evaluations,
+                repairs,
+                anchor,
+                anchor_name,
+                anchor_trajectory,
+            )
+
         progress_bar.close()
 
         if best is None:
@@ -248,3 +325,52 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             )
 
         return best
+
+    def _checkpoint(
+        self,
+        iteration: int,
+        conversation: Conversation,
+        best: tuple | None,
+        pending: str,
+        last_script: str | None,
+        last_error: str | None,
+        evaluations: int,
+        repairs: int,
+        anchor: str,
+        anchor_name: str,
+        anchor_trajectory: Trajectory | None,
+    ) -> None:
+        """Everything needed to continue this loop, written after every turn."""
+        checkpoint.save(
+            self.checkpoint_path,
+            {
+                "fingerprint": self.checkpoint_fingerprint,
+                "iteration": iteration,
+                "evaluations": evaluations,
+                "repairs": repairs,
+                "best": (
+                    None
+                    if best is None
+                    else {
+                        "script": best[0].source_script,
+                        "trajectory": checkpoint.trajectory_to_dict(best[1]),
+                    }
+                ),
+                "pending": pending,
+                "last_script": last_script,
+                "last_error": last_error,
+                "history": self.history,
+                "messages": conversation.messages,
+                "transcript": conversation.transcript,
+                # Replayed on resume instead of re-running the baselines
+                "anchor": (
+                    None
+                    if anchor_trajectory is None
+                    else {
+                        "text": anchor,
+                        "name": anchor_name,
+                        "trajectory": checkpoint.trajectory_to_dict(anchor_trajectory),
+                    }
+                ),
+            },
+        )

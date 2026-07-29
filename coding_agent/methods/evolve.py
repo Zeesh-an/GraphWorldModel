@@ -6,8 +6,10 @@ Stagnation switches the operator from refine to restructure.
 
 import time
 from functools import partial
+from pathlib import Path
 from tqdm import tqdm
 
+from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.credit import planned_action
 from coding_agent.executor import StrategyError, build_strategy, call_strategy
@@ -37,10 +39,18 @@ class EvolveSearch(OuterLoopMethod):
         stagnation_patience: int = 2,
         inspiration_count: int = 2,
         allow_mc_algorithms: bool = False,
+        use_anchor: bool = True,
+        checkpoint_path: Path | None = None,
+        checkpoint_fingerprint: dict | None = None,
     ) -> None:
         self.outer_iters = outer_iters
         self.strategy_mode = strategy_mode
         self.allow_mc_algorithms = allow_mc_algorithms
+        # Canned arms never read a prompt, so the anchor rollouts would be pure
+        # cost — five real episodes under an MC evaluator, informing nothing
+        self.use_anchor = use_anchor
+        self.checkpoint_path = checkpoint_path
+        self.checkpoint_fingerprint = checkpoint_fingerprint
         self.stagnation_patience = stagnation_patience
         self.inspiration_count = inspiration_count
         # Per-generation rewards, read back by run.py for the convergence plot
@@ -54,17 +64,27 @@ class EvolveSearch(OuterLoopMethod):
         system = build_system_prompt("evolve", self.strategy_mode, task)
         self.effective_budget = task.budget
 
-        anchor, anchor_trajectory, anchor_name = baseline_anchor(
-            environment, task, graph
-        )
-        tqdm.write(f"[evolve] {anchor}")
-        base_user = (
-            build_user_prompt(
-                "evolve", task, graph, self.strategy_mode, self.allow_mc_algorithms
+        resumed = checkpoint.load(self.checkpoint_path, self.checkpoint_fingerprint)
+
+        # The anchor rollouts are the expensive part of startup, so a resume
+        # replays the recorded table rather than re-running the baselines
+        anchor, anchor_trajectory, anchor_name = "", None, ""
+
+        if resumed is not None and resumed["anchor"] is not None:
+            anchor = resumed["anchor"]["text"]
+            anchor_name = resumed["anchor"]["name"]
+            anchor_trajectory = checkpoint.trajectory_from_dict(
+                resumed["anchor"]["trajectory"]
             )
-            + "\n\n"
-            + anchor
-        )
+        elif self.use_anchor:
+            anchor, anchor_trajectory, anchor_name = baseline_anchor(
+                environment, task, graph
+            )
+            tqdm.write(f"[evolve] {anchor}")
+
+        base_user = build_user_prompt(
+            "evolve", task, graph, self.strategy_mode, self.allow_mc_algorithms
+        ) + (f"\n\n{anchor}" if anchor else "")
 
         # The thread lets the model see the generations it already produced;
         # build_evolve_prompt still names the PARENT explicitly because the
@@ -77,8 +97,39 @@ class EvolveSearch(OuterLoopMethod):
         stagnation = 0
         last_error = None
         last_delta = None
+        start_iteration = 0
 
-        progress_bar = tqdm(range(self.outer_iters), desc="evolve search")
+        if resumed is not None:
+            conversation.restore(resumed["messages"], resumed["transcript"])
+            population = resumed["population"]
+            stagnation = resumed["stagnation"]
+            last_delta = resumed["last_delta"]
+            self.history = resumed["history"]
+            start_iteration = resumed["iteration"]
+
+            if resumed["best"] is not None:
+                best = (
+                    build_strategy(
+                        resumed["best"]["script"],
+                        self.strategy_mode,
+                        self.allow_mc_algorithms,
+                    ),
+                    checkpoint.trajectory_from_dict(resumed["best"]["trajectory"]),
+                )
+
+            best_text = "none yet" if best is None else f"{best[1].reward:.2f}"
+            tqdm.write(
+                f"[evolve] resumed from {self.checkpoint_path}: generation "
+                f"{start_iteration + 1}/{self.outer_iters}, population "
+                f"{len(population)}, best {best_text}"
+            )
+
+        progress_bar = tqdm(
+            range(start_iteration, self.outer_iters),
+            initial=start_iteration,
+            total=self.outer_iters,
+            desc="evolve search",
+        )
         for iteration in progress_bar:
             if not population:
                 operator = "seed"
@@ -161,6 +212,18 @@ class EvolveSearch(OuterLoopMethod):
                     f"[evolve] iter {iteration + 1}: script failed — "
                     f"{last_error.splitlines()[0]}"
                 )
+                self._checkpoint(
+                    iteration + 1,
+                    conversation,
+                    population,
+                    best,
+                    stagnation,
+                    last_delta,
+                    anchor,
+                    anchor_name,
+                    anchor_trajectory,
+                )
+
                 continue
 
             last_error = None
@@ -213,6 +276,19 @@ class EvolveSearch(OuterLoopMethod):
             progress_bar.set_postfix(
                 reward=f"{trajectory.reward:.2f}", best=f"{best[1].reward:.2f}"
             )
+            self._checkpoint(
+                iteration + 1,
+                conversation,
+                population,
+                best,
+                stagnation,
+                last_delta,
+                anchor,
+                anchor_name,
+                anchor_trajectory,
+            )
+
+        progress_bar.close()
 
         if best is None:
             raise StrategyError(
@@ -220,3 +296,48 @@ class EvolveSearch(OuterLoopMethod):
             )
 
         return best
+
+    def _checkpoint(
+        self,
+        iteration: int,
+        conversation: Conversation,
+        population: list[dict],
+        best: tuple | None,
+        stagnation: int,
+        last_delta: str | None,
+        anchor: str,
+        anchor_name: str,
+        anchor_trajectory: Trajectory | None,
+    ) -> None:
+        """Everything needed to continue this search, written after every generation."""
+        checkpoint.save(
+            self.checkpoint_path,
+            {
+                "fingerprint": self.checkpoint_fingerprint,
+                "iteration": iteration,
+                "population": population,
+                "best": (
+                    None
+                    if best is None
+                    else {
+                        "script": best[0].source_script,
+                        "trajectory": checkpoint.trajectory_to_dict(best[1]),
+                    }
+                ),
+                "stagnation": stagnation,
+                "last_delta": last_delta,
+                "history": self.history,
+                "messages": conversation.messages,
+                "transcript": conversation.transcript,
+                # Replayed on resume instead of re-running the baselines
+                "anchor": (
+                    None
+                    if anchor_trajectory is None
+                    else {
+                        "text": anchor,
+                        "name": anchor_name,
+                        "trajectory": checkpoint.trajectory_to_dict(anchor_trajectory),
+                    }
+                ),
+            },
+        )

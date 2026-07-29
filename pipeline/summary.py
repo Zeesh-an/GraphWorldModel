@@ -48,7 +48,13 @@ summary_columns = (
     "n_samples",
     "mc_runs",
     "real_env_episodes",
+    "llm_calls",
+    "llm_prompt_tokens",
+    "llm_completion_tokens",
+    "llm_total_tokens",
+    "llm_cost_usd",
     "elapsed_seconds",
+    "seed",
     "outer_iterations",
     "best_iteration",
     "failed_iterations",
@@ -65,6 +71,7 @@ def _row(result: dict) -> dict:
     history = result.get("history") or []
     external = result.get("external") or {}
     timeline = result.get("timeline") or []
+    usage = result.get("llm_usage") or {}
 
     spread = ground_truth_reward(result)
     nodes = graph.get("num_nodes") or 1
@@ -107,7 +114,16 @@ def _row(result: dict) -> dict:
         "n_samples": cost.get("n_samples"),
         "mc_runs": cost.get("mc_runs"),
         "real_env_episodes": result.get("real_env_episodes"),
+        # LLM spend for this arm. cost_usd is None unless --llm-price-in/-out
+        # were supplied; the token counts are exact either way.
+        "llm_calls": usage.get("calls"),
+        "llm_prompt_tokens": usage.get("prompt_tokens"),
+        "llm_completion_tokens": usage.get("completion_tokens"),
+        "llm_total_tokens": usage.get("total_tokens"),
+        "llm_cost_usd": usage.get("cost_usd"),
         "elapsed_seconds": result.get("elapsed_seconds"),
+        # Base rollout seed; each rollout's own seed is in its cost block
+        "seed": result.get("seed", cost.get("seed")),
         "outer_iterations": len(history) or None,
         "best_iteration": best_iteration,
         "failed_iterations": sum(

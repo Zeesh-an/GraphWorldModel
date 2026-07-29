@@ -58,8 +58,13 @@ from functools import partial
 from pathlib import Path
 from dotenv import load_dotenv
 
-from coding_agent import executor
-from coding_agent.agent import CodingAgent, GatewayProvider
+from coding_agent import checkpoint, executor
+from coding_agent.agent import (
+    CodingAgent,
+    GatewayProvider,
+    empty_usage,
+    merge_usage,
+)
 from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
@@ -77,7 +82,7 @@ from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo, TaskSpec
 from data.wm_simulator import valid_action_ops
 from pipeline.conditions import parse_arm
-from pipeline.layout import budget_label
+from pipeline.layout import budget_label, checkpoint_suffix
 from world_model.wm_data import load_graph_store
 
 world_model = "world_model"
@@ -129,6 +134,15 @@ class ExperimentConfig:
     allow_mc_algorithms: bool = False
     # Wall-clock cap on one generated plan_horizon()/act() call; 0 disables
     strategy_timeout: float = executor.strategy_timeout_seconds
+    # USD per 1M tokens, for the cost line in the results JSON. The lab gateway
+    # bills nothing per token (it fronts Pro subscriptions), so there is no rate
+    # to hardcode — supply your own or the cost stays null while tokens are
+    # still counted exactly.
+    llm_price_in: float | None = None
+    llm_price_out: float | None = None
+    # Resume a killed search from its checkpoint; --force turns this off so a
+    # forced re-run is genuinely fresh
+    resume: bool = True
     out_json: str | None = None
     # Arm spec this run represents; stamps the condition metadata into the
     # results JSON so a standalone run is readable by plots/report exactly like
@@ -142,9 +156,31 @@ class _CannedProvider:
 
     def __init__(self, script: str) -> None:
         self.script = script
+        # Present so usage accounting never special-cases the canned path
+        self.usage = empty_usage()
 
     def complete(self, messages: list[dict]) -> str:
+        self.usage["calls"] += 1
+
         return f"```python\n{self.script}\n```"
+
+
+def _usage_report(providers: list, config: ExperimentConfig) -> dict:
+    """Token totals for the run, and a cost only when a price was supplied."""
+    usage = merge_usage(providers)
+    prices = (config.llm_price_in, config.llm_price_out)
+
+    usage["cost_usd"] = (
+        None
+        if any(price is None for price in prices)
+        else round(
+            usage["prompt_tokens"] / 1e6 * config.llm_price_in
+            + usage["completion_tokens"] / 1e6 * config.llm_price_out,
+            6,
+        )
+    )
+
+    return usage
 
 
 def build_method(
@@ -152,12 +188,16 @@ def build_method(
     strategy_mode: str,
     allow_mc_algorithms: bool,
     use_anchor: bool = True,
+    checkpoint_path: Path | None = None,
+    checkpoint_fingerprint: dict | None = None,
 ) -> OuterLoopMethod:
     """
     The single construction site for every method.
 
     `strategy_mode` / `allow_mc_algorithms` are the resolved values, not
-    config's: a canned script overrides both.
+    config's: a canned script overrides both. Only the two methods with a
+    refinement loop take a checkpoint — per_step and windowed have nothing to
+    resume.
     """
     if config.method == "one_shot":
         return OneShotSuperAlgorithm(
@@ -168,6 +208,8 @@ def build_method(
             # burn real episodes and wall clock without informing anything
             use_anchor=use_anchor,
             allow_mc_algorithms=allow_mc_algorithms,
+            checkpoint_path=checkpoint_path,
+            checkpoint_fingerprint=checkpoint_fingerprint,
         )
 
     # per_step has no refinement loop — it is one episode with an LLM call per
@@ -185,6 +227,9 @@ def build_method(
             outer_iters=config.outer_iters,
             strategy_mode=strategy_mode,
             allow_mc_algorithms=allow_mc_algorithms,
+            use_anchor=use_anchor,
+            checkpoint_path=checkpoint_path,
+            checkpoint_fingerprint=checkpoint_fingerprint,
         )
 
     raise ValueError(
@@ -205,9 +250,15 @@ def _load_graph(config: ExperimentConfig) -> tuple[GraphInfo, str]:
 
 
 def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
+    # --seed is the base seed for every rollout in this run. Shared across
+    # candidates on purpose (common random numbers), and recorded per rollout in
+    # Trajectory.cost["seed"] so any single number can be replayed exactly.
     if config.evaluator == monte_carlo:
         return MonteCarloEnvironment(
-            graph, config.diffusion_model, mc_runs=config.mc_runs
+            graph,
+            config.diffusion_model,
+            mc_runs=config.mc_runs,
+            base_seed=config.seed,
         )
 
     if config.evaluator == world_model:
@@ -219,6 +270,7 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
             graph,
             device=config.device,
             n_samples=config.n_samples,
+            base_seed=config.seed,
         )
 
     if config.evaluator == oracle:
@@ -228,6 +280,7 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
             config.diffusion_model,
             device=config.device,
             n_samples=config.n_samples,
+            base_seed=config.seed,
         )
 
     raise ValueError(f"unknown evaluator {config.evaluator!r}")
@@ -290,11 +343,15 @@ def run_experiment(
     # GA routing: one LLM call selects from the algorithm pool (no synthesis),
     # then the pick runs through the identical --baseline canned path below
     routing_reply = None
+    # Every provider this run creates, so the token totals cover the routing call
+    providers = []
+
     if config.routing:
         if config.baseline is not None:
             raise ValueError("--routing and --baseline are mutually exclusive")
 
         router = GatewayProvider(config.model, temperature=config.temperature)
+        providers.append(router)
         routing_reply = router.complete(
             [
                 {"role": "system", "content": routing_system},
@@ -353,13 +410,30 @@ class Baseline(Strategy):
         if canned_script
         else GatewayProvider(config.model, temperature=config.temperature)
     )
+    providers.append(provider)
     agent = CodingAgent(provider)
+
+    # Beside the result this run will become; a file here means "did not finish".
+    # Canned arms are a single deterministic rollout with nothing to resume.
+    checkpoint_path = (
+        None
+        if canned_script is not None or config.out_json is None
+        else Path(config.out_json).with_suffix(checkpoint_suffix)
+    )
+    if not config.resume:
+        checkpoint.clear(checkpoint_path)
 
     method = build_method(
         config,
         effective_mode,
         effective_allow_mc,
         use_anchor=canned_script is None,
+        checkpoint_path=checkpoint_path,
+        checkpoint_fingerprint=(
+            None
+            if checkpoint_path is None
+            else checkpoint.fingerprint(config, config.method, graph)
+        ),
     )
 
     # Optimize the method with the outer-loop coding agent iteration loop to find the best strategy and trajectory result
@@ -423,7 +497,24 @@ class Baseline(Strategy):
         "script": strategy.source_script,
         # Markdown; None for canned arms, which synthesized nothing to explain
         "explanation": explanation,
+        # Every turn verbatim, prose and all. The code extractor keeps only the
+        # fenced block, but the prose around it is where the model says what it
+        # was trying to do — irrecoverable afterwards, and the first thing worth
+        # reading when a run goes wrong. Empty for canned arms.
+        "llm_transcript": (
+            []
+            if canned_script is not None
+            else getattr(getattr(method, "conversation", None), "transcript", [])
+        ),
+        # calls + token totals across every provider this run created (the
+        # routing call included). cost_usd is None unless --llm-price-in/-out
+        # were given: the lab gateway bills nothing per token, so there is no
+        # rate to assume.
+        "llm_usage": _usage_report(providers, config),
         "cost": trajectory.cost,
+        # Base seed for every rollout in this run; each rollout also records the
+        # seed it actually used in its own cost block
+        "seed": config.seed,
         # Per-outer-iteration rewards (empty for baseline/routing arms)
         "history": getattr(method, "history", []),
         # Per-node P(infected at end) across the ensemble. Costs n_samples
@@ -466,7 +557,10 @@ class Baseline(Strategy):
         print(f"[run] MC compare replay ({referee_runs} runs)...")
 
         mc_environment = MonteCarloEnvironment(
-            graph, config.diffusion_model, mc_runs=referee_runs
+            graph,
+            config.diffusion_model,
+            mc_runs=referee_runs,
+            base_seed=config.seed,
         )
 
         # Replay the actions that EARNED the reward rather than re-planning. A
@@ -478,6 +572,7 @@ class Baseline(Strategy):
 
         mc_trajectory = mc_environment.rollout(action_fn, config.horizon, config.budget)
         result["mc_reward"] = mc_trajectory.reward
+        result["mc_seed"] = mc_trajectory.cost["seed"]
         result["mc_spread_pct"] = round(
             100.0 * mc_trajectory.reward / graph.num_nodes, 2
         )
@@ -503,12 +598,18 @@ class Baseline(Strategy):
             # seed's persistent luck. Re-evaluating the winner on fresh seeds gives
             # the unbiased WM estimate: judge evaluator fidelity by
             # wm_reeval_minus_mc, not wm_minus_mc.
+            # Offset from the base seed, so these are fresh realizations no
+            # matter what --seed is, and each one is recorded for replay
+            reeval_seed_list = [
+                config.seed + offset for offset in range(1, wm_reeval_seeds + 1)
+            ]
             reeval_rewards = [
                 environment.rollout(
                     action_fn, config.horizon, config.budget, seed=reeval_seed
                 ).reward
-                for reeval_seed in range(1, wm_reeval_seeds + 1)
+                for reeval_seed in reeval_seed_list
             ]
+            result["wm_reeval_seeds"] = reeval_seed_list
             result["wm_reeval_rewards"] = reeval_rewards
             result["wm_reeval_mean"] = sum(reeval_rewards) / len(reeval_rewards)
             result["wm_reeval_minus_mc"] = (
@@ -535,6 +636,16 @@ class Baseline(Strategy):
         Path(config.out_json).write_text(json.dumps(result, indent=2, default=str))
         print(f"[run] results -> {config.out_json}")
 
+    # The result supersedes the mid-search state; leaving it would make a
+    # finished arm look interrupted to the next sweep
+    checkpoint.clear(checkpoint_path)
+
+    usage = result["llm_usage"]
+    cost = "" if usage["cost_usd"] is None else f", ${usage['cost_usd']:.4f}"
+    print(
+        f"[run] llm: {usage['calls']} calls, {usage['prompt_tokens']:,} prompt + "
+        f"{usage['completion_tokens']:,} completion tokens{cost}"
+    )
     print(f"[run] done in {result['elapsed_seconds']:.1f}s")
 
     return result
@@ -583,6 +694,27 @@ if __name__ == "__main__":
         help="wall-clock cap in seconds on one generated plan_horizon()/act() "
         "call; an overrun becomes a repair turn instead of hanging the sweep. "
         f"0 disables (default: {executor.strategy_timeout_seconds:.0f}).",
+    )
+    parser.add_argument(
+        "--llm-price-in",
+        type=float,
+        default=None,
+        help="USD per 1M prompt tokens, for the cost line in the results JSON. "
+        "The lab gateway fronts Pro subscriptions and bills nothing per token, so "
+        "there is no rate to assume: tokens are always counted exactly, cost stays "
+        "null unless both price flags are given (default: None).",
+    )
+    parser.add_argument(
+        "--llm-price-out",
+        type=float,
+        default=None,
+        help="USD per 1M completion tokens; see --llm-price-in (default: None).",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="ignore any checkpoint from a killed run of this arm and search from "
+        "scratch (default: resume).",
     )
     parser.add_argument(
         "--baseline",
@@ -748,6 +880,9 @@ if __name__ == "__main__":
         allowed_ops=tuple(args.allowed_ops),
         allow_mc_algorithms=args.allow_mc_algorithms,
         strategy_timeout=args.strategy_timeout,
+        llm_price_in=args.llm_price_in,
+        llm_price_out=args.llm_price_out,
+        resume=not args.no_resume,
         method=args.method,
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,

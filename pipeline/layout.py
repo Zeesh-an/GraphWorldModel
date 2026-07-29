@@ -28,6 +28,8 @@ results_root = Path("results")
 # Written next to the results when an arm could not run; same directory and same
 # extension, so every reader must filter on it
 skip_marker_suffix = ".skipped.json"
+# Mid-search state for a killed run, written beside the result it will become
+checkpoint_suffix = ".ckpt.json"
 
 
 def budget_label(budget_pct: float | None, budget: int) -> str:
@@ -106,19 +108,25 @@ class Layout:
 
         return root / label / f"{arm}.json"
 
+    def agent_checkpoint(self, label: str, arm: str) -> Path:
+        """Mid-search state for one (budget, arm), beside its result file."""
+        return self.agent_dir / label / f"{arm}{checkpoint_suffix}"
+
     def result_globs(self) -> list[Path]:
         """
         Every result file, ours and external, in one list for plots/report.
 
-        `<arm>.skipped.json` markers live in the same directories and match the
-        same glob, but they record why an arm did NOT run and carry none of the
-        result fields — so they are excluded here rather than at every reader.
+        `<arm>.skipped.json` markers and `<arm>.ckpt.json` checkpoints live in
+        the same directories and match the same glob, but neither carries the
+        result fields — so both are excluded here rather than at every reader.
         """
+        excluded = (skip_marker_suffix, checkpoint_suffix)
+
         return [
             path
             for path in sorted(self.agent_dir.glob("*/*.json"))
             + sorted(self.baselines_dir.glob("*/*.json"))
-            if not path.name.endswith(skip_marker_suffix)
+            if not path.name.endswith(excluded)
         ]
 
     def skip_globs(self) -> list[Path]:

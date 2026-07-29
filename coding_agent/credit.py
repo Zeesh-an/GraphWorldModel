@@ -26,7 +26,7 @@ def counterfactual_credit(
     plan: list[list[ActionOp]],
     horizon: int,
     budget: int,
-    seed: int = 0,
+    seed: int | None = None,
 ) -> tuple[float, list[dict]]:
     """Return (base_reward, one credit entry per action in the plan)."""
     # Base rollout with the full plan

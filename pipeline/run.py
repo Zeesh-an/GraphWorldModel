@@ -159,6 +159,9 @@ class PipelineConfig:
     allowed_ops: tuple = ("add_node", "remove_node")
     allow_mc_algorithms: bool = False
     strategy_timeout: float = executor.strategy_timeout_seconds
+    # USD per 1M tokens for the cost line; None -> tokens counted, cost null
+    llm_price_in: float | None = None
+    llm_price_out: float | None = None
     compare: bool = False
     credit: bool = False
     graph_id: str | None = None
@@ -539,6 +542,11 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 allowed_ops=tuple(config.allowed_ops),
                 allow_mc_algorithms=config.allow_mc_algorithms,
                 strategy_timeout=config.strategy_timeout,
+                llm_price_in=config.llm_price_in,
+                llm_price_out=config.llm_price_out,
+                # --force means redo, so it must not silently resume a killed
+                # search from the checkpoint it left behind
+                resume=not config.force,
                 out_json=str(out_json),
             )
 
@@ -578,11 +586,26 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             out_json.write_text(json.dumps(result, indent=2, default=str))
             completed.append(result)
 
+            usage = result.get("llm_usage") or {}
+            token_text = (
+                ""
+                if not usage.get("calls")
+                else (
+                    f", {usage['calls']} llm calls / "
+                    f"{usage['total_tokens']:,} tokens"
+                    + (
+                        ""
+                        if usage.get("cost_usd") is None
+                        else f" / ${usage['cost_usd']:.4f}"
+                    )
+                )
+            )
             tqdm.write(
                 f"[agent] {label}/{arm.name}: done in "
                 f"{time.perf_counter() - arm_start:.1f}s -> "
                 f"spread {ground_truth_reward(result):.2f} "
                 f"({100.0 * ground_truth_reward(result) / result['graph']['num_nodes']:.1f}% of N)"
+                f"{token_text}"
             )
             progress_bar.update(1)
 
@@ -1199,6 +1222,21 @@ if __name__ == "__main__":
         f"0 disables (default: {executor.strategy_timeout_seconds:.0f}).",
     )
     parser.add_argument(
+        "--llm-price-in",
+        type=float,
+        default=None,
+        help="USD per 1M prompt tokens, for the cost column. The lab gateway "
+        "fronts Pro subscriptions and bills nothing per token, so there is no rate "
+        "to assume: tokens are always counted, cost stays null unless both price "
+        "flags are given (default: None).",
+    )
+    parser.add_argument(
+        "--llm-price-out",
+        type=float,
+        default=None,
+        help="USD per 1M completion tokens; see --llm-price-in (default: None).",
+    )
+    parser.add_argument(
         "--compare",
         action="store_true",
         help="replay each winning strategy on Monte Carlo for a fidelity check (default: False).",
@@ -1287,6 +1325,8 @@ if __name__ == "__main__":
         allowed_ops=tuple(args.allowed_ops),
         allow_mc_algorithms=args.allow_mc_algorithms,
         strategy_timeout=args.strategy_timeout,
+        llm_price_in=args.llm_price_in,
+        llm_price_out=args.llm_price_out,
         compare=args.compare,
         credit=args.credit,
         graph_id=args.graph_id,

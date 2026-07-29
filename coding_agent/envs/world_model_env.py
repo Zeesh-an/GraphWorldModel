@@ -36,12 +36,16 @@ class WorldModelEnvironment:
         diffusion_model: str,
         device: str = "cpu",
         n_samples: int = 20,
+        base_seed: int = 0,
     ) -> None:
         self.model = model.to(device).eval()
         self.graph = graph
         self.diffusion_model = diffusion_model
         self.device = torch.device(device)
         self.n_samples = n_samples
+        # Seed every rollout uses unless one is named explicitly; shared across
+        # candidates so the DIFFERENCE between two strategies is well resolved
+        self.base_seed = base_seed
 
         self.base_edges = {
             (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge])): float(
@@ -57,6 +61,7 @@ class WorldModelEnvironment:
         graph: GraphInfo,
         device: str = "cpu",
         n_samples: int = 20,
+        base_seed: int = 0,
     ) -> "WorldModelEnvironment":
         """Rebuild a WorldModel from a train_wm.py results JSON config and load its checkpoint."""
 
@@ -98,7 +103,12 @@ class WorldModelEnvironment:
         )
 
         return cls(
-            model, graph, config["diffusion_model"], device=device, n_samples=n_samples
+            model,
+            graph,
+            config["diffusion_model"],
+            device=device,
+            n_samples=n_samples,
+            base_seed=base_seed,
         )
 
     @classmethod
@@ -108,6 +118,7 @@ class WorldModelEnvironment:
         diffusion_model: str,
         device: str = "cpu",
         n_samples: int = 20,
+        base_seed: int = 0,
     ) -> "WorldModelEnvironment":
         """Ground-truth dynamics baseline: same rollout machinery, q = true edge weight."""
         if diffusion_model != "IC":
@@ -127,7 +138,14 @@ class WorldModelEnvironment:
             diffusion_model=diffusion_model,
         )
 
-        return cls(model, graph, diffusion_model, device=device, n_samples=n_samples)
+        return cls(
+            model,
+            graph,
+            diffusion_model,
+            device=device,
+            n_samples=n_samples,
+            base_seed=base_seed,
+        )
 
     def _block_graph_input(self, sample_arrays: list[tuple]) -> GraphInput:
         # Disjoint block-diagonal union of every sample's graph: normalization is per-component, so this equals the per-sample GraphInputs stacked
@@ -149,9 +167,10 @@ class WorldModelEnvironment:
 
     @torch.inference_mode()
     def rollout(
-        self, action_fn: ActionFn, horizon: int, budget: int, seed: int = 0
+        self, action_fn: ActionFn, horizon: int, budget: int, seed: int | None = None
     ) -> Trajectory:
         start = time.perf_counter()
+        seed = self.base_seed if seed is None else seed
         rng = np.random.default_rng(seed)
         num_nodes = self.graph.num_nodes
         num_samples = self.n_samples
@@ -303,6 +322,9 @@ class WorldModelEnvironment:
             cost={
                 "n_samples": self.n_samples,
                 "env": "world_model",
+                # The seed this rollout ran under: the whole ensemble's sampling
+                # is drawn from it, so replaying it reproduces the number
+                "seed": int(seed),
                 "reward_se": reward_se,
                 "rollout_seconds": time.perf_counter() - start,
             },

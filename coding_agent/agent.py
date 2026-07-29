@@ -14,6 +14,26 @@ from openai import OpenAI, OpenAIError
 gateway_retries = 3
 
 
+def empty_usage() -> dict:
+    return {
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "total_tokens": 0,
+    }
+
+
+def merge_usage(providers: list) -> dict:
+    """Sum the usage of every provider a run created (routing spins up its own)."""
+    merged = empty_usage()
+
+    for provider in providers:
+        for key, value in getattr(provider, "usage", empty_usage()).items():
+            merged[key] += value
+
+    return merged
+
+
 class LLMProvider(Protocol):
     def complete(self, messages: list[dict]) -> str:
         """Return the model's raw text completion for a full message thread."""
@@ -60,6 +80,10 @@ class GatewayProvider:
         self.model = model
         # None -> provider default sampling; 0.0 -> greedy decoding
         self.temperature = temperature
+        # Cumulative across every call this provider makes, read back into the
+        # results JSON. Retried attempts that never returned a completion are not
+        # billed by the gateway and are not counted here either.
+        self.usage = empty_usage()
 
     def complete(self, messages: list[dict]) -> str:
         messages = fold_system(messages)
@@ -80,6 +104,13 @@ class GatewayProvider:
                         f"gateway returned empty content for model {self.model!r}: "
                         f"{response}"
                     )
+
+                # Not every OpenAI-compatible gateway returns usage; a missing
+                # block leaves the counters at zero rather than guessing
+                usage = getattr(response, "usage", None)
+                self.usage["calls"] += 1
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                    self.usage[key] += int(getattr(usage, key, 0) or 0)
 
                 return content
             except (OpenAIError, ValueError) as error:
@@ -113,8 +144,15 @@ class CodingAgent:
     def __init__(self, provider: LLMProvider) -> None:
         self.provider = provider
 
-    def generate(self, messages: list[dict]) -> str:
-        """Call the provider on a message thread and return the extracted script."""
+    def generate(self, messages: list[dict]) -> tuple[str, str]:
+        """
+        Call the provider on a message thread; return (raw reply, extracted script).
+
+        The raw reply is returned rather than dropped because the prose around
+        the code block is where the model says what it was trying to do — the
+        single most useful artifact when a run goes wrong, and it cannot be
+        reconstructed from the script afterwards.
+        """
         start = time.perf_counter()
         reply = self.provider.complete(messages)
         script = extract_code_block(reply)
@@ -125,7 +163,7 @@ class CodingAgent:
             f"thread of {len(messages)} messages)"
         )
 
-        return script
+        return reply, script
 
 
 # Opening turn (task + graph profile + anchor) plus this many recent exchanges
@@ -157,10 +195,20 @@ class Conversation:
         self.agent = agent
         self.history_exchanges = history_exchanges
         self.messages = [{"role": "system", "content": system}]
+        # Every turn verbatim, including the prose the code extractor discards.
+        # `messages` is the model's working context and is trimmed by window();
+        # this is the archive, and it is never trimmed.
+        self.transcript = []
+
+    def _record(self, kind: str, prompt: str, reply: str) -> None:
+        self.transcript.append(
+            {"turn": len(self.transcript) + 1, "kind": kind, "prompt": prompt, "reply": reply}
+        )
 
     def send(self, user_text: str) -> str:
         self.messages.append({"role": "user", "content": user_text})
-        script = self.agent.generate(self.window())
+        reply, script = self.agent.generate(self.window())
+        self._record("generate", user_text, reply)
         self.messages.append(
             {"role": "assistant", "content": f"```python\n{script}\n```"}
         )
@@ -176,12 +224,19 @@ class Conversation:
         The reply is not appended: nothing edits a strategy after this.
         """
         self.messages.append({"role": "user", "content": user_text})
+        reply = self.agent.provider.complete(self.window())
+        self._record("ask", user_text, reply)
 
-        return self.agent.provider.complete(self.window())
+        return reply
 
     def reset(self) -> None:
         """Drop everything but the system turn — a fresh episode, same contract."""
         del self.messages[1:]
+
+    def restore(self, messages: list[dict], transcript: list[dict]) -> None:
+        """Adopt a checkpointed thread so a resumed run edits what it already wrote."""
+        self.messages = list(messages)
+        self.transcript = list(transcript)
 
     def window(self) -> list[dict]:
         """System turn + opening task turn + the most recent exchanges."""

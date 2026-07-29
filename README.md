@@ -335,6 +335,7 @@ python -m pipeline.run --dataset ba --run new_agent_sweep \
 | `--budget-pcts` | `1 5 10 20` | budget sweep as % of nodes; `--budgets` for absolute k |
 | `--allow-mc-algorithms` | off | re-expose `celf`/`vanilla_greedy`/… to generated scripts; blocked by default (>60s per call, and their episodes are invisible to `real_env_episodes`) |
 | `--strategy-timeout` | `300` | wall-clock cap (s) on one generated `plan_horizon()`/`act()` call; an overrun becomes a repair turn instead of hanging the sweep. `0` disables |
+| `--llm-price-in` / `--llm-price-out` | none | USD per 1M tokens, for the cost column. Tokens are always counted; cost stays `null` unless both are given (the gateway bills nothing per token) |
 | `--compare` | off | ground-truth referee replay — required for a valid cross-condition table |
 | `--llm-model` / `--outer-iters` | `gpt-5.6-terra` / `5` | coding-agent model and refinement budget |
 

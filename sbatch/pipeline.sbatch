@@ -261,6 +261,14 @@
 #   STRATEGY_TIMEOUT wall-clock cap (s) on one generated plan_horizon()/act()
 #                   call; an overrun becomes a repair turn instead of hanging
 #                   the sweep. Default 300, 0 disables.
+#   LLM_PRICE_IN / LLM_PRICE_OUT
+#                   USD per 1M prompt / completion tokens, for the cost column.
+#                   Tokens are always counted; cost stays empty unless both are
+#                   set (the gateway bills nothing per token).
+#
+#   A killed agent arm leaves <arm>.ckpt.json beside its result and the next run
+#   of the same job resumes that search from where it stopped. FORCE=1 deletes
+#   the checkpoint first, so a forced re-run is genuinely fresh.
 #   GRAPH_ID        evaluate on a specific graph in the store
 #   BASELINE_TIMEOUT seconds before an external repo subprocess is killed
 #
@@ -525,6 +533,8 @@ COMPARE="${COMPARE:-1}"
 CREDIT="${CREDIT:-0}"
 ALLOW_MC_ALGOS="${ALLOW_MC_ALGOS:-0}"
 STRATEGY_TIMEOUT="${STRATEGY_TIMEOUT:-}"
+LLM_PRICE_IN="${LLM_PRICE_IN:-}"
+LLM_PRICE_OUT="${LLM_PRICE_OUT:-}"
 GRAPH_ID="${GRAPH_ID:-}"
 
 # ---------------------------------------------------------------------------
@@ -584,6 +594,8 @@ fi
 [ "$CREDIT" = "1" ]       && flags+=(--credit)
 [ "$ALLOW_MC_ALGOS" = "1" ] && flags+=(--allow-mc-algorithms)
 [ -n "$STRATEGY_TIMEOUT" ] && flags+=(--strategy-timeout "$STRATEGY_TIMEOUT")
+[ -n "$LLM_PRICE_IN" ]  && flags+=(--llm-price-in "$LLM_PRICE_IN")
+[ -n "$LLM_PRICE_OUT" ] && flags+=(--llm-price-out "$LLM_PRICE_OUT")
 [ "$FORCE" = "1" ]        && flags+=(--force)
 [ "$NO_PLAN_DEMO" = "1" ] && flags+=(--no-plan-demo)
 

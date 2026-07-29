@@ -122,6 +122,30 @@ means a regression becomes the base for every iteration after it, so a single ba
 sample derails the rest of the search; `evolve` has always done this correctly
 (its parent is the population best), and `one_shot` now does too.
 
+### Checkpoint and resume
+
+`one_shot` and `evolve` write `<arm>.ckpt.json` beside the result they will
+become, after **every** turn — evaluations and repairs alike. A file there means
+"this arm did not finish". The next run of the same arm picks it up and continues
+from the generation it stopped at: population, best-so-far (its trajectory
+serialized, not re-evaluated), counters, the full conversation thread, the
+transcript, and the anchor leaderboard, so a resume re-pays for neither the
+baseline rollouts nor the LLM calls it already made.
+
+A checkpoint is only reused when its **fingerprint** matches the run about to
+start — method, mode, evaluator, model, temperature, budget, horizon,
+`outer_iters`, allowed ops, mc_runs, n_samples, seed, and graph size. Resuming a
+search under a different budget or model would silently splice two experiments
+together, which is worse than losing the work, so a mismatch prints what differed
+and starts fresh. `--force` (pipeline) and `--no-resume` (standalone) delete the
+checkpoint first, because "redo" must mean redo. A finished run deletes its own
+checkpoint, so a leftover file always means an interruption.
+
+`layout.result_globs()` excludes the suffix, so a checkpoint is never mistaken
+for a result by the report or the summary table. `per_step` and `windowed` have
+no refinement loop and nothing to resume; canned arms are one deterministic
+rollout and are not checkpointed either.
+
 ### Failed scripts do not consume the search budget
 
 A script that fails to parse, import, build, or run teaches the next turn
@@ -762,6 +786,9 @@ same resolution rule as data generation) / `--horizon` / `--windows` /
 | `cost`                                                             | `{n_samples                                                                                                                                                            | mc_runs, env, reward_se, rollout_seconds}` for the winning trajectory |
 | `timeline`                                                         | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
 | `real_env_episodes`                                                | cumulative real-environment episodes consumed by inner-loop feedback (0 for `world_model`/`oracle`; the `--compare` referee replay is excluded)                        |
+| `llm_transcript`                                                   | every turn verbatim — `{turn, kind, prompt, reply}` — with the model's prose intact. The code extractor keeps only the fenced block, but the prose around it is where the model says what it was trying to do: irrecoverable afterwards, and the first thing worth reading when a run goes wrong. Empty for canned arms |
+| `llm_usage`                                                        | `{calls, prompt_tokens, completion_tokens, total_tokens, cost_usd}` summed over every provider the run created, the routing call included. `cost_usd` is `null` unless `--llm-price-in`/`--llm-price-out` were given — the lab gateway fronts Pro subscriptions and bills nothing per token, so there is no rate to assume. Token counts are exact either way, and also land in `summary.csv` |
+| `seed`                                                             | base rollout seed for the run (`--seed`); each rollout additionally records the seed it actually used in its own `cost.seed`, and `mc_seed` / `wm_reeval_seeds` record the referee and re-evaluation seeds |
 | `history`                                                          | per-outer-iteration `{iteration, reward, best, plan_seconds, rollout_seconds}` (evolve also logs `operator`; failed iterations carry `reward: null`, `error`, and their `repair` index). Empty for baseline/routing arms. Drives the convergence plot. `plan_seconds` is the generated algorithm's own compute — with free-mode composition scripts it dominates wall clock, and it is the only way to tell a slow-but-good strategy from a fast-but-lucky one |
 | `referee_mc_runs`                                                  | with `--compare`: runs used by the ground-truth replay (`--referee-mc-runs`, else `--mc-runs`) — stays high even when a native arm's inner loop ran at `--mc-runs 1`   |
 | `arm`, `arm_spec`, `condition`, `condition_name`, `budget_label`   | added when the run came from `pipeline.run`: which arm, which of the six baseline conditions, and which point of the budget sweep                                       |
