@@ -29,6 +29,11 @@ class GraphInfo:
     _degrees: np.ndarray | None = field(default=None, repr=False)
     # Prompt profile string, cached by tools.graph_profile.build_graph_profile
     _profile: str | None = field(default=None, repr=False)
+    # Feedback caches, filled by methods.base: {node: community_id} and the
+    # (RR-set cover index, theta) pair behind the residual-gain hints. Both are
+    # graph-level and would otherwise be recomputed on every refinement turn.
+    _community_labels: dict[int, int] | None = field(default=None, repr=False)
+    _rr_covers: tuple | None = field(default=None, repr=False)
 
     @classmethod
     def from_store_entry(cls, entry: dict) -> "GraphInfo":

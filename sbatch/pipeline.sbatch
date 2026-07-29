@@ -22,7 +22,7 @@
 # Every `python -m pipeline.run` flag is an environment variable. Ordinary
 # shell quoting, so a list value is just a quoted string:
 #
-#     DATASET=sbm ARMS="one_shot_free@oracle routing" ./sbatch/pipeline.sbatch
+#     DATASET=sbm ARMS="evolve_free@oracle routing" ./sbatch/pipeline.sbatch
 #
 # GPU IS AUTOMATIC. Before submitting, the script asks the pipeline whether
 # this exact set of flags ever puts a tensor on a device, and requests a GPU
@@ -81,7 +81,7 @@
 # train stage drops itself and this queues CPU-only. The ceiling, and the
 # fastest way to iterate on the agent itself.
 #
-#   DATASET=sbm ARMS=one_shot_free@oracle BASELINES=none \
+#   DATASET=sbm ARMS=evolve_free@oracle BASELINES=none \
 #       ./sbatch/pipeline.sbatch
 #
 #
@@ -90,14 +90,14 @@
 # so the ONLY thing that varies is the inner-loop feedback. GPU.
 #
 #   DATASET=sbm \
-#   ARMS="one_shot_free@monte_carlo one_shot_free@oracle one_shot_free@world_model" \
+#   ARMS="evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
 #       ./sbatch/pipeline.sbatch
 #
 #
 # --- 4. WORLD MODEL ONLY ----------------------------------------------------
 # Just our method (condition 6), nothing to compare against. GPU.
 #
-#   DATASET=ba ARMS=one_shot_free@world_model BASELINES=none \
+#   DATASET=ba ARMS=evolve_free@world_model BASELINES=none \
 #       ./sbatch/pipeline.sbatch
 #
 #
@@ -105,7 +105,7 @@
 # Condition 4 alone: averaged simulator rollouts as feedback. CPU-only.
 # MC_RUNS sets both its cost and its noise.
 #
-#   DATASET=sbm ARMS=one_shot_free@monte_carlo BASELINES=none \
+#   DATASET=sbm ARMS=evolve_free@monte_carlo BASELINES=none \
 #   MC_RUNS=200 ./sbatch/pipeline.sbatch
 #
 #
@@ -114,7 +114,7 @@
 # Keep it at 1 for the honestly model-free baseline — the whole point of this
 # arm is that every number the agent sees costs a real episode. CPU-only.
 #
-#   DATASET=sbm ARMS=one_shot_free@native BASELINES=none \
+#   DATASET=sbm ARMS=evolve_free@native BASELINES=none \
 #   NATIVE_MC_RUNS=1 ./sbatch/pipeline.sbatch
 #
 #
@@ -166,7 +166,7 @@
 #
 #   (a) no world-model arm at all -> train removes itself, queues CPU-only:
 #   DATASET=sbm \
-#   ARMS="routing one_shot_free@native one_shot_free@monte_carlo one_shot_free@oracle" \
+#   ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle" \
 #       ./sbatch/pipeline.sbatch
 #
 #   (b) keep a @world_model arm but reuse a checkpoint trained earlier:
@@ -258,6 +258,9 @@
 #                   algorithms (celf, vanilla_greedy, ...). Default 0: they
 #                   exceed 60s per call and their episodes never reach
 #                   real_env_episodes. Baselines and routing are unaffected.
+#   STRATEGY_TIMEOUT wall-clock cap (s) on one generated plan_horizon()/act()
+#                   call; an overrun becomes a repair turn instead of hanging
+#                   the sweep. Default 300, 0 disables.
 #   GRAPH_ID        evaluate on a specific graph in the store
 #   BASELINE_TIMEOUT seconds before an external repo subprocess is killed
 #
@@ -400,7 +403,7 @@
 #   python -m pipeline.run --dataset ba --run smoke \
 #       --num-graphs 2 --syn-nodes 60 --rollouts 2 --mc-marginals 3 \
 #       --epochs 3 --gen-models IC \
-#       --baselines high_degree --arms one_shot_free@oracle \
+#       --baselines high_degree --arms evolve_free@oracle \
 #       --budget-pcts 10 --outer-iters 1 --mc-runs 20 --compare
 #
 # ============================================================================
@@ -501,7 +504,10 @@ NO_PLAN_DEMO="${NO_PLAN_DEMO:-0}"
 # Agent stage
 BASELINES="${BASELINES:-high_degree degree_discount pagerank_seeds celf_pp imm random_seeds}"
 BASELINE_TIMEOUT="${BASELINE_TIMEOUT:-3600}"
-ARMS="${ARMS:-routing one_shot_free@native one_shot_free@monte_carlo one_shot_free@oracle one_shot_free@world_model}"
+# Mirrors pipeline.conditions.default_arms. evolve, not one_shot: both refine a
+# program against the same feedback for the same LLM calls, but evolve edits the
+# population best each generation while one_shot edits the latest attempt.
+ARMS="${ARMS:-routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model}"
 NATIVE_MC_RUNS="${NATIVE_MC_RUNS:-1}"
 BUDGET_PCTS="${BUDGET_PCTS:-1 5 10 20}"
 BUDGETS="${BUDGETS:-}"
@@ -518,6 +524,7 @@ ALLOWED_OPS="${ALLOWED_OPS:-add_node remove_node}"
 COMPARE="${COMPARE:-1}"
 CREDIT="${CREDIT:-0}"
 ALLOW_MC_ALGOS="${ALLOW_MC_ALGOS:-0}"
+STRATEGY_TIMEOUT="${STRATEGY_TIMEOUT:-}"
 GRAPH_ID="${GRAPH_ID:-}"
 
 # ---------------------------------------------------------------------------
@@ -576,6 +583,7 @@ fi
 [ "$COMPARE" = "1" ]      && flags+=(--compare)
 [ "$CREDIT" = "1" ]       && flags+=(--credit)
 [ "$ALLOW_MC_ALGOS" = "1" ] && flags+=(--allow-mc-algorithms)
+[ -n "$STRATEGY_TIMEOUT" ] && flags+=(--strategy-timeout "$STRATEGY_TIMEOUT")
 [ "$FORCE" = "1" ]        && flags+=(--force)
 [ "$NO_PLAN_DEMO" = "1" ] && flags+=(--no-plan-demo)
 

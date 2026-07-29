@@ -58,6 +58,7 @@ from functools import partial
 from pathlib import Path
 from dotenv import load_dotenv
 
+from coding_agent import executor
 from coding_agent.agent import CodingAgent, GatewayProvider
 from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
@@ -126,6 +127,8 @@ class ExperimentConfig:
     # Re-expose the per-candidate-simulation algorithms (celf, vanilla_greedy,
     # ...) to generated scripts; see executor.mc_blocked_algorithms
     allow_mc_algorithms: bool = False
+    # Wall-clock cap on one generated plan_horizon()/act() call; 0 disables
+    strategy_timeout: float = executor.strategy_timeout_seconds
     out_json: str | None = None
     # Arm spec this run represents; stamps the condition metadata into the
     # results JSON so a standalone run is readable by plots/report exactly like
@@ -144,21 +147,48 @@ class _CannedProvider:
         return f"```python\n{self.script}\n```"
 
 
-def build_method(name: str, allow_mc_algorithms: bool = False) -> OuterLoopMethod:
-    if name == "one_shot":
-        return OneShotSuperAlgorithm(allow_mc_algorithms=allow_mc_algorithms)
+def build_method(
+    config: "ExperimentConfig",
+    strategy_mode: str,
+    allow_mc_algorithms: bool,
+    use_anchor: bool = True,
+) -> OuterLoopMethod:
+    """
+    The single construction site for every method.
 
-    if name == "per_step":
+    `strategy_mode` / `allow_mc_algorithms` are the resolved values, not
+    config's: a canned script overrides both.
+    """
+    if config.method == "one_shot":
+        return OneShotSuperAlgorithm(
+            outer_iters=config.outer_iters,
+            credit=config.credit,
+            strategy_mode=strategy_mode,
+            # A canned script ignores its prompt, so the anchor rollouts would only
+            # burn real episodes and wall clock without informing anything
+            use_anchor=use_anchor,
+            allow_mc_algorithms=allow_mc_algorithms,
+        )
+
+    # per_step has no refinement loop — it is one episode with an LLM call per
+    # (sample, timestep), so outer_iters and credit do not apply to it
+    if config.method == "per_step":
         return PerStepReprompt(allow_mc_algorithms=allow_mc_algorithms)
 
-    if name == "windowed":
-        return WindowedOnline(allow_mc_algorithms=allow_mc_algorithms)
+    if config.method == "windowed":
+        return WindowedOnline(
+            windows=config.windows, allow_mc_algorithms=allow_mc_algorithms
+        )
 
-    if name == "evolve":
-        return EvolveSearch(allow_mc_algorithms=allow_mc_algorithms)
+    if config.method == "evolve":
+        return EvolveSearch(
+            outer_iters=config.outer_iters,
+            strategy_mode=strategy_mode,
+            allow_mc_algorithms=allow_mc_algorithms,
+        )
 
     raise ValueError(
-        f"unknown method {name!r}; choose one_shot|per_step|windowed|evolve"
+        f"unknown method {config.method!r}; choose one_shot|per_step|windowed|evolve"
     )
 
 
@@ -220,12 +250,6 @@ def _parse_routing_choice(reply: str) -> str:
     )
 
 
-def _strategy_action(
-    strategy: object, graph: GraphInfo, state: object, timestep: int
-) -> list:
-    return strategy.act(state, graph, timestep)
-
-
 def run_experiment(
     config: ExperimentConfig,
     graph: GraphInfo | None = None,
@@ -248,6 +272,10 @@ def run_experiment(
         f"budget={config.budget} ({100.0 * config.budget / graph.num_nodes:.2f}% "
         f"of N) horizon={config.horizon}"
     )
+
+    # Module-level rather than threaded through four methods: it is a machine
+    # limit on generated code, not a property of the task or the search
+    executor.strategy_timeout_seconds = config.strategy_timeout
 
     environment = _build_environment(config, graph)
     print(f"[run] {config.evaluator} environment ready")
@@ -327,30 +355,12 @@ class Baseline(Strategy):
     )
     agent = CodingAgent(provider)
 
-    method = build_method(config.method, effective_allow_mc)
-    if config.method == "windowed":
-        method = WindowedOnline(
-            windows=config.windows,
-            allow_mc_algorithms=effective_allow_mc,
-        )
-
-    if config.method == "one_shot":
-        method = OneShotSuperAlgorithm(
-            outer_iters=config.outer_iters,
-            credit=config.credit,
-            strategy_mode=effective_mode,
-            # A canned script ignores its prompt, so the anchor rollout would only
-            # burn real episodes and wall clock without informing anything
-            use_anchor=canned_script is None,
-            allow_mc_algorithms=effective_allow_mc,
-        )
-
-    if config.method == "evolve":
-        method = EvolveSearch(
-            outer_iters=config.outer_iters,
-            strategy_mode=effective_mode,
-            allow_mc_algorithms=effective_allow_mc,
-        )
+    method = build_method(
+        config,
+        effective_mode,
+        effective_allow_mc,
+        use_anchor=canned_script is None,
+    )
 
     # Optimize the method with the outer-loop coding agent iteration loop to find the best strategy and trajectory result
     print(f"[run] optimizing with {config.method} (provider {provider_label})...")
@@ -402,6 +412,10 @@ class Baseline(Strategy):
         },
         "budget": config.budget,
         "budget_pct": round(100.0 * config.budget / graph.num_nodes, 3),
+        # Seeds actually committable per episode. Equals `budget` for every method
+        # except windowed, whose budget is per window call by design — without
+        # this the sweep table reads two different budgets as the same k.
+        "effective_budget": getattr(method, "effective_budget", None) or config.budget,
         "reward": trajectory.reward,
         "spread_pct": round(100.0 * trajectory.reward / graph.num_nodes, 2),
         "summary": summarize(trajectory, graph),
@@ -454,16 +468,13 @@ class Baseline(Strategy):
         mc_environment = MonteCarloEnvironment(
             graph, config.diffusion_model, mc_runs=referee_runs
         )
-        plan = (
-            strategy.plan_horizon(graph, config.budget, config.horizon)
-            if hasattr(strategy, "plan_horizon")
-            else None
-        )
-        action_fn = (
-            partial(planned_action, plan)
-            if plan is not None
-            else partial(_strategy_action, strategy, graph)
-        )
+
+        # Replay the actions that EARNED the reward rather than re-planning. A
+        # generated script that samples (RIS with a live seed, a randomized local
+        # search) returns a different seed set on a second call, so re-planning
+        # would referee a strategy that never ran — and for per_step it would fire
+        # a fresh LLM call per (run, timestep) of the replay.
+        action_fn = partial(planned_action, trajectory.actions)
 
         mc_trajectory = mc_environment.rollout(action_fn, config.horizon, config.budget)
         result["mc_reward"] = mc_trajectory.reward
@@ -564,6 +575,14 @@ if __name__ == "__main__":
         "vanilla_greedy, static_greedy, ...) to generated scripts; they are "
         "blocked by default because they exceed 60s per call and their episodes "
         "are invisible to real_env_episodes (default: False).",
+    )
+    parser.add_argument(
+        "--strategy-timeout",
+        type=float,
+        default=executor.strategy_timeout_seconds,
+        help="wall-clock cap in seconds on one generated plan_horizon()/act() "
+        "call; an overrun becomes a repair turn instead of hanging the sweep. "
+        f"0 disables (default: {executor.strategy_timeout_seconds:.0f}).",
     )
     parser.add_argument(
         "--baseline",
@@ -728,6 +747,7 @@ if __name__ == "__main__":
         routing=args.routing,
         allowed_ops=tuple(args.allowed_ops),
         allow_mc_algorithms=args.allow_mc_algorithms,
+        strategy_timeout=args.strategy_timeout,
         method=args.method,
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,

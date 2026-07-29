@@ -67,28 +67,68 @@ evaluation cheap enough that this program-level search is affordable.
 The feedback per iteration (built by `methods/base.py::summarize` +
 `prompts.py::build_feedback_prompt`) contains:
 
-- **reward ± SE** — ensemble-mean final spread with its noise floor, so the agent
-  can tell a real improvement from sampling luck between iterations;
+- **reward ± SE** — ensemble-mean final spread with its noise floor;
+- **paired delta with a noise verdict** (`methods/base.py::paired_delta`) — the
+  signed change against the incumbent, plus the 2σ band on that comparison and an
+  explicit ruling: `INSIDE THE NOISE — this change did nothing measurable`. This
+  matters more than it sounds. On a hub-dominated graph the entire algorithmic
+  spread between `high_degree`, `degree_discount` and RIS can be ~4 nodes while
+  the ensemble SE at `--n-samples 50` is ~4 nodes: without the band the agent
+  reads sampling luck as a result and chases it;
+- **the seed set it actually chose** — every seed with its total degree and
+  community id. Improving a selection you cannot see is guesswork;
 - **infected + frontier curves** and, when the cascade dies before the horizon,
   the death step ("actions scheduled after t=X did nothing");
 - **unreached-nodes report** — per-node `P(infected)` across the ensemble
-  (`Trajectory.final_marginals`, computed by every env) surfaces the nodes the
-  cascade rarely reaches, hubs first — descriptive spatial feedback about where
-  spread is being lost, without prescribing seeds;
+  (`Trajectory.final_marginals`, computed by every env), ranked by **estimated
+  residual gain** rather than degree: a high-degree node the cascade never
+  reaches is usually unreachable, whereas a high-gain one is worth a seed;
+- **residual-gain hints** — the highest-value nodes _not_ seeded, scored by
+  reverse-reachable-set coverage not already covered by the seed set, in units of
+  expected extra nodes. This is the marginal-gain signal CELF would compute, at
+  RIS cost, and it never touches the metered evaluator. IC only (RR sets do not
+  describe LT), skipped above `rr_max_nodes`, and the cover index is cached on
+  the `GraphInfo` so it is built once per run, not once per turn;
+- **community coverage** — seeds per community against community size and the
+  mean reach inside it, plus a count of communities that got no seed at all;
 - **adjacent-seed-pairs report** — seeds with overlapping neighborhoods (likely
   redundant budget);
-- **baseline anchor** — one `degree_discount` rollout in the same env at startup
-  ("REFERENCE: … scores 46.9 — beat it"), included in every prompt;
-- **reference diff** — that anchor rollout's per-node marginals diffed against
-  the agent's, so the feedback names the specific nodes the classical algorithm
-  reaches that this strategy misses (and vice versa) plus the net expected-spread
-  gap. Costs no extra rollouts: both marginal vectors already exist;
+- **baseline leaderboard** — one rollout per algorithm in
+  `methods/base.py::anchor_algorithms` (`high_degree`, `degree_discount`,
+  `pagerank_seeds`, `imm`, `random_seeds`; RIS members dropped under LT) in the
+  same env at the same budget and horizon, sorted, included in every prompt. The
+  bar is the top row, not one arbitrary classical algorithm. Under an MC
+  evaluator these rollouts are charged to the arm like any other, so the list is
+  deliberately short — trim `anchor_algorithms` if the episode cost matters more
+  than the target;
+- **reference diff** — the _strongest_ baseline's per-node marginals diffed
+  against the agent's, naming the specific nodes it reaches that this strategy
+  misses (and vice versa) plus the net expected-spread gap. Costs no extra
+  rollouts: both marginal vectors already exist;
+- **the incumbent script itself** — see below;
 - optional **per-action counterfactual credit** (`--credit`) and **error
   tracebacks** on failed scripts.
 
 Feedback is deliberately descriptive, never prescriptive: the environments report
 where the cascade went and what each action bought, but never which node to pick —
 the algorithm design stays with the agent.
+
+### The edit target is the incumbent, not the last attempt
+
+Every feedback turn shows two programs: the one that just ran, and — when they
+differ — the **best-scoring script so far**, labelled as the one to edit. This is
+the difference between a hill climb and a random walk. Editing the latest attempt
+means a regression becomes the base for every iteration after it, so a single bad
+sample derails the rest of the search; `evolve` has always done this correctly
+(its parent is the population best), and `one_shot` now does too.
+
+### Failed scripts do not consume the search budget
+
+A script that fails to parse, import, build, or run teaches the next turn
+something, but it is not an evaluation. `--outer-iters` counts **evaluations**;
+failures draw on a separate `max_repairs` budget (default 3) and the loop only
+gives up once that is exhausted. Previously a run with `--outer-iters 5` and two
+bad scripts silently became a 3-round search.
 
 ---
 
@@ -164,9 +204,16 @@ frontier lists) is appended to the prompt, the agent writes a fresh script, its
   calls per evaluation. Treat this method as the adaptivity **upper bound / cost
   reference**, not the practical operating point. Every call is logged
   (`[per_step] LLM call k (t=…, |infected|=…)`) because that count is the cost.
+- The budget is **per episode, not per bag**. Without that the policy could
+  legally emit `budget` seeds at every one of `horizon+1` timesteps and play the
+  same nominal k as a `one_shot` arm with 11× the seeds. The counter resets at
+  `t=0`, which is exactly right under a sequential env (`MonteCarloEnvironment`);
+  under a lockstep ensemble env every sample's `t=0` also resets, so from `t>0`
+  the cap is shared across samples — stricter than per-sample, never looser. Each
+  turn's prompt states the remaining budget and which nodes are already seeded.
 - Caveats: there is no repair loop (a `StrategyError` mid-rollout aborts the
-  method), `validate_actions` is not applied to `act` outputs, and the archived
-  `script` in the results JSON is the _last_ generated script (one exists per call).
+  method), and the archived `script` in the results JSON is the _last_ generated
+  script (one exists per call).
 
 ### Method 3 — `windowed`: one online algorithm, re-applied per time window
 
@@ -176,6 +223,13 @@ algorithm's `act(state, graph, window_index)` is consulted only at window
 boundaries — solving a fresh sub-problem on the current state each window
 (classical algorithms may be reused per window; the prompt says so explicitly).
 Budget applies **per window call**.
+
+> This is the one method whose effective budget is not `--budget`. The multiplier
+> is the number of boundaries, not `--windows`: at horizon 10 with `--windows 3`
+> the window length rounds to 3 and `t=0,3,6,9` all fire, so a nominal `k` plays
+> `4k` seeds. The results JSON records the real number as `effective_budget` so
+> the sweep table is not silently read as an equal-budget comparison against
+> `one_shot` — check that column before ranking a windowed arm.
 
 - One LLM call, closed-loop at window granularity: cheaper than Method 2,
   more reactive than Method 1.
@@ -268,17 +322,60 @@ evaluator on the superset of ops (supersets are safe; subsets bite — see §7).
 ### What the LLM sees (the complete context)
 
 The system prompt (per method) carries: the role; the output contract (exactly one
-fenced ```python block, one `Strategy` subclass, no imports, no module-level code);
-the injected-names documentation; the action rules; the method's interface
-(`plan_horizon`vs`act`); and a concrete **reply skeleton** (small models follow
-scaffolds far more reliably than prose rules). The user prompt carries: task and
-objective strings, `diffusion_model`, `budget` (absolute and as % of nodes),
-`horizon`, `allowed_ops`, the **graph profile** (below), the full auto-generated
-**library API reference** (every algorithm and primitive signature with its first
-docstring line — docstrings in `tools/` are literally prompt text), and the
-closing instruction. Refinement turns append: previous reward, trajectory summary,
-the **reference diff** (below), the error traceback (repair path), and the credit
-report (`--credit`).
+fenced ```python block containing optional imports and one `Strategy` subclass);
+the **import policy** (below); the injected-names documentation; the action rules
+including what `remove_node` actually does; the method's interface
+(`plan_horizon` vs `act`); a **horizon note** chosen from `allowed_ops` (below);
+and two **worked exemplars** at the level the search should start from. The user
+prompt carries: task and objective strings, `diffusion_model`, `budget` (absolute
+and as % of nodes), `horizon`, `allowed_ops`, the **graph profile** (below), the
+full auto-generated **library API reference** (every algorithm and primitive
+signature with its first docstring line — docstrings in `tools/` are literally
+prompt text), the **full source of three library algorithms**, and the closing
+instruction. Refinement turns append: previous reward, the paired delta with its
+noise verdict, trajectory summary, the **reference diff** (below), the incumbent
+script, the error traceback (repair path), and the credit report (`--credit`).
+
+#### Imports (`executor.allowed_imports`)
+
+Generated scripts **may** import `numpy`, `networkx`, `scipy`, `math`, `random`,
+`statistics`, `heapq`, `bisect`, `collections`, `itertools`, `functools`, and
+nothing else. `executor.check_script_imports` enforces this on the AST before the
+script is compiled, and also rejects `__import__`, `eval`, `exec`, `compile`,
+`open`, and `input` by name — without those the whitelist would be trivially
+bypassable and the check would be theatre. A rejection is a `StrategyError`, so
+it lands as a repair turn naming the allowed set.
+
+The prompt previously forbade imports outright while the exec namespace exposed
+full `__builtins__`, so `import numpy` already worked and the model simply never
+tried: it wrote pure-Python loops over the adjacency next to a numpy install.
+Vectorized scoring is what makes a large RIS `theta` affordable inside
+`--strategy-timeout`, which is the difference between a crippled RIS strategy and
+a competitive one. _This is a research scaffold, not a security sandbox._
+
+#### Exemplars and library source
+
+The reply skeleton used to be a one-line `high_degree` call with "do not return
+this unchanged" — an anchor so low the model would submit a variation of it and
+spend its iterations tuning a constant. The system prompt now carries two full
+strategies (`prompts.one_shot_exemplars`): a community-aware discount, and a
+lazy-greedy max-coverage over reverse-reachable sets with the staleness-stamped
+heap that makes a large `theta` affordable. The user prompt additionally carries
+the complete source of `degree_discount`, `cofim`, and `degree_ris_refine`
+(`library_api.sourced_algorithms`) — one per idiom the library uses. Signatures
+alone leave the model guessing at how a seed set is actually built here.
+
+#### The horizon note (`allowed_ops`-dependent)
+
+Under `add_node`-only IC the cascade is progressive and monotone, so a seed at
+`t>0` has strictly fewer steps to spread than the same seed at `t=0` and every
+schedule is dominated by "all seeds at `t=0`". The old prompt spent its most
+prominent paragraph pushing the model to "schedule interventions across t₀…t_T"
+— a flat direction it would burn iterations exploring. `build_system_prompt` now
+takes the `TaskSpec` and picks: `temporal_scheduling_note` when the task allows
+edge ops (where timing genuinely matters), `seed_timing_note` otherwise, which
+says plainly to put every seed in element 0 and spend the effort on *which*
+nodes.
 
 The LLM never sees raw topology. By design, the _generated code_ gets the real
 graph at runtime (`GraphInfo` with full `edge_index`, `ic_probs`, neighbor/degree
@@ -316,15 +413,25 @@ rather than silently omitting them. netscience profiles in 0.04s.
 
 #### The reference diff (`methods/base.py::reference_diff`)
 
-`baseline_anchor` already rolls out `degree_discount` in the same environment for
-a score to beat; it now also returns that trajectory, so its per-node marginals
-can be diffed against the agent's. **Zero extra rollouts** — both vectors are
-already paid for. Refinement turns get:
+`baseline_anchor` rolls out every algorithm in `anchor_algorithms` in the same
+environment and returns the sorted table plus the **best** one's trajectory, so
+its per-node marginals can be diffed against the agent's. **Zero extra rollouts
+beyond the leaderboard** — both vectors are already paid for. Refinement turns
+get:
 
 ```
-REFERENCE DIFF (your cascade vs degree_discount's, same evaluator, per-node
-P(infected)). Listed nodes are DECISIVE flips only (one side >= 50%, the other
-< 10%); the net line below sums every node, so it is larger:
+REFERENCE SCORES — classical baselines run on THIS graph, under THIS evaluator,
+at the same budget and horizon. Beating the top row is the bar:
+  degree_discount        47.50 (±4.13 SE)
+  imm                    45.67 (±3.10 SE)
+  pagerank_seeds         45.58 (±3.32 SE)
+  high_degree            44.75 (±3.71 SE)
+  random_seeds           36.08 (±3.59 SE)
+
+REFERENCE DIFF (your cascade vs degree_discount's — the strongest baseline on
+this graph — same evaluator, per-node P(infected)). Listed nodes are DECISIVE
+flips only (one side >= 50%, the other < 10%); the net line below sums every
+node, so it is larger:
   it reaches 3 nodes you miss — top by degree: 13(d=8, ref P=0.57 vs yours 0.07), …
   net expected spread vs the reference: -15.34 nodes
 ```
@@ -340,18 +447,28 @@ prompt, so the rollout would only burn real episodes.
 1. `extract_code_block` collects all fenced blocks and prefers the first one
    containing `class ` (models pad replies with prose snippets in extra fences),
    falling back to the first fence, then the raw text.
-2. `build_strategy` compiles and `exec`s the script in a **controlled namespace**
+2. `check_script_imports` parses the AST and rejects any import outside
+   `allowed_imports`, plus the builtins that would defeat that check.
+3. `build_strategy` compiles and `exec`s the script in a **controlled namespace**
    containing exactly the names the prompts advertise: `ActionOp`, `State`,
    `GraphInfo`, `Strategy`, `algorithms`, `primitives`. Candidate classes are
    discovered by attribute (`plan_horizon`/`act`), excluding the injected base _by
    identity_ (a script may legally name its class `Strategy`). The instantiated
    strategy gets `source_script` attached so results JSONs archive the exact code
    that earned the reward. _This is a research scaffold, not a security sandbox._
-3. `call_strategy` wraps every invocation of generated code: any exception becomes
-   a `StrategyError` carrying the exception type and full traceback.
-4. `validate_actions` checks each bag: op ∈ `allowed_ops`, node ids in range,
-   seeds within budget (per bag, and `one_shot` additionally enforces the total
-   across the plan).
+4. `call_strategy` wraps every invocation of generated code: any exception becomes
+   a `StrategyError` carrying the exception type and full traceback, and the call
+   runs under a **wall-clock cap** (`--strategy-timeout`, default 300s, `0`
+   disables). An overrun becomes a repair turn that names the limit and says what
+   to do about it, instead of hanging the whole sweep on one O(N²) scan. The cap
+   is a SIGALRM, so it lands between bytecodes: a call stuck inside a long
+   numpy/networkx C call overruns until that call returns.
+5. `validate_actions` checks each bag: op ∈ `allowed_ops`, node ids in range,
+   **no node seeded twice** (a duplicate `add_node` spends two units of budget on
+   one node and would otherwise pass silently as budget the strategy never used),
+   and seeds within budget. `validate_plan` additionally enforces the total
+   across the plan and rejects re-seeding a node at a later timestep; `per_step`
+   enforces the same across the episode.
 
 `StrategyError` is the failure currency of the subsystem: it marks "the generated
 program is wrong" (recoverable — becomes a revision prompt), as opposed to every
@@ -637,6 +754,7 @@ same resolution rule as data generation) / `--horizon` / `--windows` /
 | `method`, `evaluator`, `model`                                     | provenance; `model` is the gateway name, `baseline:<algo>`, `routing:<algo>`, or `canned`                                                                              |
 | `graph`                                                            | `{graph_id, num_nodes, num_edges, directed}`; `num_edges` counts directed arcs (edge_index columns), matching the prompt stats                                         |
 | `budget`, `budget_pct`                                             | the seed budget the run was constrained to, absolute and as % of `num_nodes`                                                                                           |
+| `effective_budget`                                                 | seeds actually committable per episode. Equals `budget` for every method except `windowed`, whose budget is per window call by design — read this column before ranking a windowed arm against the others |
 | `reward`, `spread_pct`                                             | ensemble-mean final spread under the inner-loop evaluator, absolute and as % of `num_nodes`                                                                            |
 | `summary`                                                          | one-line trajectory summary (final spread, steps, per-step counts)                                                                                                     |
 | `script`                                                           | the exact source of the winning strategy (per_step: last generated script)                                                                                             |
@@ -644,11 +762,11 @@ same resolution rule as data generation) / `--horizon` / `--windows` /
 | `cost`                                                             | `{n_samples                                                                                                                                                            | mc_runs, env, reward_se, rollout_seconds}` for the winning trajectory |
 | `timeline`                                                         | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
 | `real_env_episodes`                                                | cumulative real-environment episodes consumed by inner-loop feedback (0 for `world_model`/`oracle`; the `--compare` referee replay is excluded)                        |
-| `history`                                                          | per-outer-iteration `{iteration, reward, best}` (evolve also logs `operator`; failed iterations carry `reward: null` and `error`). Empty for baseline/routing arms. Drives the convergence plot |
+| `history`                                                          | per-outer-iteration `{iteration, reward, best, plan_seconds, rollout_seconds}` (evolve also logs `operator`; failed iterations carry `reward: null`, `error`, and their `repair` index). Empty for baseline/routing arms. Drives the convergence plot. `plan_seconds` is the generated algorithm's own compute — with free-mode composition scripts it dominates wall clock, and it is the only way to tell a slow-but-good strategy from a fast-but-lucky one |
 | `referee_mc_runs`                                                  | with `--compare`: runs used by the ground-truth replay (`--referee-mc-runs`, else `--mc-runs`) — stays high even when a native arm's inner loop ran at `--mc-runs 1`   |
 | `arm`, `arm_spec`, `condition`, `condition_name`, `budget_label`   | added when the run came from `pipeline.run`: which arm, which of the six baseline conditions, and which point of the budget sweep                                       |
 | `credit_base_reward`, `credit`                                     | with `--credit`: paired-ablation base reward + per-action deltas                                                                                                       |
-| `mc_reward`, `mc_spread_pct`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy (absolute + % of `num_nodes`)                                                                            |
+| `mc_reward`, `mc_spread_pct`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy (absolute + % of `num_nodes`). The replay re-runs the exact **actions** the winner took, not the strategy — a script that samples (RIS with a live seed, a randomized local search) returns a different seed set on a second call, so re-planning would referee a strategy that never ran |
 | `wm_minus_mc`                                                      | evaluator fidelity on this exact strategy — the trust meter                                                                                                            |
 | `elapsed_seconds`                                                  | whole experiment including LLM calls                                                                                                                                   |
 

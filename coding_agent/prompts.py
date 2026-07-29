@@ -1,22 +1,34 @@
 from coding_agent.types import GraphInfo, TaskSpec
-from coding_agent.executor import mc_blocked_algorithms, scored_blocked_primitives
+from coding_agent.executor import (
+    allowed_imports,
+    mc_blocked_algorithms,
+    scored_blocked_primitives,
+)
 from coding_agent.tools.graph_profile import build_graph_profile
 from coding_agent.tools.library_api import (
     build_algorithm_menu,
+    build_algorithm_sources,
     build_api_reference,
     build_primitives_reference,
 )
 
+edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
+
 # Shared system-prompt preamble containing common rules for the coding agent
-common_rules = """\
+common_rules = f"""\
 You are designing an Influence Maximization algorithm as an executable Python script.
 
 OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
-no prose before or after. The block MUST define a class subclassing `Strategy`
-and contain nothing outside that class: no imports, no module-level code, no
-example usage.
+no prose before or after. The block contains import lines (if you need any) and
+then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
+example usage, no test code.
 
-AVAILABLE NAMES (already imported into your script's namespace — do NOT import them):
+IMPORTS: you MAY import any of {", ".join(allowed_imports)}. Use numpy for
+anything you would otherwise write as a Python loop over all nodes — vectorized
+scoring is what lets you afford large sample sizes inside the time limit.
+Importing anything else is rejected.
+
+AVAILABLE NAMES (already in your script's namespace — do NOT import these):
 - `ActionOp(op, target, destination=None, weight=None)` : a graph action. Ops:
     add_node, remove_node, add_edge, remove_edge, set_edge_weight.
 - `State` : has .infected (list[int]) and .frontier (list[int]).
@@ -25,8 +37,114 @@ AVAILABLE NAMES (already imported into your script's namespace — do NOT import
 
 ACTION RULES:
 - A seed is ActionOp("add_node", node). Emit at most `budget` add_node actions in total.
+- Seeding the same node twice is REJECTED: it spends two units of budget on one node.
 - Node ids must be in [0, num_nodes).
-- You may also use remove_node / add_edge / remove_edge / set_edge_weight to steer the cascade.
+- remove_node under IC sets the node to Removed: it STAYS counted as infected and
+  simply stops spreading, so it can only ever lower your score. Under LT it
+  returns the node to Susceptible. For influence MAXIMIZATION it is almost never
+  the right action — do not spend budget on it without a specific reason.
+- add_edge / remove_edge / set_edge_weight rewire the graph the cascade runs on;
+  under LT edge weights are ignored and only the structural change applies.
+"""
+
+# Two worked strategies at the quality the search should START from. The trivial
+# high_degree stub they replaced set the anchor far too low: the model would
+# submit a one-line variation of it and spend its iterations tuning a constant.
+one_shot_exemplars = """\
+EXAMPLES — two strategies at the level you should START from, not finish at.
+
+Example 1, community-aware discount (spends budget across communities, then
+suppresses neighbours of picks so seeds do not overlap):
+```python
+class CommunityDiscount(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        labels = primitives.detect_communities(graph)
+        allocation = primitives.allocate_budget(labels, budget)
+        degrees = primitives.compute_degree(graph)
+
+        members = {}
+        for node, community_id in labels.items():
+            members.setdefault(community_id, []).append(node)
+
+        seeds = []
+        for community_id, quota in allocation.items():
+            discounted = {node: float(degrees[node]) for node in members[community_id]}
+            for _ in range(quota):
+                if not discounted:
+                    break
+                pick = max(discounted, key=discounted.get)
+                seeds.append(pick)
+                del discounted[pick]
+                for neighbor in graph.out_neighbors(pick):
+                    if neighbor in discounted:
+                        discounted[neighbor] *= 0.5
+
+        return [[ActionOp("add_node", int(node)) for node in seeds]] + [
+            [] for _ in range(horizon)
+        ]
+```
+
+Example 2, lazy-greedy max coverage over reverse-reachable sets (the RIS family;
+the heap re-scores only the node it pops, which is what makes a large theta
+affordable):
+```python
+import heapq
+
+class RisCoverage(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        theta = min(200000, 20 * graph.num_nodes)
+        covers = {}
+        for index, rr_set in enumerate(
+            primitives.batch_reverse_sample(graph, theta=theta, seed=0)
+        ):
+            for node in rr_set:
+                covers.setdefault(int(node), set()).add(index)
+
+        heap = [(-len(cover), node, 0) for node, cover in covers.items()]
+        heapq.heapify(heap)
+        seeds, covered = [], set()
+
+        while len(seeds) < budget and heap:
+            _, node, stamp = heapq.heappop(heap)
+            if stamp == len(seeds):
+                seeds.append(node)
+                covered |= covers[node]
+            else:
+                heapq.heappush(heap, (-len(covers[node] - covered), node, len(seeds)))
+
+        # Coverage can run out before the budget does
+        for node in primitives.get_top_degree_nodes(graph, graph.num_nodes):
+            if len(seeds) >= budget:
+                break
+            if node not in seeds:
+                seeds.append(node)
+
+        return [[ActionOp("add_node", int(node)) for node in seeds]] + [
+            [] for _ in range(horizon)
+        ]
+```
+Beat both. Combining their ideas, or replacing them, are both fair game.
+"""
+
+# Only shown when the task actually allows edge ops. Under add_node-only IC the
+# cascade is progressive and monotone, so delaying a seed is weakly worse and
+# every schedule is dominated by "all seeds at t=0" — telling the model to
+# schedule across time there just burns iterations on a flat direction.
+temporal_scheduling_note = """\
+
+USING THE HORIZON: this task allows edge operations, so the timing of actions
+matters. Rewiring after the cascade has started can open a path the seeds could
+not otherwise reach; rewiring before it starts changes where the cascade goes
+from the first step. Use the frontier trajectory in the feedback to decide when
+each intervention lands.
+"""
+
+seed_timing_note = """\
+
+USING THE HORIZON: this task is add_node-only under a progressive cascade, so a
+seed placed at t>0 has strictly fewer steps to spread than the same seed at t=0.
+Put every seed in element 0 and leave the rest of the plan empty. All of your
+effort belongs in WHICH nodes you pick, not when.
 """
 
 # System prompts dict-keyed by method name (one_shot, per_step, windowed)
@@ -37,21 +155,10 @@ system_prompts = {
 METHOD: ONE-SHOT SUPER-ALGORITHM.
 Implement `plan_horizon(self, graph, budget, horizon) -> list[list[ActionOp]]`.
 Return a list of length (horizon+1): element t is the action bag applied at timestep t.
-This is your whole multi-timestep plan, decided up front. Classical algorithms only
-fill element 0 (the seed set) and leave the rest empty — go beyond that: schedule
-interventions across t0..tT to maximize final spread.
+This is your whole multi-timestep plan, decided up front.
 
-REPLY SHAPE (adapt the logic, keep the structure):
-```python
-class MyStrategy(Strategy):
-    def plan_horizon(self, graph, budget, horizon):
-        seeds = algorithms.high_degree(graph, budget, "IC")
-        plan = [[ActionOp("add_node", node) for node in seeds]]
-        plan += [[] for _ in range(horizon)]
-        return plan
-```
-Do not return this baseline unchanged — improve on it.
-""",
+"""
+    + one_shot_exemplars,
     "per_step": common_rules
     + """\
 
@@ -111,7 +218,12 @@ def build_user_prompt(
         final_line = "Write the ScoredStrategy subclass now."
     else:
         blocked = () if allow_mc_algorithms else mc_blocked_algorithms
-        reference = f"LIBRARY API:\n{build_api_reference(exclude=blocked)}"
+        # Signatures alone do not teach the idiom — the model reproduces the
+        # library's shape much more reliably once it has read a few of them
+        reference = (
+            f"LIBRARY API:\n{build_api_reference(exclude=blocked)}\n\n"
+            f"{build_algorithm_sources()}"
+        )
         final_line = f"Write the Strategy now (method = {method})."
 
     return f"""\
@@ -165,10 +277,20 @@ class MyScorer(ScoredStrategy):
 """
 
 
-def build_system_prompt(method: str, strategy_mode: str = "free") -> str:
+def build_system_prompt(
+    method: str, strategy_mode: str = "free", task: TaskSpec | None = None
+) -> str:
+    horizon_note = ""
+    if task is not None:
+        horizon_note = (
+            temporal_scheduling_note
+            if any(op in task.allowed_ops for op in edge_ops)
+            else seed_timing_note
+        )
+
     if strategy_mode == "scored":
         if method in ("one_shot", "evolve"):
-            return scored_system
+            return scored_system + horizon_note
 
         raise ValueError(
             f"strategy_mode='scored' is not supported for method {method!r}; "
@@ -176,7 +298,9 @@ def build_system_prompt(method: str, strategy_mode: str = "free") -> str:
         )
 
     # evolve generates plan_horizon strategies under the same contract as one_shot
-    return system_prompts["one_shot" if method == "evolve" else method]
+    base = system_prompts["one_shot" if method == "evolve" else method]
+
+    return base + horizon_note if method in ("one_shot", "evolve") else base
 
 
 # Evolve method: each generation is an EDIT of a parent from the population
@@ -199,7 +323,15 @@ def build_evolve_prompt(
     parent: dict,
     inspirations: list[dict],
     error: str | None = None,
+    last_result: str | None = None,
 ) -> str:
+    """
+    `last_result` is the previous generation's paired delta.
+
+    The parent's own summary carries the delta it was created with, but a
+    candidate that did not become the parent never surfaces one — so without
+    this the model's most recent edit gets no verdict at all.
+    """
     inspiration_text = "".join(
         f"\nALTERNATIVE from the population (reward={record['reward']:.2f}):\n"
         f"```python\n{record['script']}\n```\n"
@@ -208,11 +340,13 @@ def build_evolve_prompt(
     error_text = (
         f"\nYour previous attempt failed with:\n{error}\n" if error else ""
     )
+    last_text = f"\nYOUR LAST EDIT: {last_result}\n" if last_result else ""
 
     return f"""
 You are evolving a population of strategies. Produce a NEW candidate by modifying the PARENT.
-
-PARENT (reward={parent["reward"]:.2f}):
+{last_text}
+PARENT — the best in the population, which is NOT necessarily your last attempt
+(reward={parent["reward"]:.2f}):
 ```python
 {parent["script"]}
 ```
@@ -322,27 +456,52 @@ def build_feedback_prompt(
     credit_report: str | None = None,
     reference_report: str | None = None,
     script: str | None = None,
+    incumbent_script: str | None = None,
+    incumbent_reward: float | None = None,
+    delta_report: str | None = None,
 ) -> str:
     """
-    `script` is the code that produced this reward.
+    `script` is the code that produced this reward; `incumbent_script` is the
+    best-scoring code so far, shown only when the two differ.
 
-    It is also the previous assistant turn in the conversation, so this is
-    deliberately redundant — but the echo is what makes the instruction "EDIT
-    this" concrete, and it survives history trimming and any gateway that
-    mangles multi-turn threads.
+    Both are also assistant turns in the conversation, so the echo is
+    deliberately redundant — but it is what makes "EDIT this one" unambiguous,
+    and it survives history trimming and any gateway that mangles multi-turn
+    threads. The incumbent is what the next edit must be applied to: editing the
+    latest attempt instead turns the loop into a random walk, because a
+    regression then becomes the base for everything after it.
     """
     error_text = f"\nThe previous script raised an error:\n{error}\n" if error else ""
     credit_text = f"\n{credit_report}\n" if credit_report else ""
     reference_text = f"\n{reference_report}\n" if reference_report else ""
+    delta_text = f"{delta_report}\n" if delta_report else ""
     script_text = (
         f"\nTHE SCRIPT THAT PRODUCED THIS RESULT:\n```python\n{script}\n```\n"
         if script
         else ""
     )
 
+    if incumbent_script is not None:
+        target_text = (
+            f"\nYOUR BEST SCRIPT SO FAR (reward {incumbent_reward:.2f}) — THIS is "
+            f"the one to edit, NOT the attempt above, which scored worse:\n"
+            f"```python\n{incumbent_script}\n```\n"
+        )
+        instruction = (
+            "EDIT THE BEST SCRIPT ABOVE to increase final spread. The attempt that "
+            "just ran is shown so you can see what did not work — do not build on "
+            "it. Change what the diagnostics say is weak and keep what is working."
+        )
+    else:
+        target_text = ""
+        instruction = (
+            "That attempt is your best so far. EDIT it to increase final spread — "
+            "change what the diagnostics say is weak and keep what is working, "
+            "rather than starting a new design from scratch."
+        )
+
     return f"""\
 Your previous strategy achieved final spread (reward) = {reward}.
-Trajectory summary: {summary}{reference_text}{error_text}{credit_text}{script_text}
-EDIT that script to increase final spread — change what the diagnostics say is
-weak and keep what is working, rather than starting a new design from scratch.
+{delta_text}Trajectory summary: {summary}{reference_text}{error_text}{credit_text}{script_text}{target_text}
+{instruction}
 Reply with one ```python block containing the complete updated script."""

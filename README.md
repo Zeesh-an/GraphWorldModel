@@ -228,7 +228,7 @@ python -m pipeline.run --dataset netscience --compare
 # Outer-loop development without training a world model: drop the one arm that
 # needs it and the train stage is skipped automatically
 python -m pipeline.run --dataset sbm --num-graphs 40 --compare \
-    --arms routing one_shot_free@native one_shot_free@monte_carlo one_shot_free@oracle
+    --arms routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle
 ```
 
 ### The six baseline conditions
@@ -241,17 +241,23 @@ evaluator, so they all land in one `report.md` table.
 | --- | --- | --- | --- | --- |
 | 1 | Pure GA | `--baselines celf_pp …` | fixed algorithm | none |
 | 2 | GA routing | `routing` | LLM picks from the pool | none (one selection call) |
-| 3 | Native coding agent | `one_shot_free@native` | LLM writes code | real executions only |
-| 4 | Agent + MC simulation | `one_shot_free@monte_carlo` | LLM writes code | averaged simulator rollouts |
-| 5 | Agent + oracle dynamics | `one_shot_free@oracle` | LLM writes code | true transition dynamics |
-| 6 | **Ours: agent + learned GWM** | `one_shot_free@world_model` | LLM writes code | learned `f_θ` rollouts |
+| 3 | Native coding agent | `evolve_free@native` | LLM writes code | real executions only |
+| 4 | Agent + MC simulation | `evolve_free@monte_carlo` | LLM writes code | averaged simulator rollouts |
+| 5 | Agent + oracle dynamics | `evolve_free@oracle` | LLM writes code | true transition dynamics |
+| 6 | **Ours: agent + learned GWM** | `evolve_free@world_model` | LLM writes code | learned `f_θ` rollouts |
 
 Conditions 3–6 hold the method fixed, so the **only** thing varying down that
 ladder is the inner-loop evaluator — which is what makes it a clean ablation.
 `@native` means the real simulator at `--native-mc-runs` episode(s) per candidate:
 model-free trial and error that pays real experience for every noisy number it
-gets back. Swap `one_shot_free` for `evolve_scored` (or any
-`<method>_<mode>`) to run a different synthesis method down the same ladder.
+gets back. Swap `evolve_free` for `one_shot_free`, `evolve_scored`, or any
+`<method>_<mode>` to run a different synthesis method down the same ladder.
+
+The synthesis method is `evolve`, not `one_shot`: both refine a program against
+the same feedback under the same LLM-call budget, but `evolve` edits the
+**population best** each generation while `one_shot` edits the latest attempt, so
+`one_shot` compounds a regression instead of rejecting it. Same cost, strictly
+better search.
 
 **`--compare` is effectively mandatory for a multi-condition sweep.** Each arm's
 own `reward` is measured by its own evaluator — a native arm's is one noisy
@@ -263,7 +269,7 @@ it the pipeline warns and the report is marked as not comparable.
 ```bash
 # Add a classical baseline, drop an expensive one
 python -m pipeline.run --dataset sbm --baselines celf_pp imm community_im \
-    --arms one_shot_free@oracle one_shot_free@world_model --compare
+    --arms evolve_free@oracle evolve_free@world_model --compare
 
 # Give the native agent a bigger real-episode budget per candidate
 python -m pipeline.run --dataset ba --native-mc-runs 5 --compare
@@ -328,6 +334,7 @@ python -m pipeline.run --dataset ba --run new_agent_sweep \
 | `--native-mc-runs` | `1` | real episodes per candidate for an `@native` arm |
 | `--budget-pcts` | `1 5 10 20` | budget sweep as % of nodes; `--budgets` for absolute k |
 | `--allow-mc-algorithms` | off | re-expose `celf`/`vanilla_greedy`/… to generated scripts; blocked by default (>60s per call, and their episodes are invisible to `real_env_episodes`) |
+| `--strategy-timeout` | `300` | wall-clock cap (s) on one generated `plan_horizon()`/`act()` call; an overrun becomes a repair turn instead of hanging the sweep. `0` disables |
 | `--compare` | off | ground-truth referee replay — required for a valid cross-condition table |
 | `--llm-model` / `--outer-iters` | `gpt-5.6-terra` / `5` | coding-agent model and refinement budget |
 
@@ -343,7 +350,7 @@ variable:
 
 ```bash
 DATASET=ba ./sbatch/pipeline.sbatch                    # everything
-DATASET=sbm ARMS=one_shot_free@oracle BASELINES=none ./sbatch/pipeline.sbatch
+DATASET=sbm ARMS=evolve_free@oracle BASELINES=none ./sbatch/pipeline.sbatch
 DATASET=ba START_STAGE=plots ./sbatch/pipeline.sbatch  # re-plot only
 DATASET=ba DRY_RUN=1 ./sbatch/pipeline.sbatch          # show, submit nothing
 ```

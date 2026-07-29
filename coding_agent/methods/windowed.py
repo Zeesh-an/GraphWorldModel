@@ -11,6 +11,11 @@ class WindowedOnline(OuterLoopMethod):
     def __init__(self, windows: int = 3, allow_mc_algorithms: bool = False) -> None:
         self.windows = windows
         self.allow_mc_algorithms = allow_mc_algorithms
+        # Seeds this method may commit per episode. Unlike the other methods this
+        # is NOT task.budget: the budget is per window call by design, so an arm
+        # nominally at k plays k x (number of window boundaries). run.py writes it
+        # into the results JSON so the sweep table is not read as equal-budget.
+        self.effective_budget = None
 
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
@@ -31,7 +36,18 @@ class WindowedOnline(OuterLoopMethod):
         )
 
         window_length = max(1, (task.horizon + 1) // self.windows)
-        print(f"[windowed] rolling out {self.windows} windows of {window_length} steps")
+
+        # The number of boundaries, not --windows: with horizon 10 and windows 3
+        # the length rounds to 3 and t=0,3,6,9 all trigger a call
+        boundaries = sum(
+            1 for timestep in range(task.horizon + 1) if timestep % window_length == 0
+        )
+        self.effective_budget = task.budget * boundaries
+        print(
+            f"[windowed] rolling out {boundaries} window calls of {window_length} "
+            f"steps; budget {task.budget} per call = {self.effective_budget} seeds "
+            f"per episode"
+        )
 
         def action_fn(state: State, timestep: int) -> list[ActionOp]:
             # Consult the online algorithm at each window boundary only

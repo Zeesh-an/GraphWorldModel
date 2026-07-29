@@ -68,13 +68,19 @@ default_baselines = (
 )
 
 # Conditions 2-6. The method is held fixed across 3-6 so the only thing that
-# varies down that ladder is the inner-loop evaluator — the clean ablation
+# varies down that ladder is the inner-loop evaluator — the clean ablation.
+#
+# evolve, not one_shot: both refine a program against the same feedback, but
+# evolve edits the POPULATION BEST each generation while one_shot edits the
+# latest attempt, so one_shot compounds a regression instead of rejecting it.
+# Same LLM calls, same evaluator, strictly better search — swap back to
+# one_shot_free@* with --arms if you want the ablation.
 default_arms = (
     "routing",
-    "one_shot_free@native",
-    "one_shot_free@monte_carlo",
-    "one_shot_free@oracle",
-    "one_shot_free@world_model",
+    "evolve_free@native",
+    "evolve_free@monte_carlo",
+    "evolve_free@oracle",
+    "evolve_free@world_model",
 )
 
 

@@ -14,6 +14,7 @@ from coding_agent.executor import StrategyError, build_strategy, call_strategy
 from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
+    paired_delta,
     reference_diff,
     summarize,
     validate_plan,
@@ -44,13 +45,18 @@ class EvolveSearch(OuterLoopMethod):
         self.inspiration_count = inspiration_count
         # Per-generation rewards, read back by run.py for the convergence plot
         self.history = []
+        # Seeds this method may commit per episode; read back into the results JSON
+        self.effective_budget = None
 
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
-        system = build_system_prompt("evolve", self.strategy_mode)
+        system = build_system_prompt("evolve", self.strategy_mode, task)
+        self.effective_budget = task.budget
 
-        anchor, anchor_trajectory = baseline_anchor(environment, task, graph)
+        anchor, anchor_trajectory, anchor_name = baseline_anchor(
+            environment, task, graph
+        )
         tqdm.write(f"[evolve] {anchor}")
         base_user = (
             build_user_prompt(
@@ -70,6 +76,7 @@ class EvolveSearch(OuterLoopMethod):
         best = None
         stagnation = 0
         last_error = None
+        last_delta = None
 
         progress_bar = tqdm(range(self.outer_iters), desc="evolve search")
         for iteration in progress_bar:
@@ -102,7 +109,11 @@ class EvolveSearch(OuterLoopMethod):
 
                 # No base_user here: the task is already the thread's opening turn
                 user = build_evolve_prompt(
-                    operator, parent, inspirations, error=last_error
+                    operator,
+                    parent,
+                    inspirations,
+                    error=last_error,
+                    last_result=last_delta,
                 )
 
             tqdm.write(
@@ -124,9 +135,10 @@ class EvolveSearch(OuterLoopMethod):
                 plan = call_strategy(
                     strategy.plan_horizon, graph, task.budget, task.horizon
                 )
+                plan_seconds = time.perf_counter() - plan_start
                 tqdm.write(
                     f"[evolve] iter {iteration + 1}: plan built in "
-                    f"{time.perf_counter() - plan_start:.1f}s; rolling out..."
+                    f"{plan_seconds:.1f}s; rolling out..."
                 )
 
                 validate_plan(plan, task, graph)
@@ -154,12 +166,18 @@ class EvolveSearch(OuterLoopMethod):
             last_error = None
             # The reference diff rides along in the summary, so it reaches the
             # prompt wherever a population record is shown as parent or inspiration
-            diff = reference_diff(trajectory, anchor_trajectory, graph)
+            diff = reference_diff(trajectory, anchor_trajectory, graph, anchor_name)
+            last_delta = (
+                paired_delta(trajectory, best[1], "the population best")
+                if best is not None
+                else None
+            )
             population.append(
                 {
                     "script": strategy.source_script,
                     "reward": trajectory.reward,
-                    "summary": summarize(trajectory, graph)
+                    "summary": summarize(trajectory, graph, task)
+                    + (f"\n{last_delta}" if last_delta else "")
                     + (f"\n{diff}" if diff else ""),
                 }
             )
@@ -182,6 +200,10 @@ class EvolveSearch(OuterLoopMethod):
                     "reward": trajectory.reward,
                     "best": best[1].reward,
                     "operator": operator,
+                    "plan_seconds": round(plan_seconds, 3),
+                    "rollout_seconds": round(
+                        trajectory.cost.get("rollout_seconds", 0.0), 3
+                    ),
                 }
             )
             tqdm.write(

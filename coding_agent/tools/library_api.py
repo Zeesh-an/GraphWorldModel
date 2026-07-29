@@ -10,6 +10,11 @@ from coding_agent.tools import algorithms, primitives
 
 algorithm_names = list(algorithms.algorithms.keys())
 
+# Three implementations shown in full, one per idiom the library uses: neighbour
+# discounting, per-community budget allocation, and RIS-then-refine. Signatures
+# alone leave the model guessing at how a seed set is actually built here.
+sourced_algorithms = ("degree_discount", "cofim", "degree_ris_refine")
+
 # Primitives we advertise to the agent (pure, safe to call)
 primitives_list = [
     primitives.compute_degree,
@@ -47,6 +52,19 @@ def build_algorithm_menu() -> str:
         lines.append(f"- {name}: {summary}")
 
     return "\n".join(lines)
+
+
+def build_algorithm_sources(names: tuple = sourced_algorithms) -> str:
+    """Return the full source of a few library algorithms, as worked examples."""
+    blocks = "\n\n".join(
+        f"```python\n{inspect.getsource(algorithms.algorithms[name]).rstrip()}\n```"
+        for name in names
+    )
+
+    return (
+        "LIBRARY SOURCE (how these are actually written — same primitives and the "
+        "same GraphInfo you get):\n" + blocks
+    )
 
 
 def build_primitives_reference(exclude: tuple = ()) -> str:

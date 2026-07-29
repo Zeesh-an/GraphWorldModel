@@ -4,8 +4,12 @@ validated Strategy. All failures raise StrategyError carrying a message suitable
 for feeding back to the agent as a repair turn.
 """
 
+import ast
 import inspect
+import signal
+import threading
 import traceback
+from contextlib import contextmanager
 from functools import partial
 from types import SimpleNamespace
 from typing import Callable
@@ -13,6 +17,34 @@ from typing import Callable
 from coding_agent.tools import algorithms, primitives
 from coding_agent.types import ActionOp, GraphInfo, ScoredStrategy, State, Strategy
 from data.wm_simulator import valid_action_ops
+
+# Wall-clock cap on one plan_horizon()/act() call. A generated O(N^2) scan would
+# otherwise hang the whole sweep with no diagnosis; the cap turns it into a
+# repair turn that names the limit. Overridden per run by run.py from
+# --strategy-timeout; 0 disables. The signal only lands between bytecodes, so a
+# call stuck inside a long numpy/networkx C call overruns until it returns.
+strategy_timeout_seconds = 300.0
+
+# Third-party modules a generated script may import. numpy and networkx are the
+# point: without them the model writes pure-Python loops over the adjacency and
+# cannot afford the sample sizes that make RIS-style selection work.
+allowed_imports = (
+    "numpy",
+    "networkx",
+    "scipy",
+    "math",
+    "random",
+    "statistics",
+    "heapq",
+    "bisect",
+    "collections",
+    "itertools",
+    "functools",
+)
+
+# These defeat the import whitelist or reach the filesystem, so the AST check
+# rejects them by name rather than pretending the whitelist is enforceable
+forbidden_builtins = ("__import__", "eval", "exec", "compile", "open", "input")
 
 # Hidden from scored mode: simulation-based selection would rebuild CELF (and
 # bypass the metered evaluator) instead of inventing structural scoring logic
@@ -67,6 +99,66 @@ if _unknown_blocked:
 
 class StrategyError(RuntimeError):
     """A generated script failed to parse, execute, or expose a valid Strategy."""
+
+
+class _StrategyTimeout(Exception):
+    """Raised by the SIGALRM handler; converted to StrategyError by call_strategy."""
+
+
+def _raise_timeout(_signum: int, _frame: object) -> None:
+    raise _StrategyTimeout()
+
+
+@contextmanager
+def _time_limit(seconds: float):
+    # SIGALRM is main-thread and Unix only; elsewhere the call runs uncapped
+    if (
+        seconds <= 0
+        or not hasattr(signal, "SIGALRM")
+        or threading.current_thread() is not threading.main_thread()
+    ):
+        yield
+        return
+
+    previous = signal.signal(signal.SIGALRM, _raise_timeout)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0.0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def check_script_imports(script: str) -> None:
+    """Raise StrategyError if the script imports outside the whitelist."""
+    try:
+        tree = ast.parse(script)
+    except SyntaxError as error:
+        raise StrategyError(f"SyntaxError in generated script: {error}") from error
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id in forbidden_builtins:
+            raise StrategyError(
+                f"generated script uses {node.id!r}, which is not available. "
+                f"Import what you need directly from: {', '.join(allowed_imports)}."
+            )
+
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            modules = [node.module or ""]
+        else:
+            continue
+
+        for module in modules:
+            if module.split(".")[0] not in allowed_imports:
+                raise StrategyError(
+                    f"generated script imports {module!r}, which is not available. "
+                    f"Importable modules: {', '.join(allowed_imports)}. "
+                    f"ActionOp/State/GraphInfo/Strategy/algorithms/primitives are "
+                    f"already in the namespace and must not be imported."
+                )
 
 
 def _blocked_algorithm(name: str, *_args, **_kwargs) -> None:
@@ -134,6 +226,7 @@ def build_strategy(
     script: str, strategy_mode: str = "free", allow_mc_algorithms: bool = False
 ) -> Strategy:
     # Converts a generated script string into a live object
+    check_script_imports(script)
     namespace = _namespace(strategy_mode, allow_mc_algorithms)
 
     try:
@@ -199,9 +292,18 @@ def build_strategy(
 def call_strategy(method: Callable, *args) -> object:
     """Invoke generated-strategy code, converting any runtime failure into a StrategyError repair turn."""
     try:
-        return method(*args)
+        with _time_limit(strategy_timeout_seconds):
+            return method(*args)
     except StrategyError:
         raise
+    except _StrategyTimeout:
+        raise StrategyError(
+            f"strategy exceeded the {strategy_timeout_seconds:.0f}s wall-clock limit "
+            f"for one call. Something in it scales badly — a scan over all nodes "
+            f"inside a per-pick loop, or a sample size far larger than the graph "
+            f"needs. Rewrite it to run in seconds: vectorize with numpy, precompute "
+            f"scores once outside the selection loop, or shrink the sample count."
+        ) from None
     except Exception as error:
         raise StrategyError(
             f"strategy raised {type(error).__name__}: {error}\n"
@@ -212,8 +314,9 @@ def call_strategy(method: Callable, *args) -> object:
 def validate_actions(
     bag: list, num_nodes: int, budget: int, allowed_ops: tuple = valid_action_ops
 ) -> None:
-    """Raise StrategyError if an action bag references invalid nodes, uses a disallowed op, or exceeds budget."""
+    """Raise StrategyError if an action bag references invalid nodes, uses a disallowed op, repeats a seed, or exceeds budget."""
     num_adds = 0
+    seeded = set()
 
     for action in bag:
         if action.op not in allowed_ops:
@@ -229,6 +332,17 @@ def validate_actions(
 
         if action.op == "add_node":
             num_adds += 1
+
+            # Seeding a node twice spends two of k on one node and would
+            # otherwise pass silently as a budget the strategy never used
+            if int(action.target) in seeded:
+                raise StrategyError(
+                    f"action bag seeds node {action.target} more than once; a "
+                    f"duplicate add_node spends budget without adding a node. "
+                    f"Deduplicate the seed set before returning it."
+                )
+
+            seeded.add(int(action.target))
 
     if num_adds > budget:
         raise StrategyError(

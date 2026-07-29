@@ -59,6 +59,7 @@ from baselines.registry import (
     runnable_baselines,
 )
 from baselines.run_baseline import BaselineError, run_external_baseline, seed_script
+from coding_agent import executor
 from coding_agent.run import ExperimentConfig, run_experiment
 from data.generate_wm_data import (
     GenConfig,
@@ -157,6 +158,7 @@ class PipelineConfig:
     n_samples: int = 50
     allowed_ops: tuple = ("add_node", "remove_node")
     allow_mc_algorithms: bool = False
+    strategy_timeout: float = executor.strategy_timeout_seconds
     compare: bool = False
     credit: bool = False
     graph_id: str | None = None
@@ -536,6 +538,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 routing=arm.routing,
                 allowed_ops=tuple(config.allowed_ops),
                 allow_mc_algorithms=config.allow_mc_algorithms,
+                strategy_timeout=config.strategy_timeout,
                 out_json=str(out_json),
             )
 
@@ -1188,6 +1191,14 @@ if __name__ == "__main__":
         "are invisible to real_env_episodes (default: False).",
     )
     parser.add_argument(
+        "--strategy-timeout",
+        type=float,
+        default=executor.strategy_timeout_seconds,
+        help="wall-clock cap in seconds on one generated plan_horizon()/act() "
+        "call; an overrun becomes a repair turn instead of hanging the sweep. "
+        f"0 disables (default: {executor.strategy_timeout_seconds:.0f}).",
+    )
+    parser.add_argument(
         "--compare",
         action="store_true",
         help="replay each winning strategy on Monte Carlo for a fidelity check (default: False).",
@@ -1275,6 +1286,7 @@ if __name__ == "__main__":
         n_samples=args.n_samples,
         allowed_ops=tuple(args.allowed_ops),
         allow_mc_algorithms=args.allow_mc_algorithms,
+        strategy_timeout=args.strategy_timeout,
         compare=args.compare,
         credit=args.credit,
         graph_id=args.graph_id,
