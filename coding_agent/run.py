@@ -67,7 +67,11 @@ from coding_agent.methods.evolve import EvolveSearch
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
 from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
-from coding_agent.prompts import build_routing_prompt, routing_system
+from coding_agent.prompts import (
+    build_explanation_prompt,
+    build_routing_prompt,
+    routing_system,
+)
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo, TaskSpec
 from data.wm_simulator import valid_action_ops
@@ -119,6 +123,9 @@ class ExperimentConfig:
     baseline: str | None = None  # library algorithm name; evaluates it with no LLM
     routing: bool = False  # GA routing: one LLM call picks a library algorithm
     allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
+    # Re-expose the per-candidate-simulation algorithms (celf, vanilla_greedy,
+    # ...) to generated scripts; see executor.mc_blocked_algorithms
+    allow_mc_algorithms: bool = False
     out_json: str | None = None
     # Arm spec this run represents; stamps the condition metadata into the
     # results JSON so a standalone run is readable by plots/report exactly like
@@ -137,18 +144,18 @@ class _CannedProvider:
         return f"```python\n{self.script}\n```"
 
 
-def build_method(name: str) -> OuterLoopMethod:
+def build_method(name: str, allow_mc_algorithms: bool = False) -> OuterLoopMethod:
     if name == "one_shot":
-        return OneShotSuperAlgorithm()
+        return OneShotSuperAlgorithm(allow_mc_algorithms=allow_mc_algorithms)
 
     if name == "per_step":
-        return PerStepReprompt()
+        return PerStepReprompt(allow_mc_algorithms=allow_mc_algorithms)
 
     if name == "windowed":
-        return WindowedOnline()
+        return WindowedOnline(allow_mc_algorithms=allow_mc_algorithms)
 
     if name == "evolve":
-        return EvolveSearch()
+        return EvolveSearch(allow_mc_algorithms=allow_mc_algorithms)
 
     raise ValueError(
         f"unknown method {name!r}; choose one_shot|per_step|windowed|evolve"
@@ -301,6 +308,12 @@ class Baseline(Strategy):
     # Canned/baseline scripts are whole free-form Strategies (they call
     # algorithms.*), so they always run in free mode regardless of the flag
     effective_mode = "free" if canned_script is not None else config.strategy_mode
+
+    # A declared baseline (condition 1) or a routing pick (condition 2) IS the
+    # expensive algorithm — blocking it would delete the arm rather than speed it
+    # up, and its cost is honestly attributed to that arm. The block governs what
+    # the agent SYNTHESIZES, not what the harness was told to run.
+    effective_allow_mc = config.allow_mc_algorithms or canned_script is not None
     if effective_mode == "scored" and config.method in ("per_step", "windowed"):
         raise ValueError(
             "strategy_mode='scored' generates plan_horizon-only strategies; "
@@ -314,9 +327,12 @@ class Baseline(Strategy):
     )
     agent = CodingAgent(provider)
 
-    method = build_method(config.method)
+    method = build_method(config.method, effective_allow_mc)
     if config.method == "windowed":
-        method = WindowedOnline(windows=config.windows)
+        method = WindowedOnline(
+            windows=config.windows,
+            allow_mc_algorithms=effective_allow_mc,
+        )
 
     if config.method == "one_shot":
         method = OneShotSuperAlgorithm(
@@ -326,11 +342,14 @@ class Baseline(Strategy):
             # A canned script ignores its prompt, so the anchor rollout would only
             # burn real episodes and wall clock without informing anything
             use_anchor=canned_script is None,
+            allow_mc_algorithms=effective_allow_mc,
         )
 
     if config.method == "evolve":
         method = EvolveSearch(
-            outer_iters=config.outer_iters, strategy_mode=effective_mode
+            outer_iters=config.outer_iters,
+            strategy_mode=effective_mode,
+            allow_mc_algorithms=effective_allow_mc,
         )
 
     # Optimize the method with the outer-loop coding agent iteration loop to find the best strategy and trajectory result
@@ -340,6 +359,23 @@ class Baseline(Strategy):
         f"[run] winner: reward={trajectory.reward:.2f} "
         f"({100.0 * trajectory.reward / graph.num_nodes:.2f}% of N)"
     )
+
+    # One closing turn on the generation thread: what it tried each iteration and
+    # how the winner works. Canned arms (classical baselines, routing picks) are
+    # library algorithms nobody synthesized, and _CannedProvider would answer any
+    # question with the script itself — so they get no write-up.
+    explanation = None
+    if canned_script is None and hasattr(method, "conversation"):
+        print("[run] requesting the plain-English algorithm write-up...")
+        explanation = method.conversation.ask(
+            build_explanation_prompt(
+                strategy.source_script,
+                trajectory.reward,
+                getattr(method, "history", []),
+                summarize(trajectory, graph),
+            )
+        )
+        print(f"\n{'=' * 78}\nALGORITHM WRITE-UP\n{'=' * 78}\n{explanation}\n")
 
     # Per-timestep log of the representative rollout (first ensemble sample):
     # entry t holds the action bag applied at t and the resulting state
@@ -371,6 +407,8 @@ class Baseline(Strategy):
         "summary": summarize(trajectory, graph),
         # For per_step this is the last timestep's script (one is generated per step)
         "script": strategy.source_script,
+        # Markdown; None for canned arms, which synthesized nothing to explain
+        "explanation": explanation,
         "cost": trajectory.cost,
         # Per-outer-iteration rewards (empty for baseline/routing arms)
         "history": getattr(method, "history", []),
@@ -518,6 +556,14 @@ if __name__ == "__main__":
         choices=list(valid_action_ops),
         help="action ops the strategy may emit; e.g. add_node remove_node for a "
         "node-ops-only run (default: all five ops).",
+    )
+    parser.add_argument(
+        "--allow-mc-algorithms",
+        action="store_true",
+        help="re-expose the per-candidate-simulation algorithms (celf, celf_pp, "
+        "vanilla_greedy, static_greedy, ...) to generated scripts; they are "
+        "blocked by default because they exceed 60s per call and their episodes "
+        "are invisible to real_env_episodes (default: False).",
     )
     parser.add_argument(
         "--baseline",
@@ -681,6 +727,7 @@ if __name__ == "__main__":
         baseline=args.baseline,
         routing=args.routing,
         allowed_ops=tuple(args.allowed_ops),
+        allow_mc_algorithms=args.allow_mc_algorithms,
         method=args.method,
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,

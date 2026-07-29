@@ -8,19 +8,27 @@ from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, T
 
 
 class WindowedOnline(OuterLoopMethod):
-    def __init__(self, windows: int = 3) -> None:
+    def __init__(self, windows: int = 3, allow_mc_algorithms: bool = False) -> None:
         self.windows = windows
+        self.allow_mc_algorithms = allow_mc_algorithms
 
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
         system = system_prompts["windowed"]
-        user = build_user_prompt("windowed", task, graph)
+        user = build_user_prompt(
+            "windowed", task, graph, allow_mc_algorithms=self.allow_mc_algorithms
+        )
         print("[windowed] requesting online algorithm script...")
 
         # Designed once: the online algorithm is consulted at window boundaries by
         # the generated code, not by the LLM, so this thread is a single turn
-        strategy = build_strategy(Conversation(agent, system).send(user))
+        conversation = Conversation(agent, system)
+        # Read back by run.py for the closing plain-English write-up
+        self.conversation = conversation
+        strategy = build_strategy(
+            conversation.send(user), allow_mc_algorithms=self.allow_mc_algorithms
+        )
 
         window_length = max(1, (task.horizon + 1) // self.windows)
         print(f"[windowed] rolling out {self.windows} windows of {window_length} steps")

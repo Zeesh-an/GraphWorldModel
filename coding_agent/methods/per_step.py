@@ -13,6 +13,9 @@ from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, T
 
 
 class PerStepReprompt(OuterLoopMethod):
+    def __init__(self, allow_mc_algorithms: bool = False) -> None:
+        self.allow_mc_algorithms = allow_mc_algorithms
+
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
@@ -21,6 +24,8 @@ class PerStepReprompt(OuterLoopMethod):
         # earlier actions produced. It resets at t=0 because the next episode is
         # an independent sample and the old trajectory would be misleading.
         conversation = Conversation(agent, system)
+        # Read back by run.py for the closing plain-English write-up
+        self.conversation = conversation
         last_strategy = None
         llm_calls = 0
 
@@ -42,7 +47,16 @@ class PerStepReprompt(OuterLoopMethod):
 
             if timestep == 0:
                 conversation.reset()
-                user = build_user_prompt("per_step", task, graph) + "\n\n" + state_text
+                user = (
+                    build_user_prompt(
+                        "per_step",
+                        task,
+                        graph,
+                        allow_mc_algorithms=self.allow_mc_algorithms,
+                    )
+                    + "\n\n"
+                    + state_text
+                )
             else:
                 user = (
                     f"{state_text}\n\nThis is the state your previous action "
@@ -50,7 +64,10 @@ class PerStepReprompt(OuterLoopMethod):
                 )
 
             # Build the strategy object from the LLM generated code, and call it
-            last_strategy = build_strategy(conversation.send(user))
+            last_strategy = build_strategy(
+                conversation.send(user),
+                allow_mc_algorithms=self.allow_mc_algorithms,
+            )
 
             bag = call_strategy(last_strategy.act, state, graph, timestep)
             validate_actions(bag, graph.num_nodes, task.budget, task.allowed_ops)

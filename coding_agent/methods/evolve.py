@@ -35,9 +35,11 @@ class EvolveSearch(OuterLoopMethod):
         strategy_mode: str = "scored",
         stagnation_patience: int = 2,
         inspiration_count: int = 2,
+        allow_mc_algorithms: bool = False,
     ) -> None:
         self.outer_iters = outer_iters
         self.strategy_mode = strategy_mode
+        self.allow_mc_algorithms = allow_mc_algorithms
         self.stagnation_patience = stagnation_patience
         self.inspiration_count = inspiration_count
         # Per-generation rewards, read back by run.py for the convergence plot
@@ -51,7 +53,9 @@ class EvolveSearch(OuterLoopMethod):
         anchor, anchor_trajectory = baseline_anchor(environment, task, graph)
         tqdm.write(f"[evolve] {anchor}")
         base_user = (
-            build_user_prompt("evolve", task, graph, self.strategy_mode)
+            build_user_prompt(
+                "evolve", task, graph, self.strategy_mode, self.allow_mc_algorithms
+            )
             + "\n\n"
             + anchor
         )
@@ -60,6 +64,8 @@ class EvolveSearch(OuterLoopMethod):
         # build_evolve_prompt still names the PARENT explicitly because the
         # parent is the population best, which is usually NOT the last turn
         conversation = Conversation(agent, system)
+        # Read back by run.py for the closing plain-English write-up
+        self.conversation = conversation
         population = []
         best = None
         stagnation = 0
@@ -106,7 +112,9 @@ class EvolveSearch(OuterLoopMethod):
 
             try:
                 strategy = build_strategy(
-                    conversation.send(user), self.strategy_mode
+                    conversation.send(user),
+                    self.strategy_mode,
+                    self.allow_mc_algorithms,
                 )
 
                 plan_start = time.perf_counter()

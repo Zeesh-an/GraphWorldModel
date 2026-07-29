@@ -58,15 +58,31 @@ def build_primitives_reference(exclude: tuple = ()) -> str:
     )
 
 
-def build_api_reference() -> str:
+def build_api_reference(exclude: tuple = ()) -> str:
     """Return a formatted reference of named algorithms + primitives."""
+    available = [name for name in algorithm_names if name not in exclude]
     algorithm_lines = [
-        _signature_line(algorithms.algorithms[name]) for name in algorithm_names
+        _signature_line(algorithms.algorithms[name]) for name in available
     ]
+
+    # Named explicitly rather than silently omitted: the model knows these
+    # algorithms and will reach for one, and a listed reason costs a line
+    # here versus a whole wasted refinement iteration
+    blocked_note = (
+        "\n\nNOT AVAILABLE (calling one raises): "
+        + ", ".join(name for name in algorithm_names if name in exclude)
+        + "\n  These simulate the cascade for every candidate node, which is far "
+        "too slow and\n  bypasses the metered evaluator. Do not try to reimplement "
+        "them either —\n  primitives.mc_simulate_spread over all nodes has the same "
+        "cost."
+        if exclude
+        else ""
+    )
 
     return (
         "NAMED ALGORITHMS  (from coding_agent.tools.algorithms, imported as `algorithms`)\n"
         + "\n".join(algorithm_lines)
+        + blocked_note
         + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as `primitives`)\n"
         + build_primitives_reference()
     )

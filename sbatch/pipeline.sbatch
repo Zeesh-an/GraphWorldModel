@@ -254,6 +254,10 @@
 #                   from its own evaluator.
 #   CREDIT          1 = per-action counterfactual credit in the feedback.
 #                   Costs one extra rollout per action.
+#   ALLOW_MC_ALGOS  1 = let generated scripts call the per-candidate-simulation
+#                   algorithms (celf, vanilla_greedy, ...). Default 0: they
+#                   exceed 60s per call and their episodes never reach
+#                   real_env_episodes. Baselines and routing are unaffected.
 #   GRAPH_ID        evaluate on a specific graph in the store
 #   BASELINE_TIMEOUT seconds before an external repo subprocess is killed
 #
@@ -513,6 +517,7 @@ N_SAMPLES="${N_SAMPLES:-50}"
 ALLOWED_OPS="${ALLOWED_OPS:-add_node remove_node}"
 COMPARE="${COMPARE:-1}"
 CREDIT="${CREDIT:-0}"
+ALLOW_MC_ALGOS="${ALLOW_MC_ALGOS:-0}"
 GRAPH_ID="${GRAPH_ID:-}"
 
 # ---------------------------------------------------------------------------
@@ -570,6 +575,7 @@ fi
 [ -n "$GRAPH_ID" ]        && flags+=(--graph-id "$GRAPH_ID")
 [ "$COMPARE" = "1" ]      && flags+=(--compare)
 [ "$CREDIT" = "1" ]       && flags+=(--credit)
+[ "$ALLOW_MC_ALGOS" = "1" ] && flags+=(--allow-mc-algorithms)
 [ "$FORCE" = "1" ]        && flags+=(--force)
 [ "$NO_PLAN_DEMO" = "1" ] && flags+=(--no-plan-demo)
 

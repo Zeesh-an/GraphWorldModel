@@ -493,6 +493,61 @@ Greedy) are faithful-but-simplified, noted in their docstrings. All MC-based
 estimators use the real NDlib simulator — the honest classical cost that the world
 model exists to undercut in the outer loop.
 
+### What the agent may NOT call (`executor.mc_blocked_algorithms`)
+
+Eleven of the thirty are hidden from **generated scripts** in every method, unless
+`--allow-mc-algorithms`:
+
+```
+vanilla_greedy  celf  celf_pp  celf_local_search  community_celf  pagerank_greedy
+adaptive_greedy  hill_climbing  static_greedy  genetic_algorithm  simulated_annealing
+```
+
+Each one estimates spread by simulating the cascade once per candidate node per
+pick. Measured on BA-1589 (≈ netscience) at k=79 = 5% of N:
+
+| kept | s | blocked | s |
+| ---- | --- | ------- | --- |
+| `imm` | 0.55 | `vanilla_greedy` | >120 |
+| `tim` | 0.48 | `celf`, `celf_pp` | >60 |
+| `skim` | 0.50 | `adaptive_greedy`, `hill_climbing` | >60 |
+| `ris_basic`, `filtered_ris` | 0.08 | `static_greedy` | >60 |
+| `betweenness_seeds` | 2.68 | `pagerank_greedy`, `community_celf` | >60 |
+| `degree_discount`, `voterank`, … | <0.15 | `celf_local_search` | >60 |
+| | | `genetic_algorithm` | 18.05 |
+| | | `simulated_annealing` | 17.21 |
+
+Nothing in the library sits between 2.68s and 17.21s, so the cut needs no
+arbitrary threshold. Note `static_greedy` calls **no** MC primitive — it is
+blocked because its per-pick snapshot-reachability scan has the same shape and
+cost. `genetic_algorithm` / `simulated_annealing` are bounded (a fixed
+population × generations budget, not a full-N scan) but still call
+`mc_simulate_spread`, so they are blocked on the honesty ground below.
+
+**The honesty ground matters more than the speed.** These run on a private
+`Simulator` built inside `primitives`, so `MonteCarloEnvironment.episodes_used`
+never sees them. Measured: one `one_shot` iteration whose script called
+`celf(mc_runs=20)` simulated **7,462** NDlib episodes and reported
+`real_env_episodes: 2`. That field is the sample-efficiency axis the whole
+condition ladder is read on, and conditions 3 (`@native`, "real executions only")
+and 6 ("no real episodes") both depend on it meaning what it says.
+
+There is also a cleanliness argument: `celf_pp` is in `default_baselines`, so
+letting an agent arm call it makes condition 6 partly *be* condition 1 plus
+scheduling. Blocking it forces the agent to beat CELF++ rather than invoke it.
+
+**Baselines and routing are exempt.** `--baseline celf_pp` (condition 1) and a
+routing pick (condition 2) run through the same canned-script path, and *are*
+that algorithm — blocking would delete the arm rather than speed it up, and their
+cost is honestly attributed. `run_experiment` computes
+`effective_allow_mc = config.allow_mc_algorithms or canned_script is not None`.
+
+A blocked name stays bound to a raiser rather than vanishing, so calling one
+produces a legible repair turn naming the alternatives instead of an
+`AttributeError` traceback. The prompt lists the blocked set up front
+(`build_api_reference(exclude=…)`) so the first iteration is not spent
+discovering it.
+
 ---
 
 ## 9. Running experiments
@@ -585,6 +640,7 @@ same resolution rule as data generation) / `--horizon` / `--windows` /
 | `reward`, `spread_pct`                                             | ensemble-mean final spread under the inner-loop evaluator, absolute and as % of `num_nodes`                                                                            |
 | `summary`                                                          | one-line trajectory summary (final spread, steps, per-step counts)                                                                                                     |
 | `script`                                                           | the exact source of the winning strategy (per_step: last generated script)                                                                                             |
+| `explanation`                                                      | the agent's own plain-English write-up of the search and the winning script, in markdown (§ headings below). `null` for baseline/routing arms, which synthesized nothing |
 | `cost`                                                             | `{n_samples                                                                                                                                                            | mc_runs, env, reward_se, rollout_seconds}` for the winning trajectory |
 | `timeline`                                                         | per-timestep log of the representative rollout: bag applied at `t` + post-step `infected`/`frontier` lists and counts; may be shorter than horizon (early termination) |
 | `real_env_episodes`                                                | cumulative real-environment episodes consumed by inner-loop feedback (0 for `world_model`/`oracle`; the `--compare` referee replay is excluded)                        |
@@ -595,6 +651,33 @@ same resolution rule as data generation) / `--horizon` / `--windows` /
 | `mc_reward`, `mc_spread_pct`, `mc_reward_se`, `mc_rollout_seconds` | with `--compare`: ground-truth replay of the winning strategy (absolute + % of `num_nodes`)                                                                            |
 | `wm_minus_mc`                                                      | evaluator fidelity on this exact strategy — the trust meter                                                                                                            |
 | `elapsed_seconds`                                                  | whole experiment including LLM calls                                                                                                                                   |
+
+### The `explanation` write-up
+
+After the refinement loop ends, one extra turn goes out **on the same
+conversation thread** (`Conversation.ask` — prose, no code extraction), so the
+model is describing the scripts it can still see rather than reconstructing them
+from the winner alone. `build_explanation_prompt` echoes the winning script
+anyway, because the winner is the max over iterations and is often *not* the last
+turn — without the echo the model narrates the wrong algorithm. It also passes
+the full `history`, which survives even when a long run trims the middle of the
+thread, and the prompt tells the model to say "no longer visible" rather than
+invent an iteration it cannot see.
+
+The reply is printed to stdout and stored as `explanation`, in markdown under
+five fixed headings:
+
+```
+## Summary                        what the final algorithm is, what it scored
+## Iteration log                  one ### per iteration: goal, actual code change, did it work
+## How the final algorithm works  numbered walkthrough in execution order
+## Why it beats the baseline      structural property exploited + supporting diagnostic
+## Limitations                    where it fails, what to try next
+```
+
+Cost: one LLM call per agent arm per budget point. Canned arms
+(`--baseline`, `--routing`, external repos) skip it — `_CannedProvider` answers
+every prompt with its script, and a library algorithm has nothing to explain.
 
 Timing semantics: `cost.rollout_seconds` vs `mc_rollout_seconds` is the WM-vs-MC
 speed comparison on the same strategy (normalize by ensemble size:

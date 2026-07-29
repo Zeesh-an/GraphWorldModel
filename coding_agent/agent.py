@@ -167,6 +167,18 @@ class Conversation:
 
         return script
 
+    def ask(self, user_text: str) -> str:
+        """
+        One prose turn on the same thread — the reply is NOT code-extracted.
+
+        Used for the closing write-up, where the point is that the model can
+        still see every script it wrote and every reward it was given back.
+        The reply is not appended: nothing edits a strategy after this.
+        """
+        self.messages.append({"role": "user", "content": user_text})
+
+        return self.agent.provider.complete(self.window())
+
     def reset(self) -> None:
         """Drop everything but the system turn — a fresh episode, same contract."""
         del self.messages[1:]

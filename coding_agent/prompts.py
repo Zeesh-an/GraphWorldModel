@@ -1,5 +1,5 @@
 from coding_agent.types import GraphInfo, TaskSpec
-from coding_agent.executor import scored_blocked_primitives
+from coding_agent.executor import mc_blocked_algorithms, scored_blocked_primitives
 from coding_agent.tools.graph_profile import build_graph_profile
 from coding_agent.tools.library_api import (
     build_algorithm_menu,
@@ -92,7 +92,11 @@ class MyStrategy(Strategy):
 
 
 def build_user_prompt(
-    method: str, task: TaskSpec, graph: GraphInfo, strategy_mode: str = "free"
+    method: str,
+    task: TaskSpec,
+    graph: GraphInfo,
+    strategy_mode: str = "free",
+    allow_mc_algorithms: bool = False,
 ) -> str:
     if strategy_mode == "scored":
         # Library source is inspiration, not callable — ideas must be written
@@ -106,7 +110,8 @@ def build_user_prompt(
         )
         final_line = "Write the ScoredStrategy subclass now."
     else:
-        reference = f"LIBRARY API:\n{build_api_reference()}"
+        blocked = () if allow_mc_algorithms else mc_blocked_algorithms
+        reference = f"LIBRARY API:\n{build_api_reference(exclude=blocked)}"
         final_line = f"Write the Strategy now (method = {method})."
 
     return f"""\
@@ -241,6 +246,73 @@ ALGORITHM MENU:
 {build_algorithm_menu()}
 
 Reply with exactly one name from the menu."""
+
+
+def build_explanation_prompt(
+    script: str, reward: float, history: list[dict], summary: str
+) -> str:
+    """
+    Closing turn: describe the search and the winner in plain English.
+
+    Sent on the generation thread, so the model can see the scripts it actually
+    wrote rather than reconstructing them. `history` is passed anyway because a
+    long run trims the middle of the thread while every reward survives here,
+    and `script` because the winner is the max over iterations, not the last
+    turn — without the echo the model would narrate the wrong algorithm.
+    """
+    iteration_lines = "\n".join(
+        f"  iteration {record['iteration']}: "
+        + (
+            f"FAILED — {record['error'].splitlines()[0]}"
+            if record.get("error")
+            else f"reward={record['reward']:.2f} (best so far {record['best']:.2f})"
+        )
+        + (f" [operator={record['operator']}]" if record.get("operator") else "")
+        for record in history
+    )
+
+    return f"""\
+The search is over. Write the final report in plain English — no code blocks.
+
+THE WINNING SCRIPT (reward={reward:.2f}) — this is the one to describe, and it
+is NOT necessarily your last attempt:
+```python
+{script}
+```
+Its rollout diagnostics:
+{summary}
+
+Reward per iteration:
+{iteration_lines or "  (none recorded)"}
+
+Reply with GitHub-flavoured markdown using EXACTLY these headings, in this
+order, and nothing before the first one:
+
+## Summary
+Two or three sentences: what the final algorithm is, and what it scored.
+
+## Iteration log
+One `### Iteration N — reward X` subsection per iteration above. For each: what
+you were trying to fix, what you actually changed in the code, and whether it
+worked. Be specific about the change ("raised the redundancy penalty from 1.0 to
+2.5", not "tuned parameters"). If an iteration is no longer visible in this
+conversation, say so for that iteration rather than inventing what you did.
+
+## How the final algorithm works
+A numbered step-by-step walkthrough of the winning script, in execution order.
+Each step: what it computes, and why. Name the variables and functions as they
+appear in the code so a reader can follow along with the source.
+
+## Why it beats the baseline
+What structural property of this graph the algorithm exploits, and which part of
+the diagnostics above shows it working.
+
+## Limitations
+Where this algorithm would do badly, and what you would try next with more
+iterations.
+
+Write for someone who has the script in front of them but has not read this
+conversation. Do not invent results that are not in the numbers above."""
 
 
 def build_feedback_prompt(

@@ -305,8 +305,12 @@ python -m pipeline.run --dataset ba --start-stage plots
 python -m pipeline.run --dataset ba \
     --start-stage agent --end-stage agent --force
 
-# Reuse an existing world model, skip straight to the agent sweep
+# Reuse this run's own world model, skip straight to the agent sweep
 python -m pipeline.run --dataset ba --skip-stages data train
+
+# Reuse a world model trained by a *different* run
+python -m pipeline.run --dataset ba --run new_agent_sweep \
+    --wm-results-json results/influence_maximization/ba/default/world_model/sage_IC.json
 ```
 
 | flag | default | meaning |
@@ -316,12 +320,14 @@ python -m pipeline.run --dataset ba --skip-stages data train
 | `--run` | `default` | run label under `results/<task>/<dataset>/`, for holding variants side by side |
 | `--start-stage` / `--end-stage` | `data` / `report` | inclusive stage range |
 | `--skip-stages` | none | stages to omit from that range |
+| `--wm-results-json` | none | reuse an already-trained world model (any run's `world_model/<model>_<dm>.json`); skips the train stage |
 | `--force` | off | recompute stages whose outputs already exist |
 | `--baselines` | 6 classical | condition 1: which algorithms from the pool to run |
 | `--arms` | conditions 2–6 | `routing`, `<method>_<mode>[@<evaluator>]`, or extra `baseline:<algorithm>` |
 | `--evaluator` | `oracle` | fallback for arms that do not name one with `@` |
 | `--native-mc-runs` | `1` | real episodes per candidate for an `@native` arm |
 | `--budget-pcts` | `1 5 10 20` | budget sweep as % of nodes; `--budgets` for absolute k |
+| `--allow-mc-algorithms` | off | re-expose `celf`/`vanilla_greedy`/… to generated scripts; blocked by default (>60s per call, and their episodes are invisible to `real_env_episodes`) |
 | `--compare` | off | ground-truth referee replay — required for a valid cross-condition table |
 | `--llm-model` / `--outer-iters` | `gpt-5.6-terra` / `5` | coding-agent model and refinement budget |
 
@@ -396,7 +402,7 @@ results/<task>/<dataset>/<run>/
 │   └── _runs/<name>/<budget>/   raw stdout/stderr per external run
 ├── plots/*.png                  paper figures                      (stage: plots)
 ├── summary.csv / summary.json   ONE FLAT ROW PER (arm, budget)     (stage: report)
-├── report.md                    tables + figures + winning program  (stage: report)
+├── report.md                    tables + figures + winning program + its write-up  (stage: report)
 ├── pipeline.json                config + per-stage status/timings
 └── environment.json             git commit, host, python/torch/CUDA versions
 ```

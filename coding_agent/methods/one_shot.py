@@ -37,10 +37,12 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         credit: bool = False,
         strategy_mode: str = "free",
         use_anchor: bool = True,
+        allow_mc_algorithms: bool = False,
     ) -> None:
         self.outer_iters = outer_iters
         self.credit = credit
         self.strategy_mode = strategy_mode
+        self.allow_mc_algorithms = allow_mc_algorithms
         # Canned arms (classical baselines, routing) never read a prompt, so the
         # anchor rollout would be pure cost — real episodes under an MC evaluator
         self.use_anchor = use_anchor
@@ -54,7 +56,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
 
         # One extra rollout up front: a classical score in the same env, so
         # "increase final spread" becomes a concrete target in every prompt
-        base_user = build_user_prompt("one_shot", task, graph, self.strategy_mode)
+        base_user = build_user_prompt(
+            "one_shot", task, graph, self.strategy_mode, self.allow_mc_algorithms
+        )
         anchor_trajectory = None
 
         if self.use_anchor:
@@ -65,6 +69,8 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         # One thread for the whole refinement, so the base prompt is sent once and
         # every later turn is an edit against the script the model can still see
         conversation = Conversation(agent, system)
+        # Read back by run.py for the closing plain-English write-up
+        self.conversation = conversation
         pending = base_user
         best = None
         last_error = None
@@ -80,7 +86,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
 
                 # Build the strategy object from the LLM generated code, and call it
                 strategy = build_strategy(
-                    conversation.send(pending), self.strategy_mode
+                    conversation.send(pending),
+                    self.strategy_mode,
+                    self.allow_mc_algorithms,
                 )
                 last_script = strategy.source_script
 

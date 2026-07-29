@@ -33,6 +33,11 @@ Re-run one stage from scratch:
 
 python -m pipeline.run --dataset ba --start-stage agent --end-stage agent --force
 
+Reuse a world model trained by an earlier run instead of training a new one:
+
+python -m pipeline.run --dataset ba --run new_agent_sweep \
+    --wm-results-json results/influence_maximization/ba/default/world_model/sage_IC.json
+
 Hold two variants of the same (task, dataset) side by side:
 
 python -m pipeline.run --dataset jazz --run gcnii_ablation --wm-model gcnii --n-layers 8
@@ -134,6 +139,7 @@ class PipelineConfig:
     patience: int = 50
     plan_demo: bool = True
     plan_graphs: int = 5
+    wm_results_json: str | None = None
     # agent stage
     baselines: tuple = default_baselines
     arms: tuple = default_arms
@@ -150,6 +156,7 @@ class PipelineConfig:
     mc_runs: int = 200
     n_samples: int = 50
     allowed_ops: tuple = ("add_node", "remove_node")
+    allow_mc_algorithms: bool = False
     compare: bool = False
     credit: bool = False
     graph_id: str | None = None
@@ -241,6 +248,13 @@ def active_stages(config: PipelineConfig) -> list[str]:
     # Training is only needed when some arm actually evaluates against the world model
     if "train" in selected and not needs_world_model(build_arms(config)):
         print("[pipeline] no arm uses the world model: skipping the train stage")
+        selected.remove("train")
+
+    if "train" in selected and config.wm_results_json is not None:
+        print(
+            f"[pipeline] --wm-results-json {config.wm_results_json}: "
+            f"skipping the train stage"
+        )
         selected.remove("train")
 
     return [stage for stage in selected if stage not in config.skip_stages]
@@ -414,7 +428,11 @@ def _load_pipeline_graph(layout: Layout, config: PipelineConfig) -> GraphInfo:
 
 
 def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
-    wm_results = layout.wm_results(config.wm_model, config.diffusion_model)
+    wm_results = (
+        Path(config.wm_results_json)
+        if config.wm_results_json is not None
+        else layout.wm_results(config.wm_model, config.diffusion_model)
+    )
     arms = build_arms(config)
 
     if needs_world_model(arms) and not wm_results.exists():
@@ -517,6 +535,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 baseline=arm.baseline,
                 routing=arm.routing,
                 allowed_ops=tuple(config.allowed_ops),
+                allow_mc_algorithms=config.allow_mc_algorithms,
                 out_json=str(out_json),
             )
 
@@ -964,6 +983,16 @@ if __name__ == "__main__":
         choices=["linear", "structured", "structured_residual"],
         help="world-model output head (default: structured_residual).",
     )
+    # The checkpoint is located via `ckpt_dir` inside this JSON, and the
+    # architecture flags are read from its `config` block — so this one path
+    # replaces --wm-model/--head/--hidden-dim/... as well as the train stage
+    parser.add_argument(
+        "--wm-results-json",
+        type=str,
+        default=None,
+        help="reuse an already-trained world model from this train_wm.py results "
+        "JSON instead of running the train stage (default: None).",
+    )
     parser.add_argument(
         "--hidden-dim", type=int, default=64, help="hidden dimension (default: 64)."
     )
@@ -1151,6 +1180,14 @@ if __name__ == "__main__":
         help="action ops the strategies may emit (default: add_node remove_node).",
     )
     parser.add_argument(
+        "--allow-mc-algorithms",
+        action="store_true",
+        help="re-expose the per-candidate-simulation algorithms (celf, celf_pp, "
+        "vanilla_greedy, static_greedy, ...) to generated scripts; they are "
+        "blocked by default because they exceed 60s per call and their episodes "
+        "are invisible to real_env_episodes (default: False).",
+    )
+    parser.add_argument(
         "--compare",
         action="store_true",
         help="replay each winning strategy on Monte Carlo for a fidelity check (default: False).",
@@ -1237,9 +1274,11 @@ if __name__ == "__main__":
         mc_runs=args.mc_runs,
         n_samples=args.n_samples,
         allowed_ops=tuple(args.allowed_ops),
+        allow_mc_algorithms=args.allow_mc_algorithms,
         compare=args.compare,
         credit=args.credit,
         graph_id=args.graph_id,
+        wm_results_json=args.wm_results_json,
         seed=args.seed,
         device=args.device,
         start_stage=args.start_stage,

@@ -1,10 +1,15 @@
 """One markdown file per dataset: config, results tables, figures, winning program."""
 
 import json
+import re
 from pathlib import Path
 
 from pipeline.conditions import condition_names, ground_truth_reward, is_ground_truth
 from pipeline.layout import Layout
+
+# The agent writes its own `##` headings; demoting them one level keeps the
+# report's outline intact instead of the write-up opening new top-level sections
+markdown_heading = re.compile(r"^(#{1,5} )", re.MULTILINE)
 
 # Config keys worth printing; the manifest JSON holds the exhaustive version
 reported_config_keys = (
@@ -196,6 +201,22 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
         str(winner.get("summary", "")).strip(),
         "```",
         "",
+    ]
+
+    # The agent's own account of how it got here — written before the program so
+    # the reader knows what they are looking at when they expand it
+    explanation = winner.get("explanation")
+    if explanation:
+        lines += [
+            f"_The write-up below is the agent's own, produced by "
+            f"`{winner.get('model')}` at the end of its refinement loop on the "
+            f"same conversation thread as the program._",
+            "",
+            markdown_heading.sub(r"#\1", explanation.strip()),
+            "",
+        ]
+
+    lines += [
         "<details><summary>Generated program</summary>",
         "",
         "```python",
