@@ -1,15 +1,6 @@
 # Graph Completion under Incompleteness — Prior Work, Datasets, and Published Results
 
-Graphs in the wild arrive incomplete: node attributes are missing for most
-nodes, edges were never observed, and the observation window is a time slice
-rather than the whole history. This file catalogues the four literatures that
-attack that problem — **node-feature imputation**, **structure completion /
-graph structure learning (GSL)**, **static link prediction**, and **dynamic
-link prediction** — with their methods, datasets, protocols and published
-tables. It is filed under ❌ **poor fit**: §2 argues rigorously why none of it
-is a headline task for us, and then salvages the one thing that is genuinely
-useful — _structure incompleteness as a robustness condition_ for our world
-model and planner.
+Graphs in the wild arrive incomplete: node attributes are missing for most nodes, edges were never observed, and the observation window is a time slice rather than the whole history. This file catalogues the four literatures that attack that problem — **node-feature imputation**, **structure completion / graph structure learning (GSL)**, **static link prediction**, and **dynamic link prediction** — with their methods, datasets, protocols and published tables. It is filed under ❌ **poor fit**: §2 argues rigorously why none of it is a headline task for us, and then salvages the one thing that is genuinely useful — _structure incompleteness as a robustness condition_ for our world model and planner.
 
 All URLs verified for HTTP 200 on **2026-07-28** unless annotated otherwise.
 
@@ -24,26 +15,15 @@ All URLs verified for HTTP 200 on **2026-07-28** unless annotated otherwise.
 | **[figure]**   | Read off a plotted figure — the paper published no table. Approximate, direction only.                               |
 | **[claim]**    | Stated in prose by a paper or a secondary source; not cross-checked against a file or table.                         |
 
-**Automated PDF summarizers hallucinate plausible numbers from these papers.**
-Every `[verified]` cell below was produced by `curl` → `pdftotext -layout` →
-transcription from the extracted table. No number in this file came from a
-WebFetch summary.
+**Automated PDF summarizers hallucinate plausible numbers from these papers.** Every `[verified]` cell below was produced by `curl` → `pdftotext -layout` → transcription from the extracted table. No number in this file came from a WebFetch summary.
 
-**Edge-count convention.** Undirected graphs are quoted as **undirected edges**;
-directed graphs as **arcs**. This literature is the worst offender in the whole
-folder for mixing the two — see §6.4, where the _same_ OGB graph is quoted as
-61,859,140 and as 123,718,280 edges by two papers that both call it
-`ogbn-products`, and the ratio is exactly 2.
+**Edge-count convention.** Undirected graphs are quoted as **undirected edges**; directed graphs as **arcs**. This literature is the worst offender in the whole folder for mixing the two — see §6.4, where the _same_ OGB graph is quoted as 61,859,140 and as 123,718,280 edges by two papers that both call it `ogbn-products`, and the ratio is exactly 2.
 
 ---
 
 ## 1. Task definition
 
-Let `G = (V, E, X)` with adjacency `A ∈ {0,1}^{N×N}` and node features
-`X ∈ R^{N×F}`. Incompleteness is a **mask**: `M_X ∈ {0,1}^{N×F}` marks which
-feature entries were observed, `M_A ∈ {0,1}^{N×N}` marks which node pairs were
-observed. The four variants differ in which mask is non-trivial and in what
-you are asked to recover.
+Let `G = (V, E, X)` with adjacency `A ∈ {0,1}^{N×N}` and node features `X ∈ R^{N×F}`. Incompleteness is a **mask**: `M_X ∈ {0,1}^{N×F}` marks which feature entries were observed, `M_A ∈ {0,1}^{N×N}` marks which node pairs were observed. The four variants differ in which mask is non-trivial and in what you are asked to recover.
 
 | #       | Variant                                                 | Given                          | Recover                             | Evaluated by                                                           |
 | ------- | ------------------------------------------------------- | ------------------------------ | ----------------------------------- | ---------------------------------------------------------------------- |
@@ -53,58 +33,23 @@ you are asked to recover.
 | **(d)** | **Dynamic link prediction**                             | an event stream up to `t`      | which edges appear at `t+1`         | AP / AUC / MRR against negatives                                       |
 | **(e)** | **Joint**                                               | `X ⊙ M_X` **and** `A ⊙ M_A`    | both                                | node classification (T2-GNN)                                           |
 
-**Missingness mechanisms.** Almost every paper here uses MCAR — each feature
-entry is dropped independently with probability `r` (FP's protocol
-[verified], footnote 5: _"Each entry of the feature matrix is independently
-missing with a probability equal to the missing rate"_). Two harder mechanisms
-appear: **structural missingness**, where _whole nodes_ have no attributes at
-all (SAT, Amer, ITR, MEGAE — the "attribute-missing graph" line), and **biased
-missingness**, where the drop probability depends on the value. The distinction
-matters: uniform entry-wise dropping leaves every node with _some_ signal, so
-propagation-based methods stay strong to 99% missing; whole-node dropping does
-not.
+**Missingness mechanisms.** Almost every paper here uses MCAR — each feature entry is dropped independently with probability `r` (FP's protocol [verified], footnote 5: _"Each entry of the feature matrix is independently missing with a probability equal to the missing rate"_). Two harder mechanisms appear: **structural missingness**, where _whole nodes_ have no attributes at all (SAT, Amer, ITR, MEGAE — the "attribute-missing graph" line), and **biased missingness**, where the drop probability depends on the value. The distinction matters: uniform entry-wise dropping leaves every node with _some_ signal, so propagation-based methods stay strong to 99% missing; whole-node dropping does not.
 
-**Why the field exists.** Two facts drive it. First, real graphs are observed
-through a partial lens — a social network crawl misses edges, a user profile
-misses fields. Second, GNNs are unusually good at exploiting the _other_
-modality to fill in the missing one: homophily means a node's neighbours
-predict its features, and feature similarity predicts its edges. The whole
-literature is the exploration of that trade.
+**Why the field exists.** Two facts drive it. First, real graphs are observed through a partial lens — a social network crawl misses edges, a user profile misses fields. Second, GNNs are unusually good at exploiting the _other_ modality to fill in the missing one: homophily means a node's neighbours predict its features, and feature similarity predicts its edges. The whole literature is the exploration of that trade.
 
-**A vocabulary warning that matters for us.** In this literature, _"add_edge"_
-means **"predict that an unobserved edge exists"** — an inference about a
-static ground truth. In our repo, `add_edge` means **"intervene on the graph and
-change what happens next"**. The words coincide; the semantics do not. §2.2
-makes this precise, because the surface similarity is the single most
-misleading thing about this task family.
+**A vocabulary warning that matters for us.** In this literature, _"add_edge"_ means **"predict that an unobserved edge exists"** — an inference about a static ground truth. In our repo, `add_edge` means **"intervene on the graph and change what happens next"**. The words coincide; the semantics do not. §2.2 makes this precise, because the surface similarity is the single most misleading thing about this task family.
 
 ---
 
 ## 2. Fit with our methodology — ❌ poor fit, and here is the proof
 
-Our object is `f_θ(G, s_t, a_t) → s_{t+1}` with
-`s_{t+1} = T_endo(T_exo(s_t, a_t))`. A task earns a slot in this folder if it
-has **(a)** a node- or edge-level state that evolves, **(b)** an intervention
-expressible in our five ops, and **(c)** a simulator we can harvest transitions
-from. Graph completion fails (a) and (b), and (c) is vacuous.
+Our object is `f_θ(G, s_t, a_t) → s_{t+1}` with `s_{t+1} = T_endo(T_exo(s_t, a_t))`. A task earns a slot in this folder if it has **(a)** a node- or edge-level state that evolves, **(b)** an intervention expressible in our five ops, and **(c)** a simulator we can harvest transitions from. Graph completion fails (a) and (b), and (c) is vacuous.
 
 ### 2.1 There is no `s_t → s_{t+1}` — `T_endo` has nothing to do
 
-The target of every task in §1 is a **static reconstruction**: the true `X`, the
-true `A`, or a held-out entry of the true `A`. There is no time index on the
-label. In (a) and (b) the ground truth exists before the model runs and does
-not change while it runs; in (c) the "future" edge is a held-out entry of a
-fixed adjacency, not a state that evolved.
+The target of every task in §1 is a **static reconstruction**: the true `X`, the true `A`, or a held-out entry of the true `A`. There is no time index on the label. In (a) and (b) the ground truth exists before the model runs and does not change while it runs; in (c) the "future" edge is a held-out entry of a fixed adjacency, not a state that evolved.
 
-Concretely, our state is `s_t = (infected, frontier)` — channels 0 and 1 of
-`X` (`world_model/wm_data.py:17`). Neither channel has any counterpart here.
-Setting them to zero and asking the model to reconstruct `A` reduces
-`WorldModel.forward` to `head(encoder(X, graph))` on a constant input — i.e. a
-GNN autoencoder with four dead input channels and an `ICTransmissionHead` whose
-`frontier_u` gate (`world_model/wm_model.py`, the structured IC head) multiplies
-everything by zero. **The two components that make our model a world model —
-the recurrence and the mechanism-structured head — are exactly the two that do
-nothing on this task.** A plain GAE does it better with less machinery.
+Concretely, our state is `s_t = (infected, frontier)` — channels 0 and 1 of `X` (`world_model/wm_data.py:17`). Neither channel has any counterpart here. Setting them to zero and asking the model to reconstruct `A` reduces `WorldModel.forward` to `head(encoder(X, graph))` on a constant input — i.e. a GNN autoencoder with four dead input channels and an `ICTransmissionHead` whose `frontier_u` gate (`world_model/wm_model.py`, the structured IC head) multiplies everything by zero. **The two components that make our model a world model — the recurrence and the mechanism-structured head — are exactly the two that do nothing on this task.** A plain GAE does it better with less machinery.
 
 ### 2.2 None of the five action ops appear
 
@@ -116,94 +61,38 @@ nothing on this task.** A plain GAE does it better with less machinery.
 | `remove_edge`     | intervene: delete arc `u→v`                                                  | (the _masking_ step of the evaluation protocol, not an action of the model) | ✗ it is the experimenter's move, not the agent's |
 | `set_edge_weight` | intervene on `p(u→v)`                                                        | GSL learns a weighted `A*`, but as a _belief_ about the true graph          | ✗ belief, not intervention                       |
 
-The `add_edge` row is the trap. A GSL method that "adds edges" is estimating
-`P(edge exists | data)`; our `add_edge` **changes the world** and is scored by
-what the cascade does afterwards. One is an epistemic update, the other is a
-causal one. There is no counterfactual fork in this literature — nothing
-corresponding to our `cf_i` branches — because there is nothing to intervene
-_on_. The action-conditioning that our whole data-generation design exists to
-supply (`data/wm_actions.py`) has no target here.
+The `add_edge` row is the trap. A GSL method that "adds edges" is estimating `P(edge exists | data)`; our `add_edge` **changes the world** and is scored by what the cascade does afterwards. One is an epistemic update, the other is a causal one. There is no counterfactual fork in this literature — nothing corresponding to our `cf_i` branches — because there is nothing to intervene _on_. The action-conditioning that our whole data-generation design exists to supply (`data/wm_actions.py`) has no target here.
 
 ### 2.3 Our model never reads node features at all — so (a) cannot help us
 
 This is decisive and it is checkable in four lines of code.
 
-- `world_model/wm_data.py:16-17` — `in_channels = 6`, and the six channels are
-  `ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge`. Two are
-  state, one is structure, three are the action bag. **Zero are dataset
-  features.**
-- `world_model/wm_data.py:174-180` — `ch_degree` is computed inside
-  `build_features` by counting occurrences in `edge_index`
-  (`np.add.at(degrees, edge_index[0], 1.0)` … `X[:, ch_degree] = np.log1p(degrees)`).
-  It is derived from topology, never read from a file.
-- `data/generate_wm_data.py:92-99` — data generation _does_ write
-  `node_feats=bundle.node_feats` and `node_labels=bundle.node_labels` into each
-  `graphs/*.npz`.
-- `world_model/wm_data.py:225-241` — `load_graph_store` opens that same `.npz`
-  and reads **only** `edge_index`, `ic_probs`, `lt_weights`. `node_feats` and
-  `node_labels` are never touched. `coding_agent/types.py:33-40`
-  (`GraphInfo.from_store_entry`) likewise reads only `num_nodes`, `edge_index`,
-  `ic_probs`, `directed`.
+- `world_model/wm_data.py:16-17` — `in_channels = 6`, and the six channels are `ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge`. Two are state, one is structure, three are the action bag. **Zero are dataset features.**
+- `world_model/wm_data.py:174-180` — `ch_degree` is computed inside `build_features` by counting occurrences in `edge_index` (`np.add.at(degrees, edge_index[0], 1.0)` … `X[:, ch_degree] = np.log1p(degrees)`). It is derived from topology, never read from a file.
+- `data/generate_wm_data.py:92-99` — data generation _does_ write `node_feats=bundle.node_feats` and `node_labels=bundle.node_labels` into each `graphs/*.npz`.
+- `world_model/wm_data.py:225-241` — `load_graph_store` opens that same `.npz` and reads **only** `edge_index`, `ic_probs`, `lt_weights`. `node_feats` and `node_labels` are never touched. `coding_agent/types.py:33-40` (`GraphInfo.from_store_entry`) likewise reads only `num_nodes`, `edge_index`, `ic_probs`, `directed`.
 
-So the node features every paper in §4.1 exists to impute are **written to disk
-by our pipeline and read back by nothing**. Imputing them perfectly would change
-not one number we report. Cora-ML's 2,879-dim bag-of-words is the clearest case:
-it is the only real feature matrix in our whole suite (§6.3), and it is dead
-weight on disk.
+So the node features every paper in §4.1 exists to impute are **written to disk by our pipeline and read back by nothing**. Imputing them perfectly would change not one number we report. Cora-ML's 2,879-dim bag-of-words is the clearest case: it is the only real feature matrix in our whole suite (§6.3), and it is dead weight on disk.
 
-Two honest caveats. (i) This is a property of the _current_ architecture, not a
-law — a future variant that conditions transmission on node attributes (topic-
-aware IC, where `p(u→v)` depends on content similarity) would make feature
-imputation load-bearing. That variant does not exist in this repo and is not on
-the roadmap in `CLAUDE.md`. (ii) The `node_feats` write is not a bug worth
-fixing; it costs a few MB and keeps the graph store self-describing.
+Two honest caveats. (i) This is a property of the _current_ architecture, not a law — a future variant that conditions transmission on node attributes (topic- aware IC, where `p(u→v)` depends on content similarity) would make feature imputation load-bearing. That variant does not exist in this repo and is not on the roadmap in `CLAUDE.md`. (ii) The `node_feats` write is not a bug worth fixing; it costs a few MB and keeps the graph store self-describing.
 
 ### 2.4 What survives: structure incompleteness as a **robustness condition**
 
-The salvageable half. Real influence networks are _observed_, and observation
-misses edges — a crawl truncates, a privacy setting hides a follow, a contact
-tracing log drops a contact. Our entire pipeline assumes `A` is the truth. It
-has never been measured under a hidden-edge budget.
+The salvageable half. Real influence networks are _observed_, and observation misses edges — a crawl truncates, a privacy setting hides a follow, a contact tracing log drops a contact. Our entire pipeline assumes `A` is the truth. It has never been measured under a hidden-edge budget.
 
-That is a legitimate, cheap experiment, and this literature supplies the
-protocol off the shelf (§8.1): sample a fraction `r` of undirected edges
-uniformly at random, delete them, and run the whole pipeline on the residual
-graph while the **referee still uses the full graph**. Three things to measure:
+That is a legitimate, cheap experiment, and this literature supplies the protocol off the shelf (§8.1): sample a fraction `r` of undirected edges uniformly at random, delete them, and run the whole pipeline on the residual graph while the **referee still uses the full graph**. Three things to measure:
 
-1. **World-model fidelity under a corrupted `A`** — retrain (or just re-evaluate)
-   on `A_obs` and score `delta_f1`, `ens_count_bias`, `ens_marg_mae` against the
-   MC ground truth computed on the _full_ `A`. Our IC head is per-edge
-   (`q(u→v) = σ(MLP([h_u, h_v, w_uv]))`), so hidden edges are missing
-   transmission channels — the prediction should be _under_-confident, i.e.
-   `ens_count_bias` should go **negative**, the opposite failure mode from the
-   saturation we spent months fixing (`MEMORY.md`, rollout-saturation entry).
-   That sign prediction is itself a falsifiable check.
-2. **Planner regret under a corrupted `A`** — `planning_regret_multi` with seeds
-   chosen on `A_obs` but spread measured on `A_full`. This is the number that
-   matters for the paper: how much spread do we lose per 10% of hidden edges?
-3. **Degree-baseline crossover** — degree is computed from `A_obs` too, so it
-   degrades as well. The interesting question is whether our margin over degree
-   _widens_ (the model's learned structure priors compensate) or _collapses_.
+1. **World-model fidelity under a corrupted `A`** — retrain (or just re-evaluate) on `A_obs` and score `delta_f1`, `ens_count_bias`, `ens_marg_mae` against the MC ground truth computed on the _full_ `A`. Our IC head is per-edge (`q(u→v) = σ(MLP([h_u, h_v, w_uv]))`), so hidden edges are missing transmission channels — the prediction should be _under_-confident, i.e. `ens_count_bias` should go **negative**, the opposite failure mode from the saturation we spent months fixing (`MEMORY.md`, rollout-saturation entry). That sign prediction is itself a falsifiable check.
+2. **Planner regret under a corrupted `A`** — `planning_regret_multi` with seeds chosen on `A_obs` but spread measured on `A_full`. This is the number that matters for the paper: how much spread do we lose per 10% of hidden edges?
+3. **Degree-baseline crossover** — degree is computed from `A_obs` too, so it degrades as well. The interesting question is whether our margin over degree _widens_ (the model's learned structure priors compensate) or _collapses_.
 
-Budgeted at `r ∈ {0, 0.1, 0.2, 0.5}` over the small graphs (jazz, netscience,
-cora_ml, power_grid) this is four extra data-gen runs per graph and no new code
-beyond an edge-dropping flag. It converts a hidden assumption into a table.
+Budgeted at `r ∈ {0, 0.1, 0.2, 0.5}` over the small graphs (jazz, netscience, cora_ml, power_grid) this is four extra data-gen runs per graph and no new code beyond an edge-dropping flag. It converts a hidden assumption into a table.
 
 ### 2.5 The overlap that _does_ fit us lives in another file
 
-Recovering edges **from cascades** — observing who got infected when and
-inferring the diffusion network — is real structure completion that is also
-action-conditioned and dynamic. That is **[`network_inference.md`](network_inference.md)**
-(NETINF / NETRATE / MultiTree / InfoPath), rated ⚠️ moderate rather than ❌. The
-difference is the evidence: this file's methods complete `A` from `X` and the
-observed part of `A`; network inference completes `A` from _cascade traces_,
-which is exactly the data our simulator produces. If you came here looking for
-"can the world model recover missing edges", go there.
+Recovering edges **from cascades** — observing who got infected when and inferring the diffusion network — is real structure completion that is also action-conditioned and dynamic. That is **[`network_inference.md`](network_inference.md)** (NETINF / NETRATE / MultiTree / InfoPath), rated ⚠️ moderate rather than ❌. The difference is the evidence: this file's methods complete `A` from `X` and the observed part of `A`; network inference completes `A` from _cascade traces_, which is exactly the data our simulator produces. If you came here looking for "can the world model recover missing edges", go there.
 
-**Verdict.** Keep this file as (i) the written record of why feature imputation
-and link prediction are not our task, (ii) the source of the masking protocol
-for the robustness experiment in §2.4, and (iii) the Cora name-collision
-forensics in §6.3. Do not build a headline result on it.
+**Verdict.** Keep this file as (i) the written record of why feature imputation and link prediction are not our task, (ii) the source of the masking protocol for the robustness experiment in §2.4, and (iii) the Cora name-collision forensics in §6.3. Do not build a headline result on it.
 
 ---
 
@@ -211,8 +100,7 @@ forensics in §6.3. Do not build a headline result on it.
 
 ### 3.1 Link-prediction heuristics
 
-`Γ(x)` = neighbours of `x`. Order = how many hops of the neighbourhood the
-score reads; SEAL's Table 3 is the canonical listing [verified].
+`Γ(x)` = neighbours of `x`. Order = how many hops of the neighbourhood the score reads; SEAL's Table 3 is the canonical listing [verified].
 
 | Method                           | Year | Formula                              | Order  | Paper                                                                                                 |
 | -------------------------------- | ---- | ------------------------------------ | ------ | ----------------------------------------------------------------------------------------------------- |
@@ -225,15 +113,11 @@ score reads; SEAL's Table 3 is the canonical listing [verified].
 | **PageRank (PR)**                | 1998 | rooted PageRank, damping α           | high   | —                                                                                                     |
 | **SimRank (SR)**                 | 2002 | recursive structural similarity, γ   | high   | [Jeh & Widom](https://dl.acm.org/doi/10.1145/775047.775126) (403 to non-browser clients)              |
 
-SEAL's hyperparameters when reproducing these [verified]: Katz `β = 0.001`,
-PageRank `α = 0.85`, SimRank `γ = 0.8`. **These heuristics are not obsolete** —
-BUDDY's Table 2 (§5.7) shows RA beating a plain GCN on `ogbl-collab` (64.00 vs
-47.14 Hits@50) and on `ogbl-ppa` (49.33 vs 18.67 Hits@100) [verified].
+SEAL's hyperparameters when reproducing these [verified]: Katz `β = 0.001`, PageRank `α = 0.85`, SimRank `γ = 0.8`. **These heuristics are not obsolete** — BUDDY's Table 2 (§5.7) shows RA beating a plain GCN on `ogbl-collab` (64.00 vs 47.14 Hits@50) and on `ogbl-ppa` (49.33 vs 18.67 Hits@100) [verified].
 
 ### 3.2 Feature-imputation baselines
 
-The baselines every §4.1 paper must beat. All are one-liners; the point of the
-FP paper is that the best of them is nearly unbeatable.
+The baselines every §4.1 paper must beat. All are one-liners; the point of the FP paper is that the best of them is nearly unbeatable.
 
 | Baseline                   | Rule                                                    | Note                                                                                                                 |
 | -------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
@@ -270,31 +154,13 @@ FP paper is that the best of them is nearly unbeatable.
 | **CGAI**                        | 2025      | ACM MM    | Clustering-oriented _generative_ attribute-graph imputation.                                                                                                                                                                                                                       | [arXiv 2507.19085](https://arxiv.org/abs/2507.19085)                                                                  | —                                                                                               |
 | **Divide-Then-Rule**            | 2025      | arXiv     | Cluster-driven hierarchical interpolator for attribute-missing graphs.                                                                                                                                                                                                             | [arXiv 2507.10595](https://arxiv.org/abs/2507.10595)                                                                  | —                                                                                               |
 
-**Diffusion-model-based imputation (2023–2026).** The denoising-diffusion line
-has largely landed on _tabular_ and _spatiotemporal_ data rather than node
-attributes: **DiffPuter** ([arXiv 2405.20690](https://arxiv.org/abs/2405.20690),
-EM + diffusion for tabular missing data) and
-[arXiv 2407.02549](https://arxiv.org/abs/2407.02549) (tabular imputation +
-synthesis) are the two most cited. Graph-native diffusion imputation exists but
-is thin and recent: **DDFI**
-([arXiv 2512.06356](https://arxiv.org/abs/2512.06356), two-step reconstruction
-with diffusion-style feature propagation) and **FSD-CAP** (fractional subgraph
-diffusion with class-aware propagation, OpenReview 2026). Treat this sub-line as
-**[claim]** — no table in it was extracted for this review. The reliable
-survey-level statement is that on the standard MCAR benchmarks nothing has
-displaced FP/PCFI, whose numbers are in §5.1.
+**Diffusion-model-based imputation (2023–2026).** The denoising-diffusion line has largely landed on _tabular_ and _spatiotemporal_ data rather than node attributes: **DiffPuter** ([arXiv 2405.20690](https://arxiv.org/abs/2405.20690), EM + diffusion for tabular missing data) and [arXiv 2407.02549](https://arxiv.org/abs/2407.02549) (tabular imputation + synthesis) are the two most cited. Graph-native diffusion imputation exists but is thin and recent: **DDFI** ([arXiv 2512.06356](https://arxiv.org/abs/2512.06356), two-step reconstruction with diffusion-style feature propagation) and **FSD-CAP** (fractional subgraph diffusion with class-aware propagation, OpenReview 2026). Treat this sub-line as **[claim]** — no table in it was extracted for this review. The reliable survey-level statement is that on the standard MCAR benchmarks nothing has displaced FP/PCFI, whose numbers are in §5.1.
 
-**Surveys.** [Incomplete Graph Learning: A Comprehensive Survey (arXiv 2502.12412)](https://arxiv.org/abs/2502.12412)
-is the current one and covers both feature and structure incompleteness; the
-companion reading list [cherry-a11y/Incomplete-graph-learning](https://github.com/cherry-a11y/Incomplete-graph-learning)
-is maintained and was used to cross-check the code links above.
+**Surveys.** [Incomplete Graph Learning: A Comprehensive Survey (arXiv 2502.12412)](https://arxiv.org/abs/2502.12412) is the current one and covers both feature and structure incompleteness; the companion reading list [cherry-a11y/Incomplete-graph-learning](https://github.com/cherry-a11y/Incomplete-graph-learning) is maintained and was used to cross-check the code links above.
 
 ### 4.2 Structure completion / graph structure learning (GSL)
 
-Two scenarios, and papers are careless about which they are in: **structure
-refinement** (a real `A` exists, possibly corrupted, learn a better `A*`) and
-**structure inference** (no `A` at all — learn one from `X`). SUBLIME's Table 1
-vs Table 2 is the cleanest split of the two [verified] (§5.4).
+Two scenarios, and papers are careless about which they are in: **structure refinement** (a real `A` exists, possibly corrupted, learn a better `A*`) and **structure inference** (no `A` at all — learn one from `X`). SUBLIME's Table 1 vs Table 2 is the cleanest split of the two [verified] (§5.4).
 
 | Method         | Year | Venue   | Idea                                                                                                                                                                                                                            | Paper                                                                                                                                                                | Code                                                            |
 | -------------- | ---- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
@@ -309,10 +175,7 @@ vs Table 2 is the cleanest split of the two [verified] (§5.4).
 | **PTDNet**     | 2021 | WSDM    | Learn to _drop_ task-irrelevant edges (denoising rather than completion).                                                                                                                                                       | —                                                                                                                                                                    | —                                                               |
 | **GDC**        | 2019 | NeurIPS | Graph diffusion convolution — replace `A` with a PPR/heat-kernel diffusion, sparsified. A fixed, unlearned `A*`.                                                                                                                | [arXiv 1911.05485](https://arxiv.org/abs/1911.05485)                                                                                                                 | —                                                               |
 
-**Surveys.** [Zhu et al., _A Survey on Graph Structure Learning: Progress and Opportunities_ (arXiv 2103.03036)](https://arxiv.org/abs/2103.03036)
-is the standard taxonomy (metric-based / neural / direct-optimization graph
-learners); Fatemi et al.'s SLAPS paper carries the sharpest _diagnostic_
-contribution (supervision starvation) even though it is not a survey.
+**Surveys.** [Zhu et al., _A Survey on Graph Structure Learning: Progress and Opportunities_ (arXiv 2103.03036)](https://arxiv.org/abs/2103.03036) is the standard taxonomy (metric-based / neural / direct-optimization graph learners); Fatemi et al.'s SLAPS paper carries the sharpest _diagnostic_ contribution (supervision starvation) even though it is not a survey.
 
 ### 4.3 Static link prediction
 
@@ -325,10 +188,7 @@ contribution (supervision starvation) even though it is not a survey.
 | **NBFNet**          | 2021 | NeurIPS   | Neural Bellman-Ford — path-based reasoning; strong on knowledge graphs, OOMs on large OGB link tasks (§5.7).                                                                                                                                                          | [arXiv 2106.06935](https://arxiv.org/abs/2106.06935)                                                                                                                 | —                                                                               |
 | **GAE / VGAE**      | 2016 | NeurIPS-W | Inner-product decoder over GCN embeddings. The baseline everything is measured against.                                                                                                                                                                               | [arXiv 1611.07308](https://arxiv.org/abs/1611.07308)                                                                                                                 | —                                                                               |
 
-**Benchmark.** The [OGB link-property-prediction leaderboards](https://ogb.stanford.edu/docs/leader_linkprop/)
-are where this sub-field actually competes (`ogbl-ppa`, `ogbl-collab`,
-`ogbl-ddi`, `ogbl-citation2`, `ogbl-wikikg2`, `ogbl-biokg`). Dataset docs:
-[ogb.stanford.edu/docs/linkprop](https://ogb.stanford.edu/docs/linkprop/).
+**Benchmark.** The [OGB link-property-prediction leaderboards](https://ogb.stanford.edu/docs/leader_linkprop/) are where this sub-field actually competes (`ogbl-ppa`, `ogbl-collab`, `ogbl-ddi`, `ogbl-citation2`, `ogbl-wikikg2`, `ogbl-biokg`). Dataset docs: [ogb.stanford.edu/docs/linkprop](https://ogb.stanford.edu/docs/linkprop/).
 
 ### 4.4 Dynamic link prediction (adjacency completion over time)
 
@@ -347,18 +207,8 @@ are where this sub-field actually competes (`ogbl-ppa`, `ogbl-collab`,
 
 **The two benchmarks that matter.**
 
-- **DyGLib** ([yule-BUAA/DyGLib](https://github.com/yule-BUAA/DyGLib)) — one
-  training pipeline, 13 datasets, 9 methods, three negative-sampling strategies
-  (random / historical / inductive). Re-ran everything, so its numbers supersede
-  the originals. §5.8.
-- **TGB** — _Temporal Graph Benchmark_, NeurIPS 2023 D&B
-  ([arXiv 2307.01026](https://arxiv.org/abs/2307.01026),
-  [tgb.complexdatalab.com](https://tgb.complexdatalab.com/),
-  [shenyangHuang/TGB](https://github.com/shenyangHuang/TGB)). **The current
-  standard.** Nine datasets up to 67M edges, an automated leaderboard, and — the
-  substantive contribution — a _hard_ negative-sampling protocol that replaced
-  the trivially-easy random negatives everyone had been using. Under it, ranking
-  changes: AP near 0.99 becomes MRR near 0.4. §5.9.
+- **DyGLib** ([yule-BUAA/DyGLib](https://github.com/yule-BUAA/DyGLib)) — one training pipeline, 13 datasets, 9 methods, three negative-sampling strategies (random / historical / inductive). Re-ran everything, so its numbers supersede the originals. §5.8.
+- **TGB** — _Temporal Graph Benchmark_, NeurIPS 2023 D&B ([arXiv 2307.01026](https://arxiv.org/abs/2307.01026), [tgb.complexdatalab.com](https://tgb.complexdatalab.com/), [shenyangHuang/TGB](https://github.com/shenyangHuang/TGB)). **The current standard.** Nine datasets up to 67M edges, an automated leaderboard, and — the substantive contribution — a _hard_ negative-sampling protocol that replaced the trivially-easy random negatives everyone had been using. Under it, ranking changes: AP near 0.99 becomes MRR near 0.4. §5.9.
 
 ---
 
@@ -366,8 +216,7 @@ are where this sub-field actually competes (`ogbl-ppa`, `ogbl-collab`,
 
 ### 5.1 Feature Propagation (LoG 2022) ⭐ the headline of §4.1
 
-Protocol: features dropped **MCAR entry-wise** at rate `r`; FP reconstructs;
-a plain GCN then does semi-supervised node classification. Metric = accuracy.
+Protocol: features dropped **MCAR entry-wise** at rate `r`; FP reconstructs; a plain GCN then does semi-supervised node classification. Metric = accuracy.
 
 **Table 1 — FP(+GCN) vs the same GCN with all features** [verified]:
 
@@ -394,21 +243,11 @@ a plain GCN then does semi-supervised node classification. Metric = accuracy.
 | OGBN-Arxiv    | OOM        | 53.98±0.08 | 67.56±0.00  | 65.08±0.04     | **69.09±0.06** |
 | OGBN-Products | OOM        | OOM        | 74.42±0.00  | OOM            | **74.94±0.07** |
 
-**Reading it.** (i) Relative degradation at 99% missing: GCNMF −58.33%, PaGNN
-−21.25%, FP −4.12% [verified, prose]. (ii) The two _feature-agnostic_ baselines
-(Label Prop., Positional Encodings) beat both learned imputers on five of seven
-datasets — a blunt statement that the learned methods were adding negative
-value. (iii) The Zero baseline loses almost nothing up to 50% missing, which the
-authors read as _"node features are redundant"_. **That last point is the one
-with a bearing on us: on a homophilous graph, topology already carries most of
-what the features say — which is consistent with our model reading only
-`log1p(degree)` and still working (§2.3).**
+**Reading it.** (i) Relative degradation at 99% missing: GCNMF −58.33%, PaGNN −21.25%, FP −4.12% [verified, prose]. (ii) The two _feature-agnostic_ baselines (Label Prop., Positional Encodings) beat both learned imputers on five of seven datasets — a blunt statement that the learned methods were adding negative value. (iii) The Zero baseline loses almost nothing up to 50% missing, which the authors read as _"node features are redundant"_. **That last point is the one with a bearing on us: on a homophilous graph, topology already carries most of what the features say — which is consistent with our model reading only `log1p(degree)` and still working (§2.3).**
 
 ### 5.2 T2-GNN (AAAI 2023) — the joint feature+structure table
 
-Protocol: drop a fraction of **both** features and edges; report node
-classification accuracy. Eight datasets (Table 1 of that paper, transcribed in
-§6.4 below).
+Protocol: drop a fraction of **both** features and edges; report node classification accuracy. Eight datasets (Table 1 of that paper, transcribed in §6.4 below).
 
 **Table 3 — comparison at the paper's default missing setting** [verified]:
 
@@ -432,20 +271,11 @@ classification accuracy. Eight datasets (Table 1 of that paper, transcribed in
 | GCN          | 62.33     | 60.82     | 57.85     | 52.43     | 45.17     |
 | **T2-GCN**   | **71.30** | **69.93** | **66.54** | **60.44** | **54.60** |
 
-**The finding worth carrying over:** plain GCN beats _both_ the feature-completion
-methods (SAT, GCNMF) _and_ the structure-enhancement methods (IDGL, PTDNet) on
-many cells. The authors' explanation is that those methods assume feature↔
-structure coupling helps, but when _both_ are corrupted the coupling propagates
-the corruption. Under joint incompleteness, **doing nothing beats doing the
-wrong repair.** For our §2.4 experiment this is a direct warning: the correct
-control arm is "train on the corrupted graph, change nothing else", not "add a
-structure-repair module".
+**The finding worth carrying over:** plain GCN beats _both_ the feature-completion methods (SAT, GCNMF) _and_ the structure-enhancement methods (IDGL, PTDNet) on many cells. The authors' explanation is that those methods assume feature↔ structure coupling helps, but when _both_ are corrupted the coupling propagates the corruption. Under joint incompleteness, **doing nothing beats doing the wrong repair.** For our §2.4 experiment this is a direct warning: the correct control arm is "train on the corrupted graph, change nothing else", not "add a structure-repair module".
 
 ### 5.3 SLAPS (NeurIPS 2021) — structure inference from features alone
 
-Cora / CiteSeer here are the **Planetoid** graphs with only 20 labels per class;
-`Cora390` / `Citeseer370` are the larger-label-budget variants from LDS.
-Accuracy [verified, Table 1]:
+Cora / CiteSeer here are the **Planetoid** graphs with only 20 labels per class; `Cora390` / `Citeseer370` are the larger-label-budget variants from LDS. Accuracy [verified, Table 1]:
 
 | Model                       | Cora         | CiteSeer     | Cora390  | Citeseer370  | PubMed   | ogbn-arxiv |
 | --------------------------- | ------------ | ------------ | -------- | ------------ | -------- | ---------- |
@@ -462,9 +292,7 @@ OOM = out of memory, OOT = out of time (24 h), NA = not applicable.
 
 ### 5.4 SUBLIME (WWW 2022) — how much is the true graph worth?
 
-The single most useful pair of tables in this file for our purposes, because it
-prices the graph. Same models, same datasets; only the availability of `A`
-changes.
+The single most useful pair of tables in this file for our purposes, because it prices the graph. Same models, same datasets; only the availability of `A` changes.
 
 **Table 1 — structure _inference_ (no `A` given)** [verified]:
 
@@ -490,17 +318,11 @@ changes.
 | IDGL        | 84.0±0.5     | 73.1±0.7     | **83.0±0.2** | **72.0±0.3** |
 | **SUBLIME** | **84.2±0.5** | 73.5±0.6     | 81.0±0.6     | 71.8±0.3     |
 
-⭐ **The price of the graph.** Cora: 73.0 (best inferred structure) → 84.2 (true
-structure refined) = **11.2 points**. ogbn-arxiv: 56.6 → 72.0 = **15.4 points**.
-No amount of GSL recovers what the real adjacency carries. Directly relevant to
-§2.4: if hiding _all_ edges costs 11–15 points on node classification, hiding
-10–50% of them should cost our planner a measurable and monotone amount, and if
-it does not, our planner was not using the structure.
+⭐ **The price of the graph.** Cora: 73.0 (best inferred structure) → 84.2 (true structure refined) = **11.2 points**. ogbn-arxiv: 56.6 → 72.0 = **15.4 points**. No amount of GSL recovers what the real adjacency carries. Directly relevant to §2.4: if hiding _all_ edges costs 11–15 points on node classification, hiding 10–50% of them should cost our planner a measurable and monotone amount, and if it does not, our planner was not using the structure.
 
 ### 5.5 Pro-GNN (KDD 2020) — structure denoising under perturbation
 
-Metattack, `Ptb Rate` = fraction of edges perturbed. Accuracy±std [verified,
-Table 2], Cora and CiteSeer rows:
+Metattack, `Ptb Rate` = fraction of edges perturbed. Accuracy±std [verified, Table 2], Cora and CiteSeer rows:
 
 | Dataset  | Ptb % | GCN        | GAT            | RGCN       | GCN-Jaccard | GCN-SVD    | Pro-GNN-fs     | **Pro-GNN**    |
 | -------- | ----- | ---------- | -------------- | ---------- | ----------- | ---------- | -------------- | -------------- |
@@ -514,17 +336,11 @@ Table 2], Cora and CiteSeer rows:
 | CiteSeer | 10    | 67.55±0.89 | 70.63±0.48     | 67.71±0.30 | 69.54±0.56  | 68.87±0.62 | 72.43±0.52     | **72.51±0.75** |
 | CiteSeer | 25    | 56.94±2.09 | 61.85±1.12     | 55.35±0.66 | 59.89±1.47  | 57.18±1.87 | 66.40±2.57     | **68.95±2.78** |
 
-The shape to notice: at 0% perturbation Pro-GNN is _no better_ than plain GCN
-(82.98 vs 83.50 on Cora) — structure learning buys nothing on a clean graph and
-everything on a dirty one (69.72 vs 47.53 at 25%). Pro-GNN's _random_-attack
-results, the closest analogue to our uniform edge hiding, are published **only
-as Figure 4** — `[figure]`, no per-cell numbers.
+The shape to notice: at 0% perturbation Pro-GNN is _no better_ than plain GCN (82.98 vs 83.50 on Cora) — structure learning buys nothing on a clean graph and everything on a dirty one (69.72 vs 47.53 at 25%). Pro-GNN's _random_-attack results, the closest analogue to our uniform edge hiding, are published **only as Figure 4** — `[figure]`, no per-cell numbers.
 
 ### 5.6 SEAL (NeurIPS 2018) ⭐ — and two of its graphs are ours
 
-Protocol: remove 10% of existing links as positive test data, sample an equal
-number of non-edges as negatives, train on the remaining 90%. Metric AUC, 10
-runs [verified, prose].
+Protocol: remove 10% of existing links as positive test data, sample an equal number of non-edges as negatives, train on the remaining 90%. Metric AUC, 10 runs [verified, prose].
 
 **Table 1 — heuristics vs learned, AUC** [verified]:
 
@@ -539,26 +355,13 @@ runs [verified, prose].
 | Router       | 56.43±0.52 | 56.40±0.52 | 47.58±1.47 | 56.43±0.51 | 56.43±0.51 | 38.62±1.35 | 38.76±1.39 | 37.40±1.27 | 47.58±1.48 | 87.42±2.08     | 94.41±0.88 | **96.38±1.45** |
 | E.coli       | 93.71±0.39 | 81.31±0.61 | 91.82±0.58 | 95.36±0.34 | 95.95±0.35 | 93.50±0.44 | 95.57±0.44 | 62.49±1.43 | 91.89±0.58 | 96.94±0.29     | 97.21±0.27 | **97.64±0.22** |
 
-✅ **`NS` is our `netscience` and `Power` is our `power_grid`, byte-for-byte.**
-SEAL's Appendix C states _"NS … 1,589 nodes and 2,742 edges … average node
-degree 3.45"_ and _"Power … 4,941 nodes and 6,594 edges … average node degree
-2.67"_ [verified] — identical on all three statistics to our loaders (§6.2).
-`PB` (1,222 / 16,714) is also identical to Pro-GNN's `Polblogs`.
+✅ **`NS` is our `netscience` and `Power` is our `power_grid`, byte-for-byte.** SEAL's Appendix C states _"NS … 1,589 nodes and 2,742 edges … average node degree 3.45"_ and _"Power … 4,941 nodes and 6,594 edges … average node degree 2.67"_ [verified] — identical on all three statistics to our loaders (§6.2). `PB` (1,222 / 16,714) is also identical to Pro-GNN's `Polblogs`.
 
-**Why the `Power` row is the interesting one.** Every neighbourhood heuristic
-collapses to near-chance on the power grid (CN/AA/RA all 58.79, PA 44.33 —
-_worse_ than random) because it has almost no triangles; only the
-subgraph-learning methods recover (SEAL 87.61). This is the same structural
-property that makes power_grid the hardest graph in our IM suite, and it is a
-ready-made sanity check: **if our world model is asked to score hidden edges on
-power_grid, the heuristic floor is ~58 AUC and the published learned ceiling is
-~88.**
+**Why the `Power` row is the interesting one.** Every neighbourhood heuristic collapses to near-chance on the power grid (CN/AA/RA all 58.79, PA 44.33 — _worse_ than random) because it has almost no triangles; only the subgraph-learning methods recover (SEAL 87.61). This is the same structural property that makes power_grid the hardest graph in our IM suite, and it is a ready-made sanity check: **if our world model is asked to score hidden edges on power_grid, the heuristic floor is ~58 AUC and the published learned ceiling is ~88.**
 
 ### 5.7 BUDDY / ELPH (ICLR 2023) — the static link-prediction state of the art
 
-Metrics differ per dataset (first row). Planetoid splits are random; OGB uses
-the fixed OGB splits, and where possible baselines are taken from the OGB
-leaderboard [verified, Table 2]:
+Metrics differ per dataset (first row). Planetoid splits are random; OGB uses the fixed OGB splits, and where possible baselines are taken from the OGB leaderboard [verified, Table 2]:
 
 | Method    | Cora HR@100    | CiteSeer HR@100 | PubMed HR@100  | Collab HR@50   | PPA HR@100     | Citation2 MRR  | DDI HR@20      |
 | --------- | -------------- | --------------- | -------------- | -------------- | -------------- | -------------- | -------------- |
@@ -575,17 +378,11 @@ leaderboard [verified, Table 2]:
 | ELPH      | 87.72±2.13     | **93.44±0.53**  | 72.99±1.43     | **66.32±0.40** | OOM            | OOM            | **83.19±2.12** |
 | **BUDDY** | **88.00±0.44** | 92.93±0.27      | 74.10±0.78     | 65.94±0.58     | **49.85±0.20** | 87.56±0.11     | 78.51±1.36     |
 
-⚠️ **A transcription trap in this table's companion.** BUDDY's Table 6 lists
-PubMed as **18,717** nodes [verified]; PubMed is 19,717 (Kipf Table 1, SLAPS
-Table 5, OGB-independent sources — §6.4). That is a digit error in the paper,
-exactly the class of thing §0 exists to catch. Their edge counts (Cora 5,278,
-CiteSeer 4,676, PubMed 44,327) are the deduplicated-undirected convention.
+⚠️ **A transcription trap in this table's companion.** BUDDY's Table 6 lists PubMed as **18,717** nodes [verified]; PubMed is 19,717 (Kipf Table 1, SLAPS Table 5, OGB-independent sources — §6.4). That is a digit error in the paper, exactly the class of thing §0 exists to catch. Their edge counts (Cora 5,278, CiteSeer 4,676, PubMed 44,327) are the deduplicated-undirected convention.
 
 ### 5.8 DyGLib (NeurIPS 2023 D&B) — the unified dynamic-LP re-run
 
-AP × 100 for **transductive** dynamic link prediction under **random** negative
-sampling [verified, Table 1, `rnd` block]. Every number was produced by one
-pipeline, so this table supersedes the original papers' self-reported numbers.
+AP × 100 for **transductive** dynamic link prediction under **random** negative sampling [verified, Table 1, `rnd` block]. Every number was produced by one pipeline, so this table supersedes the original papers' self-reported numbers.
 
 | Dataset       | JODIE      | DyRep      | TGAT       | TGN            | CAWN       | EdgeBank   | TCL        | GraphMixer | DyGFormer      |
 | ------------- | ---------- | ---------- | ---------- | -------------- | ---------- | ---------- | ---------- | ---------- | -------------- |
@@ -604,11 +401,7 @@ pipeline, so this table supersedes the original papers' self-reported numbers.
 | Contact       | 95.31±1.33 | 95.98±0.15 | 96.28±0.09 | 96.89±0.56     | 90.26±0.28 | 92.58±0.00 | 92.44±0.12 | 91.92±0.03 | **98.29±0.01** |
 | **Avg. Rank** | 5.08       | 5.85       | 5.69       | 2.54           | 4.31       | 7.54       | 6.92       | 5.46       | **1.62**       |
 
-Under **historical** and **inductive** negative sampling the ordering changes
-substantially (DyGFormer's avg rank 2.62 / 3.23; CAWN falls to 7.54 under
-`hist`) [verified] — the negative sampler, not the model, decides half the
-leaderboard. That is the methodological lesson to carry: an evaluation whose
-negatives are too easy ranks memorization above modelling.
+Under **historical** and **inductive** negative sampling the ordering changes substantially (DyGFormer's avg rank 2.62 / 3.23; CAWN falls to 7.54 under `hist`) [verified] — the negative sampler, not the model, decides half the leaderboard. That is the methodological lesson to carry: an evaluation whose negatives are too easy ranks memorization above modelling.
 
 ### 5.9 TGB (NeurIPS 2023 D&B) — the current standard, and it is harsher
 
@@ -626,20 +419,13 @@ MRR under TGB's hard-negative protocol [verified, Tables 2a/2b/3]:
 | EdgeBank_tw | 0.600 / 0.571                 | 0.0242 / 0.0253               | 0.492 / 0.580                 | 0.124 / 0.149                 | 0.363 / 0.387                 |
 | EdgeBank_∞  | 0.527 / 0.495                 | 0.0229 / 0.0229               | 0.315 / 0.359                 | 0.109 / 0.129                 | 0.166 / 0.167                 |
 
-`tgbl-wiki` uses **all** possible negatives; `tgbl-review` uses 100 negatives
-per positive [verified]. Two findings the paper stresses: the memorization
-heuristic **EdgeBank beats DyRep on `tgbl-coin`** (0.580 vs 0.452 test MRR),
-and on the long-horizon datasets validation and test MRR diverge because of
-genuine distribution shift over the 5-year span [verified, prose].
+`tgbl-wiki` uses **all** possible negatives; `tgbl-review` uses 100 negatives per positive [verified]. Two findings the paper stresses: the memorization heuristic **EdgeBank beats DyRep on `tgbl-coin`** (0.580 vs 0.452 test MRR), and on the long-horizon datasets validation and test MRR diverge because of genuine distribution shift over the 5-year span [verified, prose].
 
-Compare with §5.8: the _same_ Wikipedia graph scores AP 0.96–0.99 under random
-negatives (DyGLib) and MRR 0.05–0.75 under TGB's negatives. **Do not mix the two
-number systems.**
+Compare with §5.8: the _same_ Wikipedia graph scores AP 0.96–0.99 under random negatives (DyGLib) and MRR 0.05–0.75 under TGB's negatives. **Do not mix the two number systems.**
 
 ### 5.10 NodeFormer (NeurIPS 2022) — GSL at scale
 
-Testing ROC-AUC on OGB-Proteins (batch 10K) and accuracy on Amazon2M (batch
-100K), with training memory [verified, Tables 2 and 3]:
+Testing ROC-AUC on OGB-Proteins (batch 10K) and accuracy on Amazon2M (batch 100K), with training memory [verified, Tables 2 and 3]:
 
 | Method         | OGB-Proteins ROC-AUC (%) | Train Mem | Amazon2M Accuracy (%) | Train Mem |
 | -------------- | ------------------------ | --------- | --------------------- | --------- |
@@ -649,9 +435,7 @@ Testing ROC-AUC on OGB-Proteins (batch 10K) and accuracy on Amazon2M (batch
 | GraphSAINT-GAT | 74.63±1.24               | 5.2 GB    | 85.17±0.32            | 2.2 GB    |
 | **NodeFormer** | **77.45±1.15**           | 3.2 GB    | **87.85±0.24**        | 4.0 GB    |
 
-The point of the table is the memory column: learned all-pair structure at 2M
-nodes in 4 GB. It is the only method in §4.2 that does not OOM on our
-larger graphs.
+The point of the table is the memory column: learned all-pair structure at 2M nodes in 4 GB. It is the only method in §4.2 that does not OOM on our larger graphs.
 
 ---
 
@@ -659,10 +443,7 @@ larger graphs.
 
 ### 6.1 What we already load, and where it appears here
 
-✅ marks a dataset we load via `data/datasets/<name>.py`. The authoritative rows
-for all of these live in
-[`influence_maximization.md`](influence_maximization.md) §6.1 — this section
-records only the **link between our graph and this literature**.
+✅ marks a dataset we load via `data/datasets/<name>.py`. The authoritative rows for all of these live in [`influence_maximization.md`](influence_maximization.md) §6.1 — this section records only the **link between our graph and this literature**.
 
 | `--dataset`                                                                                                                            | Ours                                | Appears in this literature as                                                                        | Same graph?                              |
 | -------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------- |
@@ -671,22 +452,13 @@ records only the **link between our graph and this literature**.
 | `cora_ml` ✅                                                                                                                           | 2,810 / 7,981, 2,879-dim, 7 classes | **nothing** — the "Cora" of this literature is a different graph                                     | ❌ **name collision, see §6.3**          |
 | `jazz`, `facebook`, `email_eu_core`, `lastfm_asia`, `ca_grqc`, `wiki_vote`, `nethept`, `netphy`, `twitter`, `digg`, `youtube`, `weibo` | —                                   | not found in any §4 paper surveyed                                                                   | —                                        |
 
-Two exact overlaps is more than this file expected to find, and both are on the
-**structure** side, not the feature side — consistent with §2's verdict. It also
-means the §2.4 robustness experiment has a published reference point: on
-`netscience` and `power_grid`, §5.6 gives the AUC that CN/AA/RA/Katz/SEAL reach
-when 10% of edges are hidden.
+Two exact overlaps is more than this file expected to find, and both are on the **structure** side, not the feature side — consistent with §2's verdict. It also means the §2.4 robustness experiment has a published reference point: on `netscience` and `power_grid`, §5.6 gives the AUC that CN/AA/RA/Katz/SEAL reach when 10% of edges are hidden.
 
-One more incidental match: Pro-GNN's **Polblogs** (1,222 / 16,714, no node
-features, 2 classes) is SEAL's **PB** (1,222 / 16,714) [verified, both tables].
-We do not load it.
+One more incidental match: Pro-GNN's **Polblogs** (1,222 / 16,714, no node features, 2 classes) is SEAL's **PB** (1,222 / 16,714) [verified, both tables]. We do not load it.
 
 ### 6.2 ⭐ The Cora name collision — read this before quoting any "Cora" number
 
-**Our `cora_ml` is not the Cora that GNN papers benchmark on.** They are
-different graphs from different preprocessing lineages of the same 2000-era
-McCallum crawl, and they disagree on node count, edge count, and — decisively —
-feature dimension.
+**Our `cora_ml` is not the Cora that GNN papers benchmark on.** They are different graphs from different preprocessing lineages of the same 2000-era McCallum crawl, and they disagree on node count, edge count, and — decisively — feature dimension.
 
 |             | **Planetoid "Cora"** (this literature)                                                                                                | **Our `cora_ml`** (the IM literature)                     |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
@@ -700,16 +472,9 @@ feature dimension.
 | Loader      | PyG `Planetoid(root, "Cora")`                                                                                                         | `data/datasets/cora_ml.py`                                |
 | Used by     | FP, GCNmf, T2-GNN, PCFI, LDS, Pro-GNN, IDGL, SLAPS, SUBLIME, SEAL-successors, BUDDY                                                   | DeepIM, MOEIM, SL-VAE, us                                 |
 
-The 7-class agreement is a coincidence of both being topic-labelled subsets of
-the same corpus; **the feature vocabularies are unrelated** (1,433 vs 2,879
-terms), so no feature-imputation result transfers between them. This is exactly
-the failure mode catalogued in
-[`influence_maximization.md`](influence_maximization.md) **§6.3** for Epinions,
-DBLP, Twitter, Wiki-Vote, Digg, Weibo and LiveJournal — one name, two graphs.
-Add **Cora** to that list.
+The 7-class agreement is a coincidence of both being topic-labelled subsets of the same corpus; **the feature vocabularies are unrelated** (1,433 vs 2,879 terms), so no feature-imputation result transfers between them. This is exactly the failure mode catalogued in [`influence_maximization.md`](influence_maximization.md) **§6.3** for Epinions, DBLP, Twitter, Wiki-Vote, Digg, Weibo and LiveJournal — one name, two graphs. Add **Cora** to that list.
 
-**Worse: "Planetoid Cora" is itself quoted three ways**, and all three are the
-same file under different conventions [verified, four independent tables]:
+**Worse: "Planetoid Cora" is itself quoted three ways**, and all three are the same file under different conventions [verified, four independent tables]:
 
 | Quoted as                   | Nodes     | Edges     | Who                                                | What it is                                                                                          |
 | --------------------------- | --------- | --------- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
@@ -717,24 +482,13 @@ same file under different conventions [verified, four independent tables]:
 | deduplicated undirected     | 2,708     | **5,278** | T2-GNN Table 1; BUDDY Table 6                      | after symmetrize + drop self-loops + collapse multi-edges (PyG reports 10,556 directed = 2 × 5,278) |
 | largest connected component | **2,485** | **5,069** | Shchur et al. Table 3; Pro-GNN Table 1; FP Table 3 | LCC after standardization                                                                           |
 
-So a paper reporting "Cora, 2,485 nodes" and one reporting "Cora, 2,708 nodes"
-are using the same graph; one reporting "Cora, 2,810 nodes" is not. The 2,485 /
-5,069 variant traces to **Shchur et al., _Pitfalls of GNN Evaluation_
-([arXiv 1811.05868](https://arxiv.org/abs/1811.05868), code
-[shchur/gnn-benchmark](https://github.com/shchur/gnn-benchmark))**, whose
-standardized loader is what FP and Pro-GNN both consume.
+So a paper reporting "Cora, 2,485 nodes" and one reporting "Cora, 2,708 nodes" are using the same graph; one reporting "Cora, 2,810 nodes" is not. The 2,485 / 5,069 variant traces to **Shchur et al., _Pitfalls of GNN Evaluation_ ([arXiv 1811.05868](https://arxiv.org/abs/1811.05868), code [shchur/gnn-benchmark](https://github.com/shchur/gnn-benchmark))**, whose standardized loader is what FP and Pro-GNN both consume.
 
-**CiteSeer has the same three-way split and one unresolved disagreement:** raw
-3,327 / 4,732 [Kipf, SLAPS]; deduplicated 3,327 / 4,676 [T2-GNN, BUDDY]; LCC
-quoted as **2,110 / 3,668** by Pro-GNN but **2,120 / 3,679** by Shchur _and_ FP
-[all verified]. A 10-node / 11-edge gap between two "LCC of CiteSeer" figures —
-cause not established, logged in §11.
+**CiteSeer has the same three-way split and one unresolved disagreement:** raw 3,327 / 4,732 [Kipf, SLAPS]; deduplicated 3,327 / 4,676 [T2-GNN, BUDDY]; LCC quoted as **2,110 / 3,668** by Pro-GNN but **2,120 / 3,679** by Shchur _and_ FP [all verified]. A 10-node / 11-edge gap between two "LCC of CiteSeer" figures — cause not established, logged in §11.
 
 ### 6.3 Static node-classification benchmarks (the §4.1 / §4.2 suite)
 
-Feature dim and class count are load-bearing here — they are what a feature
-imputer imputes. `Edges` follows each source's own convention; the ⚠️ column
-flags where conventions differ.
+Feature dim and class count are load-bearing here — they are what a feature imputer imputes. `Edges` follows each source's own convention; the ⚠️ column flags where conventions differ.
 
 | Dataset              | Nodes     | Edges                                                                        | Feat. dim      | Classes   | Type            | Source                                                                                                                      | ⚠️                                |
 | -------------------- | --------- | ---------------------------------------------------------------------------- | -------------- | --------- | --------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
@@ -756,22 +510,13 @@ flags where conventions differ.
 | **Squirrel**         | 5,201     | 198,493                                                                      | 2,089          | 5         | undirected      | same                                                                                                                        | heterophilous                     |
 | **Polblogs / PB**    | 1,222     | 16,714                                                                       | **none**       | 2         | directed        | via [Pro-GNN](https://github.com/ChandlerBang/Pro-GNN) / [SEAL](https://github.com/muhanzhang/SEAL/tree/master/Python/data) | featureless — Jaccard/Pro-GNN N/A |
 
-Node/edge/feature/class counts: Cora, CiteSeer, PubMed [verified, Kipf Table 1
-and SLAPS Table 5]; Cora-Full, Coauthor, Amazon [verified, Shchur Table 3];
-ogbn-\* [verified, OGB Table 1 and FP Table 3]; WebKB, Chameleon, Squirrel
-[verified, T2-GNN Table 1]; Polblogs [verified, Pro-GNN Table 1 + SEAL App. C].
+Node/edge/feature/class counts: Cora, CiteSeer, PubMed [verified, Kipf Table 1 and SLAPS Table 5]; Cora-Full, Coauthor, Amazon [verified, Shchur Table 3]; ogbn-\* [verified, OGB Table 1 and FP Table 3]; WebKB, Chameleon, Squirrel [verified, T2-GNN Table 1]; Polblogs [verified, Pro-GNN Table 1 + SEAL App. C].
 
-⭐ **`ogbn-products` is the cleanest edge-convention case in the folder.** OGB's
-own Table 1 says **61,859,140**; FP's Table 3 says **123,718,280**. `2 ×
-61,859,140 = 123,718,280` exactly [derived] — undirected edges vs stored arcs,
-same file. This is the same arithmetic that resolved our NetHEPT question
-([`influence_maximization.md`](influence_maximization.md) §6.4). Check the
-factor of 2 before ever concluding two graphs differ.
+⭐ **`ogbn-products` is the cleanest edge-convention case in the folder.** OGB's own Table 1 says **61,859,140**; FP's Table 3 says **123,718,280**. `2 × 61,859,140 = 123,718,280` exactly [derived] — undirected edges vs stored arcs, same file. This is the same arithmetic that resolved our NetHEPT question ([`influence_maximization.md`](influence_maximization.md) §6.4). Check the factor of 2 before ever concluding two graphs differ.
 
 ### 6.4 Static link-prediction benchmarks
 
-**SEAL's eight small graphs** [verified, SEAL App. C] — no node features; these
-are pure-topology benchmarks, which is why they are the relevant ones for us:
+**SEAL's eight small graphs** [verified, SEAL App. C] — no node features; these are pure-topology benchmarks, which is why they are the relevant ones for us:
 
 | Dataset   | Nodes     | Edges     | Avg deg | Domain                     | Ours?             |
 | --------- | --------- | --------- | ------- | -------------------------- | ----------------- |
@@ -784,11 +529,9 @@ are pure-topology benchmarks, which is why they are the relevant ones for us:
 | Router    | 5,022     | 6,258     | 2.49    | router-level Internet      |                   |
 | E.coli    | 1,805     | 14,660    | 12.55   | metabolite reactions       |                   |
 
-Bundled with the code at
-[muhanzhang/SEAL/Python/data](https://github.com/muhanzhang/SEAL/tree/master/Python/data).
+Bundled with the code at [muhanzhang/SEAL/Python/data](https://github.com/muhanzhang/SEAL/tree/master/Python/data).
 
-**OGB link-property prediction** [verified, OGB Table 1] — node features vary by
-dataset; the leaderboard metric is fixed per dataset:
+**OGB link-property prediction** [verified, OGB Table 1] — node features vary by dataset; the leaderboard metric is fixed per dataset:
 
 | Dataset        | Nodes     | Edges      | Node features          | Split          | Metric   | Source                                              |
 | -------------- | --------- | ---------- | ---------------------- | -------------- | -------- | --------------------------------------------------- |
@@ -799,18 +542,11 @@ dataset; the leaderboard metric is fixed per dataset:
 | ogbl-wikikg2   | 2,500,604 | 17,137,181 | KG entities/relations  | time           | MRR      | same                                                |
 | ogbl-biokg     | 93,773    | 5,088,434  | heterogeneous KG       | random         | MRR      | same                                                |
 
-Leaderboards: [ogb.stanford.edu/docs/leader_linkprop](https://ogb.stanford.edu/docs/leader_linkprop/).
-Note `ogbl-ddi` has **no node features at all** — which is why the
-feature-free heuristics in §5.7 stay competitive there and why it is the OGB
-task most like our setting.
+Leaderboards: [ogb.stanford.edu/docs/leader_linkprop](https://ogb.stanford.edu/docs/leader_linkprop/). Note `ogbl-ddi` has **no node features at all** — which is why the feature-free heuristics in §5.7 stay competitive there and why it is the OGB task most like our setting.
 
 ### 6.5 Dynamic / temporal benchmarks
 
-**DyGLib's thirteen** [verified, DyGLib Table 6]. `#N&L Feat` = dimensions of
-(node feature, link feature); `–` means none. The first four are the classic
-JODIE datasets, downloadable from [snap.stanford.edu/jodie](https://snap.stanford.edu/jodie/);
-all thirteen ship preprocessed with
-[yule-BUAA/DyGLib](https://github.com/yule-BUAA/DyGLib).
+**DyGLib's thirteen** [verified, DyGLib Table 6]. `#N&L Feat` = dimensions of (node feature, link feature); `–` means none. The first four are the classic JODIE datasets, downloadable from [snap.stanford.edu/jodie](https://snap.stanford.edu/jodie/); all thirteen ship preprocessed with [yule-BUAA/DyGLib](https://github.com/yule-BUAA/DyGLib).
 
 | Dataset     | Domain      | Nodes  | Links     | Node & link feat. | Bipartite | Duration      | Unique steps | Granularity |
 | ----------- | ----------- | ------ | --------- | ----------------- | --------- | ------------- | ------------ | ----------- |
@@ -828,15 +564,9 @@ all thirteen ship preprocessed with
 | UN Vote     | politics    | 201    | 1,035,742 | – & 1             | no        | 72 years      | 72           | years       |
 | Contact     | proximity   | 692    | 2,426,279 | – & 1             | no        | 1 month       | 8,064        | 5 minutes   |
 
-None of these carry node features — the "features" are edge attributes. DyGLib
-notes its Contact counts differ slightly from the source paper's (694 nodes /
-2,426,280 links) despite using the same released file [verified, prose].
+None of these carry node features — the "features" are edge attributes. DyGLib notes its Contact counts differ slightly from the source paper's (694 nodes / 2,426,280 links) despite using the same released file [verified, prose].
 
-**TGB's nine** [verified, TGB Table 1]. `Surprise` = fraction of test edges never
-seen in training — the single most predictive statistic for whether EdgeBank
-wins. Chronological 70/15/15 split throughout. Download and leaderboards:
-[tgb.complexdatalab.com](https://tgb.complexdatalab.com/) · code
-[shenyangHuang/TGB](https://github.com/shenyangHuang/TGB).
+**TGB's nine** [verified, TGB Table 1]. `Surprise` = fraction of test edges never seen in training — the single most predictive statistic for whether EdgeBank wins. Chronological 70/15/15 split throughout. Download and leaderboards: [tgb.complexdatalab.com](https://tgb.complexdatalab.com/) · code [shenyangHuang/TGB](https://github.com/shenyangHuang/TGB).
 
 | Dataset      | Task | Domain      | Nodes   | Edges      | Steps      | Surprise  | Edge props (W/Di/A) |
 | ------------ | ---- | ----------- | ------- | ---------- | ---------- | --------- | ------------------- |
@@ -850,16 +580,13 @@ wins. Chronological 70/15/15 split throughout. Download and leaderboards:
 | tgbn-reddit  | node | social      | 11,766  | 27,174,118 | 21,889,537 | 0.013     | ✓ / ✓ / ✘           |
 | tgbn-token   | node | transaction | 61,756  | 72,936,998 | 2,036,524  | 0.014     | ✓ / ✓ / ✓           |
 
-`tgbl-wiki` is the _same_ Wikipedia graph as DyGLib's row above (9,227 /
-157,474) — the only dataset shared between the two benchmarks, and the reason
-§5.9's closing warning matters: one graph, two number systems.
+`tgbl-wiki` is the _same_ Wikipedia graph as DyGLib's row above (9,227 / 157,474) — the only dataset shared between the two benchmarks, and the reason §5.9's closing warning matters: one graph, two number systems.
 
 ---
 
 ## 7. Which paper uses which
 
-Cells mark the dataset **as that paper reports it**. Check §6.2 before assuming
-two "Cora" cells are the same graph.
+Cells mark the dataset **as that paper reports it**. Check §6.2 before assuming two "Cora" cells are the same graph.
 
 | Dataset                                      | GCNmf'21 | SAT'22 | FP'22 | PCFI'23 | T2-GNN'23 | LDS'19 | Pro-GNN'20 | IDGL'20 | SLAPS'21 | SUBLIME'22 | NodeFormer'22 | SEAL'18 | Neo-GNN'21 | BUDDY'23 | DyGLib'23 | TGB'23 |
 | -------------------------------------------- | -------- | ------ | ----- | ------- | --------- | ------ | ---------- | ------- | -------- | ---------- | ------------- | ------- | ---------- | -------- | --------- | ------ |
@@ -884,8 +611,7 @@ two "Cora" cells are the same graph.
 | Enron / UCI / Contact / Flights / UN / Parl. |          |        |       |         |           |        |            |         |          |            |               |         |            |          | ✔         |        |
 | tgbl-review / coin / comment / flight        |          |        |       |         |           |        |            |         |          |            |               |         |            |          |           | ✔      |
 
-**Bold = we already have it.** The entire intersection between our loaded suite
-and this literature is two rows, both in SEAL's column.
+**Bold = we already have it.** The entire intersection between our loaded suite and this literature is two rows, both in SEAL's column.
 
 ---
 
@@ -893,8 +619,7 @@ and this literature is two rows, both in SEAL's column.
 
 ### 8.1 Masking protocols — how incompleteness is manufactured
 
-These are the recipes to copy for §2.4 / §9. All are experimenter-side
-corruptions applied _before_ training.
+These are the recipes to copy for §2.4 / §9. All are experimenter-side corruptions applied _before_ training.
 
 | Protocol                           | Rule                                                                      | Rates used                   | Used by                                    |
 | ---------------------------------- | ------------------------------------------------------------------------- | ---------------------------- | ------------------------------------------ |
@@ -909,10 +634,7 @@ corruptions applied _before_ training.
 | **Link-prediction split**          | hold out 10% of edges as positives + equal sampled non-edges as negatives | 10%                          | SEAL [verified, prose]                     |
 | **Chronological split**            | 70/15/15 by time                                                          | fixed                        | TGB [verified], DyGLib                     |
 
-**The one to use for us** is _uniform edge deletion_, because it is the honest
-model of an under-observed influence network and because §5.6 gives published
-reference numbers for exactly that protocol on two graphs we already load.
-Follow SEAL's split ratio (10%) as the low rung, then extend to 20% and 50%.
+**The one to use for us** is _uniform edge deletion_, because it is the honest model of an under-observed influence network and because §5.6 gives published reference numbers for exactly that protocol on two graphs we already load. Follow SEAL's split ratio (10%) as the low rung, then extend to 20% and 50%.
 
 ### 8.2 Metrics
 
@@ -926,183 +648,65 @@ Follow SEAL's split ratio (10%) as the low rung, then extend to 20% and 50%.
 
 ### 8.3 The traps
 
-1. **Negative sampling decides the leaderboard.** DyGLib's three strategies
-   reorder the same nine methods (avg rank of DyGFormer 1.62 → 2.62 → 3.23
-   across rnd/hist/ind) [verified]. TGB's hard negatives turn AP≈0.99 into
-   MRR≈0.4 on the same Wikipedia graph. Always state the sampler.
-2. **AUC saturates on easy splits.** Every heuristic in §5.6 exceeds 0.93 AUC on
-   USAir/E.coli; the graphs that separate methods are the sparse, triangle-poor
-   ones (Power, Router). Same lesson as the IM file's budget discussion —
-   report the regime where methods actually differ.
-3. **EdgeBank is the floor nobody expects to matter.** A method that does not
-   beat "predict what you saw before" has not demonstrated dynamics modelling
-   [verified, §5.9: EdgeBank 0.580 vs DyRep 0.452 on tgbl-coin].
-4. **Missing-rate curves are flat until ~60%.** FP: _"most methods perform
-   extremely well up to 50% of missing features … the gap between methods opens
-   up from around 60%"_ [verified, prose]. Reporting only 20–50% hides every
-   difference.
-5. **Do the ×2 check before claiming two graphs differ.** §6.3's
-   `ogbn-products` case; the same arithmetic that resolved NetHEPT in
-   [`influence_maximization.md`](influence_maximization.md) §6.4.
-6. **Feature-agnostic baselines are not a formality.** Label Propagation and
-   positional encodings beat both learned imputers in five of seven columns of
-   §5.1 Table 2. Any imputation claim needs them in the table.
+1. **Negative sampling decides the leaderboard.** DyGLib's three strategies reorder the same nine methods (avg rank of DyGFormer 1.62 → 2.62 → 3.23 across rnd/hist/ind) [verified]. TGB's hard negatives turn AP≈0.99 into MRR≈0.4 on the same Wikipedia graph. Always state the sampler.
+2. **AUC saturates on easy splits.** Every heuristic in §5.6 exceeds 0.93 AUC on USAir/E.coli; the graphs that separate methods are the sparse, triangle-poor ones (Power, Router). Same lesson as the IM file's budget discussion — report the regime where methods actually differ.
+3. **EdgeBank is the floor nobody expects to matter.** A method that does not beat "predict what you saw before" has not demonstrated dynamics modelling [verified, §5.9: EdgeBank 0.580 vs DyRep 0.452 on tgbl-coin].
+4. **Missing-rate curves are flat until ~60%.** FP: _"most methods perform extremely well up to 50% of missing features … the gap between methods opens up from around 60%"_ [verified, prose]. Reporting only 20–50% hides every difference.
+5. **Do the ×2 check before claiming two graphs differ.** §6.3's `ogbn-products` case; the same arithmetic that resolved NetHEPT in [`influence_maximization.md`](influence_maximization.md) §6.4.
+6. **Feature-agnostic baselines are not a formality.** Label Propagation and positional encodings beat both learned imputers in five of seven columns of §5.1 Table 2. Any imputation claim needs them in the table.
 
 ---
 
 ## 9. Implications for this project
 
-**Do not implement graph completion as a task.** §2 gives the argument; this
-section gives the three things to actually do with the file.
+**Do not implement graph completion as a task.** §2 gives the argument; this section gives the three things to actually do with the file.
 
 ### 9.1 Feature imputation is not applicable — state it and move on
 
-Our model has **six input channels and none of them is a dataset feature**
-(`world_model/wm_data.py:16-17`). `ch_degree` is computed from `edge_index`
-inside `build_features` (`wm_data.py:174-180`), not read from a file.
-`data/generate_wm_data.py:92-99` writes `node_feats` and `node_labels` into
-every `graphs/*.npz`, and `load_graph_store` (`wm_data.py:225-241`) reads back
-only `edge_index`, `ic_probs`, `lt_weights`; `GraphInfo.from_store_entry`
-(`coding_agent/types.py:33-40`) reads only `num_nodes`, `edge_index`,
-`ic_probs`, `directed`. **The features are written to disk and read by nothing.**
+Our model has **six input channels and none of them is a dataset feature** (`world_model/wm_data.py:16-17`). `ch_degree` is computed from `edge_index` inside `build_features` (`wm_data.py:174-180`), not read from a file. `data/generate_wm_data.py:92-99` writes `node_feats` and `node_labels` into every `graphs/*.npz`, and `load_graph_store` (`wm_data.py:225-241`) reads back only `edge_index`, `ic_probs`, `lt_weights`; `GraphInfo.from_store_entry` (`coding_agent/types.py:33-40`) reads only `num_nodes`, `edge_index`, `ic_probs`, `directed`. **The features are written to disk and read by nothing.**
 
-Perfect imputation of Cora-ML's 2,879-dim bag-of-words would change zero
-reported numbers. That belongs in the limitations paragraph of any writeup, one
-sentence, with the channel count as evidence. It becomes false only if we ever
-build a content-conditioned transmission model (`p(u→v)` a function of node
-attributes) — not on the roadmap.
+Perfect imputation of Cora-ML's 2,879-dim bag-of-words would change zero reported numbers. That belongs in the limitations paragraph of any writeup, one sentence, with the channel count as evidence. It becomes false only if we ever build a content-conditioned transmission model (`p(u→v)` a function of node attributes) — not on the roadmap.
 
 ### 9.2 ⭐ The one experiment worth running: robustness to hidden edges
 
-**Claim to test:** our world model and planner assume the observed adjacency is
-the true one. Real influence networks are not observed completely. How fast do
-we degrade?
+**Claim to test:** our world model and planner assume the observed adjacency is the true one. Real influence networks are not observed completely. How fast do we degrade?
 
 **Protocol** (from §8.1, uniform edge deletion; SEAL's 10% as the low rung):
 
-1. For `r ∈ {0, 0.10, 0.20, 0.50}` build `A_obs` by deleting a uniformly random
-   `r` fraction of undirected edges from `A_full`. One seed per `r` to start;
-   three seeds if the trend is noisy.
+1. For `r ∈ {0, 0.10, 0.20, 0.50}` build `A_obs` by deleting a uniformly random `r` fraction of undirected edges from `A_full`. One seed per `r` to start; three seeds if the trend is noisy.
 2. Generate transitions and train the world model on `A_obs` **only**.
-3. Score against ground truth computed on `A_full` — the referee never sees the
-   corruption. This is the whole design: the corruption is epistemic, the
-   world is not.
-4. Report, per `r`: one-step **`delta_f1`** and **`new_infection_f1`**; rollout
-   **`ens_count_bias`** and **`ens_marg_mae`**; and **`planning_regret_multi`**
-   with seeds chosen on `A_obs` and spread measured on `A_full`.
-5. Baselines in the same table: `degree` and `random` computed on `A_obs` too
-   (they degrade as well — the question is the _margin_), and the T2-GNN control
-   (§5.2): **train on the corrupted graph and change nothing else**, because
-   that paper's headline finding is that adding a repair module under joint
-   corruption can be worse than doing nothing.
+3. Score against ground truth computed on `A_full` — the referee never sees the corruption. This is the whole design: the corruption is epistemic, the world is not.
+4. Report, per `r`: one-step **`delta_f1`** and **`new_infection_f1`**; rollout **`ens_count_bias`** and **`ens_marg_mae`**; and **`planning_regret_multi`** with seeds chosen on `A_obs` and spread measured on `A_full`.
+5. Baselines in the same table: `degree` and `random` computed on `A_obs` too (they degrade as well — the question is the _margin_), and the T2-GNN control (§5.2): **train on the corrupted graph and change nothing else**, because that paper's headline finding is that adding a repair module under joint corruption can be worse than doing nothing.
 
-**Falsifiable prediction.** Our IC head is per-edge
-(`q(u→v) = σ(MLP([h_u, h_v, w_uv]))`) with a `frontier_u` gate, so hidden edges
-remove transmission channels rather than adding them. `ens_count_bias` should go
-**negative** and monotonically more so with `r` — the opposite of the saturation
-failure we fixed with the structured head (`MEMORY.md`, rollout-saturation
-entry). If it instead goes positive, the head is not using the adjacency the way
-we think it is, and that is a finding.
+**Falsifiable prediction.** Our IC head is per-edge (`q(u→v) = σ(MLP([h_u, h_v, w_uv]))`) with a `frontier_u` gate, so hidden edges remove transmission channels rather than adding them. `ens_count_bias` should go **negative** and monotonically more so with `r` — the opposite of the saturation failure we fixed with the structured head (`MEMORY.md`, rollout-saturation entry). If it instead goes positive, the head is not using the adjacency the way we think it is, and that is a finding.
 
-**Cost.** Four data-gen runs per graph on jazz / netscience / cora_ml /
-power_grid, no new model code — an edge-dropping flag in `data/wm_graphs.py`
-and a `--drop-edge-frac` argument threaded through `pipeline/run.py`. Everything
-downstream is dataset-agnostic already.
+**Cost.** Four data-gen runs per graph on jazz / netscience / cora_ml / power_grid, no new model code — an edge-dropping flag in `data/wm_graphs.py` and a `--drop-edge-frac` argument threaded through `pipeline/run.py`. Everything downstream is dataset-agnostic already.
 
-**Why these graphs.** `netscience` and `power_grid` are **byte-identical to
-SEAL's NS and Power** (§6.1), so the same experiment also yields a link-scoring
-row directly comparable to §5.6's published AUCs — the only place in this whole
-file where our suite meets the literature number-for-number.
+**Why these graphs.** `netscience` and `power_grid` are **byte-identical to SEAL's NS and Power** (§6.1), so the same experiment also yields a link-scoring row directly comparable to §5.6's published AUCs — the only place in this whole file where our suite meets the literature number-for-number.
 
 ### 9.3 Where structure completion actually fits us
 
-Recovering edges **from cascades** is the version of this problem that is
-dynamic, action-conditioned, and fed by data our simulator already produces.
-That is [`network_inference.md`](network_inference.md) (NETINF, NETRATE,
-MultiTree, InfoPath), rated ⚠️ moderate. If the robustness experiment in §9.2
-shows we degrade badly under hidden edges, the _fix_ lives in that file, not
-this one: infer the missing edges from observed cascades, then plan on the
-completed graph.
+Recovering edges **from cascades** is the version of this problem that is dynamic, action-conditioned, and fed by data our simulator already produces. That is [`network_inference.md`](network_inference.md) (NETINF, NETRATE, MultiTree, InfoPath), rated ⚠️ moderate. If the robustness experiment in §9.2 shows we degrade badly under hidden edges, the _fix_ lives in that file, not this one: infer the missing edges from observed cascades, then plan on the completed graph.
 
 ### 9.4 Two transferable lessons, independent of the task
 
-- **Report the regime where methods separate.** FP: differences are invisible
-  below 60% missing. SEAL: every heuristic is >0.93 AUC on dense graphs and
-  ~0.58 on the power grid. Same shape as the IM file's argument for 1% and 5%
-  budgets over 20%.
-- **Include the memorization floor.** EdgeBank exists because a whole subfield
-  reported gains over baselines that could not beat "predict what you already
-  saw". Our analogue is the `persistence` baseline in
-  `world_model/wm_eval.py` — already present, and it should stay in every table
-  for the same reason.
+- **Report the regime where methods separate.** FP: differences are invisible below 60% missing. SEAL: every heuristic is >0.93 AUC on dense graphs and ~0.58 on the power grid. Same shape as the IM file's argument for 1% and 5% budgets over 20%.
+- **Include the memorization floor.** EdgeBank exists because a whole subfield reported gains over baselines that could not beat "predict what you already saw". Our analogue is the `persistence` baseline in `world_model/wm_eval.py` — already present, and it should stay in every table for the same reason.
 
 ---
 
 ## 10. Reference list
 
-**Missing node features / attribute imputation**
-[FP (LoG'22, arXiv 2111.12128)](https://arxiv.org/abs/2111.12128) · [PMLR](https://proceedings.mlr.press/v198/rossi22a.html) · [code](https://github.com/twitter-research/feature-propagation) ·
-[PCFI (ICLR'23, arXiv 2305.16618)](https://arxiv.org/abs/2305.16618) · [code](https://github.com/daehoum1/pcfi) ·
-[GCNmf (FGCS'21, arXiv 2007.04583)](https://arxiv.org/abs/2007.04583) · [DOI](https://doi.org/10.1016/j.future.2020.11.016) · [code](https://github.com/marblet/GCNmf) ·
-[SAT (TPAMI'22, arXiv 2011.01623)](https://arxiv.org/abs/2011.01623) · [code](https://github.com/xuChenSJTU/SAT-master-online) ·
-[PaGNN (arXiv 2003.10130)](https://arxiv.org/abs/2003.10130) ·
-[WGNN (arXiv 2102.03450)](https://arxiv.org/abs/2102.03450) ·
-[Amer (IEEE TCYB'22)](https://ieeexplore.ieee.org/document/9765782) (202 to non-browser clients) ·
-[ITR (IJCAI'22)](https://www.ijcai.org/proceedings/2022/485) · [PDF](https://www.ijcai.org/proceedings/2022/0485.pdf) · [code](https://github.com/WxTu/ITR) ·
-[RITR (TNNLS'24, arXiv 2302.07524)](https://arxiv.org/abs/2302.07524) · [code](https://github.com/WxTu/RITR) ·
-[MEGAE (AAAI'23, arXiv 2211.16771)](https://arxiv.org/abs/2211.16771) · [code](https://github.com/zqgao22/max-entropy-gae) ·
-[T2-GNN (AAAI'23, arXiv 2212.12738)](https://arxiv.org/abs/2212.12738) · [code](https://github.com/jindi-tju/T2-GNN) ·
-[AmGCL (arXiv 2305.03741)](https://arxiv.org/abs/2305.03741) ·
-[FairAC (ICLR'23, arXiv 2302.12977)](https://arxiv.org/abs/2302.12977) ·
-[AttriReBoost (arXiv 2501.00743)](https://arxiv.org/abs/2501.00743) ·
-[CGAI (ACM MM'25, arXiv 2507.19085)](https://arxiv.org/abs/2507.19085) ·
-[Divide-Then-Rule (arXiv 2507.10595)](https://arxiv.org/abs/2507.10595) ·
-[DiffPuter (arXiv 2405.20690)](https://arxiv.org/abs/2405.20690) ·
-[DDFI (arXiv 2512.06356)](https://arxiv.org/abs/2512.06356)
+**Missing node features / attribute imputation** [FP (LoG'22, arXiv 2111.12128)](https://arxiv.org/abs/2111.12128) · [PMLR](https://proceedings.mlr.press/v198/rossi22a.html) · [code](https://github.com/twitter-research/feature-propagation) · [PCFI (ICLR'23, arXiv 2305.16618)](https://arxiv.org/abs/2305.16618) · [code](https://github.com/daehoum1/pcfi) · [GCNmf (FGCS'21, arXiv 2007.04583)](https://arxiv.org/abs/2007.04583) · [DOI](https://doi.org/10.1016/j.future.2020.11.016) · [code](https://github.com/marblet/GCNmf) · [SAT (TPAMI'22, arXiv 2011.01623)](https://arxiv.org/abs/2011.01623) · [code](https://github.com/xuChenSJTU/SAT-master-online) · [PaGNN (arXiv 2003.10130)](https://arxiv.org/abs/2003.10130) · [WGNN (arXiv 2102.03450)](https://arxiv.org/abs/2102.03450) · [Amer (IEEE TCYB'22)](https://ieeexplore.ieee.org/document/9765782) (202 to non-browser clients) · [ITR (IJCAI'22)](https://www.ijcai.org/proceedings/2022/485) · [PDF](https://www.ijcai.org/proceedings/2022/0485.pdf) · [code](https://github.com/WxTu/ITR) · [RITR (TNNLS'24, arXiv 2302.07524)](https://arxiv.org/abs/2302.07524) · [code](https://github.com/WxTu/RITR) · [MEGAE (AAAI'23, arXiv 2211.16771)](https://arxiv.org/abs/2211.16771) · [code](https://github.com/zqgao22/max-entropy-gae) · [T2-GNN (AAAI'23, arXiv 2212.12738)](https://arxiv.org/abs/2212.12738) · [code](https://github.com/jindi-tju/T2-GNN) · [AmGCL (arXiv 2305.03741)](https://arxiv.org/abs/2305.03741) · [FairAC (ICLR'23, arXiv 2302.12977)](https://arxiv.org/abs/2302.12977) · [AttriReBoost (arXiv 2501.00743)](https://arxiv.org/abs/2501.00743) · [CGAI (ACM MM'25, arXiv 2507.19085)](https://arxiv.org/abs/2507.19085) · [Divide-Then-Rule (arXiv 2507.10595)](https://arxiv.org/abs/2507.10595) · [DiffPuter (arXiv 2405.20690)](https://arxiv.org/abs/2405.20690) · [DDFI (arXiv 2512.06356)](https://arxiv.org/abs/2512.06356)
 
-**Graph structure learning**
-[LDS (ICML'19)](https://proceedings.mlr.press/v97/franceschi19a.html) · [arXiv 1903.11960](https://arxiv.org/abs/1903.11960) · [code](https://github.com/lucfra/LDS-GNN) ·
-[Pro-GNN (KDD'20)](https://dl.acm.org/doi/10.1145/3394486.3403049) (403 to non-browser clients) · [arXiv 2005.10203](https://arxiv.org/abs/2005.10203) · [code](https://github.com/ChandlerBang/Pro-GNN) ·
-[IDGL (NeurIPS'20)](https://proceedings.neurips.cc/paper/2020/hash/e05c7ba4e087beea9410929698dc41a6-Abstract.html) · [arXiv 2006.13009](https://arxiv.org/abs/2006.13009) · [code](https://github.com/hugochan/IDGL) ·
-[SLAPS (NeurIPS'21, arXiv 2102.05034)](https://arxiv.org/abs/2102.05034) · [code](https://github.com/BorealisAI/SLAPS-GNN) ·
-[SUBLIME (WWW'22)](https://dl.acm.org/doi/10.1145/3485447.3512186) (403 to non-browser clients) · [arXiv 2201.06367](https://arxiv.org/abs/2201.06367) · [code](https://github.com/GRAND-Lab/SUBLIME) ·
-[NodeFormer (NeurIPS'22)](https://openreview.net/forum?id=sMezXGG5So) · [arXiv 2306.08385](https://arxiv.org/abs/2306.08385) · [code](https://github.com/qitianwu/NodeFormer) ·
-[GDC (NeurIPS'19, arXiv 1911.05485)](https://arxiv.org/abs/1911.05485)
+**Graph structure learning** [LDS (ICML'19)](https://proceedings.mlr.press/v97/franceschi19a.html) · [arXiv 1903.11960](https://arxiv.org/abs/1903.11960) · [code](https://github.com/lucfra/LDS-GNN) · [Pro-GNN (KDD'20)](https://dl.acm.org/doi/10.1145/3394486.3403049) (403 to non-browser clients) · [arXiv 2005.10203](https://arxiv.org/abs/2005.10203) · [code](https://github.com/ChandlerBang/Pro-GNN) · [IDGL (NeurIPS'20)](https://proceedings.neurips.cc/paper/2020/hash/e05c7ba4e087beea9410929698dc41a6-Abstract.html) · [arXiv 2006.13009](https://arxiv.org/abs/2006.13009) · [code](https://github.com/hugochan/IDGL) · [SLAPS (NeurIPS'21, arXiv 2102.05034)](https://arxiv.org/abs/2102.05034) · [code](https://github.com/BorealisAI/SLAPS-GNN) · [SUBLIME (WWW'22)](https://dl.acm.org/doi/10.1145/3485447.3512186) (403 to non-browser clients) · [arXiv 2201.06367](https://arxiv.org/abs/2201.06367) · [code](https://github.com/GRAND-Lab/SUBLIME) · [NodeFormer (NeurIPS'22)](https://openreview.net/forum?id=sMezXGG5So) · [arXiv 2306.08385](https://arxiv.org/abs/2306.08385) · [code](https://github.com/qitianwu/NodeFormer) · [GDC (NeurIPS'19, arXiv 1911.05485)](https://arxiv.org/abs/1911.05485)
 
-**Static link prediction**
-[Liben-Nowell & Kleinberg 2003](https://www.cs.cornell.edu/home/kleinber/link-pred.pdf) ·
-[Adamic & Adar 2003](https://www.sciencedirect.com/science/article/abs/pii/S0378873303000091) ·
-[Resource Allocation (arXiv 0901.0553)](https://arxiv.org/abs/0901.0553) ·
-[Katz 1953](https://link.springer.com/article/10.1007/BF02289026) ·
-[SEAL (NeurIPS'18)](https://proceedings.neurips.cc/paper/2018/hash/53f0d7c537d99b3824f0f99d62ea2428-Abstract.html) · [arXiv 1802.09691](https://arxiv.org/abs/1802.09691) · [code](https://github.com/muhanzhang/SEAL) ·
-[Neo-GNN (NeurIPS'21, arXiv 2206.04216)](https://arxiv.org/abs/2206.04216) · [code](https://github.com/seongjunyun/Neo-GNNs) ·
-[ELPH/BUDDY (ICLR'23)](https://openreview.net/forum?id=m1oqEOAozQU) · [arXiv 2209.15486](https://arxiv.org/abs/2209.15486) · [code](https://github.com/melifluos/subgraph-sketching) ·
-[NBFNet (NeurIPS'21, arXiv 2106.06935)](https://arxiv.org/abs/2106.06935) ·
-[VGAE (arXiv 1611.07308)](https://arxiv.org/abs/1611.07308)
+**Static link prediction** [Liben-Nowell & Kleinberg 2003](https://www.cs.cornell.edu/home/kleinber/link-pred.pdf) · [Adamic & Adar 2003](https://www.sciencedirect.com/science/article/abs/pii/S0378873303000091) · [Resource Allocation (arXiv 0901.0553)](https://arxiv.org/abs/0901.0553) · [Katz 1953](https://link.springer.com/article/10.1007/BF02289026) · [SEAL (NeurIPS'18)](https://proceedings.neurips.cc/paper/2018/hash/53f0d7c537d99b3824f0f99d62ea2428-Abstract.html) · [arXiv 1802.09691](https://arxiv.org/abs/1802.09691) · [code](https://github.com/muhanzhang/SEAL) · [Neo-GNN (NeurIPS'21, arXiv 2206.04216)](https://arxiv.org/abs/2206.04216) · [code](https://github.com/seongjunyun/Neo-GNNs) · [ELPH/BUDDY (ICLR'23)](https://openreview.net/forum?id=m1oqEOAozQU) · [arXiv 2209.15486](https://arxiv.org/abs/2209.15486) · [code](https://github.com/melifluos/subgraph-sketching) · [NBFNet (NeurIPS'21, arXiv 2106.06935)](https://arxiv.org/abs/2106.06935) · [VGAE (arXiv 1611.07308)](https://arxiv.org/abs/1611.07308)
 
-**Dynamic link prediction**
-[JODIE (KDD'19, arXiv 1908.01207)](https://arxiv.org/abs/1908.01207) · [code](https://github.com/srijankr/jodie) ·
-[DyRep (ICLR'19)](https://openreview.net/forum?id=HyePrhR5KX) ·
-[TGAT (ICLR'20)](https://openreview.net/forum?id=rJeW1yHYwH) · [arXiv 2002.07962](https://arxiv.org/abs/2002.07962) · [code](https://github.com/StatsDLMathsRecomSys/Inductive-representation-learning-on-temporal-graphs) ·
-[TGN (arXiv 2006.10637)](https://arxiv.org/abs/2006.10637) · [code](https://github.com/twitter-research/tgn) ·
-[CAWN (ICLR'21)](https://openreview.net/forum?id=KYPz4YsCPj) · [arXiv 2101.05974](https://arxiv.org/abs/2101.05974) · [code](https://github.com/snap-stanford/CAW) ·
-[EdgeBank / DGB (arXiv 2207.10128)](https://arxiv.org/abs/2207.10128) · [code](https://github.com/fpour/DGB) ·
-[GraphMixer (ICLR'23)](https://openreview.net/forum?id=ayPPc0SyLv1) · [arXiv 2302.11636](https://arxiv.org/abs/2302.11636) · [code](https://github.com/CongWeilin/GraphMixer) ·
-[DyGFormer / DyGLib (NeurIPS'23 D&B, arXiv 2303.13047)](https://arxiv.org/abs/2303.13047) · [code](https://github.com/yule-BUAA/DyGLib) ·
-[TCL (arXiv 2105.07944)](https://arxiv.org/abs/2105.07944) ·
-[NAT (LoG'22, arXiv 2209.01084)](https://arxiv.org/abs/2209.01084) ·
-[TGB (NeurIPS'23 D&B, arXiv 2307.01026)](https://arxiv.org/abs/2307.01026) · [site](https://tgb.complexdatalab.com/) · [code](https://github.com/shenyangHuang/TGB)
+**Dynamic link prediction** [JODIE (KDD'19, arXiv 1908.01207)](https://arxiv.org/abs/1908.01207) · [code](https://github.com/srijankr/jodie) · [DyRep (ICLR'19)](https://openreview.net/forum?id=HyePrhR5KX) · [TGAT (ICLR'20)](https://openreview.net/forum?id=rJeW1yHYwH) · [arXiv 2002.07962](https://arxiv.org/abs/2002.07962) · [code](https://github.com/StatsDLMathsRecomSys/Inductive-representation-learning-on-temporal-graphs) · [TGN (arXiv 2006.10637)](https://arxiv.org/abs/2006.10637) · [code](https://github.com/twitter-research/tgn) · [CAWN (ICLR'21)](https://openreview.net/forum?id=KYPz4YsCPj) · [arXiv 2101.05974](https://arxiv.org/abs/2101.05974) · [code](https://github.com/snap-stanford/CAW) · [EdgeBank / DGB (arXiv 2207.10128)](https://arxiv.org/abs/2207.10128) · [code](https://github.com/fpour/DGB) · [GraphMixer (ICLR'23)](https://openreview.net/forum?id=ayPPc0SyLv1) · [arXiv 2302.11636](https://arxiv.org/abs/2302.11636) · [code](https://github.com/CongWeilin/GraphMixer) · [DyGFormer / DyGLib (NeurIPS'23 D&B, arXiv 2303.13047)](https://arxiv.org/abs/2303.13047) · [code](https://github.com/yule-BUAA/DyGLib) · [TCL (arXiv 2105.07944)](https://arxiv.org/abs/2105.07944) · [NAT (LoG'22, arXiv 2209.01084)](https://arxiv.org/abs/2209.01084) · [TGB (NeurIPS'23 D&B, arXiv 2307.01026)](https://arxiv.org/abs/2307.01026) · [site](https://tgb.complexdatalab.com/) · [code](https://github.com/shenyangHuang/TGB)
 
-**Benchmarks, surveys, dataset sources**
-[OGB (arXiv 2005.00687)](https://arxiv.org/abs/2005.00687) · [nodeprop](https://ogb.stanford.edu/docs/nodeprop/) · [linkprop](https://ogb.stanford.edu/docs/linkprop/) · [leaderboards](https://ogb.stanford.edu/docs/leader_linkprop/) ·
-[Shchur et al., Pitfalls of GNN Evaluation (arXiv 1811.05868)](https://arxiv.org/abs/1811.05868) · [code](https://github.com/shchur/gnn-benchmark) ·
-[Kipf & Welling GCN (arXiv 1609.02907)](https://arxiv.org/abs/1609.02907) ·
-[Planetoid](https://github.com/kimiyoung/planetoid) · [linqs Cora](https://linqs-data.soe.ucsc.edu/public/lbc/cora.tgz) ·
-[graph2gauss (our Cora-ML)](https://github.com/abojchevski/graph2gauss) ·
-[JODIE datasets (SNAP)](https://snap.stanford.edu/jodie/) ·
-[GSL survey (arXiv 2103.03036)](https://arxiv.org/abs/2103.03036) ·
-[Incomplete Graph Learning survey (arXiv 2502.12412)](https://arxiv.org/abs/2502.12412) ·
-[Incomplete-graph-learning reading list](https://github.com/cherry-a11y/Incomplete-graph-learning)
+**Benchmarks, surveys, dataset sources** [OGB (arXiv 2005.00687)](https://arxiv.org/abs/2005.00687) · [nodeprop](https://ogb.stanford.edu/docs/nodeprop/) · [linkprop](https://ogb.stanford.edu/docs/linkprop/) · [leaderboards](https://ogb.stanford.edu/docs/leader_linkprop/) · [Shchur et al., Pitfalls of GNN Evaluation (arXiv 1811.05868)](https://arxiv.org/abs/1811.05868) · [code](https://github.com/shchur/gnn-benchmark) · [Kipf & Welling GCN (arXiv 1609.02907)](https://arxiv.org/abs/1609.02907) · [Planetoid](https://github.com/kimiyoung/planetoid) · [linqs Cora](https://linqs-data.soe.ucsc.edu/public/lbc/cora.tgz) · [graph2gauss (our Cora-ML)](https://github.com/abojchevski/graph2gauss) · [JODIE datasets (SNAP)](https://snap.stanford.edu/jodie/) · [GSL survey (arXiv 2103.03036)](https://arxiv.org/abs/2103.03036) · [Incomplete Graph Learning survey (arXiv 2502.12412)](https://arxiv.org/abs/2502.12412) · [Incomplete-graph-learning reading list](https://github.com/cherry-a11y/Incomplete-graph-learning)
 
 ---
 
@@ -1110,36 +714,11 @@ completed graph.
 
 Honest list of what this review could **not** establish.
 
-- **IDGL's own tables were never extracted.** Three separate download attempts
-  (arXiv v1/v3, NeurIPS proceedings) returned truncated or corrupt PDFs. Every
-  IDGL number in §5 is a **third-party reproduction** (T2-GNN Table 3, SLAPS
-  Table 1, SUBLIME Tables 1–2). Those three agree with each other, so the
-  numbers are probably right, but IDGL's own **edge-deletion robustness
-  experiment** — the single most on-point published result for §9.2 — was not
-  read and is not transcribed here.
-- **Pro-GNN under random attack** is published only as Figure 4. The
-  random-edge-injection curve, the closest published analogue to our uniform
-  edge deletion, has no per-cell numbers.
-- **GCNmf's, SAT's, Neo-GNN's and MEGAE's own result tables** were not
-  transcribed. Their numbers appear here only as reported by FP, T2-GNN and
-  BUDDY. GCNmf's PDF extracted its prose but not its tables; SAT's and
-  Neo-GNN's downloads truncated.
-- **The CiteSeer LCC disagreement** — Pro-GNN says 2,110 / 3,668, Shchur and FP
-  say 2,120 / 3,679, all [verified] from their own tables. A 10-node gap with no
-  stated cause. Not resolved.
-- **Cora-ML's 2,879 feature dimension and 7 classes** are taken from our own
-  loader docstring (`data/datasets/cora_ml.py`), not from a run of the loader or
-  from Bojchevski & Günnemann's own table — the graph2gauss paper was not
-  downloaded. Treat as **[claim]** until someone prints
-  `node_feats.shape` after a load.
-- **Diffusion-model feature imputation on graphs** is **[claim]** throughout.
-  The concrete recent work (DDFI, FSD-CAP) is too new and too thin for a
-  transcribed table; the well-benchmarked diffusion imputers (DiffPuter and
-  friends) are tabular, not graph-native.
-- **No paper found evaluates a _world model_ under hidden edges.** The
-  robustness experiment in §9.2 has no direct precedent in this literature —
-  GSL papers corrupt the graph and measure node classification; nobody corrupts
-  the graph and measures _planning regret_. That makes §9.2 a novel setting, but
-  it also means there is no baseline number to position it against.
-- **DyRep has no public code.** Every DyRep number in §5.8 and §5.9 comes from a
-  third-party reimplementation (DyGLib's and TGB's).
+- **IDGL's own tables were never extracted.** Three separate download attempts (arXiv v1/v3, NeurIPS proceedings) returned truncated or corrupt PDFs. Every IDGL number in §5 is a **third-party reproduction** (T2-GNN Table 3, SLAPS Table 1, SUBLIME Tables 1–2). Those three agree with each other, so the numbers are probably right, but IDGL's own **edge-deletion robustness experiment** — the single most on-point published result for §9.2 — was not read and is not transcribed here.
+- **Pro-GNN under random attack** is published only as Figure 4. The random-edge-injection curve, the closest published analogue to our uniform edge deletion, has no per-cell numbers.
+- **GCNmf's, SAT's, Neo-GNN's and MEGAE's own result tables** were not transcribed. Their numbers appear here only as reported by FP, T2-GNN and BUDDY. GCNmf's PDF extracted its prose but not its tables; SAT's and Neo-GNN's downloads truncated.
+- **The CiteSeer LCC disagreement** — Pro-GNN says 2,110 / 3,668, Shchur and FP say 2,120 / 3,679, all [verified] from their own tables. A 10-node gap with no stated cause. Not resolved.
+- **Cora-ML's 2,879 feature dimension and 7 classes** are taken from our own loader docstring (`data/datasets/cora_ml.py`), not from a run of the loader or from Bojchevski & Günnemann's own table — the graph2gauss paper was not downloaded. Treat as **[claim]** until someone prints `node_feats.shape` after a load.
+- **Diffusion-model feature imputation on graphs** is **[claim]** throughout. The concrete recent work (DDFI, FSD-CAP) is too new and too thin for a transcribed table; the well-benchmarked diffusion imputers (DiffPuter and friends) are tabular, not graph-native.
+- **No paper found evaluates a _world model_ under hidden edges.** The robustness experiment in §9.2 has no direct precedent in this literature — GSL papers corrupt the graph and measure node classification; nobody corrupts the graph and measures _planning regret_. That makes §9.2 a novel setting, but it also means there is no baseline number to position it against.
+- **DyRep has no public code.** Every DyRep number in §5.8 and §5.9 comes from a third-party reimplementation (DyGLib's and TGB's).

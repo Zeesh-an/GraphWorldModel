@@ -1,41 +1,22 @@
 # Action-Conditioned World-Model Data (Influence Maximization)
 
-Generates `(G, s_t, a_t, s_{t+1}, R)` transition data for training a graph
-**world model** on diffusion dynamics under node- and edge-level interventions.
-The world model learns the one-step transition `f(G, s_t, a_t) → s_{t+1}`; this
-package produces the supervised `(input, target)` pairs it is trained on.
+Generates `(G, s_t, a_t, s_{t+1}, R)` transition data for training a graph **world model** on diffusion dynamics under node- and edge-level interventions. The world model learns the one-step transition `f(G, s_t, a_t) → s_{t+1}`; this package produces the supervised `(input, target)` pairs it is trained on.
 
-- **Graph** `G` — a directed/undirected graph with per-edge IC transmission
-  probabilities (`ic_probs`) and LT weights (`lt_weights`), saved once per graph.
-- **State** `s_t = (infected, frontier)` — `infected` = every node ever activated;
-  `frontier` = the nodes that activated _this step_ (IC: the status-1 spreaders;
-  LT: the fresh wave that flipped this iteration).
-- **Action** `a_t` — a bag of node/edge ops: `add_node`, `remove_node`,
-  `add_edge`, `remove_edge`, `set_edge_weight` (empty bag = `NULL`). Which ops are
-  used is set by `--action-ops`; omitting it generates diffusion-only data.
-- **Next state** `s_{t+1}` — the realized next state, **plus** soft Monte-Carlo
-  marginals `P(infected)` / `P(frontier)` per node (`--mc-marginals`), which are
-  the actual training targets.
+- **Graph** `G` — a directed/undirected graph with per-edge IC transmission probabilities (`ic_probs`) and LT weights (`lt_weights`), saved once per graph.
+- **State** `s_t = (infected, frontier)` — `infected` = every node ever activated; `frontier` = the nodes that activated _this step_ (IC: the status-1 spreaders; LT: the fresh wave that flipped this iteration).
+- **Action** `a_t` — a bag of node/edge ops: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `set_edge_weight` (empty bag = `NULL`). Which ops are used is set by `--action-ops`; omitting it generates diffusion-only data.
+- **Next state** `s_{t+1}` — the realized next state, **plus** soft Monte-Carlo marginals `P(infected)` / `P(frontier)` per node (`--mc-marginals`), which are the actual training targets.
 - **Reward** `R` — spread gain (Δ activated-node count this step).
 
-Backbone simulator: **NDlib** IC/LT driven one step at a time, with mid-rollout
-`status` mutation (node ops) and live edge mutation (edge ops). Per-episode
-rollouts come from classical IM "spine" seed selectors plus random and
-counterfactual action injection (same-state / different-action coverage).
-See the design spec:
-`docs/superpowers/specs/2026-06-09-action-conditioned-wm-im-data-gen-design.md`.
+Backbone simulator: **NDlib** IC/LT driven one step at a time, with mid-rollout `status` mutation (node ops) and live edge mutation (edge ops). Per-episode rollouts come from classical IM "spine" seed selectors plus random and counterfactual action injection (same-state / different-action coverage). See the design spec: `docs/superpowers/specs/2026-06-09-action-conditioned-wm-im-data-gen-design.md`.
 
 ---
 
 ## Quick start
 
-> Generation is stage 1 of `python -m pipeline.run`, which also trains the world
-> model, runs every agent arm, plots, and writes a report. Use the commands below
-> when you want data generation on its own.
+> Generation is stage 1 of `python -m pipeline.run`, which also trains the world model, runs every agent arm, plots, and writes a report. Use the commands below when you want data generation on its own.
 
-**Where things go.** Generated datasets land in `results/<task>/<dataset>/<run>/data/`
-(`--out-dir`, defaulting to `results/<dataset>/data`). Raw downloads land in
-`data/raw/<dataset>/` and are shared across every run — both are gitignored.
+**Where things go.** Generated datasets land in `results/<task>/<dataset>/<run>/data/` (`--out-dir`, defaulting to `results/<dataset>/data`). Raw downloads land in `data/raw/<dataset>/` and are shared across every run — both are gitignored.
 
 ```bash
 source .venv/bin/activate
@@ -105,17 +86,11 @@ write graphs_index.json + metadata.json
 | `node_labels` | `(N,)` int32     | class labels (real datasets) or zeros                        |
 | `ic_prob_map` | `dict[(u,v)→p]`  | edge→prob map the simulator configures NDlib with            |
 
-Edge probabilities come from `graph_utils.build_edge_index`: by default the
-**weighted cascade** model `p(u→v) = 1 / in_degree(v)` (high-in-degree nodes are
-harder to activate per-edge). `--prob-model uniform` replaces this with a constant
-`--uniform-p` on every edge. LT weights are a copy of the IC probs (they already
-satisfy the LT requirement that incoming weights sum to ≤ 1 per node).
+Edge probabilities come from `graph_utils.build_edge_index`: by default the **weighted cascade** model `p(u→v) = 1 / in_degree(v)` (high-in-degree nodes are harder to activate per-edge). `--prob-model uniform` replaces this with a constant `--uniform-p` on every edge. LT weights are a copy of the IC probs (they already satisfy the LT requirement that incoming weights sum to ≤ 1 per node).
 
 ### 2. Pick the t=0 seed set (`wm_actions.py::select_seeds`)
 
-Each episode commits a seed set chosen by one of the six **spine algorithms**
-(`SPINE_ALGORITHMS`). These span the cheap-but-weak to expensive-but-strong range
-so the dataset covers a spectrum of seed qualities:
+Each episode commits a seed set chosen by one of the six **spine algorithms** (`SPINE_ALGORITHMS`). These span the cheap-but-weak to expensive-but-strong range so the dataset covers a spectrum of seed qualities:
 
 | Algorithm      | How it picks k seeds                                                                |
 | -------------- | ----------------------------------------------------------------------------------- |
@@ -126,52 +101,31 @@ so the dataset covers a spectrum of seed qualities:
 | `celf`         | greedy marginal-gain: add the node that most increases MC-estimated spread, ×k      |
 | `local_search` | start from `degree`, then 1-swap seeds while estimated spread improves (≤ 3 rounds) |
 
-`celf` and `local_search` call `estimate_spread`, an NDlib Monte-Carlo spread
-oracle (seed → diffuse to horizon, average final infected count over `mc_runs`).
+`celf` and `local_search` call `estimate_spread`, an NDlib Monte-Carlo spread oracle (seed → diffuse to horizon, average final infected count over `mc_runs`).
 
 ### 3. Roll the episode forward (`generate_wm_data.py::_episode_transitions`)
 
-A fresh `Simulator` is reset for the chosen dynamics, then stepped over
-`--horizon + 1` timesteps:
+A fresh `Simulator` is reset for the chosen dynamics, then stepped over `--horizon + 1` timesteps:
 
 - **t = 0** the action _is_ the seed commit: `add_node` ops for every seed node.
-- **t > 0** an action is sampled by `sample_injection`: with probability
-  `1 - --inject-p` it is `NULL` (pure diffusion); otherwise one op is drawn
-  uniformly from `--action-ops` with a random valid target on the live graph.
-- The cascade is advanced one step (`Simulator.advance_marginal`) and the
-  `(s_t, a_t, s_{t+1}, R)` record is written to the **main** branch.
-- The loop stops early once the cascade is dead (no frontier) and no action is
-  pending.
+- **t > 0** an action is sampled by `sample_injection`: with probability `1 - --inject-p` it is `NULL` (pure diffusion); otherwise one op is drawn uniformly from `--action-ops` with a random valid target on the live graph.
+- The cascade is advanced one step (`Simulator.advance_marginal`) and the `(s_t, a_t, s_{t+1}, R)` record is written to the **main** branch.
+- The loop stops early once the cascade is dead (no frontier) and no action is pending.
 
 ### 4. Counterfactual forks (same state, different action)
 
-At intermediate steps, with probability `--cf-prob`, the simulator is
-snapshotted and `--cf-branches` alternative action bags (drawn by
-`counterfactual_actions`, restricted to node ops so the snapshot never has to
-undo an edge mutation) are each applied from the _same_ `s_t`. Each fork is
-written as a `cf_i` branch. This gives the trainer matched `(s_t, a, s_{t+1})` vs
-`(s_t, a', s'_{t+1})` pairs — the only signal that forces the model to be
-_action-conditioned_ rather than state-autoregressive, and the basis of the
-**action-sensitivity** eval metric.
+At intermediate steps, with probability `--cf-prob`, the simulator is snapshotted and `--cf-branches` alternative action bags (drawn by `counterfactual_actions`, restricted to node ops so the snapshot never has to undo an edge mutation) are each applied from the _same_ `s_t`. Each fork is written as a `cf_i` branch. This gives the trainer matched `(s_t, a, s_{t+1})` vs `(s_t, a', s'_{t+1})` pairs — the only signal that forces the model to be _action-conditioned_ rather than state-autoregressive, and the basis of the **action-sensitivity** eval metric.
 
 ### 5. Monte-Carlo soft marginals (`Simulator.advance_marginal`)
 
-The single realized `s_{t+1}` is one Bernoulli draw from a stochastic process
-(for IC). Training on that single draw caps one-step accuracy at the label noise
-floor. Instead, `advance_marginal`:
+The single realized `s_{t+1}` is one Bernoulli draw from a stochastic process (for IC). Training on that single draw caps one-step accuracy at the label noise floor. Instead, `advance_marginal`:
 
 1. applies the action once (the exogenous transition `T_exo` is deterministic),
 2. snapshots the post-action status,
-3. runs `--mc-marginals` independent diffusion draws (restoring status between
-   draws), and
+3. runs `--mc-marginals` independent diffusion draws (restoring status between draws), and
 4. averages each node's activation frequency into a probability.
 
-The result is the **true one-step marginal** `P(node infected at t+1)` and
-`P(node in frontier at t+1)`, stored sparsely as `{node: prob}`. IC uses all
-`--mc-marginals` draws (stochastic); LT uses a single draw (deterministic given
-its hidden thresholds). These soft marginals are the world model's regression
-targets and are **required** by the training pipeline (`--mc-marginals >= 1`,
-default 30).
+The result is the **true one-step marginal** `P(node infected at t+1)` and `P(node in frontier at t+1)`, stored sparsely as `{node: prob}`. IC uses all `--mc-marginals` draws (stochastic); LT uses a single draw (deterministic given its hidden thresholds). These soft marginals are the world model's regression targets and are **required** by the training pipeline (`--mc-marginals >= 1`, default 30).
 
 ---
 
@@ -200,24 +154,16 @@ Each transition row (JSONL):
 }
 ```
 
-- `branch` is `"main"` for the executed trajectory or `"cf_i"` for counterfactual
-  forks (same `t` / `state`, different `action`).
+- `branch` is `"main"` for the executed trajectory or `"cf_i"` for counterfactual forks (same `t` / `state`, different `action`).
 - An empty `action` list is `NULL`.
-- Edge ops carry the second endpoint as `"destination"` and, for `add_edge` /
-  `set_edge_weight`, a `"weight"` (the IC transmission probability), e.g.
-  `{"op": "set_edge_weight", "target": 4, "destination": 11, "weight": 0.62}`.
-- `next_marginal_infected` / `next_marginal_frontier` are sparse `{node: prob}`
-  maps (string keys, rounded to 6 dp) — the soft MC targets. They are present
-  whenever `--mc-marginals >= 1` (the default).
+- Edge ops carry the second endpoint as `"destination"` and, for `add_edge` / `set_edge_weight`, a `"weight"` (the IC transmission probability), e.g. `{"op": "set_edge_weight", "target": 4, "destination": 11, "weight": 0.62}`.
+- `next_marginal_infected` / `next_marginal_frontier` are sparse `{node: prob}` maps (string keys, rounded to 6 dp) — the soft MC targets. They are present whenever `--mc-marginals >= 1` (the default).
 
 ---
 
 ## The 5 action ops (identical set for every dataset)
 
-The action space is unified across tasks: every action is `(op, target,
-[destination], [weight])`. `target` is the node (or edge source `u`);
-`destination` is the edge sink `v`; `weight` is the IC transmission probability
-for the edge.
+The action space is unified across tasks: every action is `(op, target, [destination], [weight])`. `target` is the node (or edge source `u`); `destination` is the edge sink `v`; `weight` is the IC transmission probability for the edge.
 
 | op                | fields in the record                | IC effect                                    | LT effect                              |
 | ----------------- | ----------------------------------- | -------------------------------------------- | -------------------------------------- |
@@ -233,10 +179,7 @@ The three data "settings" are just which ops you pass to `--action-ops`:
 - **Setting 2 (node):** `--action-ops add_node remove_node`
 - **Setting 3 (edge):** `--action-ops add_edge remove_edge set_edge_weight`
 
-How these become model inputs is documented in
-[`world_model/README.md`](../world_model/README.md): node ops set the `act_add` /
-`act_remove` input channels, and edge ops set the `act_edge_endpoint` channel and
-mutate the per-episode adjacency.
+How these become model inputs is documented in [`world_model/README.md`](../world_model/README.md): node ops set the `act_add` / `act_remove` input channels, and edge ops set the `act_edge_endpoint` channel and mutate the per-episode adjacency.
 
 ---
 
@@ -247,9 +190,7 @@ mutate the per-episode adjacency.
 | **IC** | stochastic                     | each newly infected `u` gets one try to infect each out-neighbor `v` with prob `p(u→v)`; success → `v` infected. Monotone (no node ever de-activates). Status: 0 Susceptible, 1 Infected (spreader, this step), 2 Removed (spent). |
 | **LT** | deterministic given thresholds | `v` activates when the summed weight of its active in-neighbors ≥ its threshold `θ_v`. Thresholds are drawn `U(0,1)` per node **per episode and not stored**, so from a state-only view LT looks stochastic.                       |
 
-This determinism difference is why IC averages over `--mc-marginals` draws while
-LT uses a single draw, and why the world model uses a different structured head
-per dynamics (see `world_model/README.md`).
+This determinism difference is why IC averages over `--mc-marginals` draws while LT uses a single draw, and why the world model uses a different structured head per dynamics (see `world_model/README.md`).
 
 ---
 
@@ -282,15 +223,13 @@ per dynamics (see `world_model/README.md`).
 | `--sbm-p-in` / `--sbm-p-out`      | `0.15` / `0.01` | SBM within-block / cross-block edge probability                                                            |
 | `--seed`                          | `42`            | master RNG (graph + selection + injection + sim all derive from it)                                        |
 
-> LT node thresholds are drawn `U(0, 1)` per node internally — no CLI flag, and
-> they are not stored (the world model must learn the threshold _marginal_).
+> LT node thresholds are drawn `U(0, 1)` per node internally — no CLI flag, and they are not stored (the world model must learn the threshold _marginal_).
 
 ---
 
 ## Validation (`validate_wm_data.py`)
 
-`python -m data.validate_wm_data --dir <output_dir>` runs post-hoc gate checks on
-a produced dataset and prints a JSON summary:
+`python -m data.validate_wm_data --dir <output_dir>` runs post-hoc gate checks on a produced dataset and prints a JSON summary:
 
 | Check                        | What it confirms                                                                                                             |
 | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |

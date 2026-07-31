@@ -1,37 +1,21 @@
 # SAGE World-Model Results — BA-100 (×20 graphs), Structured Heads
 
-This document walks through **every** metric in the two GraphSAGE result files,
-metric by metric: what it measures, what the value is, and what it implies.
+This document walks through **every** metric in the two GraphSAGE result files, metric by metric: what it measures, what the value is, and what it implies.
 
 - `ba20_marg_structured_sage_IC.json` — IC dynamics
 - `ba20_marg_structured_sage_LT.json` — LT dynamics
 
-SAGE is the chosen backbone: across the 5-backbone sweep it was the only one
-faithful on **both** IC and LT rollouts, and the cheapest to run. Metric
-definitions live in [`../README.md`](../README.md) and
-[`../../data/README.md`](../../data/README.md). Numbers below are quoted verbatim
-from the JSONs.
+SAGE is the chosen backbone: across the 5-backbone sweep it was the only one faithful on **both** IC and LT rollouts, and the cheapest to run. Metric definitions live in [`../README.md`](../README.md) and [`../../data/README.md`](../../data/README.md). Numbers below are quoted verbatim from the JSONs.
 
-> **Caveat for both files:** results are a **single seed (42)** on **BA-100**
-> graphs. BA is degree-trivial (hub structure makes degree a near-optimal seed
-> heuristic), so the planning-vs-degree comparison is within noise here; it
-> becomes meaningful on WS/SBM/real graphs. Treat these as a "the method works
-> and does not saturate" result, not a final benchmark.
+> **Caveat for both files:** results are a **single seed (42)** on **BA-100** graphs. BA is degree-trivial (hub structure makes degree a near-optimal seed heuristic), so the planning-vs-degree comparison is within noise here; it becomes meaningful on WS/SBM/real graphs. Treat these as a "the method works and does not saturate" result, not a final benchmark.
 
 ---
 
 ## Shared configuration
 
-Both runs used: `model=sage`, `head=structured`, `hidden_dim=64`, `n_layers=3`,
-`dropout=0.1`, `epochs=400`, `lr=1e-3`, `weight_decay=5e-4`, `batch_size=32`,
-**`pos_weight=off`**, `patience=50`, `seed=42`, on
-`data/output/ba20_marg_structured` (20 BA graphs, ~100 nodes each, MC-marginal
-targets). `pos_weight=off` is required for the structured head — its structural
-form already avoids the all-zeros collapse, and `pos_weight` would over-inflate
-the per-edge transmission `q`.
+Both runs used: `model=sage`, `head=structured`, `hidden_dim=64`, `n_layers=3`, `dropout=0.1`, `epochs=400`, `lr=1e-3`, `weight_decay=5e-4`, `batch_size=32`, **`pos_weight=off`**, `patience=50`, `seed=42`, on `data/output/ba20_marg_structured` (20 BA graphs, ~100 nodes each, MC-marginal targets). `pos_weight=off` is required for the structured head — its structural form already avoids the all-zeros collapse, and `pos_weight` would over-inflate the per-edge transmission `q`.
 
-The only difference between the runs is `diffusion_model` (IC vs LT), which also
-switches the structured head (`ICTransmissionHead` vs `LTThresholdHead`).
+The only difference between the runs is `diffusion_model` (IC vs LT), which also switches the structured head (`ICTransmissionHead` vs `LTThresholdHead`).
 
 ---
 
@@ -51,11 +35,7 @@ switches the structured head (`ICTransmissionHead` vs `LTThresholdHead`).
 | `brier_infected`          | **0.00116** | MSE(pred prob, soft marginal) for infected                                 | Excellent calibration. The predicted probabilities, not just the thresholded labels, match the true MC marginals (persistence Brier 0.0241 — ~20× worse).                                                                                                             |
 | `brier_frontier`          | **0.00116** | same, for frontier                                                         | Same — well calibrated.                                                                                                                                                                                                                                               |
 
-**Persistence baseline** (`predict next = current`): `infected_acc 0.9834`,
-`frontier_acc 0.9298`, `new_infection_f1 0.0`, `delta_f1 0.0`, `brier_infected
-0.0241`, `brier_frontier 0.0776`. The 0.0 F1s are structural — persistence never
-predicts a change — so any change-F1 above 0 beats it; 0.83 beats it
-decisively, and the Brier gap shows the model is far better calibrated.
+**Persistence baseline** (`predict next = current`): `infected_acc 0.9834`, `frontier_acc 0.9298`, `new_infection_f1 0.0`, `delta_f1 0.0`, `brier_infected 0.0241`, `brier_frontier 0.0776`. The 0.0 F1s are structural — persistence never predicts a change — so any change-F1 above 0 beats it; 0.83 beats it decisively, and the Brier gap shows the model is far better calibrated.
 
 ### `rollout` — free-running stochastic ensemble (20 samples, 50 episodes)
 
@@ -75,20 +55,13 @@ decisively, and the Brier gap shows the model is far better calibrated.
 | `plan_regret_degree` | **0.2688 ± 0.0881** | same, picking highest-degree candidate                  | The model **edges out** the degree heuristic (0.244 < 0.269), but the gap is inside the error bars — expected on degree-trivial BA. |
 | `plan_regret_random` | **3.109 ± 0.595**   | same, random candidate                                  | The floor. The model is ~13× better than random — it is clearly using real structure to plan.                                       |
 
-**IC verdict:** at the one-step label ceiling (`delta_f1` 0.83, Brier 0.001),
-faithful as a free-running simulator (no saturation; final count within 0.1
-node), and a competent one-step planner (crushes random, ties/edges degree on
-BA). The IC world model is working.
+**IC verdict:** at the one-step label ceiling (`delta_f1` 0.83, Brier 0.001), faithful as a free-running simulator (no saturation; final count within 0.1 node), and a competent one-step planner (crushes random, ties/edges degree on BA). The IC world model is working.
 
 ---
 
 ## LT results (`…_sage_LT.json`)
 
-LT is deterministic given hidden per-node thresholds that are **re-drawn each
-episode and never stored**. A state-only model therefore cannot recover the exact
-trajectory — only the threshold _marginal_ `P(activate | active-neighbor
-fraction)`. LT numbers are looser than IC **by design**, and that is the correct
-expectation, not a defect.
+LT is deterministic given hidden per-node thresholds that are **re-drawn each episode and never stored**. A state-only model therefore cannot recover the exact trajectory — only the threshold _marginal_ `P(activate | active-neighbor fraction)`. LT numbers are looser than IC **by design**, and that is the correct expectation, not a defect.
 
 ### `test` — one-step, teacher-forced
 
@@ -104,9 +77,7 @@ expectation, not a defect.
 | `brier_infected`          | **0.0320** | calibration, infected                                     | Worse than IC (0.0012) but still well below persistence (0.0583) — the residual is the irreducible threshold uncertainty.                                                                                                                  |
 | `brier_frontier`          | **0.0383** | calibration, frontier                                     | Below persistence (0.1266) — good calibration given hidden thresholds.                                                                                                                                                                     |
 
-**Persistence baseline:** `infected_acc 0.9417`, `frontier_acc 0.8734`,
-`new_infection_f1 0.0`, `delta_f1 0.0`, `brier_infected 0.0583`, `brier_frontier
-0.1266`. The model beats it on every comparable metric.
+**Persistence baseline:** `infected_acc 0.9417`, `frontier_acc 0.8734`, `new_infection_f1 0.0`, `delta_f1 0.0`, `brier_infected 0.0583`, `brier_frontier 0.1266`. The model beats it on every comparable metric.
 
 ### `rollout` — free-running stochastic ensemble (20 samples, 50 episodes)
 
@@ -126,11 +97,7 @@ expectation, not a defect.
 | `plan_regret_degree` | **0.2713 ± 0.1972** | degree-heuristic regret           | The model beats degree on the mean (0.196 < 0.271), again inside the error bars on BA. |
 | `plan_regret_random` | **3.366 ± 0.818**   | random-pick regret                | Floor; the model is ~17× better than random.                                           |
 
-**LT verdict:** one-step is capped by hidden-threshold partial observability
-(`delta_f1` ~0.54, the expected ceiling, not a failure), but the rollout is
-faithful (final count within ~1 node, no saturation) and planning beats random
-decisively and edges degree. The LT world model is also working, with looser —
-and correctly looser — one-step resolution.
+**LT verdict:** one-step is capped by hidden-threshold partial observability (`delta_f1` ~0.54, the expected ceiling, not a failure), but the rollout is faithful (final count within ~1 node, no saturation) and planning beats random decisively and edges degree. The LT world model is also working, with looser — and correctly looser — one-step resolution.
 
 ---
 
@@ -145,10 +112,4 @@ and correctly looser — one-step resolution.
 | `final count model / true` | 36.6 / 36.7 | 47.3 / 46.2 | both faithful endpoints                                                    |
 | `plan_regret_model`        | 0.244       | 0.196       | both ≫ better than random; both ≈ degree on BA                             |
 
-**Bottom line:** the structured-head SAGE world model is an accurate, calibrated,
-non-saturating one-step simulator on both IC and LT, and a competent one-step
-planner. The remaining limits are (a) the IC label ceiling (already reached) and
-(b) LT partial observability (inherent). The next gains come from **graph
-breadth** (WS/SBM, then real graphs) and **multiple seeds for error bars**, not
-from more BA volume — the 20→40-graph A/B showed volume does not move these
-numbers.
+**Bottom line:** the structured-head SAGE world model is an accurate, calibrated, non-saturating one-step simulator on both IC and LT, and a competent one-step planner. The remaining limits are (a) the IC label ceiling (already reached) and (b) LT partial observability (inherent). The next gains come from **graph breadth** (WS/SBM, then real graphs) and **multiple seeds for error bars**, not from more BA volume — the 20→40-graph A/B showed volume does not move these numbers.

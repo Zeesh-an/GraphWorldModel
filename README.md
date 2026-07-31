@@ -1,38 +1,18 @@
 # Graph World Model
 
-A learned, action-conditioned **simulator of graph diffusion dynamics**. Given a
-graph `G`, a diffusion state `s_t`, and an intervention `a_t`, the model predicts
-the next state:
+A learned, action-conditioned **simulator of graph diffusion dynamics**. Given a graph `G`, a diffusion state `s_t`, and an intervention `a_t`, the model predicts the next state:
 
 ```
 f_θ(G, s_t, a_t) → s_{t+1}
 ```
 
-It is trained on `(G, s_t, a_t, s_{t+1})` transitions harvested from a real
-diffusion simulator, and at inference replaces that expensive simulator with a
-fast, differentiable forward pass. The long-term goal (not yet built) is to use
-the world model as the **predictive environment inside a coding-agent loop** for
-graph-algorithm design — roll out candidate algorithms cheaply instead of
-executing them.
+It is trained on `(G, s_t, a_t, s_{t+1})` transitions harvested from a real diffusion simulator, and at inference replaces that expensive simulator with a fast, differentiable forward pass. The long-term goal (not yet built) is to use the world model as the **predictive environment inside a coding-agent loop** for graph-algorithm design — roll out candidate algorithms cheaply instead of executing them.
 
-The current focus is **Influence Maximization (IM)** dynamics under two diffusion
-models — **Independent Cascade (IC)** and **Linear Threshold (LT)** — with node-
-and edge-level interventions.
+The current focus is **Influence Maximization (IM)** dynamics under two diffusion models — **Independent Cascade (IC)** and **Linear Threshold (LT)** — with node- and edge-level interventions.
 
-> **Two-layer docs.** This README is the overview. The deep technical references
-> are [`data/README.md`](data/README.md) (data generation),
-> [`world_model/README.md`](world_model/README.md) (features, models, training,
-> evaluation), and [`coding_agent/README.md`](coding_agent/README.md) (the outer
-> loop). Worked results are in
-> [`world_model/checkpoints/RESULTS.md`](world_model/checkpoints/RESULTS.md).
+> **Two-layer docs.** This README is the overview. The deep technical references are [`data/README.md`](data/README.md) (data generation), [`world_model/README.md`](world_model/README.md) (features, models, training, evaluation), and [`coding_agent/README.md`](coding_agent/README.md) (the outer loop). Worked results are in [`world_model/checkpoints/RESULTS.md`](world_model/checkpoints/RESULTS.md).
 >
-> **Prior work.** [`research/`](research/) holds one literature review per graph
-> task, all in the same format.
-> [`research/influence_maximization.md`](research/influence_maximization.md)
-> covers what we run today: every classical and learning-based method, which
-> published results are directly comparable to ours (and which are not, because
-> the graph versions differ), the full DeepIM/MOEIM/IRIE result tables, the
-> dataset catalogue, and links to every paper and code repo.
+> **Prior work.** [`research/`](research/) holds one literature review per graph task, all in the same format. [`research/influence_maximization.md`](research/influence_maximization.md) covers what we run today: every classical and learning-based method, which published results are directly comparable to ours (and which are not, because the graph versions differ), the full DeepIM/MOEIM/IRIE result tables, the dataset catalogue, and links to every paper and code repo.
 
 ---
 
@@ -56,19 +36,13 @@ and edge-level interventions.
 
 ### 1 — Data generation (`data/`)
 
-A `GraphBundle` is built for each graph (structure + per-edge IC probabilities
-`p(u→v) = 1/in_degree(v)` by default + node features). For each `(graph,
-dynamics, seed-algorithm, rollout)` an **episode** is simulated step by step with
-NDlib:
+A `GraphBundle` is built for each graph (structure + per-edge IC probabilities `p(u→v) = 1/in_degree(v)` by default + node features). For each `(graph, dynamics, seed-algorithm, rollout)` an **episode** is simulated step by step with NDlib:
 
-- **t = 0** commits a seed set chosen by one of six classical "spine" selectors
-  (`random, degree, pagerank, betweenness, celf, local_search`).
+- **t = 0** commits a seed set chosen by one of six classical "spine" selectors (`random, degree, pagerank, betweenness, celf, local_search`).
 - **t > 0** optionally injects an action (probability `--inject-p`), else `NULL`.
 - each step is advanced and recorded as `(s_t, a_t, s_{t+1}, reward)`.
-- **counterfactual forks** re-apply _different_ actions from the same `s_t` (same
-  state, different action) — the signal that forces action-conditioning.
-- **Monte-Carlo marginals**: each step is re-run `--mc-marginals` times (default 30) to estimate the _true_ one-step probability `P(infected)` / `P(frontier)`
-  per node — these soft marginals are the training targets.
+- **counterfactual forks** re-apply _different_ actions from the same `s_t` (same state, different action) — the signal that forces action-conditioning.
+- **Monte-Carlo marginals**: each step is re-run `--mc-marginals` times (default 30) to estimate the _true_ one-step probability `P(infected)` / `P(frontier)` per node — these soft marginals are the training targets.
 
 Full details, the JSONL schema, and every flag: [`data/README.md`](data/README.md).
 
@@ -76,8 +50,7 @@ Full details, the JSONL schema, and every flag: [`data/README.md`](data/README.m
 
 Each transition becomes a per-node feature matrix and a graph view.
 
-**`X` — shape `(N, 6)`**, one row per node, six channels describing time `t`
-before diffusion:
+**`X` — shape `(N, 6)`**, one row per node, six channels describing time `t` before diffusion:
 
 | col | channel      | represents                                              | type   |
 | --- | ------------ | ------------------------------------------------------- | ------ |
@@ -88,20 +61,13 @@ before diffusion:
 | 4   | `act_remove` | target of a `remove_node` op this step (action)         | binary |
 | 5   | `act_edge`   | endpoint of an edge op this step (action)               | binary |
 
-Channels 0–1 are the **state**, 2 is **structure**, 3–5 are the **action**
-projected onto nodes. **Targets** `y_inf, y_fr` (each `(N,)`) are the soft MC
-marginals `P(node infected/frontier at t+1)`.
+Channels 0–1 are the **state**, 2 is **structure**, 3–5 are the **action** projected onto nodes. **Targets** `y_inf, y_fr` (each `(N,)`) are the soft MC marginals `P(node infected/frontier at t+1)`.
 
-**Graph structure** is passed as a `GraphInput`: a symmetrically renormalized
-sparse adjacency `D^{-1/2}(A+I)D^{-1/2}` (used by GCN/GCNII) plus `edge_index` and
-`edge_weight` (used by SAGE/GAT/GT). IC keeps the transmission probability as the
-edge weight; LT uses all-ones. Edge actions are replayed per episode so each step
-sees the adjacency that actually produced its `s_{t+1}`.
+**Graph structure** is passed as a `GraphInput`: a symmetrically renormalized sparse adjacency `D^{-1/2}(A+I)D^{-1/2}` (used by GCN/GCNII) plus `edge_index` and `edge_weight` (used by SAGE/GAT/GT). IC keeps the transmission probability as the edge weight; LT uses all-ones. Edge actions are replayed per episode so each step sees the adjacency that actually produced its `s_{t+1}`.
 
 ### 3 — Model (`world_model/wm_model.py`)
 
-A **backbone encoder** maps `X (N,6) → h (N, hidden)`, then a **head** maps
-`h → logits (N,2) = [next_infected, next_frontier]`.
+A **backbone encoder** maps `X (N,6) → h (N, hidden)`, then a **head** maps `h → logits (N,2) = [next_infected, next_frontier]`.
 
 Five plug-and-play backbones (`--model`):
 
@@ -115,39 +81,25 @@ Five plug-and-play backbones (`--model`):
 
 Three heads (`--head`):
 
-- **`linear`** — `Linear(hidden, 2)`; flexible but saturates the whole graph on a
-  free-running rollout (no structural cap).
-- **`structured` (IC)** — `ICTransmissionHead`: predict a per-edge transmission
-  `q(u→v)` and derive the IC infection form `p_new(v) = 1 − ∏(1 − q·frontier_u)`.
-  Locality makes the cascade **self-terminating** — it structurally cannot
-  saturate. Train with `--pos-weight off`.
-- **`structured` (LT)** — `LTThresholdHead`: predict activation as a learned
-  monotone function of the active-neighbor fraction `f_v`, gated by `f_v > 0`.
+- **`linear`** — `Linear(hidden, 2)`; flexible but saturates the whole graph on a free-running rollout (no structural cap).
+- **`structured` (IC)** — `ICTransmissionHead`: predict a per-edge transmission `q(u→v)` and derive the IC infection form `p_new(v) = 1 − ∏(1 − q·frontier_u)`. Locality makes the cascade **self-terminating** — it structurally cannot saturate. Train with `--pos-weight off`.
+- **`structured` (LT)** — `LTThresholdHead`: predict activation as a learned monotone function of the active-neighbor fraction `f_v`, gated by `f_v > 0`.
 
-The structured heads are the fix that turned a runaway rollout (final count ~99
-of 100) into a faithful one (final count within ~1 node of truth). See
-[`world_model/README.md`](world_model/README.md) for the math.
+The structured heads are the fix that turned a runaway rollout (final count ~99 of 100) into a faithful one (final count within ~1 node of truth). See [`world_model/README.md`](world_model/README.md) for the math.
 
 ### 4 — Training & evaluation (`world_model/train_wm.py`, `wm_eval.py`)
 
-Teacher-forced one-step: `loss = BCEWithLogits(·, y_inf) + BCEWithLogits(·,
-y_fr)`. Adam, early-stop on validation `delta_f1`. Evaluation reports three
-families:
+Teacher-forced one-step: `loss = BCEWithLogits(·, y_inf) + BCEWithLogits(·, y_fr)`. Adam, early-stop on validation `delta_f1`. Evaluation reports three families:
 
-- **one-step** — `delta_f1` / `new_infection_f1`, calibration (`brier`),
-  action-specific success, action-sensitivity, vs a persistence baseline;
-- **free-running rollout** — sampled-ensemble marginal MAE, count Wasserstein-1,
-  and **count bias** (≈0 = no saturation), vs the true MC trajectory;
-- **planning regret** — use the model to pick a one-step intervention and measure
-  spread lost vs the oracle, against degree and random baselines.
+- **one-step** — `delta_f1` / `new_infection_f1`, calibration (`brier`), action-specific success, action-sensitivity, vs a persistence baseline;
+- **free-running rollout** — sampled-ensemble marginal MAE, count Wasserstein-1, and **count bias** (≈0 = no saturation), vs the true MC trajectory;
+- **planning regret** — use the model to pick a one-step intervention and measure spread lost vs the oracle, against degree and random baselines.
 
 ---
 
 ## The action space (5 ops, unified across tasks)
 
-Every action is `(op, target, [destination], [weight])`. `target` is the node (or
-edge source `u`); `destination` is the edge sink `v`; `weight` is the IC
-transmission probability for the edge.
+Every action is `(op, target, [destination], [weight])`. `target` is the node (or edge source `u`); `destination` is the edge sink `v`; `weight` is the IC transmission probability for the edge.
 
 | op                | record fields                       | IC effect                           | LT effect                              |
 | ----------------- | ----------------------------------- | ----------------------------------- | -------------------------------------- |
@@ -157,22 +109,15 @@ transmission probability for the edge.
 | `remove_edge`     | `target=u, destination=v`           | remove arc `u→v`                    | remove edge structurally               |
 | `set_edge_weight` | `target=u, destination=v, weight=w` | set arc `u→v` transmission `w`      | no-op (LT ignores edge weights)        |
 
-Node ops set the `act_add` / `act_remove` input channels; edge ops set the
-`act_edge` channel **and** mutate the per-episode adjacency. The three data
-settings are simply which ops you enable via `--action-ops` (omit = diffusion-only;
-`add_node remove_node` = node; `add_edge remove_edge set_edge_weight` = edge).
+Node ops set the `act_add` / `act_remove` input channels; edge ops set the `act_edge` channel **and** mutate the per-episode adjacency. The three data settings are simply which ops you enable via `--action-ops` (omit = diffusion-only; `add_node remove_node` = node; `add_edge remove_edge set_edge_weight` = edge).
 
 ---
 
 ## Datasets
 
-**Synthetic** (`--dataset`): `er` (Erdős–Rényi), `ba` (Barabási–Albert), `ws`
-(Watts–Strogatz), `sbm` (stochastic block model — planted communities via
-`--sbm-blocks/--sbm-p-in/--sbm-p-out`), `karate`. Generated in bulk via
-`--num-graphs` with `log1p(degree)` node features.
+**Synthetic** (`--dataset`): `er` (Erdős–Rényi), `ba` (Barabási–Albert), `ws` (Watts–Strogatz), `sbm` (stochastic block model — planted communities via `--sbm-blocks/--sbm-p-in/--sbm-p-out`), `karate`. Generated in bulk via `--num-graphs` with `log1p(degree)` node features.
 
-**Real** (downloaded on first use via `data/datasets/`; Weibo needs a manual
-AMiner download — see `data/datasets/weibo.py`):
+**Real** (downloaded on first use via `data/datasets/`; Weibo needs a manual AMiner download — see `data/datasets/weibo.py`):
 
 | `--dataset`       | Nodes     | Edges     | Type                              | Node features                       |
 | ----------------- | --------- | --------- | --------------------------------- | ----------------------------------- |
@@ -192,27 +137,17 @@ AMiner download — see `data/datasets/weibo.py`):
 | `youtube`         | 1,134,890 | 2,987,624 | Undirected (friendships)          | log(1 + degree)                     |
 | `weibo`           | 1,787,443 | ≈216M     | Directed (influence u→v)          | log(1 + total degree)               |
 
-Undirected rows quote undirected edges; directed rows quote arcs. `cora_ml` is
-loaded through graph2gauss's `standardize()` (symmetrize → drop self-loops →
-largest connected component), so it is byte-for-byte the graph DeepIM and MOEIM
-report; the raw 2,995-node file is not comparable to any published table.
+Undirected rows quote undirected edges; directed rows quote arcs. `cora_ml` is loaded through graph2gauss's `standardize()` (symmetrize → drop self-loops → largest connected component), so it is byte-for-byte the graph DeepIM and MOEIM report; the raw 2,995-node file is not comparable to any published table.
 
-The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what
-the current NDlib rollout + selector pipeline can simulate in reasonable time —
-they are targets for a future scalable-simulation pass, not day-one datasets.
+The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what the current NDlib rollout + selector pipeline can simulate in reasonable time — they are targets for a future scalable-simulation pass, not day-one datasets.
 
-**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the
-IM literature with source URLs and exact counts, which paper uses which, the
-seven dataset names that denote more than one graph, what to add next, and the
-loader contract for adding one.
+**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one.
 
 ---
 
 ## Quick start — the whole experiment in one command
 
-`pipeline/run.py` runs every stage end to end and writes a single
-`results/<task>/<dataset>/<run>/report.md` with the tables and figures. Swapping datasets is a
-one-flag change.
+`pipeline/run.py` runs every stage end to end and writes a single `results/<task>/<dataset>/<run>/report.md` with the tables and figures. Swapping datasets is a one-flag change.
 
 ```bash
 source .venv/bin/activate
@@ -233,9 +168,7 @@ python -m pipeline.run --dataset sbm --num-graphs 40 --compare \
 
 ### The six baseline conditions
 
-Two orthogonal axes — who designs the algorithm, and what feedback the designer
-gets while designing. Each condition is one **arm**; every arm carries its own
-evaluator, so they all land in one `report.md` table.
+Two orthogonal axes — who designs the algorithm, and what feedback the designer gets while designing. Each condition is one **arm**; every arm carries its own evaluator, so they all land in one `report.md` table.
 
 | # | condition | arm spec | designer | inner-loop feedback |
 | --- | --- | --- | --- | --- |
@@ -246,25 +179,11 @@ evaluator, so they all land in one `report.md` table.
 | 5 | Agent + oracle dynamics | `evolve_free@oracle` | LLM writes code | true transition dynamics |
 | 6 | **Ours: agent + learned GWM** | `evolve_free@world_model` | LLM writes code | learned `f_θ` rollouts |
 
-Conditions 3–6 hold the method fixed, so the **only** thing varying down that
-ladder is the inner-loop evaluator — which is what makes it a clean ablation.
-`@native` means the real simulator at `--native-mc-runs` episode(s) per candidate:
-model-free trial and error that pays real experience for every noisy number it
-gets back. Swap `evolve_free` for `one_shot_free`, `evolve_scored`, or any
-`<method>_<mode>` to run a different synthesis method down the same ladder.
+Conditions 3–6 hold the method fixed, so the **only** thing varying down that ladder is the inner-loop evaluator — which is what makes it a clean ablation. `@native` means the real simulator at `--native-mc-runs` episode(s) per candidate: model-free trial and error that pays real experience for every noisy number it gets back. Swap `evolve_free` for `one_shot_free`, `evolve_scored`, or any `<method>_<mode>` to run a different synthesis method down the same ladder.
 
-The synthesis method is `evolve`, not `one_shot`: both refine a program against
-the same feedback under the same LLM-call budget, but `evolve` edits the
-**population best** each generation while `one_shot` edits the latest attempt, so
-`one_shot` compounds a regression instead of rejecting it. Same cost, strictly
-better search.
+The synthesis method is `evolve`, not `one_shot`: both refine a program against the same feedback under the same LLM-call budget, but `evolve` edits the **population best** each generation while `one_shot` edits the latest attempt, so `one_shot` compounds a regression instead of rejecting it. Same cost, strictly better search.
 
-**`--compare` is effectively mandatory for a multi-condition sweep.** Each arm's
-own `reward` is measured by its own evaluator — a native arm's is one noisy
-episode, ours is a model estimate — so those numbers cannot be compared to each
-other. `--compare` replays every winning strategy on the same ground-truth Monte
-Carlo referee, and that replay is the number the tables and plots use. Without
-it the pipeline warns and the report is marked as not comparable.
+**`--compare` is effectively mandatory for a multi-condition sweep.** Each arm's own `reward` is measured by its own evaluator — a native arm's is one noisy episode, ours is a model estimate — so those numbers cannot be compared to each other. `--compare` replays every winning strategy on the same ground-truth Monte Carlo referee, and that replay is the number the tables and plots use. Without it the pipeline warns and the report is marked as not comparable.
 
 ```bash
 # Add a classical baseline, drop an expensive one
@@ -289,19 +208,11 @@ agent runs:  47%|████▋     | 7/15 [02:11<02:30, 18.8s/run, pct10/exter
 [pipeline] stage agent done in 25.7s
 ```
 
-`data` shows an episode bar, `train` shows an epoch bar with live
-`val_delta_f1` plus a nested batch bar, `agent` shows one bar over the whole
-(budget × arm) grid with ETA and the arm currently running, `plots` names each
-figure as it lands. `pipeline.json` marks each stage `running` → `done` (or
-`failed` with the exception), so an interrupted run is distinguishable from a
-clean one.
+`data` shows an episode bar, `train` shows an epoch bar with live `val_delta_f1` plus a nested batch bar, `agent` shows one bar over the whole (budget × arm) grid with ETA and the arm currently running, `plots` names each figure as it lands. `pipeline.json` marks each stage `running` → `done` (or `failed` with the exception), so an interrupted run is distinguishable from a clean one.
 
 ### Stages, resuming, and skipping
 
-`data → train → agent → plots → report`. Every stage writes its artifacts before
-the next begins, and a rerun **detects finished work on disk and skips it** — so a
-killed job resumes at the exact arm and budget it died on. LLM arms are the
-expensive part, and they are checkpointed one file per `(budget, arm)`.
+`data → train → agent → plots → report`. Every stage writes its artifacts before the next begins, and a rerun **detects finished work on disk and skips it** — so a killed job resumes at the exact arm and budget it died on. LLM arms are the expensive part, and they are checkpointed one file per `(budget, arm)`.
 
 ```bash
 # Only the reporting half of a finished run
@@ -339,15 +250,11 @@ python -m pipeline.run --dataset ba --run new_agent_sweep \
 | `--compare` | off | ground-truth referee replay — required for a valid cross-condition table |
 | `--llm-model` / `--outer-iters` | `gpt-5.6-terra` / `5` | coding-agent model and refinement budget |
 
-Generation, training, and agent hyperparameters are all exposed too
-(`--rollouts`, `--mc-marginals`, `--wm-model`, `--head`, `--epochs`, `--n-samples`,
-…) — see `python -m pipeline.run --help`.
+Generation, training, and agent hyperparameters are all exposed too (`--rollouts`, `--mc-marginals`, `--wm-model`, `--head`, `--epochs`, `--n-samples`, …) — see `python -m pipeline.run --help`.
 
 ### On SLURM
 
-`sbatch/pipeline.sbatch` is the only job script. Run it directly and it queues
-**itself**, with every one of the 67 pipeline flags reachable as an environment
-variable:
+`sbatch/pipeline.sbatch` is the only job script. Run it directly and it queues **itself**, with every one of the 67 pipeline flags reachable as an environment variable:
 
 ```bash
 DATASET=ba ./sbatch/pipeline.sbatch                    # everything
@@ -356,25 +263,13 @@ DATASET=ba START_STAGE=plots ./sbatch/pipeline.sbatch  # re-plot only
 DATASET=ba DRY_RUN=1 ./sbatch/pipeline.sbatch          # show, submit nothing
 ```
 
-**GPU is requested only when the run needs one.** Before submitting, the script
-asks `pipeline.run --print-resources` whether these flags ever put a tensor on a
-device: training `f_θ`, any `@world_model` arm, or a learned external repo get
-`--gres=gpu:1`; data generation, plots, the classical pool, and the
-`routing`/`native`/`monte_carlo`/`oracle` arms queue CPU-only and start sooner.
-`DEVICE` follows the same decision. Override with `GRES=gpu:2` or `GRES=none`.
+**GPU is requested only when the run needs one.** Before submitting, the script asks `pipeline.run --print-resources` whether these flags ever put a tensor on a device: training `f_θ`, any `@world_model` arm, or a learned external repo get `--gres=gpu:1`; data generation, plots, the classical pool, and the `routing`/`native`/`monte_carlo`/`oracle` arms queue CPU-only and start sooner. `DEVICE` follows the same decision. Override with `GRES=gpu:2` or `GRES=none`.
 
-Its header carries copy-pasteable templates for every scenario — full run,
-oracle-only, evaluator ablation, baselines-only, specific baselines, no
-baselines, single stages, plots-only, every LLM knob, every world-model knob,
-every generation knob, LT, absolute budgets, and resume.
+Its header carries copy-pasteable templates for every scenario — full run, oracle-only, evaluator ablation, baselines-only, specific baselines, no baselines, single stages, plots-only, every LLM knob, every world-model knob, every generation knob, LT, absolute budgets, and resume.
 
 ### Tasks
 
-Every run is scoped to a **graph task**. `pipeline/tasks.py` is the registry —
-name, status, objective sense, dynamics, action ops, and for anything not yet
-runnable, the one thing blocking it. The task name is both the first level of the
-results tree and the filename of its literature review in
-[`research/`](research/), so the two can never drift apart.
+Every run is scoped to a **graph task**. `pipeline/tasks.py` is the registry — name, status, objective sense, dynamics, action ops, and for anything not yet runnable, the one thing blocking it. The task name is both the first level of the results tree and the filename of its literature review in [`research/`](research/), so the two can never drift apart.
 
 ```bash
 python -m pipeline.run --dataset jazz                          # influence_maximization
@@ -383,9 +278,7 @@ python -m pipeline.run --dataset jazz --run gcnii_ablation \
 python -c "from pipeline.tasks import tasks; print(sorted(tasks))"
 ```
 
-**Only `influence_maximization` runs today.** The other twelve are catalogued
-with a status and a blocker; `pipeline.run` refuses them up front with that
-blocker and a pointer to the research doc, instead of failing mid-stage:
+**Only `influence_maximization` runs today.** The other twelve are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
 
 ```
 $ python -m pipeline.run --dataset ba --task influence_blocking
@@ -394,9 +287,7 @@ NDlib ships no competitive model ... See research/influence_blocking.md for the
 full analysis. Runnable today: ['influence_maximization']
 ```
 
-Adding one is a registry entry plus whatever its `blocker` names — usually a head
-in `wm_model.py` and a simulator branch in `wm_simulator.py`. The stages, feature
-builder, encoders, collate, plots, and report are task-agnostic.
+Adding one is a registry entry plus whatever its `blocker` names — usually a head in `wm_model.py` and a simulator branch in `wm_simulator.py`. The stages, feature builder, encoders, collate, plots, and report are task-agnostic.
 
 ### Where everything lands
 
@@ -415,28 +306,13 @@ results/<task>/<dataset>/<run>/
 └── environment.json             git commit, host, python/torch/CUDA versions
 ```
 
-**Nothing is recomputed and nothing is lost.** `summary.csv` is rewritten after
-*every single arm*, so a killed sweep still leaves a readable table of everything
-finished. The training curve flushes every 5 epochs, so a SLURM timeout at epoch
-380/400 keeps the history. Per-node `final_marginals` (which cost `n_samples`
-rollouts to produce) are serialized rather than recomputed. `environment.json`
-records the git commit and library versions so a results tree stays
-self-describing after the working copy moves on.
+**Nothing is recomputed and nothing is lost.** `summary.csv` is rewritten after *every single arm*, so a killed sweep still leaves a readable table of everything finished. The training curve flushes every 5 epochs, so a SLURM timeout at epoch 380/400 keeps the history. Per-node `final_marginals` (which cost `n_samples` rollouts to produce) are serialized rather than recomputed. `environment.json` records the git commit and library versions so a results tree stays self-describing after the working copy moves on.
 
-Raw dataset downloads live outside the results tree, in `data/raw/<dataset>/`,
-since they are inputs shared across every run.
+Raw dataset downloads live outside the results tree, in `data/raw/<dataset>/`, since they are inputs shared across every run.
 
 ### Figures produced
 
-`budget_vs_spread` (the headline: spread vs k per arm, with MC error bars),
-`budget_vs_spread_pct` (normalized), `condition_comparison` (the baseline table
-as a grouped bar chart, coloured by condition), `sample_efficiency` (spread vs
-real-environment episodes burned — the axis the whole taxonomy hangs on),
-`evaluator_fidelity` (model estimate vs Monte Carlo parity), `runtime`
-(per-rollout cost by evaluator), `convergence` (best-so-far reward per outer
-iteration), `cascade` (infected count over time), and — when a world model was
-trained — `wm_training`, `wm_one_step`, `wm_rollout`. Each is skipped silently
-when its inputs are absent, so a partial run just yields fewer figures.
+`budget_vs_spread` (the headline: spread vs k per arm, with MC error bars), `budget_vs_spread_pct` (normalized), `condition_comparison` (the baseline table as a grouped bar chart, coloured by condition), `sample_efficiency` (spread vs real-environment episodes burned — the axis the whole taxonomy hangs on), `evaluator_fidelity` (model estimate vs Monte Carlo parity), `runtime` (per-rollout cost by evaluator), `convergence` (best-so-far reward per outer iteration), `cascade` (infected count over time), and — when a world model was trained — `wm_training`, `wm_one_step`, `wm_rollout`. Each is skipped silently when its inputs are absent, so a partial run just yields fewer figures.
 
 ---
 
@@ -494,16 +370,13 @@ python -m world_model.eval_structured_oracle \
 | final count model / true                  | **36.6 / 36.7**      | **47.3 / 46.2**                       |
 | planning regret model / degree / random   | 0.244 / 0.269 / 3.11 | 0.196 / 0.271 / 3.37                  |
 
-The structured SAGE world model is an accurate, calibrated, **non-saturating**
-one-step simulator on both dynamics and beats random planning decisively. Full
-metric-by-metric analysis: [`world_model/checkpoints/RESULTS.md`](world_model/checkpoints/RESULTS.md).
+The structured SAGE world model is an accurate, calibrated, **non-saturating** one-step simulator on both dynamics and beats random planning decisively. Full metric-by-metric analysis: [`world_model/checkpoints/RESULTS.md`](world_model/checkpoints/RESULTS.md).
 
 ---
 
 ## Coding Agent (planned)
 
-The world model is designed to become the **predictive environment** in a
-coding-agent loop for graph-algorithm evolution:
+The world model is designed to become the **predictive environment** in a coding-agent loop for graph-algorithm evolution:
 
 ```
 π        = A_φ(G, task, history)          # agent proposes a candidate algorithm
@@ -511,13 +384,7 @@ coding-agent loop for graph-algorithm evolution:
 rollout  = Rollout_GWM(π, G, task)  ──▶  Refine(π)   # predicted insights guide refinement
 ```
 
-The agent operates over parameterized graph action primitives (candidate
-expansion, node selection, score propagation, subgraph update, termination), so
-algorithms are compositions of the same `(operator, arguments)` actions the world
-model already simulates. Planned baselines: native coding agent (real execution
-only), pure graph algorithms (greedy IM, BFS, PageRank), GA routing over a fixed
-pool, and the full coding-agent + GWM. The non-saturating rollout demonstrated
-above is the prerequisite this component was waiting on.
+The agent operates over parameterized graph action primitives (candidate expansion, node selection, score propagation, subgraph update, termination), so algorithms are compositions of the same `(operator, arguments)` actions the world model already simulates. Planned baselines: native coding agent (real execution only), pure graph algorithms (greedy IM, BFS, PageRank), GA routing over a fixed pool, and the full coding-agent + GWM. The non-saturating rollout demonstrated above is the prerequisite this component was waiting on.
 
 ---
 
@@ -566,9 +433,4 @@ GraphWorldModel/
 └── requirements.txt
 ```
 
-> **Legacy.** The original seed→outcome inverse-problem world-model training and
-> the VAE joint-training pipeline have been removed (`world_model/old/`,
-> `world_model/model/vae.py`). The diffusion-only CND/IM/SL data generators remain
-> archived under `data/old/` for reference. The encoder files in
-> `world_model/model/` still contain the old `*ForwardModel` classes, now unused.
-> The action-conditioned world model above is the only active path.
+> **Legacy.** The original seed→outcome inverse-problem world-model training and the VAE joint-training pipeline have been removed (`world_model/old/`, `world_model/model/vae.py`). The diffusion-only CND/IM/SL data generators remain archived under `data/old/` for reference. The encoder files in `world_model/model/` still contain the old `*ForwardModel` classes, now unused. The action-conditioned world model above is the only active path.

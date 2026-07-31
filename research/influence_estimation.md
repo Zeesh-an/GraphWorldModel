@@ -1,15 +1,8 @@
 # Influence Spread Estimation — Prior Work, Datasets, and Published Results
 
-Given a graph `G` and a seed set `S`, predict the expected spread `σ(S)` — the
-number of nodes eventually activated — **without** running Monte Carlo. This
-file covers exact/hardness results, bound- and sketch-based estimators, learned
-(GNN) estimators, and the other half of the problem: **where `p(u→v)` comes
-from**, i.e. influence-probability learning from observed cascades.
+Given a graph `G` and a seed set `S`, predict the expected spread `σ(S)` — the number of nodes eventually activated — **without** running Monte Carlo. This file covers exact/hardness results, bound- and sketch-based estimators, learned (GNN) estimators, and the other half of the problem: **where `p(u→v)` comes from**, i.e. influence-probability learning from observed cascades.
 
-This is the one task in `research/` that costs us **nothing to enter**. Our
-`rollout_ensemble` evaluator (`world_model/wm_eval.py`) already reports
-`ens_final_count_model` against `ens_final_count_true` — that *is* influence
-spread estimation, reported under a different name (§2).
+This is the one task in `research/` that costs us **nothing to enter**. Our `rollout_ensemble` evaluator (`world_model/wm_eval.py`) already reports `ens_final_count_model` against `ens_final_count_true` — that *is* influence spread estimation, reported under a different name (§2).
 
 All URLs checked for HTTP status on **2026-07-28**.
 
@@ -24,35 +17,20 @@ All URLs checked for HTTP status on **2026-07-28**.
 | **[figure]** | Read off a plotted figure — the paper published no table. Approximate, direction only. |
 | **[claim]** | Stated in prose by a paper or a secondary source; not cross-checked against a file or table. |
 
-**Automated PDF summarizers hallucinate plausible numbers from these papers.**
-While compiling the IM file, a summarizer reported IRIE scoring `142.8` on
-NetHEPT at k=50; the published value in that paper's Table 3 is **724.67**.
-Extract text (`pdftotext -layout`), read the table, then transcribe. Never let a
-summary supply a number.
+**Automated PDF summarizers hallucinate plausible numbers from these papers.** While compiling the IM file, a summarizer reported IRIE scoring `142.8` on NetHEPT at k=50; the published value in that paper's Table 3 is **724.67**. Extract text (`pdftotext -layout`), read the table, then transcribe. Never let a summary supply a number.
 
-**Edge-count convention.** Undirected graphs are quoted as **undirected edges**;
-directed graphs as **arcs**. Our loaders report `adjacency.nnz`, which for a
-symmetrized undirected graph is **2× the undirected edge count**. This one
-convention difference explains most apparent "discrepancies" between our numbers
-and published tables — check it before concluding two graphs differ.
+**Edge-count convention.** Undirected graphs are quoted as **undirected edges**; directed graphs as **arcs**. Our loaders report `adjacency.nnz`, which for a symmetrized undirected graph is **2× the undirected edge count**. This one convention difference explains most apparent "discrepancies" between our numbers and published tables — check it before concluding two graphs differ.
 
-This convention bites *hard* in this literature specifically, because the two
-most-cited learned estimators both **append reverse edges before reporting**:
+This convention bites *hard* in this literature specifically, because the two most-cited learned estimators both **append reverse edges before reporting**:
 
-- GLIE's Table I lists GR Colab as `5,242 / 28,980` — that is ca-GrQc's 14,490
-  undirected edges stored as arcs, not a different graph [derived]. Same for its
-  YouTube `1,134,891 / 5,975,246` = SNAP `com-Youtube` (2,987,624 edges) doubled
-  [derived]. GLIE states the rule explicitly: *"we turn all undirected graphs
-  into directed ones by appending reverse edges"* [verified].
-- SKIM's Table 1 column is literally headed `|A|` (arcs): Orkut `234,370.2 ·10³`
-  = 2 × `com-Orkut`'s 117,185,083 undirected edges [derived].
+- GLIE's Table I lists GR Colab as `5,242 / 28,980` — that is ca-GrQc's 14,490 undirected edges stored as arcs, not a different graph [derived]. Same for its YouTube `1,134,891 / 5,975,246` = SNAP `com-Youtube` (2,987,624 edges) doubled [derived]. GLIE states the rule explicitly: *"we turn all undirected graphs into directed ones by appending reverse edges"* [verified].
+- SKIM's Table 1 column is literally headed `|A|` (arcs): Orkut `234,370.2 ·10³` = 2 × `com-Orkut`'s 117,185,083 undirected edges [derived].
 
 ---
 
 ## 1. Task definition
 
-**Influence estimation (IE).** Given `G = (V, E)`, a diffusion model `M` (IC or
-LT) with its parameters, and a seed set `S ⊆ V`, compute
+**Influence estimation (IE).** Given `G = (V, E)`, a diffusion model `M` (IC or LT) with its parameters, and a seed set `S ⊆ V`, compute
 
 ```
 σ(S) = E[ |{v : v activated at termination}| ]
@@ -66,8 +44,7 @@ Two strictly harder / finer variants matter for us:
 | **Susceptibility estimation** | per-node vector `x_v = P(v activated)` | DeepIS, DySuse, MONSTOR (`π` vector), NMF |
 | **Influence oracle** | `σ(S)` for *arbitrary, repeated* `S` after one preprocessing pass | SKIM, MONSTOR+, GLIE |
 
-The susceptibility variant is the one our model natively produces — our targets
-`y_inf, y_fr` *are* per-node marginals, and `σ(S) = Σ_v x_v` recovers the scalar.
+The susceptibility variant is the one our model natively produces — our targets `y_inf, y_fr` *are* per-node marginals, and `σ(S) = Σ_v x_v` recovers the scalar.
 
 **Why the task exists at all: computing `σ(S)` exactly is #P-hard.**
 
@@ -77,29 +54,19 @@ The susceptibility variant is the one our model natively produces — our target
 | **LT** | *"computing the exact influence spread in the LT model is #P-hard, even if there is only one seed in the network."* Reduction uses interpolation; strictly more involved than the IC reduction. | Chen, Yuan & Zhang, ICDM 2010 [verified] |
 | **LT on DAGs** | Linear time in graph size — the tractable island LDAG exploits. | Chen, Yuan & Zhang, ICDM 2010 [verified] |
 
-Both papers frame this as closing an open question left by Kempe et al. (2003).
-The consequence everyone builds on: **`σ` must be approximated**, and the
-default approximation — 10,000 Monte Carlo rollouts per seed set — is what every
-method in §3 and §4 is trying to replace.
+Both papers frame this as closing an open question left by Kempe et al. (2003). The consequence everyone builds on: **`σ` must be approximated**, and the default approximation — 10,000 Monte Carlo rollouts per seed set — is what every method in §3 and §4 is trying to replace.
 
-Chen et al. also note the approximation problem is itself hard: *"finding an
-efficient approximation algorithm for computing the probability of s-t
-connectivity is a long-standing open problem"* [verified].
+Chen et al. also note the approximation problem is itself hard: *"finding an efficient approximation algorithm for computing the probability of s-t connectivity is a long-standing open problem"* [verified].
 
 ---
 
 ## 2. Fit with our methodology — ✅ already computed
 
-**Implementation cost: zero.** Not "small" — zero. The numbers this literature
-reports are the numbers `rollout_ensemble` already writes into every results
-JSON. What is missing is not code; it is the *framing* and the baseline table.
+**Implementation cost: zero.** Not "small" — zero. The numbers this literature reports are the numbers `rollout_ensemble` already writes into every results JSON. What is missing is not code; it is the *framing* and the baseline table.
 
 ### 2.1 The mapping is exact
 
-`world_model/wm_eval.py::rollout_ensemble` rolls `n_samples` trajectories,
-sampling each step from the predicted frontier marginal, and compares against
-`n_samples` true NDlib rollouts under the same recorded action sequence. Its
-return dict is, verbatim:
+`world_model/wm_eval.py::rollout_ensemble` rolls `n_samples` trajectories, sampling each step from the predicted frontier marginal, and compares against `n_samples` true NDlib rollouts under the same recorded action sequence. Its return dict is, verbatim:
 
 | our metric (`wm_eval.py`) | what the IE literature calls it |
 | ------------------------- | ------------------------------- |
@@ -109,12 +76,7 @@ return dict is, verbatim:
 | `ens_count_w1` | Wasserstein-1 between the model's and the simulator's *distribution* of cascade sizes — strictly more than the field reports, which is almost always a point estimate |
 | `ens_marg_mae` | **susceptibility MAE** — the DeepIS / DySuse metric exactly (per-node `|x̂_v − x_v|`) |
 
-`ens_count_bias` is the load-bearing one and it is *signed*, where the field
-almost universally reports unsigned relative error. Signed is the better choice
-and we should say so: a saturating estimator and a collapsing estimator both
-score badly on MAE, but only the signed statistic tells you which failure you
-have. Our own history is the argument — the linear head's `count_bias ≈ +49`
-diagnosed runaway saturation that an MAE column would have merely called "large".
+`ens_count_bias` is the load-bearing one and it is *signed*, where the field almost universally reports unsigned relative error. Signed is the better choice and we should say so: a saturating estimator and a collapsing estimator both score badly on MAE, but only the signed statistic tells you which failure you have. Our own history is the argument — the linear head's `count_bias ≈ +49` diagnosed runaway saturation that an MAE column would have merely called "large".
 
 ### 2.2 Reading `σ(S)` off the world model
 
@@ -125,40 +87,19 @@ s_0 = (infected = S, frontier = S);  a_t = NULL for all t
 σ̂(S) = ens_final_count_model
 ```
 
-That is the whole procedure. `rollout_ensemble` already accepts episodes whose
-action bag is empty, so a diffusion-only dataset (`--action-ops` omitted) is
-already an influence-estimation benchmark — we have simply never labelled it one.
+That is the whole procedure. `rollout_ensemble` already accepts episodes whose action bag is empty, so a diffusion-only dataset (`--action-ops` omitted) is already an influence-estimation benchmark — we have simply never labelled it one.
 
-Per-node susceptibility comes out one layer earlier: `model_marginal` inside
-`rollout_ensemble` is `x̂`, and `Σ_v x̂_v` is a lower-variance estimator of `σ(S)`
-than counting sampled activations. Worth switching to if we report `σ̂`.
+Per-node susceptibility comes out one layer earlier: `model_marginal` inside `rollout_ensemble` is `x̂`, and `Σ_v x̂_v` is a lower-variance estimator of `σ(S)` than counting sampled activations. Worth switching to if we report `σ̂`.
 
 ### 2.3 The calibration angle — our stronger claim ⭐
 
-This is the part worth writing a paper section about, because **GLIE, MONSTOR,
-and DeepIS are all black-box regressors on `σ` (or on `x`), and we are not.**
+This is the part worth writing a paper section about, because **GLIE, MONSTOR, and DeepIS are all black-box regressors on `σ` (or on `x`), and we are not.**
 
-`ICTransmissionHead` does not regress the answer. It predicts the *mechanism* —
-a per-edge transmission propensity `q(u→v) = sigmoid(MLP([h_u, h_v, w_uv]))` —
-and then composes the IC form analytically:
-`p_new(v) = 1 − ∏_{u→v}(1 − q_uv · frontier_u)`. Three consequences the black-box
-line cannot claim:
+`ICTransmissionHead` does not regress the answer. It predicts the *mechanism* — a per-edge transmission propensity `q(u→v) = sigmoid(MLP([h_u, h_v, w_uv]))` — and then composes the IC form analytically: `p_new(v) = 1 − ∏_{u→v}(1 − q_uv · frontier_u)`. Three consequences the black-box line cannot claim:
 
-1. **The estimator is structurally non-saturating.** A susceptible node with no
-   active in-neighbour has `p_new = 0`, so the cascade self-terminates. GLIE
-   instead leans on a *theoretical upper bound tightened by supervised training*
-   — an upper bound has no such guarantee once you leave the training regime.
-2. **The structural form is separately validatable.** `structured_oracle`
-   (`ICTransmissionHead(oracle=True)`, `q = edge_weight`, no learning, exposed via
-   `eval_structured_oracle.py`) isolates the question *"is the composition right?"*
-   from *"did the network learn?"*. Expected `count_bias ≈ 0`. No published
-   learned estimator in §4 ships this ablation, and it is cheap for us because
-   the head is already written.
-3. **`q` is directly comparable to the true `p(u→v)`.** That makes our model an
-   *influence-probability estimator* (§4.3) as well as a spread estimator — the
-   two halves of this file collapse into one head. `structured_residual`
-   (`q = sigmoid(logit(w) + MLP(...))`) makes the comparison explicit: zero
-   correction *is* the oracle.
+1. **The estimator is structurally non-saturating.** A susceptible node with no active in-neighbour has `p_new = 0`, so the cascade self-terminates. GLIE instead leans on a *theoretical upper bound tightened by supervised training* — an upper bound has no such guarantee once you leave the training regime.
+2. **The structural form is separately validatable.** `structured_oracle` (`ICTransmissionHead(oracle=True)`, `q = edge_weight`, no learning, exposed via `eval_structured_oracle.py`) isolates the question *"is the composition right?"* from *"did the network learn?"*. Expected `count_bias ≈ 0`. No published learned estimator in §4 ships this ablation, and it is cheap for us because the head is already written.
+3. **`q` is directly comparable to the true `p(u→v)`.** That makes our model an *influence-probability estimator* (§4.3) as well as a spread estimator — the two halves of this file collapse into one head. `structured_residual` (`q = sigmoid(logit(w) + MLP(...))`) makes the comparison explicit: zero correction *is* the oracle.
 
 ### 2.4 What we would still have to build
 
@@ -171,15 +112,13 @@ Honest list — all small, none blocking:
 | Wall-clock speedup vs the MC referee | we already run both sides in `rollout_ensemble`; just time them |
 | Seed sets sampled at *IM-relevant* budgets (1/5/10/20% of N) rather than episode states | reuse `--budget-pcts` from `pipeline/run.py` |
 
-The fourth is the only one with a research trap attached, and it is the trap in
-§8.4 — an estimator tuned on random seed sets can be useless for optimisation.
+The fourth is the only one with a research trap attached, and it is the trap in §8.4 — an estimator tuned on random seed sets can be useless for optimisation.
 
 ---
 
 ## 3. Classical and heuristic estimators
 
-Four families. Only the first two produce a *reusable* estimator; RR-sets and
-snapshots are estimators that exist only inside an IM loop.
+Four families. Only the first two produce a *reusable* estimator; RR-sets and snapshots are estimators that exist only inside an IM loop.
 
 ### 3.1 Hardness — the reason the rest of this section exists
 
@@ -211,13 +150,7 @@ snapshots are estimators that exist only inside an IM loop.
 | **SIEA / SIEA-LT** ⭐ | 2017 | SIGMETRICS | *Outward influence* + a robust mean estimator (RSA) with adaptive stopping. **Currently the strongest non-learned estimator**: ≤1% avg relative error to 65M nodes / 1.8B edges (§5.3). | [arXiv 1704.04794](https://arxiv.org/abs/1704.04794) | no public code found |
 | **Ohsaka et al.** | 2016 | VLDB | Dynamic index over RR-sets: maintains `σ` estimates under **edge insertions/deletions** — the closest classical analogue to our `add_edge` / `remove_edge` ops. | [PVLDB 9(12)](https://www.vldb.org/pvldb/vol9/p1077-ohsaka.pdf) | no public code found |
 
-**Why SKIM and Ohsaka matter to us specifically.** SKIM is the only classical
-method that is an *oracle* in our sense — amortize once, then answer arbitrary
-queries — which is precisely the economics a learned world model claims. Ohsaka
-is the only one whose index survives **graph edits**, which is what our five
-action ops do to the graph; every other method in this section must be rebuilt
-from scratch after a single `remove_edge`. That is a concrete, defensible
-advantage for an action-conditioned model and nobody in §4 claims it either.
+**Why SKIM and Ohsaka matter to us specifically.** SKIM is the only classical method that is an *oracle* in our sense — amortize once, then answer arbitrary queries — which is precisely the economics a learned world model claims. Ohsaka is the only one whose index survives **graph edits**, which is what our five action ops do to the graph; every other method in this section must be rebuilt from scratch after a single `remove_edge`. That is a concrete, defensible advantage for an action-conditioned model and nobody in §4 claims it either.
 
 ---
 
@@ -237,24 +170,15 @@ advantage for an action-conditioned model and nobody in §4 claims it either.
 | **CoupledGNN** | 2020 | AAAI | Two coupled GNNs — one over node states, one over influence — to capture the interplay. Built for cascade popularity, adapted to susceptibility by DySuse. | cascade size | [arXiv 1906.09032](https://arxiv.org/abs/1906.09032) | no public code found |
 | **DySuse** | 2023 | Expert Syst. Appl. | Susceptibility estimation on **dynamic** graphs: a structure-feature module per snapshot + a self-attention block across snapshots. Best variant `DySuseC` uses CoupledGNN. | per-node `x` | [arXiv 2308.10442](https://arxiv.org/abs/2308.10442) | no public code found |
 
-**The two closest analogues to us are MONSTOR and DeepIS, not GLIE.** GLIE
-regresses a scalar; MONSTOR and DeepIS both predict the **per-node marginal
-vector**, which is what our heads output. MONSTOR is closest of all: its stacked
-one-step GCN is literally a teacher-forced one-step transition model unrolled —
-the same factorization we use, minus the action conditioning. Nobody in this
-table conditions on an intervention. That is our gap in the literature.
+**The two closest analogues to us are MONSTOR and DeepIS, not GLIE.** GLIE regresses a scalar; MONSTOR and DeepIS both predict the **per-node marginal vector**, which is what our heads output. MONSTOR is closest of all: its stacked one-step GCN is literally a teacher-forced one-step transition model unrolled — the same factorization we use, minus the action conditioning. Nobody in this table conditions on an intervention. That is our gap in the literature.
 
 ### 4.2 Where these are actually used
 
-Every one of these is proposed as **an MC replacement inside CELF/greedy**, not
-as a standalone product: `GLIE-CELF`, `C-MON`/`U-MON` (MONSTOR + CELF/UBLF),
-`C-MON+`. The claimed win is always the same shape — near-identical seed sets,
-2–4 orders of magnitude less time (§5).
+Every one of these is proposed as **an MC replacement inside CELF/greedy**, not as a standalone product: `GLIE-CELF`, `C-MON`/`U-MON` (MONSTOR + CELF/UBLF), `C-MON+`. The claimed win is always the same shape — near-identical seed sets, 2–4 orders of magnitude less time (§5).
 
 ### 4.3 Influence-probability learning — *where `p(u→v)` comes from*
 
-Directly relevant: our `--prob-model weighted` (`p = 1/in-degree`) is an
-**assumption, not a measurement**. This literature is the measurement.
+Directly relevant: our `--prob-model weighted` (`p = 1/in-degree`) is an **assumption, not a measurement**. This literature is the measurement.
 
 | Method | Year | Venue | Idea | Paper | Code |
 | ------ | ---- | ----- | ---- | ----- | ---- |
@@ -263,17 +187,9 @@ Directly relevant: our `--prob-model weighted` (`p = 1/in-degree`) is an
 | **Credit Distribution** | 2011 | VLDB | Skips `p(u→v)` entirely — assign **direct credit** for each propagation from the action log, and maximize the credit-based objective. Sidesteps the whole estimation problem. | [arXiv 1109.6886](https://arxiv.org/abs/1109.6886) | no public code found |
 | **NetRate** | 2011 | ICML | Continuous-time: learn per-edge **transmission rates** `α_ij` by convex MLE over cascade timings. Infers structure and rates together. | [arXiv 1105.0697](https://arxiv.org/abs/1105.0697) | [Networks-Learning/netrate](https://github.com/Networks-Learning/netrate) |
 
-Goyal et al.'s three families map cleanly onto MONSTOR's three activation
-probability matrices — **BT (Bernoulli Trial), JI (Jaccard Index), LP (Linear
-Probability)** [verified] — which is why MONSTOR reports every result three
-times. That is a better protocol than ours: we report one probability model and
-call it the answer.
+Goyal et al.'s three families map cleanly onto MONSTOR's three activation probability matrices — **BT (Bernoulli Trial), JI (Jaccard Index), LP (Linear Probability)** [verified] — which is why MONSTOR reports every result three times. That is a better protocol than ours: we report one probability model and call it the answer.
 
-**The honest position for our paper:** weighted-cascade `p = 1/in-degree` is the
-field's default (DeepIM, MOEIM, IMM, ToupleGDD all use it) and is defensible as
-a *convention*, but it is not learned from anything. `structured_residual`
-(§2.3) is the natural bridge — it learns a correction *on top of* the assumed
-`w`, so if we ever get logged trajectories, the same head absorbs them.
+**The honest position for our paper:** weighted-cascade `p = 1/in-degree` is the field's default (DeepIM, MOEIM, IMM, ToupleGDD all use it) and is defensible as a *convention*, but it is not learned from anything. `structured_residual` (§2.3) is the natural bridge — it learns a correction *on top of* the assumed `w`, so if we ever get logged trajectories, the same head absorbs them.
 
 ---
 
@@ -281,11 +197,7 @@ a *convention*, but it is not learned from anything. `structured_residual`
 
 ### 5.1 GLIE (arXiv 2108.04623) ⭐ the direct comparison
 
-Protocol: train on 100 BA + Holme-Kim graphs of 100–200 nodes and 30 of 300–500
-nodes (60/20/20 split); labels from **CELF with 1,000 MC ICs**, seed sets 1–5,
-storing the CELF optimum plus **30 random negatives per size** = 20,150 training
-samples. Weighted cascade `p = 1/deg(u)`. Undirected graphs made directed by
-appending reverse edges. [verified]
+Protocol: train on 100 BA + Holme-Kim graphs of 100–200 nodes and 30 of 300–500 nodes (60/20/20 split); labels from **CELF with 1,000 MC ICs**, seed sets 1–5, storing the CELF optimum plus **30 random negatives per size** = 20,150 training samples. Weighted cascade `p = 1/deg(u)`. Undirected graphs made directed by appending reverse edges. [verified]
 
 Datasets [verified, Table I]:
 
@@ -300,9 +212,7 @@ Datasets [verified, Table I]:
 | Large | Facebook (FB) | 63,393 | 1,633,660 |
 | Large | Youtube (YT) ✅ | 1,134,891 | 5,975,246 |
 
-**Influence estimation error.** "MAE divided by the average influence" (i.e. a
-normalized MAE / relative error), and time in seconds, over all seed set sizes
-and samples [verified, Table II]:
+**Influence estimation error.** "MAE divided by the average influence" (i.e. a normalized MAE / relative error), and time in seconds, over all seed set sizes and samples [verified, Table II]:
 
 | Graph (seeds) | DMP MAE | DMP time | GLIE MAE | GLIE time |
 | ------------- | ------- | -------- | -------- | --------- |
@@ -312,12 +222,9 @@ and samples [verified, Table II]:
 | HI (1–10) | **0.041** | 2.84 | 0.056 | **0.0034** |
 | GR (1–10) ✅ | 0.122 | 4.32 | **0.084** | **0.0042** |
 
-Read this honestly: **GLIE is not uniformly more accurate than DMP** — it loses
-on Large, CR and HI. What it wins is time, by 10–1,000×, and it holds accuracy
-roughly constant as the graph grows where DMP degrades (0.009 → 0.122).
+Read this honestly: **GLIE is not uniformly more accurate than DMP** — it loses on Large, CR and HI. What it wins is time, by 10–1,000×, and it holds accuracy roughly constant as the graph grows where DMP degrades (0.009 → 0.122).
 
-**Downstream IM at 20 seeds**, CELF driven by each estimator, evaluated with
-10,000 MC ICs [verified, Table III]:
+**Downstream IM at 20 seeds**, CELF driven by each estimator, evaluated with 10,000 MC ICs [verified, Table III]:
 
 | Graph | Seed overlap | DMP-CELF infl | DMP-CELF time | GLIE-CELF infl | GLIE-CELF time |
 | ----- | ------------ | ------------- | ------------- | -------------- | -------------- |
@@ -325,10 +232,7 @@ roughly constant as the graph grows where DMP degrades (0.009 → 0.122).
 | HI (20) | 13 | 1,235 | 8,362 | **1,281** | **5.49** |
 | GR (20) ✅ | 12 | 295 | 16,533 | **393** | **7.01** |
 
-GR is the headline: **2,358× faster and 33% better spread**. The `seed overlap`
-column (12–14 of 20) is a rank-agreement statistic and is the seed of §8.4 — two
-estimators agreeing on only 60–70% of the chosen set still land within 4% spread
-on CR, but 33% apart on GR.
+GR is the headline: **2,358× faster and 33% better spread**. The `seed overlap` column (12–14 of 20) is a rank-agreement statistic and is the seed of §8.4 — two estimators agreeing on only 60–70% of the chosen set still land within 4% spread on CR, but 33% apart on GR.
 
 **Final IM quality at 200 seeds**, spread by 10,000 MC ICs [verified, Table IV]:
 
@@ -341,12 +245,7 @@ on CR, but 33% apart on GR.
 | FB | 10,981 | 10,626 | 6,434 | 7,688 | 10,309 | **11,007** | – | 10,801 |
 | YT ✅ | 246,439 | 244,579 | 110,409 | 242,057 | 236,726 | **247,178** | – | 50,435 |
 
-⚠ **Three cells in GLIE's own Table IV are almost certainly runtimes, not
-spreads.** The paper's prose states DeepIS *"required 501.61, 835.4, and 1,602.5
-seconds for the CR, GR, and HI datasets"* [verified] — and 501.61, 835.40 and
-1602.5 are exactly the three anomalous cells. Verified against two independent
-`pdftotext` passes on page 7: the table really does print them. Do not quote
-those three cells. Logged in §11.
+⚠ **Three cells in GLIE's own Table IV are almost certainly runtimes, not spreads.** The paper's prose states DeepIS *"required 501.61, 835.4, and 1,602.5 seconds for the CR, GR, and HI datasets"* [verified] — and 501.61, 835.40 and 1602.5 are exactly the three anomalous cells. Verified against two independent `pdftotext` passes on page 7: the table really does print them. Do not quote those three cells. Logged in §11.
 
 **Runtime, seconds** [verified, Tables V–VII]:
 
@@ -359,14 +258,11 @@ those three cells. Logged in §11.
 | FB | 287.7 | 3.1 | 171.25 | 56.80 | 22.77 | 9.29 | 10.62 | 17.5 |
 | YT ✅ | 151.33 | 28.92 | 82.13 | 191.00 | 4006.29 | 54.38 | 74.91 | 97.5 |
 
-GLIE's own conclusion: `GLIE-CELF` has the best quality but is *"quite slower"*;
-`PUN` is the accuracy-efficiency sweet spot at 3–60× faster than IMM [verified].
+GLIE's own conclusion: `GLIE-CELF` has the best quality but is *"quite slower"*; `PUN` is the accuracy-efficiency sweet spot at 3–60× faster than IMM [verified].
 
 ### 5.2 MONSTOR (ASONAM 2020) and MONSTOR+ (DMKD 2025) ⭐
 
-Three Twitter-derived networks, trained on two and tested on the third
-[verified, Table 1]. Columns are `Σp(u,v)/|E|` under each activation-probability
-model, train / test:
+Three Twitter-derived networks, trained on two and tested on the third [verified, Table 1]. Columns are `Σp(u,v)/|E|` under each activation-probability model, train / test:
 
 | Graph | \|V\| | \|E\| | BT train/test | JI train/test | LP train/test |
 | ----- | ----- | ----- | ------------- | ------------- | ------------- |
@@ -374,18 +270,11 @@ model, train / test:
 | WannaCry | 35,627 | 169,419 | 0.07255 / 0.09466 | 0.02977 / 0.04494 | 0.19785 / 0.16297 |
 | Celebrity | 15,184 | 56,538 | 0.03206 / 0.02787 | 0.00163 / 0.00159 | 0.26142 / 0.256 |
 
-⚠ MONSTOR+ reprints this table with WannaCry's LP column **swapped**
-(0.16297 / 0.19785) [verified, both papers]. One of the two is a transcription
-error; §11.
+⚠ MONSTOR+ reprints this table with WannaCry's LP column **swapped** (0.16297 / 0.19785) [verified, both papers]. One of the two is a transcription error; §11.
 
-**MONSTOR estimation accuracy** [verified, Table 2]: Pearson and Spearman rank
-correlation with ground-truth influence are **1.000 in 51 of 54 cells**; the
-three exceptions are Celebrity (0.998, 0.999, 0.999). Blue rows = the test
-network was *not* in training, i.e. these are inductive.
+**MONSTOR estimation accuracy** [verified, Table 2]: Pearson and Spearman rank correlation with ground-truth influence are **1.000 in 51 of 54 cells**; the three exceptions are Celebrity (0.998, 0.999, 0.999). Blue rows = the test network was *not* in training, i.e. these are inductive.
 
-**MONSTOR+ vs GLIE, head-to-head** — the single most useful table in this file,
-because it is the only published direct comparison of the two learned estimators
-[verified, MONSTOR+ Table 2]:
+**MONSTOR+ vs GLIE, head-to-head** — the single most useful table in this file, because it is the only published direct comparison of the two learned estimators [verified, MONSTOR+ Table 2]:
 
 | Dataset | MON+ Pearson BT / JI / LP | MON+ Rank BT / JI / LP | GLIE Pearson BT / JI / LP | GLIE Rank BT / JI / LP |
 | ------- | ------------------------- | ---------------------- | ------------------------- | ---------------------- |
@@ -393,14 +282,9 @@ because it is the only published direct comparison of the two learned estimators
 | WannaCry | 1.000 / 1.000 / 1.000 | 1.000 / 1.000 / 1.000 | 0.999 / 0.989 / 0.997 | 0.998 / 0.983 / 0.994 |
 | Celebrity | 0.995 / 1.000 / 1.000 | 0.998 / 1.000 / 0.999 | **0.872 / 0.745 / 0.989** | **0.884 / 0.767 / 0.937** |
 
-MONSTOR+ additionally reports LT (GLIE is IC-only): Pearson 1.000 on all three,
-rank 0.989 / 0.955 / 0.995 [verified].
+MONSTOR+ additionally reports LT (GLIE is IC-only): Pearson 1.000 on all three, rank 0.989 / 0.955 / 0.995 [verified].
 
-**Celebrity is where the two separate**, and it is the graph with the most
-extreme probability profile (JI ≈ 0.0016, LP ≈ 0.26). GLIE's Jaccard rank
-correlation collapses to 0.745/0.767 there. **A scalar-`σ` regressor degrades
-under probability-model shift; a per-node one does not.** That is the empirical
-argument for our per-node marginal targets, made by someone else's experiment.
+**Celebrity is where the two separate**, and it is the graph with the most extreme probability profile (JI ≈ 0.0016, LP ≈ 0.26). GLIE's Jaccard rank correlation collapses to 0.745/0.767 there. **A scalar-`σ` regressor degrades under probability-model shift; a per-node one does not.** That is the empirical argument for our per-node marginal targets, made by someone else's experiment.
 
 **Runtime** [verified, MONSTOR Table 4]: 1,000 estimations, seconds, vs `|E|`:
 
@@ -408,8 +292,7 @@ argument for our per-node marginal targets, made by someone else's experiment.
 | ----- | --- | --- | --- | --- | --- | --- | --- |
 | MONSTOR | 11.5 | 17.7 | 31.0 | 56.3 | 108.9 | 411.0 | 819.7 |
 
-MONSTOR+ splits this into one-off preprocessing and per-query cost [verified,
-Table 11] — the oracle economics of §3.3, restated for a neural model:
+MONSTOR+ splits this into one-off preprocessing and per-query cost [verified, Table 11] — the oracle economics of §3.3, restated for a neural model:
 
 | \|E\| | 2²⁰ | 2²¹ | 2²² | 2²³ | 2²⁴ |
 | ----- | --- | --- | --- | --- | --- |
@@ -417,19 +300,11 @@ Table 11] — the oracle economics of §3.3, restated for a neural model:
 | MON+ estimation (ms, per seed set) | 56.87 | 104.30 | 179.06 | 311.59 | 638.63 |
 | MONSTOR estimation (ms, per seed set) | 32.3 | 58.5 | 100.0 | 137.7 | 222.5 |
 
-**Submodularity is preserved empirically but not guaranteed.** MONSTOR: the
-condition `f(S)+f(T) ≥ f(S∪T)+f(S∩T)` holds in ≥99.9% of pairs under BT/JI and
-≥99.5% under LP, with MAPE on the violations of order `1e−7` to `2e−4`
-[verified, Tables 5–6]. MONSTOR+ is *worse* here — Celebrity drops to 0.904 (BT),
-**0.670 (JI)**, 0.959 (LP), 0.871 (LT), with MAPE up to 0.0239 [verified,
-Tables 12–13]. Relevant to us: greedy's (1−1/e) guarantee is void against a
-learned oracle, and this is how the field measures the damage.
+**Submodularity is preserved empirically but not guaranteed.** MONSTOR: the condition `f(S)+f(T) ≥ f(S∪T)+f(S∩T)` holds in ≥99.9% of pairs under BT/JI and ≥99.5% under LP, with MAPE on the violations of order `1e−7` to `2e−4` [verified, Tables 5–6]. MONSTOR+ is *worse* here — Celebrity drops to 0.904 (BT), **0.670 (JI)**, 0.959 (LP), 0.871 (LT), with MAPE up to 0.0239 [verified, Tables 12–13]. Relevant to us: greedy's (1−1/e) guarantee is void against a learned oracle, and this is how the field measures the damage.
 
 ### 5.3 SIEA / Outward Influence (arXiv 1704.04794) — the non-learned ceiling
 
-Metric is **relative error against ground truth**, WC model, `|S| = 1`
-[verified, Table 4]. `MC10K` = 10,000 MC simulations, i.e. exactly the "ground
-truth" everyone else trusts:
+Metric is **relative error against ground truth**, WC model, `|S| = 1` [verified, Table 4]. `MC10K` = 10,000 MC simulations, i.e. exactly the "ground truth" everyone else trusts:
 
 | Dataset | SIEA avg / max % | MC10K avg / max % | INFEST avg / max % | SIEA time (s) | MC10K time (s) | INFEST time (s) |
 | ------- | ---------------- | ----------------- | ------------------ | ------------- | -------------- | --------------- |
@@ -441,26 +316,15 @@ truth" everyone else trusts:
 | Twitter | **1.0 / 3.1** | 37.1 / 240.8 | n/a | 1272.3 | 7.9 | n/a |
 | Friendster | **0.1 / 0.6** | 3.1 / 23.6 | n/a | 1510.1 | 2.8 | n/a |
 
-**The single most important row in this file is Twitter**: `MC10K` has 37.1%
-average and **240.8% maximum** relative error. Ten thousand Monte Carlo runs —
-the field's standard ground truth, and ours — is *not* ground truth on a large
-graph with a single seed. Our `--mc-marginals 30` default is three orders of
-magnitude below that. See §8.3.
+**The single most important row in this file is Twitter**: `MC10K` has 37.1% average and **240.8% maximum** relative error. Ten thousand Monte Carlo runs — the field's standard ground truth, and ours — is *not* ground truth on a large graph with a single seed. Our `--mc-marginals 30` default is three orders of magnitude below that. See §8.3.
 
-At `|S| = 5%|V|` the picture inverts: MC10K reaches 0.0–1.8% avg error and
-matches SIEA [verified, Table 5]. **Estimation is hard at small seed sets and
-easy at large ones**, which is the same budget effect the IM file records at
-1% vs 20%.
+At `|S| = 5%|V|` the picture inverts: MC10K reaches 0.0–1.8% avg error and matches SIEA [verified, Table 5]. **Estimation is hard at small seed sets and easy at large ones**, which is the same budget effect the IM file records at 1% vs 20%.
 
-LT, `|S| = 1` [verified, Table 6]: SIEA-LT 1.6/1.2/1.5/0.4/0.5/2.4/0.2% avg over
-the same seven graphs, vs MC10K 1.6/0.5/4.3/1.0/3.3/36.1/3.1%. Note MC10K
-*beats* SIEA-LT on NetHEP and NetPHY — LT is deterministic given thresholds, so
-sampling is cheaper there. Consistent with our own LT-vs-IC asymmetry.
+LT, `|S| = 1` [verified, Table 6]: SIEA-LT 1.6/1.2/1.5/0.4/0.5/2.4/0.2% avg over the same seven graphs, vs MC10K 1.6/0.5/4.3/1.0/3.3/36.1/3.1%. Note MC10K *beats* SIEA-LT on NetHEP and NetPHY — LT is deterministic given thresholds, so sampling is cheaper there. Consistent with our own LT-vs-IC asymmetry.
 
 ### 5.4 SKIM influence oracle (arXiv 1408.6282)
 
-`ℓ = 64` sampled instances, sketch size `k = 64`, IC-WC. Error is relative,
-averaged over 100 uniformly-sampled seed sets [verified, Table 3]:
+`ℓ = 64` sampled instances, sketch size `k = 64`, IC-WC. Error is relative, averaged over 100 uniformly-sampled seed sets [verified, Table 3]:
 
 | Instance | preproc (s) | space (MiB) | 1 seed: µs / err% | 50 seeds: µs / err% | 1000 seeds: µs / err% |
 | -------- | ----------- | ----------- | ----------------- | ------------------- | --------------------- |
@@ -471,17 +335,11 @@ averaged over 100 uniformly-sampled seed sets [verified, Table 3]:
 | TwitterFollowers | 229 | 223.0 | 2.1 / 7.0 | 190.2 / 3.3 | 5,061.8 / 0.8 |
 | LiveJournal | 2,064 | 2,367.0 | 2.0 / 7.1 | 189.6 / 3.0 | 5,168.3 / 0.9 |
 
-**Error falls monotonically with seed set size** (8.5% → 2.1% → 0.5% on AstroPh)
-and query time is essentially graph-size-independent. This is the cleanest
-statement in the literature of the accuracy/`|S|` relationship, and it is the
-error profile any learned estimator should be plotted against.
+**Error falls monotonically with seed set size** (8.5% → 2.1% → 0.5% on AstroPh) and query time is essentially graph-size-independent. This is the cleanest statement in the literature of the accuracy/`|S|` relationship, and it is the error profile any learned estimator should be plotted against.
 
 ### 5.5 DySuse (arXiv 2308.10442) — the susceptibility-MAE protocol
 
-Ground truth = **1,000 MC simulations**, per-node average activation probability
-— i.e. our `next_marginal_infected` with `--mc-marginals 1000`. Metric = MAE of
-per-node susceptibility = our `ens_marg_mae`. IC, best and worst variants
-[verified, Table 2], seed size 250:
+Ground truth = **1,000 MC simulations**, per-node average activation probability — i.e. our `next_marginal_infected` with `--mc-marginals 1000`. Metric = MAE of per-node susceptibility = our `ens_marg_mae`. IC, best and worst variants [verified, Table 2], seed size 250:
 
 | Dataset | EvolveGCN | DySAT | TSGNet | DySuse-MONSTOR | DySuse-DeepIS | DySuse-CoupledGNN |
 | ------- | --------- | ----- | ------ | -------------- | ------------- | ----------------- |
@@ -491,25 +349,15 @@ per-node susceptibility = our `ens_marg_mae`. IC, best and worst variants
 | Facebook ✅ | 0.603 | 0.216 | 0.296 | 0.233 | 0.072 | **0.029** |
 | Digg | 0.560 | 0.301 | 0.342 | 0.260 | 0.070 | **0.050** |
 
-LT on Enron at seed 250: 0.421 / 0.353 / 0.395 / 0.227 / 0.107 / **0.050**
-[verified, Table 3]. TR (trivalency) on Enron at 250: 0.566 / 0.403 / 0.513 /
-0.274 / – / **0.017** [verified, Table 4].
+LT on Enron at seed 250: 0.421 / 0.353 / 0.395 / 0.227 / 0.107 / **0.050** [verified, Table 3]. TR (trivalency) on Enron at 250: 0.566 / 0.403 / 0.513 / 0.274 / – / **0.017** [verified, Table 4].
 
-**Calibrate our own number against this**: a susceptibility MAE of 0.03–0.10 is
-publishable SOTA on 4K–1M-node graphs. Our IC structured-oracle `ens_marg_mae`
-is ≈0.091 (`world_model/README.md`) — i.e. *the true-probability oracle itself*
-sits at the weak end of DySuse's learned range. That is a strong hint the two
-are not measuring the same thing (different seed sizes, different graphs,
-different step counts) and the comparison needs care before it goes in a paper.
+**Calibrate our own number against this**: a susceptibility MAE of 0.03–0.10 is publishable SOTA on 4K–1M-node graphs. Our IC structured-oracle `ens_marg_mae` is ≈0.091 (`world_model/README.md`) — i.e. *the true-probability oracle itself* sits at the weak end of DySuse's learned range. That is a strong hint the two are not measuring the same thing (different seed sizes, different graphs, different step counts) and the comparison needs care before it goes in a paper.
 
 ---
 
 ## 6. Datasets
 
-Authoritative metadata for most social graphs lives in
-[`influence_maximization.md`](influence_maximization.md) §6. This section owns
-only the graphs that are **specific to the estimation literature**, plus the
-forensics needed to compare against the tables in §5.
+Authoritative metadata for most social graphs lives in [`influence_maximization.md`](influence_maximization.md) §6. This section owns only the graphs that are **specific to the estimation literature**, plus the forensics needed to compare against the tables in §5.
 
 ### 6.1 What we already load that this literature also uses
 
@@ -523,15 +371,9 @@ forensics needed to compare against the tables in §5.
 | `digg` ✅ | 116,893 | ≈2.6M | Undirected | ≈45 | DySuse ("Digg", 1.1M/4.2M — different graph) | [Syracuse](https://datasets.syr.edu/datasets/Digg.html) |
 | `cora_ml` ✅ | 2,810 | 7,981 | Undirected | 5.7 | **DeepIS** (ships `data/cora_ml.npz` in its own repo) | [graph2gauss](https://github.com/abojchevski/graph2gauss) |
 
-**Four clean matches: `ca_grqc`, `nethept`, `netphy`, `youtube`.** These are the
-graphs where our numbers can be placed beside a published estimation result
-without a version caveat — GLIE on ca-GrQc and YouTube, SIEA on NetHEP and
-NetPHY. That is a better intersection than the IM file gets (which has only
-Jazz and Power Grid).
+**Four clean matches: `ca_grqc`, `nethept`, `netphy`, `youtube`.** These are the graphs where our numbers can be placed beside a published estimation result without a version caveat — GLIE on ca-GrQc and YouTube, SIEA on NetHEP and NetPHY. That is a better intersection than the IM file gets (which has only Jazz and Power Grid).
 
-The `ca_grqc` match needs the arcs convention: GLIE's 28,980 = 2 × 14,490
-[derived], ours is 14,484 undirected (12 fewer, self-loop handling). YouTube's
-5,975,246 = 2 × 2,987,623 vs our 2,987,624 [derived] — a one-edge difference.
+The `ca_grqc` match needs the arcs convention: GLIE's 28,980 = 2 × 14,490 [derived], ours is 14,484 undirected (12 fewer, self-loop handling). YouTube's 5,975,246 = 2 × 2,987,623 vs our 2,987,624 [derived] — a one-edge difference.
 
 ### 6.2 Graphs specific to this literature
 
@@ -550,13 +392,7 @@ The `ca_grqc` match needs the arcs convention: GLIE's 28,980 = 2 × 14,490
 | **Flickr (action log)** | 1,300,000 | 40,000,000 | Undirected + 35M action tuples over 300K actions | 61.5 [derived] | Goyal et al. WSDM'10 | not publicly redistributed [claim] |
 | **Citeseer / Pubmed / MS-Academic** | — | — | citation | — | DeepIS (`data/*.npz`) | [xiawenwen49/DeepIS](https://github.com/xiawenwen49/DeepIS) |
 
-**MONSTOR's three graphs are the closest thing this field has to a canonical
-estimation benchmark** — every MONSTOR/MONSTOR+ number and the only GLIE
-head-to-head live on them, and the repo ships them. They are 11K–36K nodes, well
-inside what our NDlib pipeline simulates. Adding them is a `data/datasets/*.py`
-copy-and-edit (the three-step contract in
-[`influence_maximization.md`](influence_maximization.md) §6.4) and it is the
-single highest-value dataset addition this review found.
+**MONSTOR's three graphs are the closest thing this field has to a canonical estimation benchmark** — every MONSTOR/MONSTOR+ number and the only GLIE head-to-head live on them, and the repo ships them. They are 11K–36K nodes, well inside what our NDlib pipeline simulates. Adding them is a `data/datasets/*.py` copy-and-edit (the three-step contract in [`influence_maximization.md`](influence_maximization.md) §6.4) and it is the single highest-value dataset addition this review found.
 
 ### 6.3 Dataset forensics — do not quote these without checking
 
@@ -569,9 +405,7 @@ single highest-value dataset addition this review found.
 | **GLIE "Facebook"** 63,393 | Not SNAP ego-Facebook (4,039). Not stated which. | ❓ unresolved |
 | **MONSTOR vs MONSTOR+ WannaCry LP** | 0.19785/0.16297 vs 0.16297/0.19785 — train and test swapped between the two papers. | ⚠ one is a typo |
 
-DySuse also states its snapshots are built by *"randomly delete 0∼2‰ of nodes
-and 0∼2‰ of edges at each timestamp"* [verified] — its graphs are perturbed
-subgraphs, not the named originals, which explains but does not excuse the table.
+DySuse also states its snapshots are built by *"randomly delete 0∼2‰ of nodes and 0∼2‰ of edges at each timestamp"* [verified] — its graphs are perturbed subgraphs, not the named originals, which explains but does not excuse the table.
 
 ---
 
@@ -605,8 +439,7 @@ Cells mark the dataset **as that paper reports it** — check §6.3 first.
 | Citeseer / Pubmed / MS-Academic | | | | | | ✔ | | | |
 | Synthetic BA / Holme-Kim | | | | ✔ | | | ✔ | ✔ | |
 
-**Bold = we already load it.** Seven rows, versus four in the IM file — this
-task has the better dataset overlap of the two.
+**Bold = we already load it.** Seven rows, versus four in the IM file — this task has the better dataset overlap of the two.
 
 ---
 
@@ -627,79 +460,41 @@ task has the better dataset overlap of the two.
 | **Speedup vs MC** | wall-clock ratio | all | ❌ not timed, though both sides already run |
 | **Distributional** | Wasserstein-1 over cascade sizes | **nobody** | ✅ `ens_count_w1` — we report strictly more |
 
-Two asymmetries worth stating in a paper: we report a **signed** bias where the
-field reports unsigned error, and a **distributional** distance where the field
-reports a point estimate. Both are defensible upgrades, and both are already in
-`rollout_ensemble`'s return dict.
+Two asymmetries worth stating in a paper: we report a **signed** bias where the field reports unsigned error, and a **distributional** distance where the field reports a point estimate. Both are defensible upgrades, and both are already in `rollout_ensemble`'s return dict.
 
 ### 8.2 Protocol conventions
 
-- **Ground truth is 10,000 MC ICs** — GLIE, SIEA and DySuse (1,000) all use MC
-  as the reference. Our `--mc-marginals` default is **30**. §8.3.
-- **Seed set sizes.** GLIE trains on 1–5 and tests to 10, then evaluates IM at
-  20, 100 and 200. SKIM sweeps 1 / 50 / 1000. SIEA reports `|S| = 1` and
-  `|S| = 5%|V|`. MONSTOR samples `|S|` uniformly in `[1, |V|/50]`.
-- **Negative sampling matters.** GLIE trains on 30 random seed sets **plus the
-  CELF optimum** per size, because random-only supervision cannot reach optimal
-  values (§8.4). MONSTOR uses half uniform-random, half degree-proportional.
-- **Probability models.** MONSTOR reports every result three times (BT / JI / LP,
-  §4.3). SIEA reports WC and LT. We report one.
+- **Ground truth is 10,000 MC ICs** — GLIE, SIEA and DySuse (1,000) all use MC as the reference. Our `--mc-marginals` default is **30**. §8.3.
+- **Seed set sizes.** GLIE trains on 1–5 and tests to 10, then evaluates IM at 20, 100 and 200. SKIM sweeps 1 / 50 / 1000. SIEA reports `|S| = 1` and `|S| = 5%|V|`. MONSTOR samples `|S|` uniformly in `[1, |V|/50]`.
+- **Negative sampling matters.** GLIE trains on 30 random seed sets **plus the CELF optimum** per size, because random-only supervision cannot reach optimal values (§8.4). MONSTOR uses half uniform-random, half degree-proportional.
+- **Probability models.** MONSTOR reports every result three times (BT / JI / LP, §4.3). SIEA reports WC and LT. We report one.
 
 ### 8.3 The trap we are already standing in: MC is not ground truth
 
-SIEA's Table 4 (§5.3) shows `MC10K` at **37.1% average / 240.8% maximum**
-relative error on Twitter with a single seed. Two consequences for us:
+SIEA's Table 4 (§5.3) shows `MC10K` at **37.1% average / 240.8% maximum** relative error on Twitter with a single seed. Two consequences for us:
 
-1. **Our `ens_final_count_true` is itself an estimate**, computed from
-   `n_samples=20` simulator rollouts by default. On a large sparse graph with a
-   small frontier, 20 draws is nowhere near enough for `ens_count_bias` to mean
-   what its name says. On BA-100 it is fine; on `nethept` it is not.
-2. **`--mc-marginals 30`** sets the *training target* quality. SIEA's numbers
-   say the error is worst exactly where our cascades start — small active sets.
-   Before we publish an estimation table, sweep `--mc-marginals` and show the
-   metric has converged.
+1. **Our `ens_final_count_true` is itself an estimate**, computed from `n_samples=20` simulator rollouts by default. On a large sparse graph with a small frontier, 20 draws is nowhere near enough for `ens_count_bias` to mean what its name says. On BA-100 it is fine; on `nethept` it is not.
+2. **`--mc-marginals 30`** sets the *training target* quality. SIEA's numbers say the error is worst exactly where our cascades start — small active sets. Before we publish an estimation table, sweep `--mc-marginals` and show the metric has converged.
 
-This is a cheap, honest experiment nobody in §4 ran, and it doubles as a
-robustness result.
+This is a cheap, honest experiment nobody in §4 ran, and it doubles as a robustness result.
 
 ### 8.4 The ranking trap — accuracy on random seed sets ≠ usefulness ⭐
 
-**An estimator can be accurate everywhere that does not matter.** IM does not
-need `σ̂ ≈ σ`; it needs the *argmax* to be right. Those come apart because random
-seed sets and near-optimal seed sets occupy different parts of the range.
+**An estimator can be accurate everywhere that does not matter.** IM does not need `σ̂ ≈ σ`; it needs the *argmax* to be right. Those come apart because random seed sets and near-optimal seed sets occupy different parts of the range.
 
-The literature states this directly. GLIE, on why random supervision is
-insufficient [verified]:
+The literature states this directly. GLIE, on why random supervision is insufficient [verified]:
 
-> *"In IM however, the difference in σ between an average seed set and the
-> optimal can be significant, hence training solely on the random sets would
-> render our model unable to predict larger values that correspond to the
-> optimum. That is why we added the aforementioned samples of the optimum seed
-> set computed using CELF."*
+> *"In IM however, the difference in σ between an average seed set and the optimal can be significant, hence training solely on the random sets would render our model unable to predict larger values that correspond to the optimum. That is why we added the aforementioned samples of the optimum seed set computed using CELF."*
 
 Three pieces of corroborating evidence in §5:
 
-- **GLIE Table III**: `seed overlap` is only 12–14 of 20 against DMP-CELF, yet
-  spread differs by 4% on CR and 33% on GR. Rank agreement and outcome agreement
-  are loosely coupled.
-- **MONSTOR+ Table 2**: GLIE's Pearson on Celebrity-JI is 0.745 while MONSTOR+ is
-  1.000 — but both still drive CELF to usable seed sets. High correlation is not
-  necessary; correct *local* ordering is.
-- **MONSTOR Tables 5–6 / MONSTOR+ Tables 12–13**: submodularity fails on 0.1–33%
-  of pairs. Greedy's guarantee is gone, and the failures are exactly where the
-  ordering is wrong.
+- **GLIE Table III**: `seed overlap` is only 12–14 of 20 against DMP-CELF, yet spread differs by 4% on CR and 33% on GR. Rank agreement and outcome agreement are loosely coupled.
+- **MONSTOR+ Table 2**: GLIE's Pearson on Celebrity-JI is 0.745 while MONSTOR+ is 1.000 — but both still drive CELF to usable seed sets. High correlation is not necessary; correct *local* ordering is.
+- **MONSTOR Tables 5–6 / MONSTOR+ Tables 12–13**: submodularity fails on 0.1–33% of pairs. Greedy's guarantee is gone, and the failures are exactly where the ordering is wrong.
 
-**What this means for our evaluation.** `ens_count_bias` measured over test
-*episodes* samples the state distribution our simulator produced — mostly
-mid-cascade states from spine selectors, not candidate seed sets near the IM
-optimum. A good `ens_count_bias` therefore does **not** license a claim about
-planning. `plan_regret_model` is the metric that does, and we already have it.
-Report both, and never let the first stand in for the second.
+**What this means for our evaluation.** `ens_count_bias` measured over test *episodes* samples the state distribution our simulator produced — mostly mid-cascade states from spine selectors, not candidate seed sets near the IM optimum. A good `ens_count_bias` therefore does **not** license a claim about planning. `plan_regret_model` is the metric that does, and we already have it. Report both, and never let the first stand in for the second.
 
-The mirror-image warning is already recorded in
-[`influence_maximization.md`](influence_maximization.md): IMINFECTOR found IMM
-underperforming on real cascade traces because it optimizes against a simulator.
-Our estimator is trained against NDlib. Same class of assumption.
+The mirror-image warning is already recorded in [`influence_maximization.md`](influence_maximization.md): IMINFECTOR found IMM underperforming on real cascade traces because it optimizes against a simulator. Our estimator is trained against NDlib. Same class of assumption.
 
 ---
 
@@ -707,86 +502,37 @@ Our estimator is trained against NDlib. Same class of assumption.
 
 Ordered by value per hour. The first three are hours, not days.
 
-1. **Relabel what we already print.** `ens_final_count_model` vs
-   `ens_final_count_true` is an influence-estimation result. Add relative error
-   and MAPE (one line each, §8.1) and the table speaks the field's units. This
-   is the entire cost of entering this task.
+1. **Relabel what we already print.** `ens_final_count_model` vs `ens_final_count_true` is an influence-estimation result. Add relative error and MAPE (one line each, §8.1) and the table speaks the field's units. This is the entire cost of entering this task.
 
-2. **Add Spearman/Kendall over seed sets.** The only genuinely missing metric,
-   and the one MONSTOR+ uses for its GLIE comparison (§5.2). `scipy.stats` is
-   already imported in `wm_eval.py`. Without it we cannot be placed on the same
-   axis as the two closest analogues.
+2. **Add Spearman/Kendall over seed sets.** The only genuinely missing metric, and the one MONSTOR+ uses for its GLIE comparison (§5.2). `scipy.stats` is already imported in `wm_eval.py`. Without it we cannot be placed on the same axis as the two closest analogues.
 
-3. **Time both sides of `rollout_ensemble`.** It already runs the model ensemble
-   and the true MC ensemble in the same function. A speedup number is a
-   stopwatch, and speedup is the headline claim of every method in §4.
+3. **Time both sides of `rollout_ensemble`.** It already runs the model ensemble and the true MC ensemble in the same function. A speedup number is a stopwatch, and speedup is the headline claim of every method in §4.
 
-4. **Run `structured_oracle` and report `count_bias ≈ 0` as a validation of the
-   structural form** (§2.3). No published learned estimator ships this ablation.
-   It costs one `eval_structured_oracle.py` invocation and it is the strongest
-   differentiator we have against a black-box σ regressor.
+4. **Run `structured_oracle` and report `count_bias ≈ 0` as a validation of the structural form** (§2.3). No published learned estimator ships this ablation. It costs one `eval_structured_oracle.py` invocation and it is the strongest differentiator we have against a black-box σ regressor.
 
-5. **Add MONSTOR's three graphs** (Extended, WannaCry, Celebrity — §6.2). They
-   are 11K–36K nodes, the repo ships them, and they are the only benchmark where
-   *both* MONSTOR+ and GLIE have published numbers. Highest-value dataset
-   addition in this review.
+5. **Add MONSTOR's three graphs** (Extended, WannaCry, Celebrity — §6.2). They are 11K–36K nodes, the repo ships them, and they are the only benchmark where *both* MONSTOR+ and GLIE have published numbers. Highest-value dataset addition in this review.
 
-6. **Sweep `--mc-marginals` and `n_samples` and show convergence** (§8.3). SIEA's
-   Twitter row proves MC10K can be 240% off; our defaults are 30 and 20. This is
-   a cheap robustness experiment that also protects every other number we report.
+6. **Sweep `--mc-marginals` and `n_samples` and show convergence** (§8.3). SIEA's Twitter row proves MC10K can be 240% off; our defaults are 30 and 20. This is a cheap robustness experiment that also protects every other number we report.
 
-7. **Frame the action conditioning as the contribution.** Every estimator in §3
-   and §4 answers `σ(S)` on a *fixed* graph. Ours answers
-   `σ(s_t, a_t)` — spread after an intervention — and Ohsaka et al. (§3.3) is the
-   only prior work that even maintains an index across edge edits. "Influence
-   estimation under interventions" is an unoccupied slot.
+7. **Frame the action conditioning as the contribution.** Every estimator in §3 and §4 answers `σ(S)` on a *fixed* graph. Ours answers `σ(s_t, a_t)` — spread after an intervention — and Ohsaka et al. (§3.3) is the only prior work that even maintains an index across edge edits. "Influence estimation under interventions" is an unoccupied slot.
 
-8. **Do not claim planning quality from estimation quality.** §8.4. Report
-   `plan_regret_model` alongside, always.
+8. **Do not claim planning quality from estimation quality.** §8.4. Report `plan_regret_model` alongside, always.
 
-**What not to do:** do not build a separate σ-regressor to compete with GLIE on
-its own terms. We would be a worse GLIE. The per-node marginal + mechanism head
-is the differentiated position, and MONSTOR+'s Celebrity result (§5.2) is
-published evidence that the per-node formulation is the more robust one.
+**What not to do:** do not build a separate σ-regressor to compete with GLIE on its own terms. We would be a worse GLIE. The per-node marginal + mechanism head is the differentiated position, and MONSTOR+'s Celebrity result (§5.2) is published evidence that the per-node formulation is the more robust one.
 
 ---
 
 ## 10. Reference list
 
-**Hardness**
-[Chen, Wang & Wang, KDD'10 (MSR-TR-2010-2)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/msr-tr-2010-2_v2.pdf) ·
-[Chen, Yuan & Zhang, ICDM'10 (LT)](http://snap.stanford.edu/class/cs224w-readings/chen10influence.pdf)
+**Hardness** [Chen, Wang & Wang, KDD'10 (MSR-TR-2010-2)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/msr-tr-2010-2_v2.pdf) · [Chen, Yuan & Zhang, ICDM'10 (LT)](http://snap.stanford.edu/class/cs224w-readings/chen10influence.pdf)
 
-**Bounds and sketches**
-[IRIE (arXiv 1111.4795)](https://arxiv.org/abs/1111.4795) ·
-[StaticGreedy (arXiv 1212.4779)](https://arxiv.org/abs/1212.4779) ·
-[RIS / Borgs (arXiv 1212.0884)](https://arxiv.org/abs/1212.0884) ·
-[SKIM (arXiv 1408.6282)](https://arxiv.org/abs/1408.6282) ·
-[ConTinEst (NeurIPS'13)](https://papers.nips.cc/paper_files/paper/2013/hash/8fb21ee7a2207526da55a679f0332de2-Abstract.html) ·
-[INFEST / Lucier, Oren & Singer (arXiv 1506.01188)](https://arxiv.org/abs/1506.01188) ·
-[Ohsaka et al., PVLDB 9(12)](https://www.vldb.org/pvldb/vol9/p1077-ohsaka.pdf) ·
-[SIEA / Outward Influence (arXiv 1704.04794)](https://arxiv.org/abs/1704.04794) ·
-[DMP (arXiv 1407.1255)](https://arxiv.org/abs/1407.1255) · [code](https://github.com/mateuszwilinski/dynamic-message-passing)
+**Bounds and sketches** [IRIE (arXiv 1111.4795)](https://arxiv.org/abs/1111.4795) · [StaticGreedy (arXiv 1212.4779)](https://arxiv.org/abs/1212.4779) · [RIS / Borgs (arXiv 1212.0884)](https://arxiv.org/abs/1212.0884) · [SKIM (arXiv 1408.6282)](https://arxiv.org/abs/1408.6282) · [ConTinEst (NeurIPS'13)](https://papers.nips.cc/paper_files/paper/2013/hash/8fb21ee7a2207526da55a679f0332de2-Abstract.html) · [INFEST / Lucier, Oren & Singer (arXiv 1506.01188)](https://arxiv.org/abs/1506.01188) · [Ohsaka et al., PVLDB 9(12)](https://www.vldb.org/pvldb/vol9/p1077-ohsaka.pdf) · [SIEA / Outward Influence (arXiv 1704.04794)](https://arxiv.org/abs/1704.04794) · [DMP (arXiv 1407.1255)](https://arxiv.org/abs/1407.1255) · [code](https://github.com/mateuszwilinski/dynamic-message-passing)
 
-**Learned estimators**
-[MONSTOR (arXiv 2001.08853)](https://arxiv.org/abs/2001.08853) · [code](https://github.com/jihoonko/asonam20-monstor) ·
-[MONSTOR+ (DMKD 2025)](https://link.springer.com/article/10.1007/s10618-025-01137-z) · [PDF](http://dmlab.kaist.ac.kr/~kijungs/papers/monstorDAMI2025.pdf) ·
-[DeepIS (WSDM'21)](https://dl.acm.org/doi/10.1145/3437963.3441829) · [code](https://github.com/xiawenwen49/DeepIS) ·
-[GLIE (arXiv 2108.04623)](https://arxiv.org/abs/2108.04623) · [ASONAM'23](https://dl.acm.org/doi/10.1145/3625007.3627293) · [SNAM'24](https://link.springer.com/article/10.1007/s13278-024-01311-z) · [code](https://github.com/geopanag/learn_im) ·
-[NMF (arXiv 2106.02608)](https://arxiv.org/abs/2106.02608) ·
-[DySuse (arXiv 2308.10442)](https://arxiv.org/abs/2308.10442) ·
-[CoupledGNN (arXiv 1906.09032)](https://arxiv.org/abs/1906.09032) ·
-[Inf2vec (ICDE'18)](https://ieeexplore.ieee.org/document/8509310)
+**Learned estimators** [MONSTOR (arXiv 2001.08853)](https://arxiv.org/abs/2001.08853) · [code](https://github.com/jihoonko/asonam20-monstor) · [MONSTOR+ (DMKD 2025)](https://link.springer.com/article/10.1007/s10618-025-01137-z) · [PDF](http://dmlab.kaist.ac.kr/~kijungs/papers/monstorDAMI2025.pdf) · [DeepIS (WSDM'21)](https://dl.acm.org/doi/10.1145/3437963.3441829) · [code](https://github.com/xiawenwen49/DeepIS) · [GLIE (arXiv 2108.04623)](https://arxiv.org/abs/2108.04623) · [ASONAM'23](https://dl.acm.org/doi/10.1145/3625007.3627293) · [SNAM'24](https://link.springer.com/article/10.1007/s13278-024-01311-z) · [code](https://github.com/geopanag/learn_im) · [NMF (arXiv 2106.02608)](https://arxiv.org/abs/2106.02608) · [DySuse (arXiv 2308.10442)](https://arxiv.org/abs/2308.10442) · [CoupledGNN (arXiv 1906.09032)](https://arxiv.org/abs/1906.09032) · [Inf2vec (ICDE'18)](https://ieeexplore.ieee.org/document/8509310)
 
-**Influence-probability learning**
-[Goyal, Bonchi & Lakshmanan, WSDM'10](http://www.wsdm-conference.org/2010/proceedings/docs/p241.pdf) · [ACM](https://dl.acm.org/doi/10.1145/1718487.1718518) ·
-[Saito et al., KES'08](https://link.springer.com/chapter/10.1007/978-3-540-85567-5_9) ·
-[Credit Distribution (arXiv 1109.6886)](https://arxiv.org/abs/1109.6886) ·
-[NetRate (arXiv 1105.0697)](https://arxiv.org/abs/1105.0697) · [code](https://github.com/Networks-Learning/netrate)
+**Influence-probability learning** [Goyal, Bonchi & Lakshmanan, WSDM'10](http://www.wsdm-conference.org/2010/proceedings/docs/p241.pdf) · [ACM](https://dl.acm.org/doi/10.1145/1718487.1718518) · [Saito et al., KES'08](https://link.springer.com/chapter/10.1007/978-3-540-85567-5_9) · [Credit Distribution (arXiv 1109.6886)](https://arxiv.org/abs/1109.6886) · [NetRate (arXiv 1105.0697)](https://arxiv.org/abs/1105.0697) · [code](https://github.com/Networks-Learning/netrate)
 
-**Our own**
-`world_model/wm_eval.py::rollout_ensemble` · `world_model/eval_structured_oracle.py` ·
-[`influence_maximization.md`](influence_maximization.md)
+**Our own** `world_model/wm_eval.py::rollout_ensemble` · `world_model/eval_structured_oracle.py` · [`influence_maximization.md`](influence_maximization.md)
 
 ---
 
@@ -794,58 +540,14 @@ published evidence that the per-node formulation is the more robust one.
 
 Honest list of what this review could **not** establish.
 
-- **GLIE's code — RESOLVED, and the IM file's note is now out of date.** The
-  repo previously cited 404s, and the arXiv PDF only says *"the source code can
-  be found in the supplementary files"* [verified]. But the code **is** public:
-  **[github.com/geopanag/learn_im](https://github.com/geopanag/learn_im)**
-  (HTTP 200, last pushed 2024-07-18, 8 stars). Its `readme.md` opens *"The code
-  to reproduce the analysis for 'Maximizing Influence with Graph Neural
-  Networks'"* and ships `train_glie.py`, `celf_glie.py`, `pun.py`, `qnet_im.py`
-  [verified]. `geopanag/glie`, `geopanag/GLIE` and `geopanag/pun` all 404 —
-  those are the dead links. Update `influence_maximization.md`.
-- **Three cells of GLIE's Table IV are runtimes, not spreads** (CR/DEEPIS-CELF
-  501.61, GR/IMM 835.40, HI/DEEPIS-CELF 1602.5). Confirmed present in the PDF by
-  two extraction passes and matched to a prose sentence listing those exact three
-  numbers as seconds. The paper's true IMM-on-GR spread is unknown.
-- **DeepIS's own result tables were not transcribed.** The paper is paywalled
-  (`dl.acm.org` returns 403 to automated fetch); no arXiv or author-hosted PDF
-  found. Its headline claims — *5× smaller estimation error than SOTA GNN
-  approaches, 2 orders of magnitude faster than MC* — are **[claim]**, from the
-  abstract via secondary sources. The only [verified] DeepIS numbers here are
-  GLIE's Table IV column, which is itself suspect (above).
-- **ConTinEst, SIMPATH, LDAG, UBLF, Inf2vec, Saito et al., Goyal et al.
-  result tables** — methods identified and linked, cells not transcribed. Goyal
-  et al. publish ROC curves rather than tables, so their comparison of Static vs
-  CT vs DT models is **[figure]**/**[claim]** only; their stated finding is that
-  the **continuous-time model performs best** and **Bernoulli slightly beats
-  Jaccard** [claim].
-- **InfluLearner has no verified URL here.** The NeurIPS 2014 proceedings hash was
-  not confirmed, and a guessed hash was removed rather than left in. Cite by
-  title (Du, Liang, Balcan & Song, NeurIPS 2014) until checked.
-- **URL verification results (2026-07-28).** Everything in §10 returned HTTP 200
-  except: `dl.acm.org` and `doi.org` return **403** and `ieeexplore.ieee.org`
-  returns **202** to automated fetch — these are bot challenges, not dead links,
-  and all resolve in a browser. `law.di.unimi.it/webdata/sk-2005/` did not
-  respond at all. Four URLs were **found broken and fixed**: the ConTinEst
-  NeurIPS hash (a guessed hash 404'd; the real one is
-  `8fb21ee7a2207526da55a679f0332de2`, confirmed from the NeurIPS 2013 index), the
-  ConTinEst code repo (`Networks-Learning/influence-estimation-and-maximization`
-  404s — downgraded to "no public code found"), and the two Network Repository
-  slugs for Crime and HI-II-14 (both 404; the site root is up, so the slugs are
-  wrong — the data ships in GLIE's repo instead).
-- **GLIE's "Facebook" (63,393 nodes)** is not ego-Facebook and the paper does not
-  say which graph it is (§6.3).
-- **MONSTOR's Extended / WannaCry / Celebrity provenance** traces to Liu et al.
-  2019 via the repo; the original collection paper was not read, and the exact
-  crawl for Extended is described only as *"we crawled more tweets and retweets
-  in addition to those used in (Sabottke et al. 2015)"* [verified].
-- **DySuse's Table 1 is not usable** — two of five edge counts are internally
-  impossible or off by ×100 (§6.3). Its *result* tables are [verified]; its
-  dataset table is not.
-- **No published estimator conditions on an intervention.** The claim in §9.7
-  that "influence estimation under interventions" is unoccupied is an absence of
-  evidence from this review, not a proven absence. Ohsaka et al. (dynamic index
-  under edge edits) is the nearest neighbour found.
-- **No estimation paper reports Jazz, Power Grid, NetScience, Cora-ML (as a
-  diffusion graph), wiki-Vote, LastFM or email-Eu-core.** Our overlap with this
-  literature is the seven rows in §7 and no more.
+- **GLIE's code — RESOLVED, and the IM file's note is now out of date.** The repo previously cited 404s, and the arXiv PDF only says *"the source code can be found in the supplementary files"* [verified]. But the code **is** public: **[github.com/geopanag/learn_im](https://github.com/geopanag/learn_im)** (HTTP 200, last pushed 2024-07-18, 8 stars). Its `readme.md` opens *"The code to reproduce the analysis for 'Maximizing Influence with Graph Neural Networks'"* and ships `train_glie.py`, `celf_glie.py`, `pun.py`, `qnet_im.py` [verified]. `geopanag/glie`, `geopanag/GLIE` and `geopanag/pun` all 404 — those are the dead links. Update `influence_maximization.md`.
+- **Three cells of GLIE's Table IV are runtimes, not spreads** (CR/DEEPIS-CELF 501.61, GR/IMM 835.40, HI/DEEPIS-CELF 1602.5). Confirmed present in the PDF by two extraction passes and matched to a prose sentence listing those exact three numbers as seconds. The paper's true IMM-on-GR spread is unknown.
+- **DeepIS's own result tables were not transcribed.** The paper is paywalled (`dl.acm.org` returns 403 to automated fetch); no arXiv or author-hosted PDF found. Its headline claims — *5× smaller estimation error than SOTA GNN approaches, 2 orders of magnitude faster than MC* — are **[claim]**, from the abstract via secondary sources. The only [verified] DeepIS numbers here are GLIE's Table IV column, which is itself suspect (above).
+- **ConTinEst, SIMPATH, LDAG, UBLF, Inf2vec, Saito et al., Goyal et al. result tables** — methods identified and linked, cells not transcribed. Goyal et al. publish ROC curves rather than tables, so their comparison of Static vs CT vs DT models is **[figure]**/**[claim]** only; their stated finding is that the **continuous-time model performs best** and **Bernoulli slightly beats Jaccard** [claim].
+- **InfluLearner has no verified URL here.** The NeurIPS 2014 proceedings hash was not confirmed, and a guessed hash was removed rather than left in. Cite by title (Du, Liang, Balcan & Song, NeurIPS 2014) until checked.
+- **URL verification results (2026-07-28).** Everything in §10 returned HTTP 200 except: `dl.acm.org` and `doi.org` return **403** and `ieeexplore.ieee.org` returns **202** to automated fetch — these are bot challenges, not dead links, and all resolve in a browser. `law.di.unimi.it/webdata/sk-2005/` did not respond at all. Four URLs were **found broken and fixed**: the ConTinEst NeurIPS hash (a guessed hash 404'd; the real one is `8fb21ee7a2207526da55a679f0332de2`, confirmed from the NeurIPS 2013 index), the ConTinEst code repo (`Networks-Learning/influence-estimation-and-maximization` 404s — downgraded to "no public code found"), and the two Network Repository slugs for Crime and HI-II-14 (both 404; the site root is up, so the slugs are wrong — the data ships in GLIE's repo instead).
+- **GLIE's "Facebook" (63,393 nodes)** is not ego-Facebook and the paper does not say which graph it is (§6.3).
+- **MONSTOR's Extended / WannaCry / Celebrity provenance** traces to Liu et al. 2019 via the repo; the original collection paper was not read, and the exact crawl for Extended is described only as *"we crawled more tweets and retweets in addition to those used in (Sabottke et al. 2015)"* [verified].
+- **DySuse's Table 1 is not usable** — two of five edge counts are internally impossible or off by ×100 (§6.3). Its *result* tables are [verified]; its dataset table is not.
+- **No published estimator conditions on an intervention.** The claim in §9.7 that "influence estimation under interventions" is unoccupied is an absence of evidence from this review, not a proven absence. Ohsaka et al. (dynamic index under edge edits) is the nearest neighbour found.
+- **No estimation paper reports Jazz, Power Grid, NetScience, Cora-ML (as a diffusion graph), wiki-Vote, LastFM or email-Eu-core.** Our overlap with this literature is the seven rows in §7 and no more.

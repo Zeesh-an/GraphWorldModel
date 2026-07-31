@@ -1,19 +1,8 @@
 # Cascade Reconstruction — Prior Work, Datasets, and Published Results
 
-Cascade reconstruction recovers the **unobserved portion of a diffusion that
-already happened**: which nodes were actually infected, *when* they were
-activated, and *who infected whom*. It is the smoothing problem that sits
-between [`source_localization.md`](source_localization.md) (recover `s_0` only)
-and [`network_inference.md`](network_inference.md) (recover `G` itself). Here
-`G` is known, the dynamics are known or learned, and the unknown is the hidden
-trajectory `s_0 … s_T`. Our world model already emits a per-step `frontier`
-channel and stores it on disk, so the ground truth these papers spend whole
-sections approximating is something we can just read back.
+Cascade reconstruction recovers the **unobserved portion of a diffusion that already happened**: which nodes were actually infected, *when* they were activated, and *who infected whom*. It is the smoothing problem that sits between [`source_localization.md`](source_localization.md) (recover `s_0` only) and [`network_inference.md`](network_inference.md) (recover `G` itself). Here `G` is known, the dynamics are known or learned, and the unknown is the hidden trajectory `s_0 … s_T`. Our world model already emits a per-step `frontier` channel and stores it on disk, so the ground truth these papers spend whole sections approximating is something we can just read back.
 
-All URLs returned HTTP 200 on **2026-07-29** unless annotated otherwise.
-**Every `dl.acm.org` link in this file returns 403 to a scripted request** and
-opens normally in a browser — that is ACM's bot policy, not a dead link. IEEE
-Xplore returns 202 for the same reason. Both are treated as resolving.
+All URLs returned HTTP 200 on **2026-07-29** unless annotated otherwise. **Every `dl.acm.org` link in this file returns 403 to a scripted request** and opens normally in a browser — that is ACM's bot policy, not a dead link. IEEE Xplore returns 202 for the same reason. Both are treated as resolving.
 
 ---
 
@@ -26,44 +15,23 @@ Xplore returns 202 for the same reason. Both are treated as resolving.
 | **[figure]** | Read off a plotted figure — the paper published no table. Approximate, direction only. |
 | **[claim]** | Stated in prose by a paper or a secondary source; not cross-checked against a file or table. |
 
-**Automated PDF summarizers hallucinate plausible numbers from these papers.**
-This literature is unusually easy to scramble for two reasons. First, **most of
-its headline results are figures, not tables** — Rozenshtein et al. (KDD 2016),
-Xiao et al. (SDM/ICDM 2018) and Farajtabar et al. (AISTATS 2015) publish **zero**
-result tables between them [verified by full-text extraction of all four PDFs];
-any per-cell number a summarizer offers for those papers is fabricated. Second,
-the two dominant metrics point in opposite directions (`F1↑`, `NRMSE↓`) and
-DITTO's tables interleave them column-by-column, so a mis-parse silently
-inverts the ranking. Every number below marked [verified] was read from
-`pdftotext -layout` output of the paper's own table.
+**Automated PDF summarizers hallucinate plausible numbers from these papers.** This literature is unusually easy to scramble for two reasons. First, **most of its headline results are figures, not tables** — Rozenshtein et al. (KDD 2016), Xiao et al. (SDM/ICDM 2018) and Farajtabar et al. (AISTATS 2015) publish **zero** result tables between them [verified by full-text extraction of all four PDFs]; any per-cell number a summarizer offers for those papers is fabricated. Second, the two dominant metrics point in opposite directions (`F1↑`, `NRMSE↓`) and DITTO's tables interleave them column-by-column, so a mis-parse silently inverts the ranking. Every number below marked [verified] was read from `pdftotext -layout` output of the paper's own table.
 
-**Edge-count convention.** Undirected graphs are quoted as *undirected edges*;
-directed graphs as *arcs*. Our loaders report `adjacency.nnz`, which for a
-symmetrized undirected graph is **2× the undirected edge count**. This single
-convention difference explains most apparent "discrepancies" between our numbers
-and published tables — check it before concluding two graphs differ.
+**Edge-count convention.** Undirected graphs are quoted as *undirected edges*; directed graphs as *arcs*. Our loaders report `adjacency.nnz`, which for a symmetrized undirected graph is **2× the undirected edge count**. This single convention difference explains most apparent "discrepancies" between our numbers and published tables — check it before concluding two graphs differ.
 
-**"Cascade" means two different objects in this file.** An *influence cascade*
-is a tree whose edges are who-infected-whom; a *network cascade* is the set of
-infected nodes with edges induced from `G`. Sadikov et al. (WSDM 2011) show the
-two behave differently under sampling and report separate columns for each
-[verified] — never compare a number from one to the other.
+**"Cascade" means two different objects in this file.** An *influence cascade* is a tree whose edges are who-infected-whom; a *network cascade* is the set of infected nodes with edges induced from `G`. Sadikov et al. (WSDM 2011) show the two behave differently under sampling and report separate columns for each [verified] — never compare a number from one to the other.
 
 ---
 
 ## 1. Task definition
 
-Given a graph `G = (V, E)`, a diffusion model `M` (known, parameterized, or
-learned), and a **partial observation** `O` of one episode of diffusion,
-recover the hidden trajectory:
+Given a graph `G = (V, E)`, a diffusion model `M` (known, parameterized, or learned), and a **partial observation** `O` of one episode of diffusion, recover the hidden trajectory:
 
 ```
 Ŷ = argmax_Y  p(Y | O, G, M),     Y = (s_0, s_1, …, s_T)
 ```
 
-where `s_t ∈ {S, I, R}^{|V|}` (or `{0,1}^{|V|}` for monotone SI/IC). Depending
-on what `O` contains and what part of `Y` is scored, the literature splits into
-four sub-tasks that are routinely conflated:
+where `s_t ∈ {S, I, R}^{|V|}` (or `{0,1}^{|V|}` for monotone SI/IC). Depending on what `O` contains and what part of `Y` is scored, the literature splits into four sub-tasks that are routinely conflated:
 
 | Sub-task | `O` contains | Recover | Canonical papers |
 | -------- | ------------ | ------- | ---------------- |
@@ -83,31 +51,17 @@ four sub-tasks that are routinely conflated:
 
 ### Why the task exists
 
-Epidemiology needs the transmission tree, not just the case count: contact
-tracing, super-spreader attribution, and counterfactual "what if we had
-quarantined at day 5" all require who-infected-whom. Platform-side, APIs return
-a *sample* — Twitter's public stream is exactly the uniform-random subsample
-Sadikov et al. model — so every measured cascade statistic is biased low unless
-corrected. And methodologically it is the strictest test of a learned forward
-model: source localization only asks the model to rank `|V|` candidates,
-reconstruction asks it to produce a coherent `T × |V|` trajectory.
+Epidemiology needs the transmission tree, not just the case count: contact tracing, super-spreader attribution, and counterfactual "what if we had quarantined at day 5" all require who-infected-whom. Platform-side, APIs return a *sample* — Twitter's public stream is exactly the uniform-random subsample Sadikov et al. model — so every measured cascade statistic is biased low unless corrected. And methodologically it is the strictest test of a learned forward model: source localization only asks the model to rank `|V|` candidates, reconstruction asks it to produce a coherent `T × |V|` trajectory.
 
 ---
 
 ## 2. Fit with our methodology
 
-**Status: strong fit, real work.** Nothing new to simulate, no new action op, no
-new data-generation run — but it needs an *inference procedure* written on top
-of the trained model, which is the honest cost (§2.5).
+**Status: strong fit, real work.** Nothing new to simulate, no new action op, no new data-generation run — but it needs an *inference procedure* written on top of the trained model, which is the honest cost (§2.5).
 
 ### 2.1 The world model is the transition kernel these papers are missing
 
-Every method in §3 needs `p(s_{t+1} | s_t, G)` and gets it in one of three
-unsatisfying ways: assume IC/SI with a hand-set global `β` (NetFill, NETSLEUTH,
-DHREC), assume a parametric continuous-time kernel and fit it from *many other*
-cascades (NETRATE, Farajtabar), or estimate `β` by a mean-field approximation
-from the single observed snapshot (DITTO §4.1). Ours is **learned, per-edge, and
-already trained**:
+Every method in §3 needs `p(s_{t+1} | s_t, G)` and gets it in one of three unsatisfying ways: assume IC/SI with a hand-set global `β` (NetFill, NETSLEUTH, DHREC), assume a parametric continuous-time kernel and fit it from *many other* cascades (NETRATE, Farajtabar), or estimate `β` by a mean-field approximation from the single observed snapshot (DITTO §4.1). Ours is **learned, per-edge, and already trained**:
 
 ```
 p(s_{t+1} | s_t, G)   =   ICTransmissionHead(encoder(X, graph))
@@ -115,26 +69,13 @@ p(s_{t+1} | s_t, G)   =   ICTransmissionHead(encoder(X, graph))
                           p_new(v) = 1 − ∏_u (1 − q(u→v)·frontier_u)
 ```
 
-Cascade reconstruction is then textbook **filtering/smoothing against that
-kernel**: given observations on a subset of `(node, time)` pairs, infer the
-hidden trajectory. Actions are `NULL` throughout (`--inject-p 0`, no
-`--action-ops`), so `T_exo = identity` and the factorization collapses to
-`s_{t+1} = T_endo(s_t)` — the special case we already train and already
-evaluate.
+Cascade reconstruction is then textbook **filtering/smoothing against that kernel**: given observations on a subset of `(node, time)` pairs, infer the hidden trajectory. Actions are `NULL` throughout (`--inject-p 0`, no `--action-ops`), so `T_exo = identity` and the factorization collapses to `s_{t+1} = T_endo(s_t)` — the special case we already train and already evaluate.
 
-The `structured` head matters here specifically. A `linear` head's free-running
-rollout saturates to the whole graph, which makes any smoothing objective
-degenerate (the model believes every hidden node was infected). The
-self-terminating `structured` head — `count_bias −0.58` on our BA-100 IC run —
-is what makes trajectory likelihood a meaningful score at all. This is the same
-prerequisite the coding-agent loop was waiting on.
+The `structured` head matters here specifically. A `linear` head's free-running rollout saturates to the whole graph, which makes any smoothing objective degenerate (the model believes every hidden node was infected). The self-terminating `structured` head — `count_bias −0.58` on our BA-100 IC run — is what makes trajectory likelihood a meaningful score at all. This is the same prerequisite the coding-agent loop was waiting on.
 
 ### 2.2 The `frontier` channel *is* the quantity these papers reconstruct
 
-`s_t = (infected, frontier)` where `frontier` = **activated at step `t`**. That
-is verbatim the signal Rozenshtein's `FR` reporting scheme samples, the
-`hitting time` DITTO's NRMSE scores, and the per-level structure Zong's
-consistent trees enumerate. Our generator writes it to disk every step:
+`s_t = (infected, frontier)` where `frontier` = **activated at step `t`**. That is verbatim the signal Rozenshtein's `FR` reporting scheme samples, the `hitting time` DITTO's NRMSE scores, and the per-level structure Zong's consistent trees enumerate. Our generator writes it to disk every step:
 
 | What a reconstruction benchmark needs | Where it already is |
 | ------------------------------------- | ------------------- |
@@ -144,11 +85,7 @@ consistent trees enumerate. Our generator writes it to disk every step:
 | A masking protocol | Drop records / drop nodes from `state` at load time. Zero generator changes. |
 | The graph the episode ran on | `graphs/*.npz` + `reconstruct_episode_adjacency` already replays edge ops per episode. |
 
-**Consequence: supervised evaluation is free.** Mask a fraction of one episode,
-reconstruct, score against what we already wrote. Every paper in §5 had to
-either simulate its own ground truth (DITTO, DIPT, Xiao, Rozenshtein — all of
-them) or accept that on real data there is none. We are in the first camp
-already, at zero marginal cost.
+**Consequence: supervised evaluation is free.** Mask a fraction of one episode, reconstruct, score against what we already wrote. Every paper in §5 had to either simulate its own ground truth (DITTO, DIPT, Xiao, Rozenshtein — all of them) or accept that on real data there is none. We are in the first camp already, at zero marginal cost.
 
 ### 2.3 Which settings we can run today, and which we cannot
 
@@ -162,8 +99,7 @@ already, at zero marginal cost.
 
 ### 2.4 Metrics we would report
 
-Directly on top of `wm_metrics.py`, which already computes per-node
-precision/recall/F1 against binary and soft targets:
+Directly on top of `wm_metrics.py`, which already computes per-node precision/recall/F1 against binary and soft targets:
 
 | Metric | Definition | Precedent |
 | ------ | ---------- | --------- |
@@ -173,34 +109,23 @@ precision/recall/F1 against binary and soft targets:
 | **Trajectory likelihood** | `Σ_t log p(ŝ_{t+1} \| ŝ_t, G)` under our own head | no direct precedent; it is what our structured head uniquely affords |
 | **MCC** | for heavily class-imbalanced masks | Rozenshtein's only reported measure [verified] |
 
-Note the trap our existing eval already documents: `infected_acc` is dominated
-by unchanged nodes and looks great for free. The substantive numbers are
-`delta_f1`-shaped — scored on the *changes* — which is what Event F1 above is.
+Note the trap our existing eval already documents: `infected_acc` is dominated by unchanged nodes and looks great for free. The substantive numbers are `delta_f1`-shaped — scored on the *changes* — which is what Event F1 above is.
 
 ### 2.5 Honest cost
 
-The kernel, the data, and the metrics exist. What does not exist is the
-**inference procedure**, and it is not a small script:
+The kernel, the data, and the metrics exist. What does not exist is the **inference procedure**, and it is not a small script:
 
 1. **Posterior sampling.** DITTO's answer is Metropolis–Hastings MCMC with a GNN-learned proposal `Q_θ`, trained unsupervised, reverse-temporal sampling scheme, `O(T(n log n + m))` per sample [verified]. That is a research contribution in itself, not glue code.
 2. **A cheaper first cut.** Greedy backward decoding — start from the observed snapshot, at each step pick the `s_t` maximizing `p(s_{t+1} | s_t)` under the frozen head, subject to monotonicity for IC. Roughly a day's work, no guarantees, but it produces a number and a baseline.
 3. **Barycenter vs MLE.** DITTO's central argument is that plain MLE over histories is unstable because likelihood is nearly flat in `β̂` (their Fig. 2) and that a barycenter formulation over hitting times is stable [claim, argued in prose + figure]. If we go the MLE route we should expect to hit the same wall.
 
-Realistic estimate: **greedy backward decode + masked-episode harness ≈ 1–2 days**
-for a first table; **MCMC/learned-proposal parity with DITTO ≈ weeks**. The
-cheap version is worth doing precisely because §5.1 shows the MLE baselines
-(DHREC, CRI) are 10–35% behind — the bar for "interesting" is low, and our
-learned kernel is a genuinely new ingredient.
+Realistic estimate: **greedy backward decode + masked-episode harness ≈ 1–2 days** for a first table; **MCMC/learned-proposal parity with DITTO ≈ weeks**. The cheap version is worth doing precisely because §5.1 shows the MLE baselines (DHREC, CRI) are 10–35% behind — the bar for "interesting" is low, and our learned kernel is a genuinely new ingredient.
 
 ---
 
 ## 3. Classical and heuristic methods
 
-Three families, distinguished by what they optimize: **statistical correction**
-(fit a generative cascade shape, invert the sampling bias), **combinatorial**
-(find the minimum structure consistent with the observations — almost always a
-Steiner-tree variant), and **MLE** (maximize the likelihood of the history under
-an assumed diffusion model).
+Three families, distinguished by what they optimize: **statistical correction** (fit a generative cascade shape, invert the sampling bias), **combinatorial** (find the minimum structure consistent with the observations — almost always a Steiner-tree variant), and **MLE** (maximize the likelihood of the history under an assumed diffusion model).
 
 | Method | Year | Venue | Family | Idea | Paper | Code |
 | ------ | ---- | ----- | ------ | ---- | ----- | ---- |
@@ -232,9 +157,7 @@ an assumed diffusion model).
 
 ## 4. Learning-based methods
 
-Four groups. The last one — **methods that put a learned forward model in the
-inner loop** — is the direct analogue of what we would build, and is called out
-separately in §4.2.
+Four groups. The last one — **methods that put a learned forward model in the inner loop** — is the direct analogue of what we would build, and is called out separately in §4.2.
 
 ### 4.1 The catalogue
 
@@ -252,16 +175,11 @@ separately in §4.2.
 | **DIPT** ⭐ | 2025 | — | **Deep Identification of Propagation Trees.** First method that outputs the *explicit* who-infected-whom edges rather than per-step node states: cross-attention influence scores between node pairs + a VAE prior over seeds, optimized by alternating latent inference. Authors are the Emory group (Memon, Ling, Kong, Seshagiri, Zufle, **Liang Zhao**). | [arXiv 2503.00646](https://arxiv.org/abs/2503.00646) | no public code found ([anonymous 4open.science link](https://anonymous.4open.science/r/Compartmental-Infectious-Disease-Simulation-4F7C) is the *simulator*, not the model) |
 | **Distribution Classification** | 2025→2026 | ICLR | Learn spreading-model **parameters** when node statuses are unobservable, using observable proxy indicators; beats ABC and GNN baselines. Parameter recovery, not trajectory recovery. | [arXiv 2505.11228](https://arxiv.org/abs/2505.11228) | no public code found |
 
-**Adjacent measurement work** (not reconstruction methods, but they quantify why
-reconstruction is needed): *Phantom cascades* — hidden nodes cause systematic
-under-estimation of cascade size across five datasets ([arXiv 1502.01602](https://arxiv.org/abs/1502.01602), no public code found);
-*How the cascade inference problem distorts information diffusion* ([arXiv 2410.21554](https://arxiv.org/abs/2410.21554), no public code found).
+**Adjacent measurement work** (not reconstruction methods, but they quantify why reconstruction is needed): *Phantom cascades* — hidden nodes cause systematic under-estimation of cascade size across five datasets ([arXiv 1502.01602](https://arxiv.org/abs/1502.01602), no public code found); *How the cascade inference problem distorts information diffusion* ([arXiv 2410.21554](https://arxiv.org/abs/2410.21554), no public code found).
 
 ### 4.2 The group that matters to us: a learned forward model in the inner loop
 
-Three methods invert a *learned* propagation operator rather than a hand-set
-one. This is exactly our position, and the difference is where the operator
-comes from:
+Three methods invert a *learned* propagation operator rather than a hand-set one. This is exactly our position, and the difference is where the operator comes from:
 
 | Method | Forward model | How it is obtained | Inversion |
 | ------ | ------------- | ------------------ | --------- |
@@ -270,37 +188,19 @@ comes from:
 | **DIPT** (2025) | pairwise influence score `MLP([h_u, h_v])` | learned end-to-end from cascades | alternating optimization of a latent seed vector |
 | **ours (proposed)** | `q(u→v) = sigmoid(MLP([h_u, h_v, w_uv]))` | **already trained** on `(G, s_t, a_t, s_{t+1})` transitions with MC-marginal soft targets | not written yet — §2.5 |
 
-Two things fall out of this table. First, **our forward model is strictly better
-supervised than any of theirs**: DITTO gets one scalar `β̂` per graph, DIPT
-learns influence scores with no per-step supervision, and we train per-edge
-transmission against MC-estimated `P(infected)` marginals at every step. Second,
-**they all had to build the inversion**, and so do we — that is the whole
-remaining cost, and none of the three released a reusable inversion component
-(DITTO's repo is the only public code in the group).
+Two things fall out of this table. First, **our forward model is strictly better supervised than any of theirs**: DITTO gets one scalar `β̂` per graph, DIPT learns influence scores with no per-step supervision, and we train per-edge transmission against MC-estimated `P(infected)` marginals at every step. Second, **they all had to build the inversion**, and so do we — that is the whole remaining cost, and none of the three released a reusable inversion component (DITTO's repo is the only public code in the group).
 
 ---
 
 ## 5. Published results
 
-**Read this first: only four papers in this literature publish result tables at
-all.** DITTO, DIPT, Sadikov and Zong do. Rozenshtein (KDD'16), Xiao (SDM'18),
-Xiao (ICDM'18) and Farajtabar (AISTATS'15) publish **figures only** — verified
-by full-text extraction; `grep -c "Table" rozenshtein.txt` returns **0**. Their
-sections below are marked [figure] throughout and give directions, not cells.
+**Read this first: only four papers in this literature publish result tables at all.** DITTO, DIPT, Sadikov and Zong do. Rozenshtein (KDD'16), Xiao (SDM'18), Xiao (ICDM'18) and Farajtabar (AISTATS'15) publish **figures only** — verified by full-text extraction; `grep -c "Table" rozenshtein.txt` returns **0**. Their sections below are marked [figure] throughout and give directions, not cells.
 
 ### 5.1 DITTO (KDD 2023) ⭐ the most comparable table
 
-**Why it is the reference point:** it reconstructs a full `T`-step history, it
-reports `F1` on the reconstructed states and `NRMSE` on hitting times — both of
-which we can compute from what we already store — and **two of its four
-synthetic rows are BA and ER graphs we generate natively** (`--dataset ba`,
-`--dataset er`).
+**Why it is the reference point:** it reconstructs a full `T`-step history, it reports `F1` on the reconstructed states and `NRMSE` on hitting times — both of which we can compute from what we already store — and **two of its four synthetic rows are BA and ER graphs we generate natively** (`--dataset ba`, `--dataset er`).
 
-Protocol [verified, §5.1.1 + Appendix D.1]: BA (`n=1,000`, attachment 4) and ER
-(`n=1,000`, `p=0.008`); SI and SIR for `T=10`, infection rate 0.1, recovery rate
-0.1, **5% of nodes as sources**. Oregon2/Prost: `T=15`, infection 0.1, recovery
-0.05, **10% sources**. `NRMSE` is over infection *and* recovery hitting times,
-normalized by `2n(T+1)²`.
+Protocol [verified, §5.1.1 + Appendix D.1]: BA (`n=1,000`, attachment 4) and ER (`n=1,000`, `p=0.008`); SI and SIR for `T=10`, infection rate 0.1, recovery rate 0.1, **5% of nodes as sources**. Oregon2/Prost: `T=15`, infection 0.1, recovery 0.05, **10% sources**. `NRMSE` is over infection *and* recovery hitting times, normalized by `2n(T+1)²`.
 
 Datasets [verified, Table 2]:
 
@@ -317,8 +217,7 @@ Datasets [verified, Table 2]:
 
 #### 5.1.1 Synthetic SI/SIR vs the MLE baselines [verified, Table 5]
 
-`Gap` is relative to `GRIN` trained with the *true* `β` (the "ideal" row).
-`F1↑`, `NRMSE↓`.
+`Gap` is relative to `GRIN` trained with the *true* `β` (the "ideal" row). `F1↑`, `NRMSE↓`.
 
 | Type | Method | BA-SI F1 | NRMSE | ER-SI F1 | NRMSE | Oregon2-SI F1 | NRMSE | Prost-SI F1 | NRMSE |
 | ---- | ------ | -------- | ----- | -------- | ----- | ------------- | ----- | ----------- | ----- |
@@ -334,10 +233,7 @@ Datasets [verified, Table 2]:
 | MLE | CRI | .5994 | .3356 | .6129 | .3109 | .5761 | .3576 | .5738 | .3406 |
 | Barycenter | **DITTO** ⭐ | **.7783** | **.1633** | **.7734** | **.1679** | **.7928** | **.1707** | **.7929** | **.1690** |
 
-**DITTO beats the "ideal" supervised model on BA-SIR and ER-SIR** (`Gap` −3.49%
-and −32.41% on NRMSE [verified]) — an unsupervised MCMC method outscoring a
-supervised imputer trained on the true parameters. That is the strongest single
-claim in this literature.
+**DITTO beats the "ideal" supervised model on BA-SIR and ER-SIR** (`Gap` −3.49% and −32.41% on NRMSE [verified]) — an unsupervised MCMC method outscoring a supervised imputer trained on the true parameters. That is the strongest single claim in this literature.
 
 #### 5.1.2 Real diffusion [verified, Table 4]
 
@@ -352,23 +248,11 @@ claim in this literature.
 | MLE | CRI | .6058 | .4444 | .7468 | .2942 | .4170 | .5487 | .5344 | .3552 |
 | Barycenter | **DITTO** | .8206 | .2142 | **.7471** | **.2903** | **.6240** | **.2637** | **.6411** | **.2983** |
 
-Reading it: on **real** diffusion the supervised imputers collapse (GCN/GIN
-`F1 ≈ 0.32–0.54`) because they were trained on simulated SI/SIR that does not
-match reality — the same warning IMINFECTOR raises for IM in
-[`influence_maximization.md`](influence_maximization.md) §5.5, and a direct
-caution for us, since our world model is trained on NDlib transitions.
-BrFarmers is the one exception, and the paper says why: its dynamics are
-"very close to the SI model" [verified, §5.3].
+Reading it: on **real** diffusion the supervised imputers collapse (GCN/GIN `F1 ≈ 0.32–0.54`) because they were trained on simulated SI/SIR that does not match reality — the same warning IMINFECTOR raises for IM in [`influence_maximization.md`](influence_maximization.md) §5.5, and a direct caution for us, since our world model is trained on NDlib transitions. BrFarmers is the one exception, and the paper says why: its dynamics are "very close to the SI model" [verified, §5.3].
 
 ### 5.2 DIPT (2025) ⭐ the only propagation-**tree** table, and it is Emory's
 
-Protocol [verified, §4.1.1]: for Cora-ML, CiteSeer and Power Grid — **graphs we
-already load** — there is no real diffusion data, so they **simulate**: pick 10%
-of nodes as sources, run **SI for 200 iterations to convergence**. MemeTracker
-uses real cascades: top **583 sites, 6,700 cascades**, top 5% of nodes per
-cascade (earliest appearance) as sources. IDSS is their own US-county SIR
-mobility simulation (3,143 counties, `R0 = 1.2`, 90 days, ≈500–1,000 infected
-counties per run).
+Protocol [verified, §4.1.1]: for Cora-ML, CiteSeer and Power Grid — **graphs we already load** — there is no real diffusion data, so they **simulate**: pick 10% of nodes as sources, run **SI for 200 iterations to convergence**. MemeTracker uses real cascades: top **583 sites, 6,700 cascades**, top 5% of nodes per cascade (earliest appearance) as sources. IDSS is their own US-county SIR mobility simulation (3,143 counties, `R0 = 1.2`, 90 days, ≈500–1,000 infected counties per run).
 
 Propagation-tree identification [verified, Table 1]:
 
@@ -378,8 +262,7 @@ Propagation-tree identification [verified, Table 1]:
 | DDMSL | 0.412 | 0.259 | 0.119 | 0.063 | 0.405 | 0.253 | 0.130 | 0.069 | 0.121 | 0.064 |
 | **DIPT** ⭐ | **0.622** | **0.452** | **0.602** | **0.430** | **0.593** | **0.421** | **0.680** | **0.515** | **0.421** | **0.266** |
 
-Source localization on the same graphs [verified, Table 2] — note the column
-order is `RE · PR · F1 · AUC`:
+Source localization on the same graphs [verified, Table 2] — note the column order is `RE · PR · F1 · AUC`:
 
 | Method | Cora-ML F1 | AUC | Memetracker F1 | AUC | CiteSeer F1 | AUC | Power Grid F1 | AUC | IDSS F1 | AUC |
 | ------ | ---------- | --- | -------------- | --- | ----------- | --- | ------------- | --- | ------- | --- |
@@ -391,23 +274,13 @@ order is `RE · PR · F1 · AUC`:
 | DDMSL | 0.750 | **0.873** | **0.515** | **0.641** | 0.742 | 0.870 | **0.831** | 0.866 | **0.527** | **0.645** |
 | **DIPT** | **0.839** | **0.881** | 0.518 | 0.629 | **0.832** | **0.880** | 0.828 | 0.864 | 0.525 | 0.630 |
 
-Partial supervision [verified, Table 3] — with only 10/20/30% of the true
-propagation tree visible during training, `Path Precision` on Power Grid goes
-**0.683 → 0.718 → 0.759** (vs 0.680 fully unsupervised). A little tree
-supervision buys a lot, which is directly relevant to us: we have **100%** of
-the tree, for free.
+Partial supervision [verified, Table 3] — with only 10/20/30% of the true propagation tree visible during training, `Path Precision` on Power Grid goes **0.683 → 0.718 → 0.759** (vs 0.680 fully unsupervised). A little tree supervision buys a lot, which is directly relevant to us: we have **100%** of the tree, for free.
 
 ### 5.3 Sadikov et al. (WSDM 2011) — the canonical missing-data reference
 
-Data [verified, §5.1]: a Twitter follow graph of **71,804,410 nodes and
-2,040,072,198 directed edges** (avg degree 28.4), crawled BFS from the public
-stream, June–December 2009 (Topsy). **250 retweet cascades** and **100 blog
-influence cascades** (Spinn3r, Aug–Nov 2008, English blogosphere, cascades of
-≥100 nodes); synthetic runs use 1,000 cascades of 127 nodes each.
+Data [verified, §5.1]: a Twitter follow graph of **71,804,410 nodes and 2,040,072,198 directed edges** (avg degree 28.4), crawled BFS from the public stream, June–December 2009 (Topsy). **250 retweet cascades** and **100 blog influence cascades** (Spinn3r, Aug–Nov 2008, English blogosphere, cascades of ≥100 nodes); synthetic runs use 1,000 cascades of 127 nodes each.
 
-Relative error of *estimated* (`ê`) vs *observed* (`e′`) `k`-tree parameters at
-sample ratio `σ* = 0.5` [verified, Table 2 — synthetic cascades on the Twitter
-network]:
+Relative error of *estimated* (`ê`) vs *observed* (`e′`) `k`-tree parameters at sample ratio `σ* = 0.5` [verified, Table 2 — synthetic cascades on the Twitter network]:
 
 | Param | Network cascade `ê` | `e′` | Influence cascade `ê` | `e′` |
 | ----- | ------------------- | ---- | --------------------- | ---- |
@@ -416,8 +289,7 @@ network]:
 | `k` (in-degree) | 0.14 | 0.21 | — | — |
 | `h` (height) | 0.00 | 0.39 | 0.00 | 0.46 |
 
-Same experiment on pure `k`-trees of 127 nodes, `b ~ Normal(2,1)`, `k = 3.5`
-[verified, Table 3]:
+Same experiment on pure `k`-trees of 127 nodes, `b ~ Normal(2,1)`, `k = 3.5` [verified, Table 3]:
 
 | Param | Spurious edges `ê` | `e′` | No spurious edges `ê` | `e′` |
 | ----- | ------------------ | ---- | --------------------- | ---- |
@@ -426,25 +298,13 @@ Same experiment on pure `k`-trees of 127 nodes, `b ~ Normal(2,1)`, `k = 3.5`
 | `k` | 0.02 | 0.43 | — | — |
 | `h` | 0.05 | 0.66 | 0.10 | 0.43 |
 
-Cascade-property recovery (nodes, edges, width, participation) is **figure only**
-[figure, Fig. 7]. The paper's stated findings: correction beats naive
-observation for **σ ≤ 0.7**, gives **20–30% relative error even at σ = 0.1**
-(90% missing), and **does worse than doing nothing for σ > 0.9** [verified,
-prose]. The one failure mode is **width on retweet influence cascades**, which
-they attribute to those trees being imbalanced [verified].
+Cascade-property recovery (nodes, edges, width, participation) is **figure only** [figure, Fig. 7]. The paper's stated findings: correction beats naive observation for **σ ≤ 0.7**, gives **20–30% relative error even at σ = 0.1** (90% missing), and **does worse than doing nothing for σ > 0.9** [verified, prose]. The one failure mode is **width on retweet influence cascades**, which they attribute to those trees being imbalanced [verified].
 
-The takeaway that matters for us: **cascades are fragile.** A small fraction of
-missing nodes disconnects a tree, so *observed* statistics are biased low by
-30–86% at σ = 0.5 — which is why a reconstruction step is not optional if you
-want an unbiased cascade statistic.
+The takeaway that matters for us: **cascades are fragile.** A small fraction of missing nodes disconnects a tree, so *observed* statistics are biased low by 30–86% at σ = 0.5 — which is why a reconstruction step is not optional if you want an unbiased cascade statistic.
 
 ### 5.4 Zong et al. (ICDM 2012) — consistent trees
 
-Data [verified, §V]: **Enron** email graph, 86,808 nodes; **Twitter** retweets
-from >17M users over 7 months from June 2009, giving **321 cascades of depth >4,
-node size 10–81**; synthetic cascades on an anonymous Facebook social graph.
-Uncertainty is `σ = 1 − |X|/|V_T|`, i.e. the fraction of the true cascade
-*removed*.
+Data [verified, §V]: **Enron** email graph, 86,808 nodes; **Twitter** retweets from >17M users over 7 months from June 2009, giving **321 cascades of depth >4, node size 10–81**; synthetic cascades on an anonymous Facebook social graph. Uncertainty is `σ = 1 − |X|/|V_T|`, i.e. the fraction of the true cascade *removed*.
 
 Node- and edge-level precision [verified, Table I]:
 
@@ -455,58 +315,23 @@ Node- and edge-level precision [verified, Table I]:
 | WBCT | `prec_v` | 100% | 70.1% | 73.6% | 66.1% |
 | WBCT | `prec_e` | 69% | 55.7% | 60.6% | 41.7% |
 
-Robustness to missing data is **figure only** [figure, Fig. 6]; the paper states
-WPCT holds `prec ≥ 70%` and `rec ≥ 25%` even when **85% of cascade nodes are
-removed** [verified, prose]. Note the gap between `prec_v` (100%) and `prec_e`
-(78–86%) — **getting the node set right is much easier than getting the edges
-right**, which is the same finding DIPT reports 13 years later and the reason
-§8 insists on scoring edges separately.
+Robustness to missing data is **figure only** [figure, Fig. 6]; the paper states WPCT holds `prec ≥ 70%` and `rec ≥ 25%` even when **85% of cascade nodes are removed** [verified, prose]. Note the gap between `prec_v` (100%) and `prec_e` (78–86%) — **getting the node set right is much easier than getting the edges right**, which is the same finding DIPT reports 13 years later and the reason §8 insists on scoring edges separately.
 
 ### 5.5 Rozenshtein et al. (KDD 2016) — CulT — **no tables published**
 
-Full-text extraction finds **zero occurrences of "Table"** in the paper
-[verified]. Everything below is [figure] or [verified] prose.
+Full-text extraction finds **zero occurrences of "Table"** in the paper [verified]. Everything below is [figure] or [verified] prose.
 
-Setup [verified, §5.1]: synthetic power-law backgrounds of `n = 100` with
-`δ = 100` random interactions injected between consecutive real activations;
-plus **100-node BFS subgraphs** of Facebook (New Orleans wall posts), Tumblr
-(MemeTracker quotes), Students (UC Irvine message log) and Enron. Four
-propagation models: **SI** (`p = 0.1`), **shortest path**, **IC** (`p` = inverse
-largest eigenvalue), **forest fire** (threshold 1), each run until half the
-nodes activate. Two reporting schemes: **RS** (each active node reported w.p. β)
-and **FR** (frontier reported after θ interactions). Metric: **MCC**. Baselines:
-`Reports` (trivially precision 1.0) and `Baseline` (one-hop cascade from each
-report). Real-cascade case study: Flixster movie ID 54053, rated by 10K users,
-first 10 raters designated seeds, reports sampled among frontier nodes w.p. 0.5
-with θ = 1000.
+Setup [verified, §5.1]: synthetic power-law backgrounds of `n = 100` with `δ = 100` random interactions injected between consecutive real activations; plus **100-node BFS subgraphs** of Facebook (New Orleans wall posts), Tumblr (MemeTracker quotes), Students (UC Irvine message log) and Enron. Four propagation models: **SI** (`p = 0.1`), **shortest path**, **IC** (`p` = inverse largest eigenvalue), **forest fire** (threshold 1), each run until half the nodes activate. Two reporting schemes: **RS** (each active node reported w.p. β) and **FR** (frontier reported after θ interactions). Metric: **MCC**. Baselines: `Reports` (trivially precision 1.0) and `Baseline` (one-hop cascade from each report). Real-cascade case study: Flixster movie ID 54053, rated by 10K users, first 10 raters designated seeds, reports sampled among frontier nodes w.p. 0.5 with θ = 1000.
 
-Directions [figure]: MCC ≈ **0.60–0.90** across the four real graphs, CulT above
-both baselines throughout; accuracy is best for power-law exponent
-**γ ∈ [1.5, 3.5]** — the range real graphs occupy [verified, Fig. 2]; the
-`α ↔ k` relation is monotonic so binary search on `α` recovers a target seed
-count, and tree cost shows an "elbow" at the true `k = 5` [figure, Fig. 1].
+Directions [figure]: MCC ≈ **0.60–0.90** across the four real graphs, CulT above both baselines throughout; accuracy is best for power-law exponent **γ ∈ [1.5, 3.5]** — the range real graphs occupy [verified, Fig. 2]; the `α ↔ k` relation is monotonic so binary search on `α` recovers a target seed count, and tree cost shows an "elbow" at the true `k = 5` [figure, Fig. 1].
 
-**Why it matters to us despite having no table:** CulT is the only method here
-that assumes **no propagation model at all** and operates on a temporal
-interaction stream. It is the honest ceiling for "what can you do without a
-kernel" — and therefore the right thing to beat with a learned one.
+**Why it matters to us despite having no table:** CulT is the only method here that assumes **no propagation model at all** and operates on a temporal interaction stream. It is the honest ceiling for "what can you do without a kernel" — and therefore the right thing to beat with a learned one.
 
 ### 5.6 Xiao et al. (SDM 2018 and ICDM 2018) — **no result tables**
 
-**SDM 2018, `OrderedSteinerTree`** [verified, §6]: graphs are **email-eu
-986/25,552**, **grqc 4,158/13,428**, **arxiv-hep-th 8,638/24,827**, **facebook
-4,039/88,234** — three of which we already load. Cascade models: SI (`p = 0.5`),
-IC (tuned to activate half the graph), continuous-time (exponential, `β = 1`),
-shortest path. Report probabilities `q = 0.001 × 2^i`, `i = 0…8`; 100 runs per
-setting. Real cascades: **Digg 2009, 279,631 nodes / 1,548,131 edges, top 18
-cascades, average size 1,965**, 8 runs.
+**SDM 2018, `OrderedSteinerTree`** [verified, §6]: graphs are **email-eu 986/25,552**, **grqc 4,158/13,428**, **arxiv-hep-th 8,638/24,827**, **facebook 4,039/88,234** — three of which we already load. Cascade models: SI (`p = 0.5`), IC (tuned to activate half the graph), continuous-time (exponential, `β = 1`), shortest path. Report probabilities `q = 0.001 × 2^i`, `i = 0…8`; 100 runs per setting. Real cascades: **Digg 2009, 279,631 nodes / 1,548,131 edges, top 18 cascades, average size 1,965**, 8 runs.
 
-Directions [figure]: all four methods reach **node precision > 0.8**, usually
-near 1.0; `closure`/`greedy`/`delayed-bfs` beat plain `steiner` on **order
-accuracy** under every model and graph; `greedy` scales roughly linearly in
-`|E|`. On **real** Digg cascades node precision **drops significantly**, which
-the authors attribute to infected nodes being densely interconnected with
-uninfected ones and to the parsimony assumption failing [verified, prose].
+Directions [figure]: all four methods reach **node precision > 0.8**, usually near 1.0; `closure`/`greedy`/`delayed-bfs` beat plain `steiner` on **order accuracy** under every model and graph; `greedy` scales roughly linearly in `|E|`. On **real** Digg cascades node precision **drops significantly**, which the authors attribute to infected nodes being densely interconnected with uninfected ones and to the parsimony assumption failing [verified, prose].
 
 **ICDM 2018, tree sampling** — datasets [verified, Table I]:
 
@@ -518,43 +343,17 @@ uninfected ones and to the parsimony assumption failing [verified, prose].
 | grqc | 4,158 | 13,428 | 0.1641 |
 | Digg | 279,631 | 1,548,131 | 0.0015 |
 
-Setup [verified]: SI with `β = 0.1`; IC with per-edge `p ~ U[0,1]`; 1,000 sampled
-Steiner trees per instance; metric is **average precision (AP)** on nodes *and*
-edges; 100 runs per setting; Digg uses the top-10 largest real cascades, average
-size 1,868. Results are [figure] only. Their reported qualitative finding: on
-`grqc` — the one graph with high assortativity (0.164) — a **Personalized
-PageRank baseline beats tree sampling**, because assortative graphs make the
-infected subgraph densely connected and a random walker exploits that
-[verified, prose]. Worth internalizing: on assortative graphs a trivial
-centrality baseline is competitive, so any reconstruction claim must report
-PageRank alongside.
+Setup [verified]: SI with `β = 0.1`; IC with per-edge `p ~ U[0,1]`; 1,000 sampled Steiner trees per instance; metric is **average precision (AP)** on nodes *and* edges; 100 runs per setting; Digg uses the top-10 largest real cascades, average size 1,868. Results are [figure] only. Their reported qualitative finding: on `grqc` — the one graph with high assortativity (0.164) — a **Personalized PageRank baseline beats tree sampling**, because assortative graphs make the infected subgraph densely connected and a random walker exploits that [verified, prose]. Worth internalizing: on assortative graphs a trivial centrality baseline is competitive, so any reconstruction claim must report PageRank alongside.
 
 ### 5.7 Farajtabar et al. (AISTATS 2015) — "Back to the Past" — **no tables**
 
-Synthetic [verified, §5.1]: three Kronecker families — core-periphery
-`[0.9 0.5; 0.5 0.3]`, random `[0.5 0.5; 0.5 0.5]`, hierarchical
-`[0.9 0.1; 0.1 0.9]` — 10 networks each of **256 nodes / 512 edges**,
-`α ~ U(10, 5)`; a cascade counts as "large" at >40 nodes; **400 Monte Carlo
-samples, 10% of infected nodes observed**.
+Synthetic [verified, §5.1]: three Kronecker families — core-periphery `[0.9 0.5; 0.5 0.3]`, random `[0.5 0.5; 0.5 0.5]`, hierarchical `[0.9 0.1; 0.1 0.9]` — 10 networks each of **256 nodes / 512 edges**, `α ~ U(10, 5)`; a cascade counts as "large" at >40 nodes; **400 Monte Carlo samples, 10% of infected nodes observed**.
 
-Real [verified, §5.2]: the MemeTracker meme dataset over **1,700 mainstream
-media sites and blogs**; a diffusion network is inferred **per topic with
-NETRATE** first, then sources are recovered; 15 sources each with ≥10 long
-cascades (>27 nodes), 5 runs, **10% observed, 500 samples**.
+Real [verified, §5.2]: the MemeTracker meme dataset over **1,700 mainstream media sites and blogs**; a diffusion network is inferred **per topic with NETRATE** first, then sources are recovered; 15 sources each with ≥10 long cascades (>27 nodes), 5 runs, **10% observed, 500 samples**.
 
-Directions [figure, Figs. 3–5]: on synthetic Kronecker graphs success
-probability reaches **≈0.6** and top-10 success **≈1.0**, "dramatically"
-above NaiveMC / OutDeg / NETSLEUTH / Pinto's method. On MemeTracker the numbers
-are far smaller but the paper quantifies them in prose [verified]: their method
-is **≈20× better than a uniform guesser over all 1,700 nodes** (`1/1700 =
-5.8 × 10⁻⁴`) and **≈5× better than guessing uniformly among the 425 nodes from
-which the observations are reachable** (`1/425 = 2.4 × 10⁻³`) — so absolute
-success probability is on the order of **1%**. Source-time MSE ≈ 2,000 days²,
-i.e. **≈45 days** error on cascades that unfold over a year [verified].
+Directions [figure, Figs. 3–5]: on synthetic Kronecker graphs success probability reaches **≈0.6** and top-10 success **≈1.0**, "dramatically" above NaiveMC / OutDeg / NETSLEUTH / Pinto's method. On MemeTracker the numbers are far smaller but the paper quantifies them in prose [verified]: their method is **≈20× better than a uniform guesser over all 1,700 nodes** (`1/1700 = 5.8 × 10⁻⁴`) and **≈5× better than guessing uniformly among the 425 nodes from which the observations are reachable** (`1/425 = 2.4 × 10⁻³`) — so absolute success probability is on the order of **1%**. Source-time MSE ≈ 2,000 days², i.e. **≈45 days** error on cascades that unfold over a year [verified].
 
-That 1% is the sober number to keep in mind: **retrospective reconstruction on
-real data is very hard**, and the published wins are ratios against random, not
-absolute accuracy.
+That 1% is the sober number to keep in mind: **retrospective reconstruction on real data is very hard**, and the published wins are ratios against random, not absolute accuracy.
 
 ### 5.8 SOTA summary
 
@@ -574,16 +373,11 @@ absolute accuracy.
 
 ## 6. Datasets
 
-Cascade reconstruction needs **two things a plain IM graph does not have**: a
-per-node activation *time*, and — for tree metrics — a ground-truth
-who-infected-whom edge. Almost no real corpus has the second. That is why every
-paper in §5 that reports tree metrics **simulates** the cascade, and why our
-generator's stored `frontier` is a genuine asset rather than a shortcut.
+Cascade reconstruction needs **two things a plain IM graph does not have**: a per-node activation *time*, and — for tree metrics — a ground-truth who-infected-whom edge. Almost no real corpus has the second. That is why every paper in §5 that reports tree metrics **simulates** the cascade, and why our generator's stored `frontier` is a genuine asset rather than a shortcut.
 
 ### 6.1 What we already load ✅
 
-Authoritative rows live in [`influence_maximization.md`](influence_maximization.md) §6.1.
-The ones this literature actually uses:
+Authoritative rows live in [`influence_maximization.md`](influence_maximization.md) §6.1. The ones this literature actually uses:
 
 | `--dataset` | Nodes | Edges | Used here by | Timestamps? |
 | ----------- | ----- | ----- | ------------ | ----------- |
@@ -595,17 +389,11 @@ The ones this literature actually uses:
 | `digg` ✅ | 116,893 | ≈2.6M | ⚠️ **wrong Digg** — this literature uses the ISI/Lerman 279,631-node cascade version (§6.2) | ✗ (friendship only) |
 | `ba`, `er` ✅ | 1,000 | 3,984 / 3,987 | **DITTO** — `--ba-m 4`, `--er-p 0.008` reproduces their graphs | ✗ — simulated |
 
-**Five of our loaders are already in this literature's tables, plus both
-synthetic families DITTO uses.** No new loader is needed to produce a comparable
-first result. The two LCC discrepancies are the preprocessing switch documented
-in [`influence_maximization.md`](influence_maximization.md) §6.3, not different
-graphs.
+**Five of our loaders are already in this literature's tables, plus both synthetic families DITTO uses.** No new loader is needed to produce a comparable first result. The two LCC discrepancies are the preprocessing switch documented in [`influence_maximization.md`](influence_maximization.md) §6.3, not different graphs.
 
 ### 6.2 Cascade corpora — the ones with real traces
 
-Rows carried over from [`influence_maximization.md`](influence_maximization.md)
-§6.2 and re-checked, plus every other corpus this literature uses. **Cascades**,
-**avg cascade**, **span** and **timestamps** are the columns that matter here.
+Rows carried over from [`influence_maximization.md`](influence_maximization.md) §6.2 and re-checked, plus every other corpus this literature uses. **Cascades**, **avg cascade**, **span** and **timestamps** are the columns that matter here.
 
 | Dataset | Nodes | Edges | Cascades | Avg cascade | Time span | Timestamps | Source |
 | ------- | ----- | ----- | -------- | ----------- | --------- | ---------- | ------ |
@@ -630,27 +418,13 @@ Rows carried over from [`influence_maximization.md`](influence_maximization.md)
 | **Twitter (Sadikov)** | 71,804,410 | 2,040,072,198 arcs | 250 retweet + 100 blog cascades [verified] | ≥100 nodes each | Jun–Dec 2009 (tweets); Aug–Nov 2008 (Spinn3r blogs) | ✅ | Topsy / Spinn3r — **not publicly redistributed** |
 | **Twitter7 (Yang–Leskovec)** | — | — | 476M tweets | — | Jun–Dec 2009 | ✅ | [SNAP twitter7](https://snap.stanford.edu/data/twitter7.html) |
 
-Digg 2009 / Sina Weibo / MAG counts are **[verified]** from IMINFECTOR's Table 3
-(re-checked against `influence_maximization.md` §6.2); MemeTracker and Flixster
-sizes remain **[claim]** except DIPT's 583/6,700 slice which is **[verified]**.
+Digg 2009 / Sina Weibo / MAG counts are **[verified]** from IMINFECTOR's Table 3 (re-checked against `influence_maximization.md` §6.2); MemeTracker and Flixster sizes remain **[claim]** except DIPT's 583/6,700 slice which is **[verified]**.
 
-**Corpora named in the brief that this review could not pin down** — recorded so
-nobody re-searches them: a public **Telegram** or **Reddit** cascade corpus with
-who-infected-whom labels; **Android / Christianity StackExchange** cascade
-splits (they appear in cascade-*prediction* work, not in any reconstruction
-paper found here — see [`cascade_prediction.md`](cascade_prediction.md)); the
-**APS citation** corpus as a reconstruction benchmark; and **SMS/call-log**
-contact traces. Xiao's own [cascade-dataset](https://github.com/xiaohan2012/cascade-dataset)
-index lists Higgs, Digg 2009, [Flickr (MPI-SWS)](http://socialnetworks.mpi-sws.org/data-www2009.html),
-[EPFL tweets-with-URL](http://lsir.epfl.ch/research/datasets/socialnetwork/),
-[NEWS](https://github.com/s-mishra/featuredriven-hawkes) and
-[AMiner citations](https://aminer.org/citation), and flags SEISMIC's SNAP link
-as **broken** [verified from the repo README].
+**Corpora named in the brief that this review could not pin down** — recorded so nobody re-searches them: a public **Telegram** or **Reddit** cascade corpus with who-infected-whom labels; **Android / Christianity StackExchange** cascade splits (they appear in cascade-*prediction* work, not in any reconstruction paper found here — see [`cascade_prediction.md`](cascade_prediction.md)); the **APS citation** corpus as a reconstruction benchmark; and **SMS/call-log** contact traces. Xiao's own [cascade-dataset](https://github.com/xiaohan2012/cascade-dataset) index lists Higgs, Digg 2009, [Flickr (MPI-SWS)](http://socialnetworks.mpi-sws.org/data-www2009.html), [EPFL tweets-with-URL](http://lsir.epfl.ch/research/datasets/socialnetwork/), [NEWS](https://github.com/s-mishra/featuredriven-hawkes) and [AMiner citations](https://aminer.org/citation), and flags SEISMIC's SNAP link as **broken** [verified from the repo README].
 
 ### 6.3 What a reconstruction benchmark needs that none of these give
 
-Real corpora give you **timestamps** but never the **transmission edge** — Digg
-records that user `v` voted at time `t`, not that `u` caused it. Consequently:
+Real corpora give you **timestamps** but never the **transmission edge** — Digg records that user `v` voted at time `t`, not that `u` caused it. Consequently:
 
 | Requirement | Real corpora | Our generator |
 | ----------- | ------------ | ------------- |
@@ -661,19 +435,13 @@ records that user `v` voted at time `t`, not that `u` caused it. Consequently:
 | Counterfactual branches from the same `s_t` | ❌ | ✅ (`branch == cf_i`) |
 | Controllable observation rate | ❌ (fixed by the API that collected it) | ✅ (mask at load) |
 
-Three of six are things **only** a simulator can give, which is exactly why
-DITTO, DIPT, Xiao and Rozenshtein all simulate. We are already in that position
-and can additionally offer soft targets and counterfactual branches, neither of
-which appears anywhere in §5.
+Three of six are things **only** a simulator can give, which is exactly why DITTO, DIPT, Xiao and Rozenshtein all simulate. We are already in that position and can additionally offer soft targets and counterfactual branches, neither of which appears anywhere in §5.
 
 ---
 
 ## 7. Which paper uses which
 
-Cells mark the dataset **as that paper reports it**. Check
-[`influence_maximization.md`](influence_maximization.md) §6.3 before assuming
-two papers with the same cell used the same graph — Digg in particular denotes
-two different objects here.
+Cells mark the dataset **as that paper reports it**. Check [`influence_maximization.md`](influence_maximization.md) §6.3 before assuming two papers with the same cell used the same graph — Digg in particular denotes two different objects here.
 
 | Dataset | Sadikov'11 | Zong'12 | Farajtabar'15 | Rozenshtein'16 | Xiao SDM'18 | Xiao ICDM'18 | DITTO'23 | DIPT'25 |
 | ------- | ---------- | ------- | ------------- | -------------- | ----------- | ------------ | -------- | ------- |
@@ -702,9 +470,7 @@ two different objects here.
 | BrFarmers / Pol / Covid / Hebrew | | | | | | | ✔ | |
 | IDSS | | | | | | | | ✔ |
 
-**Bold + ✅ = we already load it.** Seven of the graphs in this table are ours,
-spread across five of the eight papers — a far better intersection than the IM
-literature gives us (four rows, two papers).
+**Bold + ✅ = we already load it.** Seven of the graphs in this table are ours, spread across five of the eight papers — a far better intersection than the IM literature gives us (four rows, two papers).
 
 ---
 
@@ -724,12 +490,7 @@ literature gives us (four rows, two papers).
 | **MCC** | Matthews correlation over infected/not | timing and structure | Rozenshtein (its **only** metric) |
 | **Trajectory log-likelihood** | `Σ_t log p(ŝ_{t+1} \| ŝ_t, G)` | nothing — but needs a kernel to evaluate under | **nobody** — this is ours to add |
 
-The `prec_v = 100%` / `prec_e = 78%` split in Zong's Table I and DIPT's
-0.68-path-precision-at-best are the same message thirteen years apart: **the node
-set is easy, the tree is hard.** Any protocol that reports only node-level
-numbers is reporting the easy half. Our own eval already learned this lesson in
-a different guise — `infected_acc` looks great because it is dominated by
-unchanged nodes, which is why we report `delta_f1`.
+The `prec_v = 100%` / `prec_e = 78%` split in Zong's Table I and DIPT's 0.68-path-precision-at-best are the same message thirteen years apart: **the node set is easy, the tree is hard.** Any protocol that reports only node-level numbers is reporting the easy half. Our own eval already learned this lesson in a different guise — `infected_acc` looks great because it is dominated by unchanged nodes, which is why we report `delta_f1`.
 
 ### 8.2 The traps
 
@@ -766,26 +527,11 @@ unchanged nodes, which is why we report `delta_f1`.
 
 8. **Run PageRank as a baseline, specifically on `ca_grqc`.** Xiao ICDM'18 found Personalized PageRank beats tree sampling on exactly that graph because of its assortativity (0.164). If our method cannot beat PageRank there, the result is not real.
 
-9. **Store the transmission edge.** `build_record` has no field for it — but the
-   cost is larger than "add a field", because **NDlib never produces it**.
-   `IndependentCascadesModel.iteration` sets `actual_status[v] = 1` on a
-   successful coin flip without recording which `u` caused it [verified, read
-   from the installed source]. Capturing it means subclassing
-   `IndependentCascadesModel` and overriding `iteration` to log the `(u, v)`
-   pair when `flip <= threshold`, then threading that through `Simulator.advance`
-   into a new `parents` field on the record.
+9. **Store the transmission edge.** `build_record` has no field for it — but the cost is larger than "add a field", because **NDlib never produces it**. `IndependentCascadesModel.iteration` sets `actual_status[v] = 1` on a successful coin flip without recording which `u` caused it [verified, read from the installed source]. Capturing it means subclassing `IndependentCascadesModel` and overriding `iteration` to log the `(u, v)` pair when `flip <= threshold`, then threading that through `Simulator.advance` into a new `parents` field on the record.
 
-   Two subtleties for whoever does it. First, NDlib iterates spreaders in node
-   order and skips any `v` already flipped this step, so the recorded parent is
-   *the first successful `u` in node order*, not a uniformly random one among the
-   successes — a real but documentable bias. Second, LT has no transmission edge
-   at all: activation is a threshold crossing over the whole active neighbourhood,
-   so the honest ground truth there is a parent *set*, not a parent.
+   Two subtleties for whoever does it. First, NDlib iterates spreaders in node order and skips any `v` already flipped this step, so the recorded parent is *the first successful `u` in node order*, not a uniformly random one among the successes — a real but documentable bias. Second, LT has no transmission edge at all: activation is a threshold crossing over the whole active neighbourhood, so the honest ground truth there is a parent *set*, not a parent.
 
-   Still the highest research-value item in this file: it unlocks every tree
-   metric in §8.1 and would give us the only corpus in this literature carrying
-   both soft MC marginals and ground-truth propagation edges (§6.3). Call it a
-   simulator change of a day, not a one-line generator change.
+   Still the highest research-value item in this file: it unlocks every tree metric in §8.1 and would give us the only corpus in this literature carrying both soft MC marginals and ground-truth propagation edges (§6.3). Call it a simulator change of a day, not a one-line generator change.
 
 10. **Cost is honest and bounded.** Greedy backward decoding + a masked-episode harness ≈ 1–2 days for a first table. MCMC-with-learned-proposal parity with DITTO ≈ weeks. Do the cheap one: §5.1 shows the MLE baselines (DHREC, CRI) sit 10–35% behind the supervised ideal, so the bar for a publishable number is low and our kernel is a genuinely new ingredient.
 
@@ -797,63 +543,17 @@ unchanged nodes, which is why we report `delta_f1`.
 
 ## 10. Reference list
 
-**Statistical correction / missing data**
-[Sadikov 2011 WSDM, Correcting for Missing Data in Information Cascades](https://cs.stanford.edu/~jure/pubs/cascades-wsdm11.pdf) · [ACM](https://dl.acm.org/doi/10.1145/1935826.1935861) (403 to bots) · no public code found ·
-[Belák 2015, Phantom cascades (arXiv 1502.01602)](https://arxiv.org/abs/1502.01602) · no public code found ·
-[How the cascade inference problem distorts information diffusion (arXiv 2410.21554)](https://arxiv.org/abs/2410.21554) · no public code found
+**Statistical correction / missing data** [Sadikov 2011 WSDM, Correcting for Missing Data in Information Cascades](https://cs.stanford.edu/~jure/pubs/cascades-wsdm11.pdf) · [ACM](https://dl.acm.org/doi/10.1145/1935826.1935861) (403 to bots) · no public code found · [Belák 2015, Phantom cascades (arXiv 1502.01602)](https://arxiv.org/abs/1502.01602) · no public code found · [How the cascade inference problem distorts information diffusion (arXiv 2410.21554)](https://arxiv.org/abs/2410.21554) · no public code found
 
-**Combinatorial / Steiner-tree**
-[Lappas 2010 KDD, Finding Effectors in Social Networks](https://dl.acm.org/doi/10.1145/1835804.1835882) (403 to bots) · no public code found ·
-[Zong 2012 ICDM, Inferring the Underlying Structure of Information Cascades (arXiv 1210.3587)](https://arxiv.org/abs/1210.3587) · [IEEE](https://ieeexplore.ieee.org/document/6413726) · no public code found ·
-[Rozenshtein 2016 KDD, Reconstructing an Epidemic over Time](https://www.kdd.org/kdd2016/papers/files/rpp0920-rozenshteinAT3.pdf) · [ACM](https://dl.acm.org/doi/10.1145/2939672.2939865) · [code](https://github.com/polinapolina/reconstructing-an-epidemic-over-time) ·
-[Xiao 2018 SDM, Reconstructing a cascade from temporal observations (arXiv 1801.08586)](https://arxiv.org/abs/1801.08586) · [code](https://github.com/xiaohan2012/reconstructing-cascade) ·
-[Xiao 2018 ICDM, Robust Cascade Reconstruction by Steiner Tree Sampling (arXiv 1809.05812)](https://arxiv.org/abs/1809.05812) · [code](https://github.com/xiaohan2012/cascade-reconstruction-by-tree-samples) · [random_steiner_tree](https://github.com/xiaohan2012/random_steiner_tree) · [active variant](https://github.com/xiaohan2012/active-cascade-reconstruction) ·
-[Risk-aware temporal cascade reconstruction (KAIS 2022)](https://link.springer.com/article/10.1007/s10115-022-01748-8) · no public code found ·
-[PoolMLE — Reconstructing Network Outbreaks under Group Surveillance (arXiv 2602.11419)](https://arxiv.org/abs/2602.11419) · no public code found
+**Combinatorial / Steiner-tree** [Lappas 2010 KDD, Finding Effectors in Social Networks](https://dl.acm.org/doi/10.1145/1835804.1835882) (403 to bots) · no public code found · [Zong 2012 ICDM, Inferring the Underlying Structure of Information Cascades (arXiv 1210.3587)](https://arxiv.org/abs/1210.3587) · [IEEE](https://ieeexplore.ieee.org/document/6413726) · no public code found · [Rozenshtein 2016 KDD, Reconstructing an Epidemic over Time](https://www.kdd.org/kdd2016/papers/files/rpp0920-rozenshteinAT3.pdf) · [ACM](https://dl.acm.org/doi/10.1145/2939672.2939865) · [code](https://github.com/polinapolina/reconstructing-an-epidemic-over-time) · [Xiao 2018 SDM, Reconstructing a cascade from temporal observations (arXiv 1801.08586)](https://arxiv.org/abs/1801.08586) · [code](https://github.com/xiaohan2012/reconstructing-cascade) · [Xiao 2018 ICDM, Robust Cascade Reconstruction by Steiner Tree Sampling (arXiv 1809.05812)](https://arxiv.org/abs/1809.05812) · [code](https://github.com/xiaohan2012/cascade-reconstruction-by-tree-samples) · [random_steiner_tree](https://github.com/xiaohan2012/random_steiner_tree) · [active variant](https://github.com/xiaohan2012/active-cascade-reconstruction) · [Risk-aware temporal cascade reconstruction (KAIS 2022)](https://link.springer.com/article/10.1007/s10115-022-01748-8) · no public code found · [PoolMLE — Reconstructing Network Outbreaks under Group Surveillance (arXiv 2602.11419)](https://arxiv.org/abs/2602.11419) · no public code found
 
-**MLE / probabilistic**
-[Gomez-Rodriguez 2010 KDD, NetInf (arXiv 1006.0234)](https://arxiv.org/abs/1006.0234) · [code](https://snap.stanford.edu/netinf/) ·
-[Gomez-Rodriguez 2011 ICML, NETRATE (arXiv 1105.0697)](https://arxiv.org/abs/1105.0697) · [code](https://github.com/Networks-Learning/netrate) ·
-[Prakash 2012 ICDM, NETSLEUTH](https://faculty.cc.gatech.edu/~badityap/papers/netsleuth-icdm12.pdf) · [IEEE](https://ieeexplore.ieee.org/document/6413786) · no public code found ·
-[Sefer & Kingsford 2014 ICDM, DHREC](https://www.cs.cmu.edu/~ckingsf/software/dhrec/icdm2014.pdf) · [KAIS 2016](https://link.springer.com/article/10.1007/s10115-015-0904-x) · [project page](http://www.cs.cmu.edu/~ckingsf/research/3cde/paper.html) ·
-[Farajtabar 2015 AISTATS, Back to the Past (arXiv 1501.06582)](https://arxiv.org/abs/1501.06582) · [PMLR](http://proceedings.mlr.press/v38/farajtabar15.pdf) · no public code found ·
-[Sundareisan 2015 SDM, Hidden Hazards / NetFill (DOI 10.1137/1.9781611974010.47)](https://doi.org/10.1137/1.9781611974010.47) (403 to bots) · no public code found ·
-[Chen 2016 TNSE, CRI (DOI 10.1109/TNSE.2016.2523804)](https://doi.org/10.1109/TNSE.2016.2523804) · no public code found ·
-[Zhu, Chen & Ying 2017 AAAI, Catch'Em All / OJC (arXiv 1611.06963)](https://arxiv.org/abs/1611.06963) · [AAAI](https://ojs.aaai.org/index.php/AAAI/article/view/10746) · no public code found ·
-[Chen, Tong & Ying 2019 TKDE, Inferring Full Diffusion History from Partial Timestamps (DOI 10.1109/TKDE.2019.2905210)](https://doi.org/10.1109/TKDE.2019.2905210) · no public code found
+**MLE / probabilistic** [Gomez-Rodriguez 2010 KDD, NetInf (arXiv 1006.0234)](https://arxiv.org/abs/1006.0234) · [code](https://snap.stanford.edu/netinf/) · [Gomez-Rodriguez 2011 ICML, NETRATE (arXiv 1105.0697)](https://arxiv.org/abs/1105.0697) · [code](https://github.com/Networks-Learning/netrate) · [Prakash 2012 ICDM, NETSLEUTH](https://faculty.cc.gatech.edu/~badityap/papers/netsleuth-icdm12.pdf) · [IEEE](https://ieeexplore.ieee.org/document/6413786) · no public code found · [Sefer & Kingsford 2014 ICDM, DHREC](https://www.cs.cmu.edu/~ckingsf/software/dhrec/icdm2014.pdf) · [KAIS 2016](https://link.springer.com/article/10.1007/s10115-015-0904-x) · [project page](http://www.cs.cmu.edu/~ckingsf/research/3cde/paper.html) · [Farajtabar 2015 AISTATS, Back to the Past (arXiv 1501.06582)](https://arxiv.org/abs/1501.06582) · [PMLR](http://proceedings.mlr.press/v38/farajtabar15.pdf) · no public code found · [Sundareisan 2015 SDM, Hidden Hazards / NetFill (DOI 10.1137/1.9781611974010.47)](https://doi.org/10.1137/1.9781611974010.47) (403 to bots) · no public code found · [Chen 2016 TNSE, CRI (DOI 10.1109/TNSE.2016.2523804)](https://doi.org/10.1109/TNSE.2016.2523804) · no public code found · [Zhu, Chen & Ying 2017 AAAI, Catch'Em All / OJC (arXiv 1611.06963)](https://arxiv.org/abs/1611.06963) · [AAAI](https://ojs.aaai.org/index.php/AAAI/article/view/10746) · no public code found · [Chen, Tong & Ying 2019 TKDE, Inferring Full Diffusion History from Partial Timestamps (DOI 10.1109/TKDE.2019.2905210)](https://doi.org/10.1109/TKDE.2019.2905210) · no public code found
 
-**Learning-based**
-[BRITS (arXiv 1805.10572)](https://arxiv.org/abs/1805.10572) · [code](https://github.com/caow13/BRITS) ·
-[GRIN (arXiv 2108.00298)](https://arxiv.org/abs/2108.00298) · [code](https://github.com/Graph-Machine-Learning-Group/grin) ·
-[SPIN (arXiv 2205.13479)](https://arxiv.org/abs/2205.13479) · [code](https://github.com/Graph-Machine-Learning-Group/spin) ·
-[SL-VAE (KDD 2022)](https://dl.acm.org/doi/10.1145/3534678.3539267) (403 to bots) · [code](https://github.com/triplej0079/SLVAE) ·
-[Deep Demixing / DDMIX (arXiv 2011.09583)](https://arxiv.org/abs/2011.09583) · [journal version (arXiv 2306.07938)](https://arxiv.org/abs/2306.07938) · [code](https://github.com/gojkoc54/Deep_demixing) ·
-[DDMSL (NeurIPS 2023)](https://proceedings.neurips.cc/paper_files/paper/2023/hash/46ab9d9645b6975b947231ddb48da1ab-Abstract-Conference.html) · [OpenReview](https://openreview.net/forum?id=5Fr8Nwi5KF) · no public code found ·
-[DITTO (arXiv 2306.00488)](https://arxiv.org/abs/2306.00488) · [ACM](https://dl.acm.org/doi/abs/10.1145/3580305.3599488) · [code](https://github.com/q-rz/KDD23-DITTO) ·
-[PGSL (ESWA 2024, DOI 10.1016/j.eswa.2023.122028)](https://doi.org/10.1016/j.eswa.2023.122028) · no public code found ·
-[SIDSL (arXiv 2502.17928)](https://arxiv.org/abs/2502.17928) · no public code found ·
-[DIPT (arXiv 2503.00646)](https://arxiv.org/abs/2503.00646) · no public code found ·
-[Learning hidden cascades via classification (arXiv 2505.11228)](https://arxiv.org/abs/2505.11228) · no public code found
+**Learning-based** [BRITS (arXiv 1805.10572)](https://arxiv.org/abs/1805.10572) · [code](https://github.com/caow13/BRITS) · [GRIN (arXiv 2108.00298)](https://arxiv.org/abs/2108.00298) · [code](https://github.com/Graph-Machine-Learning-Group/grin) · [SPIN (arXiv 2205.13479)](https://arxiv.org/abs/2205.13479) · [code](https://github.com/Graph-Machine-Learning-Group/spin) · [SL-VAE (KDD 2022)](https://dl.acm.org/doi/10.1145/3534678.3539267) (403 to bots) · [code](https://github.com/triplej0079/SLVAE) · [Deep Demixing / DDMIX (arXiv 2011.09583)](https://arxiv.org/abs/2011.09583) · [journal version (arXiv 2306.07938)](https://arxiv.org/abs/2306.07938) · [code](https://github.com/gojkoc54/Deep_demixing) · [DDMSL (NeurIPS 2023)](https://proceedings.neurips.cc/paper_files/paper/2023/hash/46ab9d9645b6975b947231ddb48da1ab-Abstract-Conference.html) · [OpenReview](https://openreview.net/forum?id=5Fr8Nwi5KF) · no public code found · [DITTO (arXiv 2306.00488)](https://arxiv.org/abs/2306.00488) · [ACM](https://dl.acm.org/doi/abs/10.1145/3580305.3599488) · [code](https://github.com/q-rz/KDD23-DITTO) · [PGSL (ESWA 2024, DOI 10.1016/j.eswa.2023.122028)](https://doi.org/10.1016/j.eswa.2023.122028) · no public code found · [SIDSL (arXiv 2502.17928)](https://arxiv.org/abs/2502.17928) · no public code found · [DIPT (arXiv 2503.00646)](https://arxiv.org/abs/2503.00646) · no public code found · [Learning hidden cascades via classification (arXiv 2505.11228)](https://arxiv.org/abs/2505.11228) · no public code found
 
-**Theory / learnability**
-[Amin, Heidari & Kearns 2014 ICML, Learning from Contagion (Without Timestamps)](https://proceedings.mlr.press/v32/amin14.html) · [PDF](https://www.cis.upenn.edu/~mkearns/papers/LearningFromContagion.pdf) · no public code found ·
-[He, Xu, Kempe & Liu 2016 NeurIPS, Learning Influence Functions from Incomplete Observations (arXiv 1611.02305)](https://arxiv.org/abs/1611.02305) · [PDF](https://proceedings.neurips.cc/paper/2016/file/68b1fbe7f16e4ae3024973f12f3cb313-Paper.pdf) · no public code found ·
-Milling, Caramanis, Mannor & Shakkottai 2012 SIGMETRICS, *Network forensics: random infection vs spreading epidemic* — no stable public PDF found; no public code found
+**Theory / learnability** [Amin, Heidari & Kearns 2014 ICML, Learning from Contagion (Without Timestamps)](https://proceedings.mlr.press/v32/amin14.html) · [PDF](https://www.cis.upenn.edu/~mkearns/papers/LearningFromContagion.pdf) · no public code found · [He, Xu, Kempe & Liu 2016 NeurIPS, Learning Influence Functions from Incomplete Observations (arXiv 1611.02305)](https://arxiv.org/abs/1611.02305) · [PDF](https://proceedings.neurips.cc/paper/2016/file/68b1fbe7f16e4ae3024973f12f3cb313-Paper.pdf) · no public code found · Milling, Caramanis, Mannor & Shakkottai 2012 SIGMETRICS, *Network forensics: random infection vs spreading epidemic* — no stable public PDF found; no public code found
 
-**Data**
-[ISI/Lerman Digg 2009](https://www.isi.edu/~lerman/downloads/digg2009.html) ·
-[SNAP MemeTracker](https://snap.stanford.edu/data/memetracker9.html) ·
-[SNAP twitter7](https://snap.stanford.edu/data/twitter7.html) ·
-[SNAP Higgs Twitter](https://snap.stanford.edu/data/higgs-twitter.html) ·
-[SNAP Oregon-2](http://snap.stanford.edu/data/Oregon-2.html) ·
-[NetRepo rt-pol](https://networkrepository.com/rt-pol.php) ·
-[NetRepo ia-email-univ](http://networkrepository.com/ia-email-univ.php) ·
-[NetRepo ia-fb-messages](http://networkrepository.com/ia-fb-messages.php) ·
-[KONECT sociopatterns-infectious](http://konect.cc/networks/sociopatterns-infectious/) ·
-[netdiffuseR brfarmers](https://usccana.github.io/netdiffuseR/reference/brfarmers.html) ·
-[CMU Enron](https://www.cs.cmu.edu/~enron/) ·
-[Opsahl datasets](https://toreopsahl.com/datasets/) ·
-[Xiao's cascade-dataset index](https://github.com/xiaohan2012/cascade-dataset)
+**Data** [ISI/Lerman Digg 2009](https://www.isi.edu/~lerman/downloads/digg2009.html) · [SNAP MemeTracker](https://snap.stanford.edu/data/memetracker9.html) · [SNAP twitter7](https://snap.stanford.edu/data/twitter7.html) · [SNAP Higgs Twitter](https://snap.stanford.edu/data/higgs-twitter.html) · [SNAP Oregon-2](http://snap.stanford.edu/data/Oregon-2.html) · [NetRepo rt-pol](https://networkrepository.com/rt-pol.php) · [NetRepo ia-email-univ](http://networkrepository.com/ia-email-univ.php) · [NetRepo ia-fb-messages](http://networkrepository.com/ia-fb-messages.php) · [KONECT sociopatterns-infectious](http://konect.cc/networks/sociopatterns-infectious/) · [netdiffuseR brfarmers](https://usccana.github.io/netdiffuseR/reference/brfarmers.html) · [CMU Enron](https://www.cs.cmu.edu/~enron/) · [Opsahl datasets](https://toreopsahl.com/datasets/) · [Xiao's cascade-dataset index](https://github.com/xiaohan2012/cascade-dataset)
 
 ---
 
@@ -872,12 +572,5 @@ Honest list of what this review could **not** establish.
 - **Prost and Hebrew have no independent public source** found — both reach us via DITTO's repo. Their provenance is unverified.
 - **No public Telegram, Reddit, APS-citation, or SMS/call-log corpus with who-infected-whom labels was found** in this literature. If one exists it is not cited by any of the eight papers in §7.
 - **Android / Christianity StackExchange** appear in cascade-*prediction* work, not in any reconstruction paper surveyed — see [`cascade_prediction.md`](cascade_prediction.md).
-- **Our pipeline has no transmission edge to discard.** `build_record` stores
-  `state`/`next_state` but not who infected whom — and neither does the layer
-  below it: NDlib's `IndependentCascadesModel.iteration` flips `v` to infected
-  without recording the responsible `u` [verified, read from the installed
-  source]. So tree-level metrics (§8.1) cannot be scored today, and getting them
-  needs an NDlib subclass, not a record field. See §9 item 9 for the two
-  subtleties (parent selection is biased by node order; LT has a parent *set*,
-  not a parent). This is the one blocking gap on our side.
+- **Our pipeline has no transmission edge to discard.** `build_record` stores `state`/`next_state` but not who infected whom — and neither does the layer below it: NDlib's `IndependentCascadesModel.iteration` flips `v` to infected without recording the responsible `u` [verified, read from the installed source]. So tree-level metrics (§8.1) cannot be scored today, and getting them needs an NDlib subclass, not a record field. See §9 item 9 for the two subtleties (parent selection is biased by node order; LT has a parent *set*, not a parent). This is the one blocking gap on our side.
 - **No published cascade-reconstruction baseline exists for Jazz, NetHEPT, NetPHY, LastFM, wiki-Vote, NetScience or `sbm`.** Results there would be self-contained, exactly as with SBM in the IM file.

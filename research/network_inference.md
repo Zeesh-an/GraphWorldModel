@@ -1,14 +1,6 @@
 # Diffusion Network Inference — Prior Work, Datasets, and Published Results
 
-Recovering a **latent influence network** from nothing but activation traces:
-given cascades `{(node, infection time)}` and no adjacency at all, infer which
-edges exist and how fast each one transmits. This is the _inverse_ of everything
-else in this folder — here `G` is the unknown, not the condition. Two sub-tasks
-travel together and are often conflated: **edge existence** (a discrete recovery
-problem, scored with precision/recall/F1/AUC/break-even) and **edge rate or
-weight** (a continuous estimation problem, scored with MAE/MSE/KL). The
-headline theoretical result of the field is a **sample complexity**: how many
-cascades you need before recovery is possible at all.
+Recovering a **latent influence network** from nothing but activation traces: given cascades `{(node, infection time)}` and no adjacency at all, infer which edges exist and how fast each one transmits. This is the _inverse_ of everything else in this folder — here `G` is the unknown, not the condition. Two sub-tasks travel together and are often conflated: **edge existence** (a discrete recovery problem, scored with precision/recall/F1/AUC/break-even) and **edge rate or weight** (a continuous estimation problem, scored with MAE/MSE/KL). The headline theoretical result of the field is a **sample complexity**: how many cascades you need before recovery is possible at all.
 
 All URLs in this file returned the stated HTTP code on **2026-07-28**.
 
@@ -23,38 +15,19 @@ All URLs in this file returned the stated HTTP code on **2026-07-28**.
 | **[figure]**   | Read off a plotted figure — the paper published no table. Approximate, direction only.                               |
 | **[claim]**    | Stated in prose by a paper or a secondary source; not cross-checked against a file or table.                         |
 
-Every number in this file was extracted with `pdftotext -layout` from the PDF
-and read out of the paper's own table. **No number here came from a WebFetch
-summary or an automated summarizer.** This literature is unusually prone to
-that failure mode because most of its results are published _only as
-precision-recall figures_ — there are far fewer real tables here than in the IM
-literature, so the temptation to let a summarizer "read" a plot is high. Where
-a paper published no table, the row is tagged **[figure]** and states direction
-only.
+Every number in this file was extracted with `pdftotext -layout` from the PDF and read out of the paper's own table. **No number here came from a WebFetch summary or an automated summarizer.** This literature is unusually prone to that failure mode because most of its results are published _only as precision-recall figures_ — there are far fewer real tables here than in the IM literature, so the temptation to let a summarizer "read" a plot is high. Where a paper published no table, the row is tagged **[figure]** and states direction only.
 
-**Edge-count convention.** Undirected graphs are quoted as _undirected edges_;
-directed graphs as _arcs_. Our loaders report `adjacency.nnz`, which for a
-symmetrized undirected graph is **2× the undirected edge count**. Synthetic
-Kronecker benchmarks in this literature are **directed**, so their quoted edge
-counts are arcs.
+**Edge-count convention.** Undirected graphs are quoted as _undirected edges_; directed graphs as _arcs_. Our loaders report `adjacency.nnz`, which for a symmetrized undirected graph is **2× the undirected edge count**. Synthetic Kronecker benchmarks in this literature are **directed**, so their quoted edge counts are arcs.
 
 ---
 
 ## 1. Task definition
 
-**Given.** A set of cascades `C = {c_1, …, c_n}`. Each cascade is an `N`-vector
-of infection times `t^c = (t^c_1, …, t^c_N)`, where `t^c_i ∈ [0, T]` is when node
-`i` was activated in cascade `c`, and `t^c_i = ∞` for nodes never activated
-inside the observation window `T`. **We observe _when_, never _from whom_.**
+**Given.** A set of cascades `C = {c_1, …, c_n}`. Each cascade is an `N`-vector of infection times `t^c = (t^c_1, …, t^c_N)`, where `t^c_i ∈ [0, T]` is when node `i` was activated in cascade `c`, and `t^c_i = ∞` for nodes never activated inside the observation window `T`. **We observe _when_, never _from whom_.**
 
-**Recover.** The directed edge set `E*` and, in the continuous-time variants,
-the per-edge transmission rate `α*_{j→i}` (or probability `A*_{ji}`).
+**Recover.** The directed edge set `E*` and, in the continuous-time variants, the per-edge transmission rate `α*_{j→i}` (or probability `A*_{ji}`).
 
-**The generative model** that almost every method assumes is the
-_continuous-time independent cascade_ (CIC): once `j` is infected at `t_j`, it
-draws a transmission delay from a pairwise transmission function
-`f(t_i | t_j; α_{ji})`, and `i` takes the _minimum_ over all its infected
-parents. The three standard parametric choices are:
+**The generative model** that almost every method assumes is the _continuous-time independent cascade_ (CIC): once `j` is infected at `t_j`, it draws a transmission delay from a pairwise transmission function `f(t_i | t_j; α_{ji})`, and `i` takes the _minimum_ over all its infected parents. The three standard parametric choices are:
 
 | Model           | Transmission density `f(t_i \| t_j; α)` | Hazard `H(t_i \| t_j; α)` |
 | --------------- | --------------------------------------- | ------------------------- |
@@ -64,13 +37,7 @@ parents. The three standard parametric choices are:
 
 [verified, NETRATE Table 1 / InfoPath Tables 1–2]
 
-**Why the problem is hard, in one sentence:** the likelihood of a cascade must
-sum over every possible propagation tree consistent with the observed times, and
-the number of such trees is super-exponential in the cascade length. The whole
-methodological history of this field is different ways to dodge that sum —
-take only the _most likely_ tree (NetInf), take _all_ trees via Kirchhoff's
-matrix-tree theorem (MultiTree), or reformulate so the sum has a closed form
-(NETRATE, ConNIe).
+**Why the problem is hard, in one sentence:** the likelihood of a cascade must sum over every possible propagation tree consistent with the observed times, and the number of such trees is super-exponential in the cascade length. The whole methodological history of this field is different ways to dodge that sum — take only the _most likely_ tree (NetInf), take _all_ trees via Kirchhoff's matrix-tree theorem (MultiTree), or reformulate so the sum has a closed form (NETRATE, ConNIe).
 
 ### 1.1 Variants
 
@@ -87,27 +54,17 @@ matrix-tree theorem (MultiTree), or reformulate so the sum has a closed form
 
 ### 1.2 The evaluation loop this field actually runs
 
-Because ground truth is unobservable on real cascades, essentially every paper
-in §3–§4 does the same thing: **generate a synthetic network with known `E*`
-(Kronecker or Forest Fire), simulate cascades on it, infer, and score against
-`E*`.** Real MemeTracker experiments then substitute the _hyperlink graph_ as a
-proxy ground truth. Both protocols are catalogued in §8, and the Kronecker
-parameter matrices — the reproducible core of the benchmark — are in §6.3.
+Because ground truth is unobservable on real cascades, essentially every paper in §3–§4 does the same thing: **generate a synthetic network with known `E*` (Kronecker or Forest Fire), simulate cascades on it, infer, and score against `E*`.** Real MemeTracker experiments then substitute the _hyperlink graph_ as a proxy ground truth. Both protocols are catalogued in §8, and the Kronecker parameter matrices — the reproducible core of the benchmark — are in §6.3.
 
 ---
 
 ## 2. Fit with our methodology
 
-**Verdict: ⚠️ moderate, and the reason is architectural, not incidental.** This
-task inverts `G`'s role. Everywhere else in this folder `G` is a _condition_ the
-model reads; here `G` is the _variable being solved for_. That is a real cost
-and it is worth being precise about exactly where our existing machinery
-carries us and exactly where it stops.
+**Verdict: ⚠️ moderate, and the reason is architectural, not incidental.** This task inverts `G`'s role. Everywhere else in this folder `G` is a _condition_ the model reads; here `G` is the _variable being solved for_. That is a real cost and it is worth being precise about exactly where our existing machinery carries us and exactly where it stops.
 
 ### 2.1 What our structured IC head already gives us — for free
 
-`world_model/wm_model.py::ICTransmissionHead` predicts a **per-edge**
-transmission propensity and derives the state update from it:
+`world_model/wm_model.py::ICTransmissionHead` predicts a **per-edge** transmission propensity and derives the state update from it:
 
 ```
 q_uv     = sigmoid(MLP([h_u, h_v, w_uv]))
@@ -116,29 +73,13 @@ p_new(v) = 1 − Π_{u→v} (1 − q_uv · frontier_u)
 
 Three consequences matter here:
 
-1. **We already have a per-edge parameter with the right semantics.** `q_uv` is
-   exactly the `A_{uv}` that ConNIe estimates and the discretisation of the
-   `α_{uv}` that NETRATE estimates. Our `structured_oracle` variant sets
-   `q = edge_weight` (the true IC probability) and validates that the structural
-   form is correct — which is the same sanity check ConNIe's MSE experiment
-   runs.
-2. **`structured_residual` is literally a rate-refinement estimator.**
-   `q = sigmoid(logit(w) + MLP([h_u, h_v, w]))` anchors on the current edge
-   weight and learns a correction. Zero correction = the oracle. Point a
-   likelihood at it and it becomes a _transmission-rate estimator_ on a known
-   support — the ConNIe/NETRATE weight sub-problem, restricted to edges we
-   already believe in.
-3. **`GraphInput.edge_weight` is a plain `torch.Tensor` `(E,)`.** Nothing stops
-   `edge_weight.requires_grad_(True)` and taking `∂loss/∂edge_weight`. The BCE
-   loss flows through `torch.log1p(-gated)` → `scatter_add_` → `p_new`, all
-   differentiable. **Continuous edge-weight recovery is a solved plumbing
-   problem for us.**
+1. **We already have a per-edge parameter with the right semantics.** `q_uv` is exactly the `A_{uv}` that ConNIe estimates and the discretisation of the `α_{uv}` that NETRATE estimates. Our `structured_oracle` variant sets `q = edge_weight` (the true IC probability) and validates that the structural form is correct — which is the same sanity check ConNIe's MSE experiment runs.
+2. **`structured_residual` is literally a rate-refinement estimator.** `q = sigmoid(logit(w) + MLP([h_u, h_v, w]))` anchors on the current edge weight and learns a correction. Zero correction = the oracle. Point a likelihood at it and it becomes a _transmission-rate estimator_ on a known support — the ConNIe/NETRATE weight sub-problem, restricted to edges we already believe in.
+3. **`GraphInput.edge_weight` is a plain `torch.Tensor` `(E,)`.** Nothing stops `edge_weight.requires_grad_(True)` and taking `∂loss/∂edge_weight`. The BCE loss flows through `torch.log1p(-gated)` → `scatter_add_` → `p_new`, all differentiable. **Continuous edge-weight recovery is a solved plumbing problem for us.**
 
 ### 2.2 Where it stops — edge _existence_ is discrete
 
-Everything above optimises weights **on a support that `edge_index` fixes in
-advance**. `edge_index` is an integer tensor; there is no gradient into it. To
-recover _which_ edges exist we would need one of:
+Everything above optimises weights **on a support that `edge_index` fixes in advance**. `edge_index` is an integer tensor; there is no gradient into it. To recover _which_ edges exist we would need one of:
 
 | Route                                                                                                       | What it costs                                                                                      | Precedent                                 |
 | ----------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------- |
@@ -147,29 +88,16 @@ recover _which_ edges exist we would need one of:
 | **Greedy submodular edge addition** — add the edge with the highest marginal log-likelihood gain, `k` times | Not gradient-based at all; a different program from our training loop                              | NetInf, MultiTree                         |
 | **Gumbel/concrete edge sampler** — a learned Bernoulli per pair, reparameterised                            | Genuinely new machinery, and still `O(N²)`                                                         | GSL literature (§4.5)                     |
 
-**Honest summary: our head buys us the rate half of the problem and none of the
-existence half.** The rate half is the half the theory papers call "much
-harder" (NETRATE: "estimating transmission rates is considerably harder than
-simply discovering edges" — §5.2), so this is not a trivial share. But claiming
-the task without an existence mechanism would be claiming half of it.
+**Honest summary: our head buys us the rate half of the problem and none of the existence half.** The rate half is the half the theory papers call "much harder" (NETRATE: "estimating transmission rates is considerably harder than simply discovering edges" — §5.2), so this is not a trivial share. But claiming the task without an existence mechanism would be claiming half of it.
 
 ### 2.3 The action-op collision — `add_edge` as _search_, not _intervention_
 
-Our five ops include `add_edge`, `remove_edge`, `set_edge_weight`. That is
-**exactly this task's action vocabulary**, and the coincidence is tempting.
-It is also the one place to be careful:
+Our five ops include `add_edge`, `remove_edge`, `set_edge_weight`. That is **exactly this task's action vocabulary**, and the coincidence is tempting. It is also the one place to be careful:
 
-- In IM/blocking/CND, an edge op is an **intervention**: the world changes, and
-  `s_{t+1}` changes because of it. `T_exo` is real.
-- In network inference, an edge op is a **search move**: the world is fixed and
-  unknown, and we are editing our _hypothesis_ about it. Nothing about the
-  observed cascade changes when we propose an edge.
+- In IM/blocking/CND, an edge op is an **intervention**: the world changes, and `s_{t+1}` changes because of it. `T_exo` is real.
+- In network inference, an edge op is a **search move**: the world is fixed and unknown, and we are editing our _hypothesis_ about it. Nothing about the observed cascade changes when we propose an edge.
 
-A coding agent proposing `add_edge(u, v, w)` moves is therefore doing
-_hypothesis search over `G`_, scored by cascade likelihood — not planning. The
-`(operator, arguments)` shape transfers; the semantics of `T_exo` do not. Worth
-stating explicitly in any writeup, because a reader who sees the same five ops
-will assume the former.
+A coding agent proposing `add_edge(u, v, w)` moves is therefore doing _hypothesis search over `G`_, scored by cascade likelihood — not planning. The `(operator, arguments)` shape transfers; the semantics of `T_exo` do not. Worth stating explicitly in any writeup, because a reader who sees the same five ops will assume the former.
 
 ### 2.4 Metrics we would have to add
 
@@ -186,9 +114,7 @@ Nothing in `wm_eval.py` scores an edge set. The field's metric suite is:
 | **KL divergence**           | between estimated and true transmission _function_    | KernelCascade                   |
 | **Sample complexity**       | #cascades to reach a target recovery probability      | Netrapalli, Abrahao, Daneshmand |
 
-The last one is the headline in the theory papers and the one our pipeline is
-best positioned to measure empirically — `--num-graphs` × rollouts already
-sweeps cascade counts.
+The last one is the headline in the theory papers and the one our pipeline is best positioned to measure empirically — `--num-graphs` × rollouts already sweeps cascade counts.
 
 ### 2.5 Cost estimate and ranking
 
@@ -200,22 +126,13 @@ sweeps cascade counts.
 | Survival / ℓ1 likelihood loss         | **M**  | Replaces BCE; not compatible with the current teacher-forced loop                                                   |
 | Edge-set metrics (P/R/F1/BEP/AUC/MAE) | **S**  | Self-contained additions to `wm_metrics.py`                                                                         |
 
-**Ranking against the other candidate tasks:** below `source_localization`
-(free — inverts the model we already have), below `influence_estimation`
-(already computed), below `influence_blocking` / `epidemic_control` /
-`cascade_reconstruction` (all keep `G` as a condition), and roughly level with
-`cascade_prediction` — both need data our simulator does not currently emit.
-**Recommended role: a §-length robustness/limitation section, or a
-weights-only experiment on a fixed support**, not a headline task. §9 spells
-out the cheap version.
+**Ranking against the other candidate tasks:** below `source_localization` (free — inverts the model we already have), below `influence_estimation` (already computed), below `influence_blocking` / `epidemic_control` / `cascade_reconstruction` (all keep `G` as a condition), and roughly level with `cascade_prediction` — both need data our simulator does not currently emit. **Recommended role: a §-length robustness/limitation section, or a weights-only experiment on a fixed support**, not a headline task. §9 spells out the cheap version.
 
 ---
 
 ## 3. Classical and heuristic methods
 
-The likelihood-based line, in the order it was published. **All four
-Gomez-Rodriguez-line code releases still resolve** (verified 2026-07-28,
-HTTP 206 on a ranged GET — see §3.1).
+The likelihood-based line, in the order it was published. **All four Gomez-Rodriguez-line code releases still resolve** (verified 2026-07-28, HTTP 206 on a ranged GET — see §3.1).
 
 | Method                                   | Year | Venue | Idea                                                                                                                                                                                                           | Paper                                                                                                                                                | Code                                                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------- | ---- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -234,8 +151,7 @@ HTTP 206 on a ranged GET — see §3.1).
 
 ### 3.1 Code-release status — verified
 
-Because the task brief singled this out: **the Gomez-Rodriguez / SNAP releases
-are all alive.** Checked with `curl -r 0-500 -L`:
+Because the task brief singled this out: **the Gomez-Rodriguez / SNAP releases are all alive.** Checked with `curl -r 0-500 -L`:
 
 | Artifact               | URL                                                                 | Status 2026-07-28 |
 | ---------------------- | ------------------------------------------------------------------- | ----------------- |
@@ -246,16 +162,11 @@ are all alive.** Checked with `curl -r 0-500 -L`:
 | ConNIe (MATLAB)        | `http://snap.stanford.edu/connie/connie_matlab.zip`                 | **200** ✅        |
 | SNAP `examples/netinf` | `https://github.com/snap-stanford/snap/tree/master/examples/netinf` | **200** ✅        |
 
-⚠️ **One dead link worth recording:** the NetInf landing page still points at
-`http://www.stanford.edu/~manuelgr/netrate/` for NETRATE — that URL now
-**404s**. The live NETRATE home moved to
-`http://people.tuebingen.mpg.de/manuelgr/netrate/`, which the InfoPath page
-links correctly. Anyone following the SNAP page's own link will hit a dead end.
+⚠️ **One dead link worth recording:** the NetInf landing page still points at `http://www.stanford.edu/~manuelgr/netrate/` for NETRATE — that URL now **404s**. The live NETRATE home moved to `http://people.tuebingen.mpg.de/manuelgr/netrate/`, which the InfoPath page links correctly. Anyone following the SNAP page's own link will hit a dead end.
 
 ### 3.2 Theory and sample complexity
 
-The results this literature is actually cited for. `d` = node in-degree,
-`N` (or `n`) = number of nodes, `Δ` = maximum degree, `D` = super-graph degree.
+The results this literature is actually cited for. `d` = node in-degree, `N` (or `n`) = number of nodes, `Δ` = maximum degree, `D` = super-graph degree.
 
 | Result                                       | Bound                                                                                        | Setting                               | Source                                                                                     |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------ |
@@ -271,18 +182,9 @@ The results this literature is actually cited for. `d` = node in-degree,
 | Uniform-random sources                       | `Ω(d⁹ log² d log N)` cascades                                                                | ibid.                                 | [verified, §1]                                                                             |
 | NETRATE's own bound (as cited by Daneshmand) | `O(N d log N)` cascades                                                                      | continuous-time                       | [verified, Daneshmand §1]                                                                  |
 
-**The two bounds to remember:** `Ω(d log n)` is the floor, and `O(d² log n)` /
-`O(d³ log N)` is what practical estimators achieve — i.e. **polynomial in local
-degree, only logarithmic in network size.** That is the reason this field
-believes inference is tractable on large graphs at all.
+**The two bounds to remember:** `Ω(d log n)` is the floor, and `O(d² log n)` / `O(d³ log N)` is what practical estimators achieve — i.e. **polynomial in local degree, only logarithmic in network size.** That is the reason this field believes inference is tractable on large graphs at all.
 
-Additional theory: [Khim & Loh 2018, _A theory of maximum likelihood for
-weighted infection graphs_](https://arxiv.org/abs/1806.05273) (MLE and
-hypothesis testing for _weighted_ infection graphs — treats "did this cascade
-spread over graph `G`?" as a testing problem rather than a recovery one);
-[Hoffmann & Caramanis 2019, _Learning Graphs from Noisy Epidemic
-Cascades_](https://arxiv.org/abs/1903.02650) (corrupted / missing infection
-times).
+Additional theory: [Khim & Loh 2018, _A theory of maximum likelihood for weighted infection graphs_](https://arxiv.org/abs/1806.05273) (MLE and hypothesis testing for _weighted_ infection graphs — treats "did this cascade spread over graph `G`?" as a testing problem rather than a recovery one); [Hoffmann & Caramanis 2019, _Learning Graphs from Noisy Epidemic Cascades_](https://arxiv.org/abs/1903.02650) (corrupted / missing infection times).
 
 ---
 
@@ -290,11 +192,7 @@ times).
 
 ### 4.1 Point-process / Hawkes network inference
 
-The Hawkes line solves a _sibling_ problem: nodes fire **repeatedly**, and the
-network is the `N×N` **infectivity matrix** `A` in
-`λ_i(t) = μ_i + Σ_j Σ_{t_j<t} a_{ij} g(t − t_j)`. Recovering `A` is edge-weight
-inference under a different generative model. Directly relevant to us because
-`a_{ij}` plays exactly the role our `q(u→v)` plays.
+The Hawkes line solves a _sibling_ problem: nodes fire **repeatedly**, and the network is the `N×N` **infectivity matrix** `A` in `λ_i(t) = μ_i + Σ_j Σ_{t_j<t} a_{ij} g(t − t_j)`. Recovering `A` is edge-weight inference under a different generative model. Directly relevant to us because `a_{ij}` plays exactly the role our `q(u→v)` plays.
 
 | Method                              | Year | Venue   | Idea                                                                                                                                                                                                                                                        | Paper                                                      | Code                                                                                        |
 | ----------------------------------- | ---- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
@@ -316,27 +214,16 @@ inference under a different generative model. Directly relevant to us because
 | **FIM** ⭐                  | 2024 | **WWW**  | Treats diffusion as a **continuous-time dynamical system**; approximates the propagation operator, trains a dense parameter matrix `A` with a per-node BCE loss over simulated states, then thresholds `A ≥ λ*` to get edges. Adds a sampling trick (SDTS) for influence estimation. **The only method in this review that runs on ≥10K-node real cascade data.** | [arXiv 2403.02867](https://arxiv.org/abs/2403.02867) | [github.com/kkhuang81/FIM](https://github.com/kkhuang81/FIM)                                                      |
 | **Debiased Jacobian ML**    | 2026 | preprint | Recovers the network from cascade data by estimating the **Jacobian** of the transition map with a debiased ML estimator; frames inference as a causal-estimation problem with inference guarantees (CIs on edges).                                                                                                                                               | [arXiv 2606.07483](https://arxiv.org/abs/2606.07483) | no public code found                                                                                              |
 
-**This is the paper the project note's "FIM" means.** Keke Huang, Ruize Gao,
-Bogdan Cautis, Xiaokui Xiao, _Scalable Continuous-time Diffusion Framework for
-Network Inference and Influence Estimation_, WWW 2024. Its Table 5 (§5.6) is
-the single most usable modern baseline table in this file: F1 on six synthetic
-Kronecker graphs with published ground truth and published generator
-parameters.
+**This is the paper the project note's "FIM" means.** Keke Huang, Ruize Gao, Bogdan Cautis, Xiaokui Xiao, _Scalable Continuous-time Diffusion Framework for Network Inference and Influence Estimation_, WWW 2024. Its Table 5 (§5.6) is the single most usable modern baseline table in this file: F1 on six synthetic Kronecker graphs with published ground truth and published generator parameters.
 
 ### 4.4 Discrete-time IC probability learning — cross-link
 
-The Saito-EM and Goyal-et-al. line (§3) learns `p(u→v)` from **action logs**
-with no continuous clock. It is catalogued authoritatively in
-[`influence_estimation.md`](influence_estimation.md), because in that literature
-the learned probabilities are an _input_ to spread estimation rather than the
-object of study. The distinction that matters for us:
+The Saito-EM and Goyal-et-al. line (§3) learns `p(u→v)` from **action logs** with no continuous clock. It is catalogued authoritatively in [`influence_estimation.md`](influence_estimation.md), because in that literature the learned probabilities are an _input_ to spread estimation rather than the object of study. The distinction that matters for us:
 
 - **Network inference proper** (§3, §4.1–4.3): the _support_ is unknown.
-- **Influence-probability learning** (Saito, Goyal): the support is **given**
-  (you have the social graph); only the weights are unknown.
+- **Influence-probability learning** (Saito, Goyal): the support is **given** (you have the social graph); only the weights are unknown.
 
-The second is a much easier problem, and — see §2.1 — it is the one our
-`structured_residual` head is already shaped for.
+The second is a much easier problem, and — see §2.1 — it is the one our `structured_residual` head is already shaped for.
 
 ### 4.5 Adjacent, explicitly not core
 
@@ -350,29 +237,17 @@ Flagged so nobody mistakes them for baselines:
 | **Link prediction**                                                                                                                       | Predicts missing edges from _observed_ edges. Network inference sees **zero** edges. See [`graph_completion.md`](graph_completion.md).                                                                    |
 | **Source localization**                                                                                                                   | Also inverts the forward model, but solves for the _seed set_ with `G` known. Much cheaper for us — see [`source_localization.md`](source_localization.md).                                               |
 
-**Transformer/VAE cascade→graph work:** this review found **no** established
-method that encodes raw cascades with a transformer or a VAE and decodes an
-adjacency matrix scored against ground-truth edges on the Kronecker benchmark.
-The neural line (§4.3) parameterises a dense matrix directly rather than
-generating one. Recorded as an open gap (§11).
+**Transformer/VAE cascade→graph work:** this review found **no** established method that encodes raw cascades with a transformer or a VAE and decodes an adjacency matrix scored against ground-truth edges on the Kronecker benchmark. The neural line (§4.3) parameterises a dense matrix directly rather than generating one. Recorded as an open gap (§11).
 
 ---
 
 ## 5. Published results
 
-Fewer real tables than the IM literature — most of this field publishes
-precision-recall _curves_. Everything below marked [verified] was read out of
-the paper's own table with `pdftotext -layout`; everything marked [figure] is
-direction-only.
+Fewer real tables than the IM literature — most of this field publishes precision-recall _curves_. Everything below marked [verified] was read out of the paper's own table with `pdftotext -layout`; everything marked [figure] is direction-only.
 
 ### 5.1 NetInf (TKDD) ⭐ — the field's one clean sample-complexity table
 
-**The most reproducible table in this file.** All networks: **1,024 nodes,
-1,446 edges** (directed). Exponential incubation, `α = 1`, `β` chosen per row so
-that mean cascade size `r/|C|` is neither tiny nor huge (`β ∈ (0.1, 0.6)`).
-`f` = fraction of true edges that participate in ≥1 cascade; `|C|` = number of
-cascades generated to reach that `f`; `r` = total edge transmissions (so mean
-cascade size = `r/|C|`).
+**The most reproducible table in this file.** All networks: **1,024 nodes, 1,446 edges** (directed). Exponential incubation, `α = 1`, `β` chosen per row so that mean cascade size `r/|C|` is neither tiny nor huge (`β ∈ (0.1, 0.6)`). `f` = fraction of true edges that participate in ≥1 cascade; `|C|` = number of cascades generated to reach that `f`; `r` = total edge transmissions (so mean cascade size = `r/|C|`).
 
 | Network                  | `f`  | `     | C      | `        | `r`      | **BEP** | **AUC** |
 | ------------------------ | ---- | ----- | ------ | -------- | -------- | ------- | ------- |
@@ -395,32 +270,15 @@ cascade size = `r/|C|`).
 
 [verified, TKDD Table II]
 
-**Read this table as a sample-complexity curve, because that is what it is.**
-Recovery is governed by _cascade coverage of the edge set_, not by raw cascade
-count: at `f = 0.5` every topology sits at BEP ≈ 0.31–0.39, and at `f = 0.99`
-every topology sits at BEP ≈ 0.92–0.98. **An edge that never transmitted leaves
-no trace and cannot be recovered** — this is the practical face of the
-`Ω(d log n)` lower bound in §3.2. Note also that the cost of reaching `f = 0.99`
-is topology-dependent: core-periphery needs 3,110 cascades, hierarchical needs
-5,078.
+**Read this table as a sample-complexity curve, because that is what it is.** Recovery is governed by _cascade coverage of the edge set_, not by raw cascade count: at `f = 0.5` every topology sits at BEP ≈ 0.31–0.39, and at `f = 0.99` every topology sits at BEP ≈ 0.92–0.98. **An edge that never transmitted leaves no trace and cannot be recovered** — this is the practical face of the `Ω(d log n)` lower bound in §3.2. Note also that the cost of reaching `f = 0.99` is topology-dependent: core-periphery needs 3,110 cascades, hierarchical needs 5,078.
 
-⚠️ **Internal inconsistency to be aware of:** Table II's caption says all
-networks have **1,446 edges**, but Fig. 5's caption describes the Forest Fire
-network as **1,024 nodes / 1,477 edges** [verified, both captions]. The gap is
-~2%; it does not change any conclusion, but do not quote "1,446" as though the
-paper were unambiguous.
+⚠️ **Internal inconsistency to be aware of:** Table II's caption says all networks have **1,446 edges**, but Fig. 5's caption describes the Forest Fire network as **1,024 nodes / 1,477 edges** [verified, both captions]. The gap is ~2%; it does not change any conclusion, but do not quote "1,446" as though the paper were unambiguous.
 
-**NetInf's optimality bound** [verified, TKDD §4.1]: at 2,000 inferred edges,
-the greedy solution is **≥ 97% of the (NP-hard) optimum** on synthetic data and
-**≥ 84%** on real data, via the online bound.
+**NetInf's optimality bound** [verified, TKDD §4.1]: at 2,000 inferred edges, the greedy solution is **≥ 97% of the (NP-hard) optimum** on synthetic data and **≥ 84%** on real data, via the online bound.
 
 ### 5.2 NETRATE (ICML 2011)
 
-Setup [verified, §4.1]: Kronecker networks **1,024 nodes / 2,048 edges**;
-Forest Fire **1,024 nodes / 2,422 edges** (the paper's own text reads "1,024
-edges and 2,422 edges" — a typo for nodes/edges). Rates drawn
-`α ∈ [0.01, 1]` for exponential and Rayleigh, `α ∈ [0.01, 2]` for power-law.
-Observation window `T = 10`. 5,000 cascades unless stated.
+Setup [verified, §4.1]: Kronecker networks **1,024 nodes / 2,048 edges**; Forest Fire **1,024 nodes / 2,422 edges** (the paper's own text reads "1,024 edges and 2,422 edges" — a typo for nodes/edges). Rates drawn `α ∈ [0.01, 1]` for exponential and Rayleigh, `α ∈ [0.01, 2]` for power-law. Observation window `T = 10`. 5,000 cascades unless stated.
 
 | Result                                                          | Value                                                                                                                           | Tier                   |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
@@ -431,24 +289,13 @@ Observation window `T = 10`. 5,000 cascades unless stated.
 | Runtime, single CPU, all incoming edges of one node             | **≈ 20 s** at 20,000 nodes                                                                                                      | [figure, Fig 3(c)]     |
 | Cluster scaling                                                 | 25 CPUs → **16,000 nodes / 32,000 edges in < 4 hours**                                                                          | [verified, §4.1 prose] |
 
-**The single most quotable sentence in this literature, for our purposes:**
-"Estimating transmission rates is considerably harder than simply discovering
-edges and therefore more cascades are needed for accurate estimates."
-[verified, §4.1]. That is the direct justification for §2's split verdict.
+**The single most quotable sentence in this literature, for our purposes:** "Estimating transmission rates is considerably harder than simply discovering edges and therefore more cascades are needed for accurate estimates." [verified, §4.1]. That is the direct justification for §2's split verdict.
 
-**Real data** [verified, §4.2]: MemeTracker hyperlink cascades — top **500**
-media sites/blogs by document count, **5,000** hyperlink edges as ground truth,
-**116,234** cascades. Per-cell precision/recall published only as Fig. 4.
+**Real data** [verified, §4.2]: MemeTracker hyperlink cascades — top **500** media sites/blogs by document count, **5,000** hyperlink edges as ground truth, **116,234** cascades. Per-cell precision/recall published only as Fig. 4.
 
 ### 5.3 ConNIe (NIPS 2010)
 
-Setup [verified, §3.1]: directed scale-free (preferential attachment) and
-Erdős–Rényi graphs, both **512 nodes / 1,024 edges**. Edge probabilities
-`A_ij ~ U[0.05, 1]`. Transmission-time models: exponential, power-law, and
-**Weibull** (`α = 9.5`, `k = 2.3`, fitted to the Hong Kong SARS outbreak — the
-only non-monotone delay density in this literature). Cascades generated until
-99% of edges transmitted at least once; "on the same order of cascades as there
-are nodes".
+Setup [verified, §3.1]: directed scale-free (preferential attachment) and Erdős–Rényi graphs, both **512 nodes / 1,024 edges**. Edge probabilities `A_ij ~ U[0.05, 1]`. Transmission-time models: exponential, power-law, and **Weibull** (`α = 9.5`, `k = 2.3`, fitted to the Hong Kong SARS outbreak — the only non-monotone delay density in this literature). Cascades generated until 99% of edges transmitted at least once; "on the same order of cascades as there are nodes".
 
 | Dataset                                 | Nodes / Edges   | ConNIe BEP | NetInf BEP | Weight error                       | Tier                   |
 | --------------------------------------- | --------------- | ---------- | ---------- | ---------------------------------- | ---------------------- |
@@ -457,32 +304,15 @@ are nodes".
 | Email net (European research institute) | **593 / 2,824** | **≈ 0.95** | —          | error **< 0.03**                   | [verified, §3.2 prose] |
 | Product-recommendation net              | **275 / 1,522** | **0.74**   | **0.55**   | n/a (no ground-truth weights)      | [verified, §3.2 prose] |
 
-**Robustness** [verified, §3.1]: ConNIe still recovers the network at a
-**noise-to-signal ratio of 0.4** on infection times (Gaussian perturbation of
-observed times / mean transmission time). This is the only published
-noise-robustness number in the classical line, and it is the number to beat if
-we ever claim our learned model degrades gracefully.
+**Robustness** [verified, §3.1]: ConNIe still recovers the network at a **noise-to-signal ratio of 0.4** on infection times (Gaussian perturbation of observed times / mean transmission time). This is the only published noise-robustness number in the classical line, and it is the number to beat if we ever claim our learned model degrades gracefully.
 
-**Runtime** [verified, §3.2]: the 275-node recommendation network took
-**< 20 seconds**; the abstract claims "thousand-node networks in a matter of
-minutes".
+**Runtime** [verified, §3.2]: the 275-node recommendation network took **< 20 seconds**; the abstract claims "thousand-node networks in a matter of minutes".
 
-> **Cross-link worth noticing:** ConNIe's "collaboration network between 379
-> scientists doing research on networks" is the **largest connected component of
-> the NetScience graph we already load** (`ca-netscience`, 379 / 914 — see
-> [`influence_maximization.md`](influence_maximization.md) §6). Our
-> `netscience` loader gives the full 1,589 / 2,742 graph; extracting its LCC
-> reproduces ConNIe's graph exactly. That makes ConNIe's `BEP ≈ 0.95` the one
-> published network-inference number in this entire file that sits on a graph
-> already in our suite.
+> **Cross-link worth noticing:** ConNIe's "collaboration network between 379 scientists doing research on networks" is the **largest connected component of the NetScience graph we already load** (`ca-netscience`, 379 / 914 — see [`influence_maximization.md`](influence_maximization.md) §6). Our `netscience` loader gives the full 1,589 / 2,742 graph; extracting its LCC reproduces ConNIe's graph exactly. That makes ConNIe's `BEP ≈ 0.95` the one published network-inference number in this entire file that sits on a graph already in our suite.
 
 ### 5.4 MultiTree (ICML 2012)
 
-Setup [verified, §4.1]: three **1,024-node** Kronecker networks; rates
-`α ~ U(0.5, 1.5)`; `β = 0.5`; **200 observed cascades** for the headline
-precision-recall figures; the AUC-gain figures use **1,024 nodes / 1,024
-edges**. The deliberate design choice is the _small_-cascade regime, on the
-argument that real social networks change faster than you can record cascades.
+Setup [verified, §4.1]: three **1,024-node** Kronecker networks; rates `α ~ U(0.5, 1.5)`; `β = 0.5`; **200 observed cascades** for the headline precision-recall figures; the AUC-gain figures use **1,024 nodes / 1,024 edges**. The deliberate design choice is the _small_-cascade regime, on the argument that real social networks change faster than you can record cascades.
 
 | Claim                                               | Value                                                                                                                   | Tier                   |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------- | --- | --- | --------------- |
@@ -494,22 +324,13 @@ argument that real social networks change faster than you can record cascades.
 | Runtime vs NETRATE                                  | MultiTree and NetInf ≈ **1 order of magnitude faster**; even one full-gradient NETRATE iteration is slower              | [verified, §4.1 prose] |
 | Scalability                                         | 100,000-node and 200,000-node graphs (avg 2 edges/node), 10,000 cascades → **10.12 ms** and **12.14 ms** per edge added | [verified, §4.1 prose] |
 
-**Real data** [verified, §4.2]: top **1,000** media sites/blogs, **10,000**
-hyperlink edges, **500 longest** hyperlink cascades, power-law transmission.
-Per-cell results published only as Fig. 5.
+**Real data** [verified, §4.2]: top **1,000** media sites/blogs, **10,000** hyperlink edges, **500 longest** hyperlink cascades, power-law transmission. Per-cell results published only as Fig. 5.
 
 ### 5.5 KernelCascade (NIPS 2012) — the only clean real-data method table
 
-Setup [verified, §5.1]: Kronecker core-periphery and Erdős–Rényi; per-edge
-transmission is a **mixture of two Rayleighs**
-`f(t|θ, a₁, b₁, a₂, b₂) = θR₁ + (1−θ)R₂`, with
-`p(t) = f(t|0.5, 10, 1, 20, 1)`, `q(t) = f(t|0.5, 0, 1, 20, 1)`, or a per-edge
-random choice of the two. Cascade counts swept over **50, 100, 200, 400, 800,
-1000**; 10 random instantiations per setting. NetInf is given the **true edge
-count** as an advantage.
+Setup [verified, §5.1]: Kronecker core-periphery and Erdős–Rényi; per-edge transmission is a **mixture of two Rayleighs** `f(t|θ, a₁, b₁, a₂, b₂) = θR₁ + (1−θ)R₂`, with `p(t) = f(t|0.5, 10, 1, 20, 1)`, `q(t) = f(t|0.5, 0, 1, 20, 1)`, or a per-edge random choice of the two. Cascade counts swept over **50, 100, 200, 400, 800, 1000**; 10 random instantiations per setting. NetInf is given the **true edge count** as an advantage.
 
-**MemeTracker, top 500 sites / 6,466 edges / 11,530 cascades from 7,181,406
-posts in one month** [verified, Table 1]:
+**MemeTracker, top 500 sites / 6,466 edges / 11,530 cascades from 7,181,406 posts in one month** [verified, Table 1]:
 
 | Method            | Precision | Recall   | **F1**   | Predicted edges |
 | ----------------- | --------- | -------- | -------- | --------------- |
@@ -519,15 +340,9 @@ posts in one month** [verified, Table 1]:
 
 [verified, Table 1]
 
-This is **the only head-to-head precision/recall/F1 table on real cascades in
-the entire classical line**, and it is the one to cite for "how good is network
-inference on real data" — the answer is F1 ≈ 0.6–0.7, not 0.95.
+This is **the only head-to-head precision/recall/F1 table on real cascades in the entire classical line**, and it is the one to cite for "how good is network inference on real data" — the answer is F1 ≈ 0.6–0.7, not 0.95.
 
-Synthetic [figure, Figs 3–4]: KernelCascade beats NetInf and both NETRATE
-variants in every one of the six settings, and **fully recovers the network at
-≈ 1,000 cascades**, which the competitors do not. NETRATE's performance is
-"very sensitive to the choice of transmission function", ranging from
-second-best to worst depending on the true generator.
+Synthetic [figure, Figs 3–4]: KernelCascade beats NetInf and both NETRATE variants in every one of the six settings, and **fully recovers the network at ≈ 1,000 cascades**, which the competitors do not. NETRATE's performance is "very sensitive to the choice of transmission function", ranging from second-best to worst depending on the true generator.
 
 ### 5.6 FIM (WWW 2024) ⭐ — the best modern table
 
@@ -538,12 +353,9 @@ Datasets [verified, Table 2]:
 | **#Nodes**    | 128    | 1024 / 2048         | 1024 / 2048         | 1024 / 2048         | **498**     | **8,190**  | **12,677** |
 | **#Cascades** | 10,000 | 20,000 / 10,000     | 20,000 / 10,000     | 20,000 / 10,000     | **8,304**   | **43,365** | **3,461**  |
 
-Synthetic edge counts = **4× node count** (so Hier1024 = 4,096 arcs);
-`λ_uv ~ U(0, 0.1)`; `T = 10`, `ε = 1.0`; edge threshold `λ* = 0.01`;
-cascades split **80/10/10** train/val/test [verified, §5 + §5.1].
+Synthetic edge counts = **4× node count** (so Hier1024 = 4,096 arcs); `λ_uv ~ U(0, 0.1)`; `T = 10`, `ε = 1.0`; edge threshold `λ* = 0.01`; cascades split **80/10/10** train/val/test [verified, §5 + §5.1].
 
-**Network inference F1 and BCE loss on the six synthetic networks**
-[verified, Table 5]:
+**Network inference F1 and BCE loss on the six synthetic networks** [verified, Table 5]:
 
 | Metric   | Method  | Rand1024 | Hier1024 | Core1024 | Rand2048 | Hier2048 | Core2048 |
 | -------- | ------- | -------- | -------- | -------- | -------- | -------- | -------- |
@@ -552,22 +364,11 @@ cascades split **80/10/10** train/val/test [verified, §5 + §5.1].
 | **F1**   | **FIM** | **0.60** | **0.75** | **0.58** | **0.41** | **0.42** | **0.34** |
 | **F1**   | NMF     | 0.44     | 0.49     | 0.36     | 0.32     | 0.36     | 0.16     |
 
-**Read this carefully — it is the most important sober fact in this file.**
-On 1,024-node Kronecker graphs with **20,000 cascades**, the 2024 state of the
-art reaches **F1 = 0.58–0.75**. Doubling the graph to 2,048 nodes while
-_halving_ cascades to 10,000 drops it to **F1 = 0.34–0.42**. NetInf's
-`BEP ≈ 0.98` (§5.1) is not comparable — it is measured at `f = 0.99` edge
-coverage, a data regime FIM does not assume. **Network inference on realistic
-cascade budgets is not a solved problem.**
+**Read this carefully — it is the most important sober fact in this file.** On 1,024-node Kronecker graphs with **20,000 cascades**, the 2024 state of the art reaches **F1 = 0.58–0.75**. Doubling the graph to 2,048 nodes while _halving_ cascades to 10,000 drops it to **F1 = 0.34–0.42**. NetInf's `BEP ≈ 0.98` (§5.1) is not comparable — it is measured at `f = 0.99` edge coverage, a data regime FIM does not assume. **Network inference on realistic cascade budgets is not a solved problem.**
 
-Scalability [verified, §5.1]: on the authors' server, **NMF and NETRATE are
-both OOM on Weibo and Twitter**, and NETRATE could not finish within 12 hours on
-MemeTracker or on any synthetic set except the 128-node HR. FIM speedup over
-NMF up to **8.24×** (Hier2048); over ConTinEst for influence estimation up to
-**100–120×**.
+Scalability [verified, §5.1]: on the authors' server, **NMF and NETRATE are both OOM on Weibo and Twitter**, and NETRATE could not finish within 12 hours on MemeTracker or on any synthetic set except the 128-node HR. FIM speedup over NMF up to **8.24×** (Hier2048); over ConTinEst for influence estimation up to **100–120×**.
 
-Downstream influence maximization on the inferred `A` [verified, Table 4],
-spread at seed-set size 4 → 10:
+Downstream influence maximization on the inferred `A` [verified, Table 4], spread at seed-set size 4 → 10:
 
 | Dataset     | Method  | 4          | 5          | 6          | 7          | 8          | 9          | 10         |
 | ----------- | ------- | ---------- | ---------- | ---------- | ---------- | ---------- | ---------- | ---------- |
@@ -578,13 +379,7 @@ spread at seed-set size 4 → 10:
 
 ### 5.7 InfoPath (WSDM 2013)
 
-Synthetic [verified, §4.1]: two Kronecker networks, both **1,024 nodes / 2,048
-edges** — core-periphery `[0.9, 0.5; 0.5, 0.3]` and hierarchical
-`[0.9, 0.1; 0.1, 0.9]`. Each edge's rate follows one of four evolution
-patterns — **Slab, Square, Chainsaw, Hump** — over 200 time units with **1,000
-cascades per time unit** [verified, Fig 2 caption]. Continuous patterns
-(Chainsaw, Hump) are tracked "near perfectly"; discontinuous ones (Slab,
-Square) are harder [verified, §4.1 prose]. Per-cell numbers are figure-only.
+Synthetic [verified, §4.1]: two Kronecker networks, both **1,024 nodes / 2,048 edges** — core-periphery `[0.9, 0.5; 0.5, 0.3]` and hierarchical `[0.9, 0.1; 0.1, 0.9]`. Each edge's rate follows one of four evolution patterns — **Slab, Square, Chainsaw, Hump** — over 200 time units with **1,000 cascades per time unit** [verified, Fig 2 caption]. Continuous patterns (Chainsaw, Hump) are tracked "near perfectly"; discontinuous ones (Slab, Square) are harder [verified, §4.1 prose]. Per-cell numbers are figure-only.
 
 Real, per-topic [verified, Table 3] — sites and meme cascades per query `Q`:
 
@@ -599,19 +394,11 @@ Real, per-topic [verified, Table 3] — sites and meme cascades per query `Q`:
 | Strauss-Kahn       | 1,263   | 204,238            |
 | Syria              | 1,565   | 615,176            |
 
-Scale [verified, §4.2]: 38 topics × 365 days = **> 13,000** network-inference
-solves, on a **1,000-core / 6 TB** cluster, in **< 4 hours**. The largest
-single run: "Occupy Wall Street", a **43,415-node** time-varying network over
-18 months (Jan 2011 – Jun 2012) from **1,381,793** cascades.
+Scale [verified, §4.2]: 38 topics × 365 days = **> 13,000** network-inference solves, on a **1,000-core / 6 TB** cluster, in **< 4 hours**. The largest single run: "Occupy Wall Street", a **43,415-node** time-varying network over 18 months (Jan 2011 – Jun 2012) from **1,381,793** cascades.
 
 ### 5.8 Trace complexity — Abrahao et al. (KDD 2013)
 
-Networks [verified, §6]: Facebook-Rice **graduate 503 nodes (Δ = 48)** and
-**undergraduate 1,220 nodes (Δ = 287)**; synthetic **1,024-node**
-Barabási–Albert (Δ = 174), `G(n, p)` with `p = 0.2` (Δ = 253), and a
-power-law tree with exponent 3 (Δ = 94). Degree-distribution reconstruction
-used **10n** traces. NetInf is given the **true edge count** as an advantage.
-`First-Edge+` threshold `p = 0.5`.
+Networks [verified, §6]: Facebook-Rice **graduate 503 nodes (Δ = 48)** and **undergraduate 1,220 nodes (Δ = 287)**; synthetic **1,024-node** Barabási–Albert (Δ = 174), `G(n, p)` with `p = 0.2` (Δ = 253), and a power-law tree with exponent 3 (Δ = 94). Degree-distribution reconstruction used **10n** traces. NetInf is given the **true edge count** as an advantage. `First-Edge+` threshold `p = 0.5`.
 
 | Finding                                                                                                                                                           | Tier                   |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
@@ -622,55 +409,34 @@ used **10n** traces. NetInf is given the **true edge count** as an advantage.
 | `G(n, p)` with `p = 0.2`: **neither** First-Edge+ **nor NetInf** reaches high F1 at any trace count tested — dense random graphs have very large trace complexity | [verified, §6]         |
 | Runtime: First-Edge+ "a matter of seconds"; NetInf "a couple of hours" on the same networks                                                                       | [verified, §6]         |
 
-**The `G(n,p)` row is the useful warning.** Our `er` synthetic family is exactly
-this generator. If we ever run a network-inference experiment on `--dataset er`,
-the published expectation is that **everything fails**.
+**The `G(n,p)` row is the useful warning.** Our `er` synthetic family is exactly this generator. If we ever run a network-inference experiment on `--dataset er`, the published expectation is that **everything fails**.
 
 ### 5.9 Daneshmand et al. (ICML 2014)
 
-Setup [verified, §8]: Forest Fire and Kronecker networks with **128 nodes**,
-rates `α ~ U(0.5, 1.5)`, `T = 5` (theory illustrations) or `T = 10`
-(comparisons), success probability estimated over **100 independent cascade
-sets**, `λ_n = K√(log p / n)`.
+Setup [verified, §8]: Forest Fire and Kronecker networks with **128 nodes**, rates `α ~ U(0.5, 1.5)`, `T = 5` (theory illustrations) or `T = 10` (comparisons), success probability estimated over **100 independent cascade sets**, `λ_n = K√(log p / n)`.
 
 | Result                                                                                  | Value                                                                     | Tier               |
 | --------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------ |
 | F1 vs #cascades, hierarchical Kronecker (POW) and Forest Fire (EXP), 500–2,500 cascades | soft-thresholding > NETRATE > **First-Edge (clearly worst)**              | [figure, Fig 4]    |
 | Success probability vs `β` in `n = 10βd log p`, for `p ∈ {6, 26, 40}`                   | the three curves **line up**, confirming the `log p` scaling of Theorem 2 | [figure, Fig 3(a)] |
 
-The `p`-collapse result is the empirical confirmation that sample complexity is
-**logarithmic in super-neighbourhood size** — the claim that makes large-graph
-inference plausible.
+The `p`-collapse result is the empirical confirmation that sample complexity is **logarithmic in super-neighbourhood size** — the claim that makes large-graph inference plausible.
 
 ### 5.10 Netrapalli & Sanghavi (SIGMETRICS 2012)
 
-All figure-only. Networks [verified, §6 figure captions]: 2-D grids
-**10×10, 15×15, 20×20**, and a **200-node random 4-regular** graph with a
-**degree-8 super-graph**.
+All figure-only. Networks [verified, §6 figure captions]: 2-D grids **10×10, 15×15, 20×20**, and a **200-node random 4-regular** graph with a **degree-8 super-graph**.
 
-The one qualitative result worth carrying: **recovery probability collapses
-onto a single curve when plotted against the _average number of infections per
-node_, not against the total number of cascades** [figure, Fig 3]. Different
-grid sizes need visibly different cascade counts but the same per-node
-infection count. Super-graph side information helps only **moderately**,
-matching the `log D` vs `log n` prediction [figure, Fig 4].
+The one qualitative result worth carrying: **recovery probability collapses onto a single curve when plotted against the _average number of infections per node_, not against the total number of cascades** [figure, Fig 3]. Different grid sizes need visibly different cascade counts but the same per-node infection count. Super-graph side information helps only **moderately**, matching the `log D` vs `log n` prediction [figure, Fig 4].
 
 ---
 
 ## 6. Datasets
 
-This literature's dataset story is unlike every other file in this folder.
-**Real graphs are almost irrelevant here** — you cannot evaluate edge recovery
-without ground truth, so the benchmark is _synthetic graphs with published
-generator parameters_ (§6.3), and the "real" experiments substitute a hyperlink
-graph as a ground-truth proxy (§6.4). The authoritative rows for the social
-graphs themselves live in
-[`influence_maximization.md`](influence_maximization.md) §6.
+This literature's dataset story is unlike every other file in this folder. **Real graphs are almost irrelevant here** — you cannot evaluate edge recovery without ground truth, so the benchmark is _synthetic graphs with published generator parameters_ (§6.3), and the "real" experiments substitute a hyperlink graph as a ground-truth proxy (§6.4). The authoritative rows for the social graphs themselves live in [`influence_maximization.md`](influence_maximization.md) §6.
 
 ### 6.1 What we already load that applies
 
-Only two of our fifteen graphs appear anywhere in this literature, and one of
-them only after a preprocessing step:
+Only two of our fifteen graphs appear anywhere in this literature, and one of them only after a preprocessing step:
 
 | Our `--dataset`          | Nodes / Edges                           | Where it appears                                                                                                                                                                                                                   | Note                                                                                                                                                                     |
 | ------------------------ | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -680,16 +446,11 @@ them only after a preprocessing step:
 | ✅ `er` (`--dataset er`) | tunable                                 | **Abrahao et al. §6** tests `G(n, 0.2)`, `n = 1024`, `Δ = 253`                                                                                                                                                                     | ⚠️ **The published result is that inference fails.** Neither First-Edge+ nor NetInf reaches high F1 at any trace count tested (§5.8)                                     |
 | ✅ `ba`                  | tunable                                 | **Abrahao et al. §6** (BA, `n = 1024`, `Δ = 174`); **ConNIe §3.1** (directed preferential attachment, 512 / 1,024)                                                                                                                 | BA is used, but never with a published per-cell table — figure-only                                                                                                      |
 
-**Everything else in our suite — `jazz`, `cora_ml`, `facebook`, `power_grid`,
-`ca_grqc`, `wiki_vote`, `lastfm_asia`, `nethept`, `netphy`, `twitter`, `digg`,
-`youtube`, `sbm`, `karate`, `ws` — has no network-inference baseline at all.**
-That is not an oversight in this review; the task needs cascades, and a bare
-topology file supplies none.
+**Everything else in our suite — `jazz`, `cora_ml`, `facebook`, `power_grid`, `ca_grqc`, `wiki_vote`, `lastfm_asia`, `nethept`, `netphy`, `twitter`, `digg`, `youtube`, `sbm`, `karate`, `ws` — has no network-inference baseline at all.** That is not an oversight in this review; the task needs cascades, and a bare topology file supplies none.
 
 ### 6.2 Full catalogue of graphs used as ground truth
 
-Synthetic rows are directed; **edge counts are arcs**. Real rows follow the
-convention stated per row.
+Synthetic rows are directed; **edge counts are arcs**. Real rows follow the convention stated per row.
 
 | Graph                               | Nodes               | Edges                                            | Directed?                      | Avg deg               | Used by                         | Source                                                                                                     |
 | ----------------------------------- | ------------------- | ------------------------------------------------ | ------------------------------ | --------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -719,23 +480,11 @@ convention stated per row.
 | Blog/news hyperlink graph           | **500**             | **6,466** arcs                                   | directed                       | 12.9                  | KernelCascade                   | §6.4                                                                                                       |
 | Blog/news hyperlink graph           | **1,000**           | **10,000** arcs                                  | directed                       | 10.0                  | MultiTree                       | §6.4                                                                                                       |
 
-⚠️ **Note the four different "top-500 MemeTracker hyperlink graphs"** — 4,000 /
-5,000 / 6,466 arcs, from four papers, all called "the top 500 sites". They are
-built from different time slices with different thresholds and **are not the
-same graph**. This is the network-inference equivalent of the seven name
-collisions catalogued in
-[`influence_maximization.md`](influence_maximization.md) §6.3, and it means
-NetInf's `BEP = 0.28`, NETRATE's Fig 4, and KernelCascade's `F1 = 0.72` are
-**not** three numbers on one benchmark.
+⚠️ **Note the four different "top-500 MemeTracker hyperlink graphs"** — 4,000 / 5,000 / 6,466 arcs, from four papers, all called "the top 500 sites". They are built from different time slices with different thresholds and **are not the same graph**. This is the network-inference equivalent of the seven name collisions catalogued in [`influence_maximization.md`](influence_maximization.md) §6.3, and it means NetInf's `BEP = 0.28`, NETRATE's Fig 4, and KernelCascade's `F1 = 0.72` are **not** three numbers on one benchmark.
 
 ### 6.3 ⭐ The Kronecker ground-truth benchmark — exact settings
 
-**This is the single most actionable section in the file.** These are
-reproducible in ~10 lines: a Kronecker graph is `K^{⊗k}`, the `k`-fold Kronecker
-power of a 2×2 initiator matrix `Θ`, sampled edge-by-edge with probability
-`Π Θ[b_i(u), b_i(v)]`. `k = 10` gives 1,024 nodes, `k = 11` gives 2,048.
-Three initiators are standard, each producing a qualitatively different global
-structure.
+**This is the single most actionable section in the file.** These are reproducible in ~10 lines: a Kronecker graph is `K^{⊗k}`, the `k`-fold Kronecker power of a 2×2 initiator matrix `Θ`, sampled edge-by-edge with probability `Π Θ[b_i(u), b_i(v)]`. `k = 10` gives 1,024 nodes, `k = 11` gives 2,048. Three initiators are standard, each producing a qualitatively different global structure.
 
 #### The initiator matrices
 
@@ -747,17 +496,9 @@ structure.
 | **Core-periphery**                   | `[0.9, 0.5; 0.5, 0.3]`         | dense core + sparse rim      | **NETRATE, MultiTree, InfoPath, FIM, KernelCascade** |
 | **Core-periphery**                   | `[0.962, 0.535; 0.535, 0.107]` | same shape, denser core      | **NetInf only** (fitted, per Leskovec et al. 2008)   |
 
-[verified: NetInf TKDD §4.1; NETRATE §4.1; MultiTree §4.1; InfoPath §4.1;
-FIM §5]
+[verified: NetInf TKDD §4.1; NETRATE §4.1; MultiTree §4.1; InfoPath §4.1; FIM §5]
 
-⚠️ **NetInf is the odd one out and it matters.** NetInf (2010) used the
-_fitted_ initiators from the Kronecker-graphs papers
-(`[0.962, 0.535; 0.535, 0.107]` and `[0.962, 0.107; 0.107, 0.962]`); **every
-paper after it** switched to the rounder `[0.9, 0.5; 0.5, 0.3]` and
-`[0.9, 0.1; 0.1, 0.9]`. NetInf's Table II (§5.1) therefore sits on **different
-graphs** from NETRATE Fig 1, MultiTree Fig 2, InfoPath Fig 2, and FIM Table 5,
-even though all five say "core-periphery Kronecker, 1,024 nodes". Reproduce
-NetInf's numbers only with NetInf's initiators.
+⚠️ **NetInf is the odd one out and it matters.** NetInf (2010) used the _fitted_ initiators from the Kronecker-graphs papers (`[0.962, 0.535; 0.535, 0.107]` and `[0.962, 0.107; 0.107, 0.962]`); **every paper after it** switched to the rounder `[0.9, 0.5; 0.5, 0.3]` and `[0.9, 0.1; 0.1, 0.9]`. NetInf's Table II (§5.1) therefore sits on **different graphs** from NETRATE Fig 1, MultiTree Fig 2, InfoPath Fig 2, and FIM Table 5, even though all five say "core-periphery Kronecker, 1,024 nodes". Reproduce NetInf's numbers only with NetInf's initiators.
 
 #### Cascade-generation parameters, per paper
 
@@ -776,30 +517,15 @@ NetInf's numbers only with NetInf's initiators.
 
 #### Forest Fire
 
-The scale-free counterpart, used alongside Kronecker by NetInf, NETRATE and
-Daneshmand. NetInf: 1,024 nodes / 1,477 edges (Fig 5) with a power-law cascade-
-size distribution; mean **9.1** and median **8** cascades per edge over 4,038
-cascades [verified, TKDD §4.1]. NETRATE: 1,024 nodes / 2,422 edges [verified,
-Fig 2 caption]. **Neither paper publishes its forward/backward burning
-probabilities**, so Forest Fire is _less_ reproducible than Kronecker — recorded
-in §11.
+The scale-free counterpart, used alongside Kronecker by NetInf, NETRATE and Daneshmand. NetInf: 1,024 nodes / 1,477 edges (Fig 5) with a power-law cascade- size distribution; mean **9.1** and median **8** cascades per edge over 4,038 cascades [verified, TKDD §4.1]. NETRATE: 1,024 nodes / 2,422 edges [verified, Fig 2 caption]. **Neither paper publishes its forward/backward burning probabilities**, so Forest Fire is _less_ reproducible than Kronecker — recorded in §11.
 
 #### What we could reproduce today
 
-`nx.stochastic_block_model` will not give a Kronecker graph, but the generator
-is ~10 lines of `numpy` (sample `A[u,v] ~ Bernoulli(Π Θ[bit_i(u), bit_i(v)])`).
-Adding `--dataset kronecker --kron-theta hier|core|rand` would put our pipeline
-on the **only benchmark this entire field agrees on**, and — unlike our `sbm`
-family, which has no published IM baseline
-([`influence_maximization.md`](influence_maximization.md) §6) — it comes with
-five papers' worth of published numbers. That is the highest-value dataset
-addition this review found.
+`nx.stochastic_block_model` will not give a Kronecker graph, but the generator is ~10 lines of `numpy` (sample `A[u,v] ~ Bernoulli(Π Θ[bit_i(u), bit_i(v)])`). Adding `--dataset kronecker --kron-theta hier|core|rand` would put our pipeline on the **only benchmark this entire field agrees on**, and — unlike our `sbm` family, which has no published IM baseline ([`influence_maximization.md`](influence_maximization.md) §6) — it comes with five papers' worth of published numbers. That is the highest-value dataset addition this review found.
 
 ### 6.4 Cascade corpora — counts, span, and timestamp resolution
 
-The task brief asks for cascade counts, average cascade length, time span and
-timestamp resolution. Here they are, per corpus and per paper, because **every
-paper cuts the same raw dumps differently**.
+The task brief asks for cascade counts, average cascade length, time span and timestamp resolution. Here they are, per corpus and per paper, because **every paper cuts the same raw dumps differently**.
 
 #### MemeTracker — the raw corpus
 
@@ -853,27 +579,17 @@ paper cuts the same raw dumps differently**.
 | **MAG (CS)**                 | 1,436,158  | 15,928,078 arcs  | **181,020** | **29**      | citation years — **1-year** resolution      | Microsoft Academic Graph via [IMINFECTOR](https://github.com/geopanag/IMINFECTOR) |
 | **Higgs Twitter**            | 456,631    | 14,855,875 arcs  | —           | —           | 1–7 Jul 2012, **1-second**                  | [SNAP](https://snap.stanford.edu/data/higgs-twitter.html)                         |
 
-Digg / Weibo / MAG counts are [verified] from IMINFECTOR's Table 3, transcribed
-in [`influence_maximization.md`](influence_maximization.md) §6.2. Timestamp
-resolutions marked [claim] were not confirmed against the files.
+Digg / Weibo / MAG counts are [verified] from IMINFECTOR's Table 3, transcribed in [`influence_maximization.md`](influence_maximization.md) §6.2. Timestamp resolutions marked [claim] were not confirmed against the files.
 
-⚠️ **Two Weibo graphs and two Digg graphs exist** — our `weibo` loader and our
-`digg` loader read _different files_ from the ones above. See
-[`influence_maximization.md`](influence_maximization.md) §6.3 (name collisions)
-before quoting any number across the two.
+⚠️ **Two Weibo graphs and two Digg graphs exist** — our `weibo` loader and our `digg` loader read _different files_ from the ones above. See [`influence_maximization.md`](influence_maximization.md) §6.3 (name collisions) before quoting any number across the two.
 
-**The practical point for us:** none of these corpora carry the
-`(G, s_t, a_t, s_{t+1})` shape our pipeline consumes, and none carry
-interventions at all. Using them means writing a _second_ data path — logged
-trajectories, per Yuntong's scoping — not extending `generate_wm_data.py`.
+**The practical point for us:** none of these corpora carry the `(G, s_t, a_t, s_{t+1})` shape our pipeline consumes, and none carry interventions at all. Using them means writing a _second_ data path — logged trajectories, per Yuntong's scoping — not extending `generate_wm_data.py`.
 
 ---
 
 ## 7. Which paper uses which
 
-Cells mark the dataset **as that paper reports it**. Read §6.3's initiator
-warning and §6.2's four-hyperlink-graphs warning before treating any column as
-comparable to another.
+Cells mark the dataset **as that paper reports it**. Read §6.3's initiator warning and §6.2's four-hyperlink-graphs warning before treating any column as comparable to another.
 
 | Dataset / family                   | NetInf'10 | ConNIe'10 | NETRATE'11 | MultiTree'12 | KernelCascade'12 | InfoPath'13 | Netrapalli'12 | Abrahao'13 | Daneshmand'14 | FIM'24 |
 | ---------------------------------- | --------- | --------- | ---------- | ------------ | ---------------- | ----------- | ------------- | ---------- | ------------- | ------ |
@@ -895,10 +611,7 @@ comparable to another.
 | ✅ Sina Weibo                      |           |           |            |              |                  |             |               |            |               | ✔      |
 | Twitter (Hodas–Lerman)             |           |           |            |              |                  |             |               |            |               | ✔      |
 
-**Column-by-column takeaway:** the Kronecker triple is the only thing every
-generation agrees on. Real-graph coverage is thin, non-overlapping, and — with
-the single exception of ConNIe's 379-node NetScience LCC — disjoint from our
-suite.
+**Column-by-column takeaway:** the Kronecker triple is the only thing every generation agrees on. Real-graph coverage is thin, non-overlapping, and — with the single exception of ConNIe's 379-node NetScience LCC — disjoint from our suite.
 
 ---
 
@@ -909,16 +622,11 @@ suite.
 Six steps, essentially identical in every paper from NetInf to FIM:
 
 1. **Generate `G*`** from a Kronecker initiator (§6.3) or Forest Fire.
-2. **Draw per-edge rates** `α*_{ji}` from a uniform distribution (the range
-   varies — see §6.3's table; it is _not_ standardised).
-3. **Pick a source** uniformly at random per cascade. (Abrahao et al. §3 notes
-   this is a modelling assumption, not a fact about real cascades.)
-4. **Simulate** to a time horizon `T`, recording only **first** infection times.
-   Nodes not infected by `T` get `t = ∞`.
+2. **Draw per-edge rates** `α*_{ji}` from a uniform distribution (the range varies — see §6.3's table; it is _not_ standardised).
+3. **Pick a source** uniformly at random per cascade. (Abrahao et al. §3 notes this is a modelling assumption, not a fact about real cascades.)
+4. **Simulate** to a time horizon `T`, recording only **first** infection times. Nodes not infected by `T` get `t = ∞`.
 5. **Infer** `Ĝ` (and `α̂`).
-6. **Score** against `G*` by sweeping the method's sparsity knob — `k`
-   (NetInf, MultiTree), `ρ` (ConNIe), `λ*` (FIM) — while NETRATE produces one
-   point with no knob.
+6. **Score** against `G*` by sweeping the method's sparsity knob — `k` (NetInf, MultiTree), `ρ` (ConNIe), `λ*` (FIM) — while NETRATE produces one point with no knob.
 
 ### 8.2 Metrics, and the trap in each
 
@@ -939,151 +647,59 @@ Six steps, essentially identical in every paper from NetInf to FIM:
 
 Three protocol details silently favour some methods:
 
-- **NetInf and MultiTree are given `k` = the true edge count.** Abrahao et al.
-  and KernelCascade both state they hand NetInf the true `|E|` "to give it an
-  advantage" [verified]. NETRATE, ConNIe and FIM get no such hint.
-- **NETRATE has no tunable parameter**, so it yields one solution while NetInf
-  and ConNIe yield a whole curve from which a point must be "selected blindly
-  (or at best heuristically)" [verified, NETRATE §4.1]. Comparing a curve's best
-  point to a single point is not a fair comparison, and NETRATE says so.
-- **Cascade coverage `f` is the real independent variable.** NetInf's Table II
-  is indexed by it; most later papers index by raw cascade count instead, which
-  hides the topology-dependence (core-periphery reaches `f = 0.99` in 3,110
-  cascades, hierarchical needs 5,078).
+- **NetInf and MultiTree are given `k` = the true edge count.** Abrahao et al. and KernelCascade both state they hand NetInf the true `|E|` "to give it an advantage" [verified]. NETRATE, ConNIe and FIM get no such hint.
+- **NETRATE has no tunable parameter**, so it yields one solution while NetInf and ConNIe yield a whole curve from which a point must be "selected blindly (or at best heuristically)" [verified, NETRATE §4.1]. Comparing a curve's best point to a single point is not a fair comparison, and NETRATE says so.
+- **Cascade coverage `f` is the real independent variable.** NetInf's Table II is indexed by it; most later papers index by raw cascade count instead, which hides the topology-dependence (core-periphery reaches `f = 0.99` in 3,110 cascades, hierarchical needs 5,078).
 
 ### 8.4 The real-data protocol, and why its ceiling is low
 
-There is no ground truth on real cascades, so every paper substitutes the
-**hyperlink graph** — an edge `u→v` if some post on `u` linked to a post on `v`
-— and then infers from _phrase_ cascades. This is a proxy, and a weak one:
-NetInf itself says its assumption is "sites prefer to create links to sites
-that recently mentioned information while completely ignoring the authority of
-the site", which "is not satisfied in real life", and on that basis calls
-`BEP = 0.44` "a good result" [verified, TKDD §4.2].
+There is no ground truth on real cascades, so every paper substitutes the **hyperlink graph** — an edge `u→v` if some post on `u` linked to a post on `v` — and then infers from _phrase_ cascades. This is a proxy, and a weak one: NetInf itself says its assumption is "sites prefer to create links to sites that recently mentioned information while completely ignoring the authority of the site", which "is not satisfied in real life", and on that basis calls `BEP = 0.44` "a good result" [verified, TKDD §4.2].
 
-The honest ceiling on real data is therefore **F1 ≈ 0.6–0.7**
-(KernelCascade Table 1, §5.5) — not the `0.9+` the synthetic tables report.
-Any claim we make about real cascades has to live under that ceiling.
+The honest ceiling on real data is therefore **F1 ≈ 0.6–0.7** (KernelCascade Table 1, §5.5) — not the `0.9+` the synthetic tables report. Any claim we make about real cascades has to live under that ceiling.
 
 ---
 
 ## 9. Implications for this project
 
-1. **Do not claim this task whole.** §2 is the honest version: our
-   `ICTransmissionHead` gives us the _rate_ half and none of the _existence_
-   half. Claiming both would require a dense `N×N` scorer or an ℓ1-prox loss,
-   neither of which is in the codebase.
+1. **Do not claim this task whole.** §2 is the honest version: our `ICTransmissionHead` gives us the _rate_ half and none of the _existence_ half. Claiming both would require a dense `N×N` scorer or an ℓ1-prox loss, neither of which is in the codebase.
 
-2. **The cheap, defensible version is a weights-only experiment on a known
-   support.** Freeze `edge_index`, perturb `edge_weight` away from the truth,
-   train `structured_residual` with the existing BCE loss, and report
-   normalised MAE `E[|w* − ŵ|]/w*` against NETRATE's `< 25%` at 5,000 cascades
-   (§5.2). This is **one evaluation script and no new simulator** — the
-   residual head already anchors on `w`, so the gradient path exists today.
-   It also directly tests a claim we currently make implicitly: that
-   `structured_residual`'s learned correction is small because `w` is right.
+2. **The cheap, defensible version is a weights-only experiment on a known support.** Freeze `edge_index`, perturb `edge_weight` away from the truth, train `structured_residual` with the existing BCE loss, and report normalised MAE `E[|w* − ŵ|]/w*` against NETRATE's `< 25%` at 5,000 cascades (§5.2). This is **one evaluation script and no new simulator** — the residual head already anchors on `w`, so the gradient path exists today. It also directly tests a claim we currently make implicitly: that `structured_residual`'s learned correction is small because `w` is right.
 
-3. **Add a Kronecker generator.** §6.3 gives three initiator matrices that five
-   papers agree on, `k = 10 → 1,024` nodes, and published numbers on each. A
-   `--dataset kronecker --kron-theta hier|core|rand` flag would put our
-   _existing_ IM and rollout experiments on the one synthetic family this
-   literature has standardised — which is more than our `sbm` family can say
-   ([`influence_maximization.md`](influence_maximization.md) §6). Highest
-   value-per-hour item in this file.
+3. **Add a Kronecker generator.** §6.3 gives three initiator matrices that five papers agree on, `k = 10 → 1,024` nodes, and published numbers on each. A `--dataset kronecker --kron-theta hier|core|rand` flag would put our _existing_ IM and rollout experiments on the one synthetic family this literature has standardised — which is more than our `sbm` family can say ([`influence_maximization.md`](influence_maximization.md) §6). Highest value-per-hour item in this file.
 
-4. **Sample complexity is the experiment our pipeline is uniquely good at.**
-   Every theory paper's headline (`Ω(d log n)`, `O(d² log n)`, `O(d³ log N)`)
-   is about _how much data_ recovery needs. We can already sweep cascade counts
-   by varying `--num-graphs` × rollouts. Plotting our one-step `delta_f1`
-   against **per-node infection count** (not cascade count — §8.2) would give
-   the world-model analogue of Netrapalli & Sanghavi Fig 3, which nobody has
-   published.
+4. **Sample complexity is the experiment our pipeline is uniquely good at.** Every theory paper's headline (`Ω(d log n)`, `O(d² log n)`, `O(d³ log N)`) is about _how much data_ recovery needs. We can already sweep cascade counts by varying `--num-graphs` × rollouts. Plotting our one-step `delta_f1` against **per-node infection count** (not cascade count — §8.2) would give the world-model analogue of Netrapalli & Sanghavi Fig 3, which nobody has published.
 
-5. **Report `er` results as a negative control, if at all.** Abrahao et al.
-   §6 found that on `G(n, 0.2)` **neither First-Edge+ nor NetInf** achieves
-   high F1 at any trace count. Our `er` family is the same generator. A poor
-   result there is the published expectation, not a defect.
+5. **Report `er` results as a negative control, if at all.** Abrahao et al. §6 found that on `G(n, 0.2)` **neither First-Edge+ nor NetInf** achieves high F1 at any trace count. Our `er` family is the same generator. A poor result there is the published expectation, not a defect.
 
-6. **The realistic bar is much lower than the classical tables suggest.**
-   FIM (2024), with 20,000 cascades on 1,024 nodes, reaches **F1 = 0.58–0.75**;
-   at 2,048 nodes on 10,000 cascades, **F1 = 0.34–0.42** (§5.6). NetInf's
-   `BEP = 0.98` is measured at 99% edge coverage — a data regime nobody has in
-   practice. Any comparison we publish must state which regime it is in.
+6. **The realistic bar is much lower than the classical tables suggest.** FIM (2024), with 20,000 cascades on 1,024 nodes, reaches **F1 = 0.58–0.75**; at 2,048 nodes on 10,000 cascades, **F1 = 0.34–0.42** (§5.6). NetInf's `BEP = 0.98` is measured at 99% edge coverage — a data regime nobody has in practice. Any comparison we publish must state which regime it is in.
 
-7. **The `add_edge` / `remove_edge` / `set_edge_weight` ops mean something
-   different here.** §2.3: a search move over a hypothesis, not an intervention
-   on the world. If the coding-agent loop ever proposes edge ops against a
-   cascade likelihood, that is _hypothesis search_, and the writeup should say
-   so — a reader seeing the same five ops will assume otherwise.
+7. **The `add_edge` / `remove_edge` / `set_edge_weight` ops mean something different here.** §2.3: a search move over a hypothesis, not an intervention on the world. If the coding-agent loop ever proposes edge ops against a cascade likelihood, that is _hypothesis search_, and the writeup should say so — a reader seeing the same five ops will assume otherwise.
 
-8. **This is a limitation section, not a chapter.** Ranked in §2.5 below
-   `source_localization`, `influence_estimation`, `influence_blocking`,
-   `epidemic_control` and `cascade_reconstruction`. The one paragraph worth
-   writing: _"our world model conditions on a known `G`; recovering `G` from
-   traces alone is a distinct inverse problem with its own literature, whose
-   modern state of the art reaches F1 ≈ 0.6 at 20K cascades on 1K nodes."_
+8. **This is a limitation section, not a chapter.** Ranked in §2.5 below `source_localization`, `influence_estimation`, `influence_blocking`, `epidemic_control` and `cascade_reconstruction`. The one paragraph worth writing: _"our world model conditions on a known `G`; recovering `G` from traces alone is a distinct inverse problem with its own literature, whose modern state of the art reaches F1 ≈ 0.6 at 20K cascades on 1K nodes."_
 
 ---
 
 ## 10. Reference list
 
-**Foundational — structure inference**
-[NetInf, KDD 2010 (ACM DOI, 403 to `curl`)](https://dl.acm.org/doi/10.1145/1835804.1835933) ·
-[NetInf, TKDD (arXiv 1006.0234)](https://arxiv.org/abs/1006.0234) ·
-code: [snap.stanford.edu/netinf](http://snap.stanford.edu/netinf/) ·
-[`netinf.tgz`](http://snap.stanford.edu/netinf/netinf.tgz) ·
-[github.com/snap-stanford/snap/examples/netinf](https://github.com/snap-stanford/snap/tree/master/examples/netinf)
+**Foundational — structure inference** [NetInf, KDD 2010 (ACM DOI, 403 to `curl`)](https://dl.acm.org/doi/10.1145/1835804.1835933) · [NetInf, TKDD (arXiv 1006.0234)](https://arxiv.org/abs/1006.0234) · code: [snap.stanford.edu/netinf](http://snap.stanford.edu/netinf/) · [`netinf.tgz`](http://snap.stanford.edu/netinf/netinf.tgz) · [github.com/snap-stanford/snap/examples/netinf](https://github.com/snap-stanford/snap/tree/master/examples/netinf)
 
-[ConNIe, NIPS 2010](http://snap.stanford.edu/connie/connie-nips10.pdf) ·
-code: [`connie_matlab.zip`](http://snap.stanford.edu/connie/connie_matlab.zip)
+[ConNIe, NIPS 2010](http://snap.stanford.edu/connie/connie-nips10.pdf) · code: [`connie_matlab.zip`](http://snap.stanford.edu/connie/connie_matlab.zip)
 
-[NETRATE, ICML 2011 (arXiv 1105.0697)](https://arxiv.org/abs/1105.0697) ·
-code: [people.tuebingen.mpg.de/manuelgr/netrate](http://people.tuebingen.mpg.de/manuelgr/netrate/) ·
-[`netrate.tgz`](http://people.tuebingen.mpg.de/manuelgr/netrate/netrate.tgz)
+[NETRATE, ICML 2011 (arXiv 1105.0697)](https://arxiv.org/abs/1105.0697) · code: [people.tuebingen.mpg.de/manuelgr/netrate](http://people.tuebingen.mpg.de/manuelgr/netrate/) · [`netrate.tgz`](http://people.tuebingen.mpg.de/manuelgr/netrate/netrate.tgz)
 
-[MultiTree, ICML 2012 (arXiv 1205.1671)](https://arxiv.org/abs/1205.1671) · no public code found ·
-[KernelCascade, NIPS 2012](https://papers.nips.cc/paper_files/paper/2012/hash/d759175de8ea5b1d9a2660e45554894f-Abstract.html) · no public code found ·
-[InfoPath, WSDM 2013 (arXiv 1212.1464)](https://arxiv.org/abs/1212.1464) ·
-code: [snap.stanford.edu/infopath](http://snap.stanford.edu/infopath/) · [`infopath.tgz`](http://snap.stanford.edu/infopath/infopath.tgz)
+[MultiTree, ICML 2012 (arXiv 1205.1671)](https://arxiv.org/abs/1205.1671) · no public code found · [KernelCascade, NIPS 2012](https://papers.nips.cc/paper_files/paper/2012/hash/d759175de8ea5b1d9a2660e45554894f-Abstract.html) · no public code found · [InfoPath, WSDM 2013 (arXiv 1212.1464)](https://arxiv.org/abs/1212.1464) · code: [snap.stanford.edu/infopath](http://snap.stanford.edu/infopath/) · [`infopath.tgz`](http://snap.stanford.edu/infopath/infopath.tgz)
 
-**Theory and sample complexity**
-[Netrapalli & Sanghavi, SIGMETRICS 2012 (arXiv 1202.1779)](https://arxiv.org/abs/1202.1779) · no public code found ·
-[Abrahao et al., KDD 2013 (arXiv 1308.2954)](https://arxiv.org/abs/1308.2954) · no public code found ·
-[Daneshmand et al., ICML 2014 (arXiv 1405.2936)](https://arxiv.org/abs/1405.2936) · no public code found ·
-[Pouget-Abadie & Horel, ICML 2015 (arXiv 1505.05663)](https://arxiv.org/abs/1505.05663) · no public code found ·
-[Khim & Loh 2018 (arXiv 1806.05273)](https://arxiv.org/abs/1806.05273) · no public code found ·
-[Hoffmann & Caramanis 2019 (arXiv 1903.02650)](https://arxiv.org/abs/1903.02650) · no public code found
+**Theory and sample complexity** [Netrapalli & Sanghavi, SIGMETRICS 2012 (arXiv 1202.1779)](https://arxiv.org/abs/1202.1779) · no public code found · [Abrahao et al., KDD 2013 (arXiv 1308.2954)](https://arxiv.org/abs/1308.2954) · no public code found · [Daneshmand et al., ICML 2014 (arXiv 1405.2936)](https://arxiv.org/abs/1405.2936) · no public code found · [Pouget-Abadie & Horel, ICML 2015 (arXiv 1505.05663)](https://arxiv.org/abs/1505.05663) · no public code found · [Khim & Loh 2018 (arXiv 1806.05273)](https://arxiv.org/abs/1806.05273) · no public code found · [Hoffmann & Caramanis 2019 (arXiv 1903.02650)](https://arxiv.org/abs/1903.02650) · no public code found
 
-**Probabilistic / EM / Bayesian**
-[Saito, Nakano & Kimura, KES 2008](https://link.springer.com/chapter/10.1007/978-3-540-85567-5_9) · no public code found ·
-[Goyal, Bonchi & Lakshmanan, WSDM 2010 (ACM DOI, 403 to `curl`)](https://dl.acm.org/doi/10.1145/1718487.1718518) · no public code found ·
-[Gray, Mitchell & Roughan 2019 (arXiv 1908.03318)](https://arxiv.org/abs/1908.03318) · no public code found ·
-[Braunstein et al. 2016 (arXiv 1609.00432)](https://arxiv.org/abs/1609.00432) · no public code found
+**Probabilistic / EM / Bayesian** [Saito, Nakano & Kimura, KES 2008](https://link.springer.com/chapter/10.1007/978-3-540-85567-5_9) · no public code found · [Goyal, Bonchi & Lakshmanan, WSDM 2010 (ACM DOI, 403 to `curl`)](https://dl.acm.org/doi/10.1145/1718487.1718518) · no public code found · [Gray, Mitchell & Roughan 2019 (arXiv 1908.03318)](https://arxiv.org/abs/1908.03318) · no public code found · [Braunstein et al. 2016 (arXiv 1609.00432)](https://arxiv.org/abs/1609.00432) · no public code found
 
-**Hawkes / point-process network inference**
-[Zhou, Zha & Song, AISTATS 2013 (PMLR v31)](https://proceedings.mlr.press/v31/zhou13a.html) ·
-third-party code: [Hawkes-Process-Toolkit](https://github.com/HongtengXu/Hawkes-Process-Toolkit) ·
-[Linderman & Adams, ICML 2014 (arXiv 1402.0914)](https://arxiv.org/abs/1402.0914) ·
-code: [github.com/slinderman/pyhawkes](https://github.com/slinderman/pyhawkes)
+**Hawkes / point-process network inference** [Zhou, Zha & Song, AISTATS 2013 (PMLR v31)](https://proceedings.mlr.press/v31/zhou13a.html) · third-party code: [Hawkes-Process-Toolkit](https://github.com/HongtengXu/Hawkes-Process-Toolkit) · [Linderman & Adams, ICML 2014 (arXiv 1402.0914)](https://arxiv.org/abs/1402.0914) · code: [github.com/slinderman/pyhawkes](https://github.com/slinderman/pyhawkes)
 
-**Modern / neural**
-[NMF — Neural Mean-Field, NeurIPS 2020 (arXiv 2006.09449)](https://arxiv.org/abs/2006.09449) · no public code found at a verified URL ·
-[**FIM**, WWW 2024 (arXiv 2403.02867)](https://arxiv.org/abs/2403.02867) ·
-code: [github.com/kkhuang81/FIM](https://github.com/kkhuang81/FIM) ·
-[Debiased Jacobian ML 2026 (arXiv 2606.07483)](https://arxiv.org/abs/2606.07483) · no public code found
+**Modern / neural** [NMF — Neural Mean-Field, NeurIPS 2020 (arXiv 2006.09449)](https://arxiv.org/abs/2006.09449) · no public code found at a verified URL · [**FIM**, WWW 2024 (arXiv 2403.02867)](https://arxiv.org/abs/2403.02867) · code: [github.com/kkhuang81/FIM](https://github.com/kkhuang81/FIM) · [Debiased Jacobian ML 2026 (arXiv 2606.07483)](https://arxiv.org/abs/2606.07483) · no public code found
 
-**Adjacent (not baselines — §4.5)**
-[Graph structure learning survey (arXiv 2103.03036)](https://arxiv.org/abs/2103.03036) ·
-[DeepInf, KDD 2018 (arXiv 1807.05560)](https://arxiv.org/abs/1807.05560) · [code](https://github.com/xptree/DeepInf)
+**Adjacent (not baselines — §4.5)** [Graph structure learning survey (arXiv 2103.03036)](https://arxiv.org/abs/2103.03036) · [DeepInf, KDD 2018 (arXiv 1807.05560)](https://arxiv.org/abs/1807.05560) · [code](https://github.com/xptree/DeepInf)
 
-**Data**
-[SNAP MemeTracker (96M memes)](https://snap.stanford.edu/data/memetracker9.html) ·
-[InfoPath data](http://snap.stanford.edu/infopath/data.html) ·
-[ISI/Lerman Digg 2009](https://www.isi.edu/~lerman/downloads/digg2009.html) ·
-[AMiner Weibo](https://www.aminer.cn/influencelocality) ·
-[Hodas & Lerman Twitter (Sci. Rep. 4:4343)](https://www.nature.com/articles/srep04343) ·
-[SNAP Higgs Twitter](https://snap.stanford.edu/data/higgs-twitter.html) ·
-[NetRepo `ca-netscience`](https://networkrepository.com/netscience.php)
+**Data** [SNAP MemeTracker (96M memes)](https://snap.stanford.edu/data/memetracker9.html) · [InfoPath data](http://snap.stanford.edu/infopath/data.html) · [ISI/Lerman Digg 2009](https://www.isi.edu/~lerman/downloads/digg2009.html) · [AMiner Weibo](https://www.aminer.cn/influencelocality) · [Hodas & Lerman Twitter (Sci. Rep. 4:4343)](https://www.nature.com/articles/srep04343) · [SNAP Higgs Twitter](https://snap.stanford.edu/data/higgs-twitter.html) · [NetRepo `ca-netscience`](https://networkrepository.com/netscience.php)
 
 ---
 
@@ -1093,8 +709,7 @@ Honest list of what this review could **not** establish.
 
 ### 11.1 Code releases — the one thing that came out clean
 
-**The Gomez-Rodriguez line's code releases all still resolve** (checked
-2026-07-28 with `curl -r 0-500 -L`, browser UA):
+**The Gomez-Rodriguez line's code releases all still resolve** (checked 2026-07-28 with `curl -r 0-500 -L`, browser UA):
 
 | Artifact                | URL                                                           | Status     |
 | ----------------------- | ------------------------------------------------------------- | ---------- |
@@ -1105,95 +720,40 @@ Honest list of what this review could **not** establish.
 | ConNIe (MATLAB + SNOPT) | `http://snap.stanford.edu/connie/connie_matlab.zip`           | **200** ✅ |
 | SNAP `examples/netinf`  | `github.com/snap-stanford/snap/tree/master/examples/netinf`   | **200** ✅ |
 
-⚠️ **One broken link inside SNAP's own pages:** the NetInf landing page links
-NETRATE as `http://www.stanford.edu/~manuelgr/netrate/`, which **404s**. The
-live home is the MPI Tübingen URL above (the InfoPath page links it correctly).
-Anyone following SNAP's link hits a dead end.
+⚠️ **One broken link inside SNAP's own pages:** the NetInf landing page links NETRATE as `http://www.stanford.edu/~manuelgr/netrate/`, which **404s**. The live home is the MPI Tübingen URL above (the InfoPath page links it correctly). Anyone following SNAP's link hits a dead end.
 
-⚠️ **`memetracker.org` is gone** — DNS resolution fails entirely. NetInf,
-NETRATE and MultiTree all cite `http://memetracker.org/data.html` as their data
-source. Use the [SNAP mirror](https://snap.stanford.edu/data/memetracker9.html)
-instead.
+⚠️ **`memetracker.org` is gone** — DNS resolution fails entirely. NetInf, NETRATE and MultiTree all cite `http://memetracker.org/data.html` as their data source. Use the [SNAP mirror](https://snap.stanford.edu/data/memetracker9.html) instead.
 
-**No public code found** for: MultiTree, KernelCascade, First-Edge/First-Edge+,
-Daneshmand's soft-thresholding, Pouget-Abadie & Horel, Khim & Loh, Saito EM,
-Goyal et al., Braunstein et al., Gray et al., the debiased-Jacobian preprint,
-and **NMF** (FIM says it used "the official implementation published by the
-authors", but this review found no URL that resolves). Only **FIM** among the
-learning-based methods has a verified repo.
+**No public code found** for: MultiTree, KernelCascade, First-Edge/First-Edge+, Daneshmand's soft-thresholding, Pouget-Abadie & Horel, Khim & Loh, Saito EM, Goyal et al., Braunstein et al., Gray et al., the debiased-Jacobian preprint, and **NMF** (FIM says it used "the official implementation published by the authors", but this review found no URL that resolves). Only **FIM** among the learning-based methods has a verified repo.
 
 ### 11.2 Result tables that could not be extracted
 
-- **NETRATE has no result table at all.** Every precision/recall/accuracy/MAE
-  number in the ICML paper is a figure. §5.2 reports the paper's own prose
-  claims (`< 25%` MAE, `< 20%` at 5,000 cascades) and marks the rest [figure].
-- **MultiTree, InfoPath, Netrapalli & Sanghavi, Daneshmand, Abrahao,
-  Pouget-Abadie & Horel** — same: precision-recall and F1 curves only. Their
-  _setup_ tables are transcribed; their _result_ cells do not exist as numbers.
-- **KernelCascade's synthetic F1 and KL curves** (Figs 3–4, six settings ×
-  six cascade counts) are figure-only; only its MemeTracker Table 1 is
-  transcribed.
-- **FIM's Table 7 (`Core4096` MAE/runtime), Table 8 and Table 9** were located
-  but not transcribed — they are appendix ablations on influence estimation,
-  not network inference.
-- **NetInf's runtime and scalability numbers** were not transcribed (they exist
-  in the TKDD paper but were not needed for any claim here).
+- **NETRATE has no result table at all.** Every precision/recall/accuracy/MAE number in the ICML paper is a figure. §5.2 reports the paper's own prose claims (`< 25%` MAE, `< 20%` at 5,000 cascades) and marks the rest [figure].
+- **MultiTree, InfoPath, Netrapalli & Sanghavi, Daneshmand, Abrahao, Pouget-Abadie & Horel** — same: precision-recall and F1 curves only. Their _setup_ tables are transcribed; their _result_ cells do not exist as numbers.
+- **KernelCascade's synthetic F1 and KL curves** (Figs 3–4, six settings × six cascade counts) are figure-only; only its MemeTracker Table 1 is transcribed.
+- **FIM's Table 7 (`Core4096` MAE/runtime), Table 8 and Table 9** were located but not transcribed — they are appendix ablations on influence estimation, not network inference.
+- **NetInf's runtime and scalability numbers** were not transcribed (they exist in the TKDD paper but were not needed for any claim here).
 
 ### 11.3 Datasets marked [claim] or unresolved
 
-- **Timestamp resolution for Weibo, Digg 2009 and MAG** is [claim] — inferred
-  from the corpora's known formats, not confirmed by downloading a file. Only
-  MemeTracker's **1-second** resolution is [verified], from SNAP's own format
-  spec (`T 2008-09-09 22:35:24`).
-- **Average cascade length is missing for every MemeTracker cut** — none of
-  NetInf, NETRATE, MultiTree, KernelCascade or FIM publishes it. Only
-  Digg/Weibo/MAG have published averages (847 / 148 / 29), and those come from
-  IMINFECTOR's table, not from a network-inference paper.
-- **Facebook-Rice (503 and 1,220 nodes)** — Abrahao et al.'s only real graphs.
-  **No working public download URL found.** Node counts and max degrees are
-  [verified] from their §6; edge counts are not published at all.
-- **ConNIe's email network (593 / 2,824)** and **recommendation subset
-  (275 / 1,522)** — no public URL. The email graph is _not_ SNAP's
-  `email-Eu-core` (1,005 nodes); same institution, different snapshot.
-- **Daneshmand's 128-node Kronecker and Forest Fire edge counts** are never
-  stated.
-- **Twitter as FIM uses it** — FIM cites Hodas & Lerman (Sci. Rep. 2014) but
-  publishes only its post-filter counts (12,677 nodes / 3,461 cascades). The
-  raw corpus size and a direct download URL were not established.
+- **Timestamp resolution for Weibo, Digg 2009 and MAG** is [claim] — inferred from the corpora's known formats, not confirmed by downloading a file. Only MemeTracker's **1-second** resolution is [verified], from SNAP's own format spec (`T 2008-09-09 22:35:24`).
+- **Average cascade length is missing for every MemeTracker cut** — none of NetInf, NETRATE, MultiTree, KernelCascade or FIM publishes it. Only Digg/Weibo/MAG have published averages (847 / 148 / 29), and those come from IMINFECTOR's table, not from a network-inference paper.
+- **Facebook-Rice (503 and 1,220 nodes)** — Abrahao et al.'s only real graphs. **No working public download URL found.** Node counts and max degrees are [verified] from their §6; edge counts are not published at all.
+- **ConNIe's email network (593 / 2,824)** and **recommendation subset (275 / 1,522)** — no public URL. The email graph is _not_ SNAP's `email-Eu-core` (1,005 nodes); same institution, different snapshot.
+- **Daneshmand's 128-node Kronecker and Forest Fire edge counts** are never stated.
+- **Twitter as FIM uses it** — FIM cites Hodas & Lerman (Sci. Rep. 2014) but publishes only its post-filter counts (12,677 nodes / 3,461 cascades). The raw corpus size and a direct download URL were not established.
 
 ### 11.4 Kronecker / Forest Fire settings that could not be pinned down
 
-- **Forest Fire burning probabilities are unpublished** in NetInf, NETRATE and
-  Daneshmand. All three say "Forest Fire model (Leskovec et al.)" and give node
-  and edge counts, but never the forward/backward burn probabilities. **Forest
-  Fire is therefore not reproducible from these papers**, unlike Kronecker.
-- **Daneshmand's Kronecker initiator is not stated** — the paper says
-  "hierarchical Kronecker" and cites Leskovec et al., so it is _presumably_
-  `[0.9, 0.1; 0.1, 0.9]`, but that is inference, not extraction.
-- **KernelCascade's Kronecker initiators are not stated.** It says
-  "core-periphery structure [11]" and "Erdős–Rényi random", citing the same
-  sources as NETRATE — again presumably `[0.9, 0.5; 0.5, 0.3]` and
-  `[0.5, 0.5; 0.5, 0.5]`, but not written down.
-- **NetInf's Table II edge count is internally inconsistent** — caption says
-  1,446 edges for all networks, Fig. 5's caption says the Forest Fire graph has
-  1,477. Both are [verified]; the paper does not reconcile them.
-- **`k` (Kronecker power) is never stated by any paper** — it is inferred from
-  the node counts (`2^10 = 1,024`, `2^11 = 2,048`). Consistent across all five
-  papers, so this is safe, but it is [derived] not [verified].
-- **How the Kronecker sampler is seeded / thresholded to hit an exact edge
-  count** (1,024 / 1,446 / 2,048 / 4,096 arcs from the same initiator) is not
-  described anywhere. Reproducing an exact edge count will need a rejection or
-  rescaling step the papers do not specify.
+- **Forest Fire burning probabilities are unpublished** in NetInf, NETRATE and Daneshmand. All three say "Forest Fire model (Leskovec et al.)" and give node and edge counts, but never the forward/backward burn probabilities. **Forest Fire is therefore not reproducible from these papers**, unlike Kronecker.
+- **Daneshmand's Kronecker initiator is not stated** — the paper says "hierarchical Kronecker" and cites Leskovec et al., so it is _presumably_ `[0.9, 0.1; 0.1, 0.9]`, but that is inference, not extraction.
+- **KernelCascade's Kronecker initiators are not stated.** It says "core-periphery structure [11]" and "Erdős–Rényi random", citing the same sources as NETRATE — again presumably `[0.9, 0.5; 0.5, 0.3]` and `[0.5, 0.5; 0.5, 0.5]`, but not written down.
+- **NetInf's Table II edge count is internally inconsistent** — caption says 1,446 edges for all networks, Fig. 5's caption says the Forest Fire graph has 1,477. Both are [verified]; the paper does not reconcile them.
+- **`k` (Kronecker power) is never stated by any paper** — it is inferred from the node counts (`2^10 = 1,024`, `2^11 = 2,048`). Consistent across all five papers, so this is safe, but it is [derived] not [verified].
+- **How the Kronecker sampler is seeded / thresholded to hit an exact edge count** (1,024 / 1,446 / 2,048 / 4,096 arcs from the same initiator) is not described anywhere. Reproducing an exact edge count will need a rejection or rescaling step the papers do not specify.
 
 ### 11.5 Method coverage gaps
 
-- **No transformer-based or VAE-based cascade→graph method was found** that
-  scores edge recovery on the Kronecker benchmark. §4.3's neural line
-  parameterises a dense matrix directly. If such a method exists it is not
-  cited by FIM (2024), which is the most recent survey-adjacent work here.
-- **Pouget-Abadie & Horel's and Khim & Loh's experimental sections were not
-  read** — both were confirmed as theory contributions and cited for their
-  framing, but no numbers from either appear in this file.
-- **Wang et al. Bayesian network inference** (named in the task brief) could
-  not be disambiguated to a specific paper; §4.2 covers the Bayesian line via
-  Gray/Mitchell/Roughan and Linderman & Adams instead.
+- **No transformer-based or VAE-based cascade→graph method was found** that scores edge recovery on the Kronecker benchmark. §4.3's neural line parameterises a dense matrix directly. If such a method exists it is not cited by FIM (2024), which is the most recent survey-adjacent work here.
+- **Pouget-Abadie & Horel's and Khim & Loh's experimental sections were not read** — both were confirmed as theory contributions and cited for their framing, but no numbers from either appear in this file.
+- **Wang et al. Bayesian network inference** (named in the task brief) could not be disambiguated to a specific paper; §4.2 covers the Bayesian line via Gray/Mitchell/Roughan and Linderman & Adams instead.
