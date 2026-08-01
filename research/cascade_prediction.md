@@ -60,14 +60,14 @@ Two negative results motivated it. Salganik, Dodds & Watts (Science 2006) showed
 
 **Status: ⚠️ moderate fit — and the reason matters more than the verdict.**
 
-| Element | How cascade prediction maps onto `f_θ(G, s_t, a_t) → s_{t+1}` |
-| ------- | -------------------------------------------------------------- |
-| **State** `s_t` | `(infected, frontier)` — exactly our two channels. `infected` = adopted by `t`; `frontier` = adopted in the current step. No change needed. |
-| **Action** `a_t` | **`NULL`, every step.** Nothing intervenes; the cascade is just watched. |
-| **`T_exo`** | identity. |
-| **`T_endo`** | the real-world adoption process — *not* IC, *not* LT, and not known. |
-| **Objective** | `ΔP = |infected at t_p| − |infected at t_o|`, i.e. our rollout's final-count readout under a different name. |
-| **Evaluation** | already implemented: `world_model/wm_eval.py::rollout_ensemble` reports `ens_final_count_model` vs `ens_final_count_true`. MSLE over those two numbers *is* the field's metric. |
+| Element          | How cascade prediction maps onto `f_θ(G, s_t, a_t) → s_{t+1}`                                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **State** `s_t`  | `(infected, frontier)` — exactly our two channels. `infected` = adopted by `t`; `frontier` = adopted in the current step. No change needed.                                     |
+| **Action** `a_t` | **`NULL`, every step.** Nothing intervenes; the cascade is just watched.                                                                                                        |
+| **`T_exo`**      | identity.                                                                                                                                                                       |
+| **`T_endo`**     | the real-world adoption process — *not* IC, *not* LT, and not known.                                                                                                            |
+| **Objective**    | `ΔP = \|infected at t_p\| − \|infected at t_o\|`, i.e. our rollout's final-count readout under a different name.                                                                   |
+| **Evaluation**   | already implemented: `world_model/wm_eval.py::rollout_ensemble` reports `ens_final_count_model` vs `ens_final_count_true`. MSLE over those two numbers *is* the field's metric. |
 
 ### 2.1 The action space goes idle
 

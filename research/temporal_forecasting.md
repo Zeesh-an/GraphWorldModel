@@ -319,7 +319,9 @@ Both methods have public code. BasicTS+ attributes the spread to three "overlook
 | PEMS07        | 29.64 | 22.00  | 26.14   | 22.25 | 21.16 | 20.44     | 20.04  | **19.49** | 20.68 | 21.01 | 22.50   | 22.47 | N/A       | 20.59    | 19.61    |
 | PEMS08        | 21.29 | 16.80  | 18.91   | 16.19 | 15.23 | 14.67     | 14.77  | 14.10     | 15.78 | 15.25 | 16.90   | 16.92 | **14.00** | 15.39    | 14.21    |
 | _Params (LA)_ | —     | 0.10   | 8.07    | 0.25  | 0.37  | 0.31      | 0.20   | 0.39      | 0.75  | 0.41  | 1.20    | 38.49 | 40.48     | 0.22     | **0.12** |
-| _Speed (LA)_  | —     | 24.48  | 11.36   | 21.01 | 94.87 | 27.70     | 128.84 | 152.33    | 28.22 | 24.37 | 16.19   | 52.23 | 497.26    | **7.50** |
+| _Speed (LA)_  | —     | 24.48  | 11.36   | 21.01 | 94.87 | 27.70     | 128.84 | 152.33    | 28.22 | 24.37 | 16.19   | 52.23 | 497.26    | **7.50** | ?        |
+
+⚠️ **The `_Speed (LA)_` row was transcribed one cell short** and the missing value could not be recovered. Fifteen values were extracted for sixteen columns, so the cells are shown in their extracted order with a `?` appended. **This means the assignment of `**7.50**` to STNorm rather than STID is unverified** — the `?` may belong anywhere at or after the STNorm column. Do not quote a per-model speed from this row without re-reading BasicTS+ Table V. Every other row in this table has its full sixteen cells and is unaffected.
 
 BasicTS+'s own reading, in their words [verified]:
 
@@ -572,6 +574,7 @@ Two links in §3 do not resolve for a non-browser client and are annotated there
 
 Honest list of what this review could **not** establish.
 
+- **One cell of BasicTS+ Table V's `_Speed (LA)_` row is missing** and could not be recovered from the extracted text: fifteen values for sixteen model columns. It is marked `?` in §5.3, and the consequence is that the trailing values' column assignment (STNorm vs STID) is unverified. Every other cell in that table is [verified] and full. Resolving it needs a re-read of the paper's own table.
 - **Edge counts for METR-LA / PEMS-BAY / PEMS08 disagree across papers** and the discrepancy is not resolved here. METR-LA is 1,515 (LargeST Table 1) vs 1,722 (D²STGNN Table 2); PEMS-BAY 2,369 vs 2,694; PEMS08 276 vs 295 vs 548. All are [verified] transcriptions of their own tables — so the graphs differ by preprocessing, not by transcription error. Likely causes are the self-loop/threshold choice in DCRNN's Gaussian kernel (`κ`) and arcs-vs-edges, the same convention trap `research/README.md` documents. **Not resolved:** no file was downloaded and counted. Since no dataset here will be loaded (§2.4), this was not worth the download.
 - **TaxiBJ, NYC-Bike/Taxi, Q-Traffic, and the loop-detector archives are [claim]-tier only.** No paper table was extracted for them, and their crops genuinely are not standardized — every paper picks its own window and grid resolution. A number quoted for "NYC-Taxi" is close to meaningless without the paper that produced it.
 - **Q-Traffic's query sub-dataset was not examined.** It is the one artifact in this literature that resembles an exogenous input (user route requests preceding traffic change) and is therefore the only plausible route to an action-conditioned variant of this task. Whether it can be made to look like any of our five ops is unestablished.

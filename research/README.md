@@ -2,7 +2,7 @@
 
 One markdown file per graph task, all in the same format. Each is self-contained: task definition, fit with our methodology, every baseline method with paper and code URLs, every dataset those baselines evaluate on with node/edge counts and source URLs, transcribed result tables, evaluation protocols, and an honest list of what the review could **not** establish.
 
-**8,900 lines · 13 tasks · ~450 methods · ~400 datasets · 1,060 unique URLs**, compiled 2026-07-28/29.
+**9,400 lines · 13 tasks · ~450 methods · ~400 datasets · 1,060 unique URLs**, compiled 2026-07-28/29.
 
 These files are **literature references**, not design documents. What we built lives in `../CLAUDE.md` and the per-package READMEs; what the field published lives here.
 
@@ -20,13 +20,13 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | ---------------------------------------------------------- | ----------------------- | ----- | ----------------------------------------------------------------------- |
 | [`influence_maximization.md`](influence_maximization.md)   | ✅ **implemented**      | 809   | ⭐ DeepIM Tables 2/3 — Jazz, Cora-ML, Power Grid byte-identical         |
 | [`influence_blocking.md`](influence_blocking.md)           | ✅ direct               | 742   | ⭐ SandIMIN PVLDB'24 Table 5 — email-Eu-core, YouTube, our exact metric |
-| [`source_localization.md`](source_localization.md)         | ✅ **cheapest**         | 666   | ⭐ SL-VAE KDD'22 Tables 1–4 — 5 of its 7 graphs are ours                |
+| [`source_localization.md`](source_localization.md)         | ✅ **cheapest**         | 964   | ⭐ SL-VAE KDD'22 Tables 1–4 — 5 of its 7 graphs are ours                |
 | [`critical_node_detection.md`](critical_node_detection.md) | ✅ direct               | 971   | ⭐ CoreHD/BPD Table I — "Grid" is our `power_grid` byte-for-byte        |
 | [`epidemic_control.md`](epidemic_control.md)               | ✅ direct               | 690   | partial — different dataset family (contact networks)                   |
 | [`influence_estimation.md`](influence_estimation.md)       | ✅ **already computed** | 553   | ⭐ GLIE + SIEA — `ca_grqc`, `nethept`, `netphy`, `youtube` match        |
-| [`cascade_reconstruction.md`](cascade_reconstruction.md)   | ✅ direct               | 576   | DIPT 2025 — Cora-ML and Power Grid                                      |
+| [`cascade_reconstruction.md`](cascade_reconstruction.md)   | ✅ direct               | 763   | DIPT 2025 — Cora-ML and Power Grid                                      |
 | [`adaptive_online_im.md`](adaptive_online_im.md)           | ✅ direct               | 556   | only DeepIM's re-run OIM row; the rest are figures                      |
-| [`network_inference.md`](network_inference.md)             | ⚠️ moderate             | 759   | no — Kronecker synthetics, not our graphs                               |
+| [`network_inference.md`](network_inference.md)             | ⚠️ moderate             | 782   | no — Kronecker synthetics, not our graphs                               |
 | [`cascade_prediction.md`](cascade_prediction.md)           | ⚠️ moderate             | 567   | no — real cascade corpora only                                          |
 | [`cascading_failure.md`](cascading_failure.md)             | ⚠️ moderate             | 728   | Jhun et al. Table I, via Motter–Lai on our `power_grid`                 |
 | [`graph_completion.md`](graph_completion.md)               | ❌ poor fit             | 724   | SEAL NeurIPS'18 — `netscience`, `power_grid` byte-identical             |
@@ -53,6 +53,19 @@ Things that emerged from more than one file, or that change what we should do.
 6. **Published tables are less trustworthy than they look.** BasicTS+ found the same method on the same data varying **33%** across papers, from normalisation and metric implementation alone. Cascade prediction's per-paper cascade filters move MSLE more than the gap between adjacent methods. Several canonical papers (Rozenshtein KDD'16, Xiao 2018, Farajtabar AISTATS'15, NETRATE) publish **no result tables at all** — any number attributed to them is fabricated.
 
 7. **No published work is action-conditioned.** True in influence estimation (every method answers `σ(S)` on a fixed graph) and in cascading failure (every GNN is one-shot; every planner plans against the exact simulator). That is the contribution _and_ the problem: there is no step-wise baseline to compare against.
+
+8. **Supplying a better forward model is not a contribution; supplying a better inversion is.** From `source_localization.md` §2.2: SL-VAE states outright that its forward operator is pluggable and reports no significant difference across GAT, MONSTOR and DeepIS. Every inverse task in this folder invites the same trap, because each one's strongest methods are built by learning a forward model and inverting it, and we have a forward model. Dropping ours into that slot reproduces a paper its authors already wrote. The escape is to contribute the `argmax` instead: `source_localization.md` §2.3 reformulates the task as **amortized program search**, where the coding agent searches the space of inversion algorithms and the world model is the forward oracle they call. That reframing is also what restores the six-condition table, since a task with no agent has no arms 3–6.
+
+   **Four criteria decide whether the reframing applies**, and they split the inverse tasks cleanly. (1) An inference algorithm with real design freedom, (2) the world model callable as a forward oracle with `G` still a *condition*, (3) a dense reward with ground truth we own, (4) no cheaper exact alternative, because a learned approximation replacing a closed form is a regression.
+
+   | Task | 1 | 2 | 3 | 4 | Verdict |
+   | ---- | - | - | - | - | ------- |
+   | `cascade_reconstruction` §2.4 | ✅ | ✅ | ✅ | ✅ | **best fit in the folder**; inner loop runs at ~10⁴ oracle calls per instance |
+   | `source_localization` §2.3 | ✅ | ✅ | ✅ | ✅ | both loops, ~10² calls per instance |
+   | `network_inference` §2.6 | ✅ | ❌ | ⚠️ | ❌ | **agent fits, world model does not**: `G` is the variable, and NETRATE's likelihood is already convex and closed-form |
+   | `influence_estimation`, `cascade_prediction` | ❌ | ✅ | n/a | n/a | world model only; forecasting has no algorithm to search |
+
+   Two consequences worth carrying. **Network inference is the folder's only inverted case**: everywhere else that fails, it fails on the agent side. And **the reward is the specification**: `cascade_reconstruction.md` §2.6 shows that scoring a program search on the easy half of a metric pair (node set rather than tree) does not merely under-report, it makes the search discard the capability. Check that a trivial baseline scores badly under the chosen reward before running any search.
 
 ---
 

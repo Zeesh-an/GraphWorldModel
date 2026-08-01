@@ -2,6 +2,8 @@
 
 Source localization is the **inverse** of the diffusion process this repo already models: given a graph `G` and an observed diffusion state `y`, recover the seed set `x` that produced it. It goes by several names — source detection, rumor source identification, patient-zero inference, the graph diffusion inverse problem — and the modern learning-based line (SL-VAE, IVGD, SL-Diff, DDMSL) is built by explicitly _learning a forward propagation model_ and then inverting it. That forward model is exactly what our world model already is.
 
+**But supplying it is not a contribution.** SL-VAE states outright that its forward operator is pluggable and reports no significant difference across GAT, MONSTOR and DeepIS [verified, §4]; dropping ours into that slot is a swap the seed paper has already declared a no-op. The contribution has to be the **inversion procedure**, not the likelihood. §2.3 therefore formalizes source localization as an **amortized program-search** problem: the coding-agent outer loop searches the space of inversion _algorithms_, and the world model is the forward oracle those algorithms query. That formulation is what puts both of this project's loops to work on the task, and it lands in a cell of §1's taxonomy that is currently empty.
+
 All URLs returned HTTP 200 on **2026-07-28** unless annotated otherwise.
 
 ---
@@ -33,14 +35,26 @@ x* = argmax_x  p(x | y, G)   ∝   p(y | x, G) · p(x)
 
 The likelihood `p(y | x, G)` **is the forward diffusion operator**. Every method in this file differs in how it obtains that operator and how it inverts it:
 
-| Family                                     | `p(y \| x, G)` obtained by                                  | Inversion                                          |
-| ------------------------------------------ | ----------------------------------------------------------- | -------------------------------------------------- |
-| Centrality / combinatorial                 | assumed analytically (SI tree, BFS, SIR sample path)        | closed-form maximizer                              |
-| Message passing                            | dynamic message passing / belief propagation recursions     | gradient or MAP over the recursion                 |
-| Label propagation (LPSI)                   | none — model-free convergence of a heat/label diffusion     | local maxima of the converged label field          |
-| Supervised GNN (GCNSI, GIN-SD)             | never modelled — learned discriminatively `y → x`           | one forward pass, node-level binary classification |
-| Invertible (IVGD)                          | learned GNN, made **invertible** by a residual construction | run the network backwards + validity projection    |
-| Generative (SL-VAE, SL-Diff, DDMSL, SIDSL) | learned GNN forward model `p_ψ(y \| x, G)`                  | optimize `x` in a learned latent/denoising prior   |
+| Family                                     | `p(y \| x, G)` obtained by                                  | Inversion                                          | Amortized? |
+| ------------------------------------------ | ----------------------------------------------------------- | -------------------------------------------------- | ---------- |
+| Centrality / combinatorial                 | assumed analytically (SI tree, BFS, SIR sample path)        | closed-form maximizer                              | ✅ yes     |
+| Message passing                            | dynamic message passing / belief propagation recursions     | gradient or MAP over the recursion                 | ❌ no      |
+| Label propagation (LPSI)                   | none — model-free convergence of a heat/label diffusion     | local maxima of the converged label field          | ✅ yes     |
+| Supervised GNN (GCNSI, GIN-SD)             | never modelled — learned discriminatively `y → x`           | one forward pass, node-level binary classification | ✅ yes     |
+| Invertible (IVGD)                          | learned GNN, made **invertible** by a residual construction | run the network backwards + validity projection    | ✅ yes     |
+| Generative (SL-VAE, SL-Diff, DDMSL, SIDSL) | learned GNN forward model `p_ψ(y \| x, G)`                  | optimize `x` in a learned latent/denoising prior   | ❌ no      |
+| **Program search (this project, §2.3)**    | **learned action-conditioned world model `f_θ`**            | **search the space of inversion _programs_ offline; run one program per instance** | ✅ **yes** |
+
+**"Amortized" means the per-instance cost is a fixed evaluation, not an optimization loop.** A non-amortized method re-solves an optimization problem from scratch for every new cascade; an amortized one does its expensive work once and then applies the result. Read the last two columns together and one cell of the cross-product is empty in the published literature:
+
+|                             | **Uses a forward model** | **No forward model**            |
+| --------------------------- | ------------------------ | ------------------------------- |
+| **Per-instance inversion**  | SL-VAE, IVGD¹, DDMSL, SIDSL, DMP, BP | none                    |
+| **Amortized inference**     | **← nothing published**  | GCNSI, GIN-SD, LPSI, NETSLEUTH, OJC, centralities |
+
+¹ IVGD is the near-miss: its inversion is a single backward pass, but the validity-aware projection layers are an unrolled per-instance optimization, so its inference cost still scales with an inner loop.
+
+**The empty cell is the target.** The generative line pays an optimization loop per cascade to exploit a forward model; the amortized line runs in one pass but discards the forward model entirely, and it is the _weakest_ family in every table in §5 (GCNSI is the lowest-scoring learned method in §5.1, §5.2, §5.3 and §5.5 without exception). Nothing published is both amortized and forward-model-using. That combination is exactly the shape of this project's two loops: the outer loop produces the amortized artifact (a program mapping `(G, y) → x̂`, written once, executed on every instance), and the inner loop is the forward model that program calls while it runs. §2.3 formalizes it.
 
 The problem is **ill-posed**: diffusion is many-to-one (many seed sets produce the same final state) and information-destroying (a saturated cascade retains almost no trace of its origin). Hence the field's two defining moves — impose a prior over plausible source sets, and evaluate with AUC rather than accuracy, because sources are ~1–10% of nodes and accuracy is dominated by the negatives.
 
@@ -64,45 +78,261 @@ Rumour and misinformation attribution, epidemic patient-zero tracing, computer v
 
 ## 2. Fit with our methodology
 
-**Status: cheapest task in this folder to add.** It needs _no new simulator, no new action op, and no new data generation run._ It is the only task here whose training data already exists on disk in exactly the form it requires.
+**Status: cheapest task in this folder to add, and the only one where a cheap addition also happens to be a methodological contribution.** It needs _no new simulator, no new action op, and no new data generation run._ It is the only task here whose training data already exists on disk in exactly the form it requires.
 
-### 2.1 Why it is nearly free
+The rest of this section is in two halves. §2.1 establishes that the _data_ is free. §2.2 onward establishes that the _framing_ has to change: the obvious use of our world model here is a component swap the seed paper calls interchangeable, and §2.3 replaces it with a formalization that puts both the inner-loop world model and the outer-loop coding agent to work.
+
+### 2.1 Why the data is nearly free
 
 | Requirement                               | Where it already exists                                                                                                                                                                                                                                                                                                                    |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | A learned forward operator `p(y \| x, G)` | **This is the world model.** SL-VAE, IVGD and SL-Diff each train one from scratch (SL-VAE plugs in GAT / MONSTOR / DeepIS; IVGD pre-trains a GNN with `pretrain.py` before `main.py`). Ours is `WorldModel.forward` with a `structured` head.                                                                                              |
 | `(seed set, final state)` training pairs  | Already emitted. In `data/generate_wm_data.py::_episode_transitions`, the `t = 0` record has `state = State(infected=[], frontier=[])` and `action` = the **entire seed bag** as `add_node` ops; the episode's last record carries `next_state`. Grouping `transitions_<IC\|LT>_<split>.jsonl` by `episode_id` recovers `(x, y)` directly. |
 | No interventions after `t = 0`            | `--inject-p 0` and omitting `--action-ops`. The transition then degenerates to `f_θ(G, s_t) → s_{t+1}`, which is the `T_exo = identity` special case we already train.                                                                                                                                                                     |
-| Soft observation targets                  | `--mc-marginals` already writes `next_marginal_infected` / `next_marginal_frontier`, i.e. `P(node infected)` — a _continuous_ `y ∈ [0,1]^{                                                                                                                                                                                                 | V   | }`, which is precisely the input type SL-VAE assumes ("the value of `y` is continuous in the range [0,1] that fit Gaussian distribution" [verified]). |
+| Soft observation targets                  | `--mc-marginals` already writes `next_marginal_infected` / `next_marginal_frontier`, i.e. `P(node infected)` — a _continuous_ `y ∈ [0,1]^{\|V\|}`, which is precisely the input type SL-VAE assumes ("the value of `y` is continuous in the range [0,1] that fit Gaussian distribution" [verified]).                                       |
 | The graphs                                | Five of SL-VAE's seven datasets are graphs we already load (§6.1).                                                                                                                                                                                                                                                                         |
 
-### 2.2 The mapping
+### 2.2 What the published methods optimize, and why swapping the forward model is not a contribution
 
-| Element               | Source localization under `f_θ(G, s_t, a_t) → s_{t+1}`                                                                              |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **State** `s_t`       | `(infected, frontier)` — unchanged. The _observation_ `y` is `infected` at the terminal step.                                       |
-| **Action** `a_t`      | `NULL` for all `t > 0`. At `t = 0` the seed commit _is_ the unknown we are solving for.                                             |
-| **`T_exo`**           | identity (no interventions).                                                                                                        |
-| **`T_endo`**          | the IC/LT step the structured head already learns.                                                                                  |
-| **Objective**         | `argmax_x p(y \| x, G) · p(x)` — an optimization _over the input channels_ of the frozen world model, not a new training objective. |
-| **Decision variable** | channel 0/1 of `X` at `t = 0`. Relaxed to `x̃ ∈ [0,1]^{                                                                              | V   | }` and optimized by gradient descent, exactly the Phase-2 logit optimization the legacy inverse-problem pipeline used (`x_hat = sigmoid(logits)`, see `CLAUDE.md` "Legacy"). |
+Every generative method in §4 solves the same per-instance problem. Given one observation $y$ on one graph $G$:
 
-### 2.3 What has to be built
+$$\hat{x} \;=\; \arg\max_{x} \; \underbrace{\log p_\psi(y \mid x, G)}_{\text{learned forward model}} \;+\; \underbrace{\log p(x)}_{\text{learned prior}}$$
 
-Three pieces, in order. Nothing in `data/` changes.
+SL-VAE relaxes $x$ to $\tilde{x} \in [0,1]^{|V|}$ and runs Adam on it; IVGD runs its network backwards and projects; DDMSL runs a reverse denoising chain. All three differ only in _how they invert_. The forward model $p_\psi$ is a component, and SL-VAE is explicit that it is a **replaceable** one: the paper plugs in GAT, MONSTOR and DeepIS and reports no significant difference between them [verified, §4 and Fig. 3 discussion]. IVGD's `pretrain.py` exists purely so `main.py` has something to invert.
 
-1. **`world_model/wm_sl.py` — an inversion loop (~120 lines).** Freeze the trained model, initialize `logits` over `|V|`, and minimize `‖y − f_θ(sigmoid(logits), G)‖²` by Adam. This is SL-VAE's Eq. (8) with the VAE prior term dropped — i.e. their **SL-VAE (a)** ablation, which their Table 4 shows already beats every classical baseline on Jazz, Cora-ML and Karate [verified, §5.1]. It is the honest first milestone.
-2. **A source prior (~80 lines).** A small VAE (`3-layer MLP encoder + decoder`, as in SL-VAE) trained on the seed sets our generator already writes, adding `−log Σ_z p_θ(x|z) q_φ(z|x̂)` to the objective. This is the step that takes SL-VAE (a) → SL-VAE in their ablation: F1 on Jazz `0.6254 → 0.8182` [verified].
-3. **Metrics in `wm_eval.py` (~40 lines).** `precision / recall / F1 / AUC` on the recovered _seed set_, plus **RE (re-simulated error)** — the discrepancy between the observation produced by re-simulating the predicted sources and the true observation. Note the field's own trap: `accuracy` is the metric every classical paper reports and it is nearly useless here (IVGD's Table 3 shows GCNSI at `ACC 0.884` with `F1 0.0218` on Network Science [verified]).
+**So "SL-VAE, but with our world model as $p_\psi$" is a paper the seed authors already wrote.** It is worth building exactly once, as an ablation arm (§2.6, arm A), because it isolates what the rest of the design buys. It is not the contribution.
 
-**Multi-source is the default for us**, not an extension: our seed sets are `k = 1–20%` of `N`, which is squarely the multi-source regime. **Single-source** would need a `--budget 1` generation run — cheap, but it changes which baselines are admissible (rumor centrality and the Jordan centre only make sense there).
+Two properties of our world model do survive the comparison, and they are worth stating precisely so they are not oversold:
 
-### 2.4 Honest cost and honest risks
+1. **It is mechanism-shaped, not a black-box regressor.** `ICTransmissionHead` predicts per-edge transmission $q(u \to v)$ and composes $p_{\text{new}}(v) = 1 - \prod_u (1 - q \cdot \text{frontier}_u)$. SL-VAE's GAT/MONSTOR/DeepIS forward models regress $y$ from $x$ directly with no cascade structure. Ours therefore cannot saturate by construction, which matters here because saturation destroys the information the inverse problem needs (§2.9).
+2. **It is action-conditioned.** $f_\theta(G, s_t, a_t) \to s_{t+1}$ accepts interventions mid-cascade. No published forward model in this literature does. In the base formulation below this buys nothing (actions are `NULL` throughout), which is an honest weakness; §2.8 is the variant that cashes it in.
 
-- **Cost: ~1–2 days.** One new module, one prior model, three metrics. No simulator work, no new ops, no regeneration.
-- **The observation is easier than the literature's.** Our marginals are averaged over `--mc-marginals` draws; SL-VAE observes a single binary realization. Ours is a strictly more informative `y`, so our F1 will be optimistic relative to their table unless we also evaluate on a single binarized draw. **Report both.**
-- **The forward model's failure mode propagates.** A rollout that saturates (`ens_count_bias ≫ 0`) destroys source information — the inverse problem gets _harder_ exactly when the forward model is _wrong_ in the direction we already fought (`wm-rollout-saturation-diagnosis-2026-06`). Source-localization F1 is therefore a genuinely new, sharp diagnostic for forward-model fidelity, which is arguably the strongest reason to add it.
-- **It uses none of the action ops.** Unlike influence blocking, this task exercises zero of the four idle ops. Its value is as an _inverse_ probe of the forward model, not as action-space coverage.
+### 2.3 The formalization: amortized program inversion
+
+The reframing is to **contribute the $\arg\max$ and let the likelihood be incidental**. Instead of optimizing a source vector per instance, search the space of _inversion programs_ once, offline, and run the winning program on every instance.
+
+#### 2.3.1 The objective
+
+Let $\mathcal{A}$ be the space of programs expressible in the coding agent's strategy contract, where each $A \in \mathcal{A}$ is a function
+
+$$A : (G,\; y,\; k) \;\longmapsto\; \hat{x} \subseteq V, \qquad |\hat{x}| = k$$
+
+and let $A_{f}$ denote the program $A$ with its forward-model primitive bound to a specific simulator $f$ (§2.4.3). Let $\mathcal{D}_{\text{train}} = \{(G^{(i)}, y^{(i)}, x^{(i)})\}$ be labelled episodes harvested from our generator. The outer loop solves
+
+$$A^{*} \;=\; \arg\max_{A \in \mathcal{A}} \; \frac{1}{|\mathcal{D}_{\text{train}}|} \sum_{i} F_1\!\left(A_{f_\theta}\!\left(G^{(i)}, y^{(i)}, k^{(i)}\right),\; x^{(i)}\right)$$
+
+and at test time inference is a single execution of $A^{*}$. There is no per-instance optimization loop, and no gradient with respect to $x$ anywhere in the method.
+
+**Three things changed relative to §2.2, and each one matters independently:**
+
+| Change | From | To | Why it matters |
+| ------ | ---- | -- | -------------- |
+| **Decision variable** | a continuous relaxation $\tilde{x} \in [0,1]^{\|V\|}$, thresholded at the end | a discrete set $\hat{x}$, chosen directly | No relaxation gap. SL-VAE's recall runs far ahead of its precision on five of six graphs (§5.2: IVGD hits `RE = 1.0000` on five graphs and lets precision carry F1), which is the signature of a thresholded relaxation over-predicting. |
+| **The prior $p(x)$** | a learned VAE latent density | **program code**: structural heuristics the agent writes and mutates | LPSI ("sources are local maxima of a converged label field"), the Jordan centre of each infected component, one-source-per-community, minimum-hop-separation constraints. These are the classical methods of §3, and the agent can compose, parameterize and hybridize them. A VAE prior cannot express "at most one source per 3-hop ball"; ten lines of Python can. |
+| **What is optimized** | $\tilde{x}$, per instance, discarded afterwards | $A$, once, reused on every instance | This is the amortization, and it is the axis §1 shows is empty. |
+
+#### 2.3.2 The three nested loops
+
+The single most common confusion about this design is which loop pays what. There are three, and they are strictly nested:
+
+| Loop                         | Iterates over                                                        | One iteration costs                                                                           | Runs                                               |
+| ---------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| **Outer (the coding agent)** | candidate programs $A$                                               | one LLM generation, plus one evaluation sweep of $A$ over all of $\mathcal{D}_{\text{train}}$ | offline, once per (task, dataset, dynamics)        |
+| **Middle (the executor)**    | instances $(G, y, x)$ in the sweep                                   | one execution of $A$                                                                          | $\|\mathcal{D}_{\text{train}}\|$ times per program |
+| **Inner (the world model)**  | candidate source sets $\hat{x}$ tested _inside_ one execution of $A$ | one call to `predict_marginals`, i.e. one $T$-step rollout                                    | as many times as $A$ chooses                       |
+
+Write $P$ for the number of programs the outer loop evaluates (generations × population), $M = |\mathcal{D}_{\text{train}}|$, and $C$ for the candidate evaluations one program performs on one instance. Total forward-simulation work during program search is
+
+$$P \cdot M \cdot C \quad \text{rollouts.}$$
+
+Under the `@monte_carlo` binding each of those is $R$ independent NDlib episodes of $T$ steps, giving $P \cdot M \cdot C \cdot R$ simulated episodes; under `@world_model` each is a single batched forward pass per timestep. With $P \approx 10^2$, $M \approx 10^2$ and $C \approx 10^2$ the product is already $10^6$ rollouts before the $R$ multiplier, which is why **nobody has run a program search over an inverse problem**: without a cheap forward model it is not merely slow, it is infeasible.
+
+**That is the load-bearing claim, and it is a program-search-time claim, not an inference-time one.** Be precise about this. At inference our program still performs $C$ forward evaluations, while SL-VAE performs $I$ gradient steps; if $C \approx I$ there is no inference-time win, and asserting one without measuring it would be dishonest. What is unconditionally true is that the world model is what makes the _search_ possible at all. Any inference-time advantage is an empirical question, and §8.5 specifies how to measure it rather than assume it.
+
+#### 2.3.3 Why the outer reward is ground-truth F1, not re-simulation error
+
+The natural-looking reward is the re-simulation error $\lVert y - f_\theta(\hat{x}, G) \rVert^2$, since it needs no labels. **It is the wrong outer-loop signal, and the reason is the ill-posedness stated in §1.** Diffusion is many-to-one: distinct source sets $x_1 \neq x_2$ routinely satisfy $f_\theta(x_1) \approx f_\theta(x_2) \approx y$. Under re-simulation error those two are indistinguishable, so a program that systematically recovers the wrong member of an equivalence class scores as well as one that recovers the right member, and the outer loop gets no signal on the thing we actually care about.
+
+**We have $x$, and the real-cascade literature does not.** Our episodes are generated by our own simulator, so every training instance carries its true source set. That asymmetry is what makes the search signal usable. The split is therefore:
+
+| Signal | Where it is used | Needs labels? |
+| ------ | ---------------- | ------------- |
+| **F1 against the true source set**, averaged over training episodes | the outer loop's reward, i.e. program selection | ✅ yes |
+| **Re-simulation error** $\lVert y - f_\theta(\hat{x}) \rVert^2$ | _inside_ a program, to rank its own candidate hypotheses | ❌ no |
+
+The consequence is worth stating plainly, because it is the answer to the obvious referee objection: **labels are used to select the program, never to run it.** $A^{*}$ is a self-contained algorithm whose only inputs are $(G, y, k)$. It can therefore be deployed on real cascades where no ground truth exists, which is precisely the regime SIDSL identifies as the field's hard case (§5.5: generative methods are "nearly useless without enough real cascades", DDMSL's Android F1 `0.010` without pretraining [verified]).
+
+#### 2.3.4 What a generated program actually looks like
+
+Made concrete, because "the agent writes an algorithm" is otherwise hand-waving. A plausible mid-search candidate, using primitives that already exist in `coding_agent/tools/primitives.py` plus the one new binding of §2.4.3:
+
+```python
+def localize(graph, observation, budget):
+    # Prior: sources sit at local maxima of a label field over the infected subgraph (LPSI's idea)
+    infected = [v for v in range(graph.num_nodes) if observation[v] > 0.5]
+    field = propagate_labels(graph, infected, alpha=0.85)
+    communities = detect_communities(graph)
+
+    # Propose: best local-maximum candidate per community, so sources cannot cluster
+    proposals = []
+    for members in group_by(communities, infected):
+        proposals.append(max(members, key=lambda v: field[v]))
+
+    # Test: rank proposals by how well re-simulating them reproduces the observation
+    selected = []
+    for _ in range(budget):
+        best, best_error = None, float("inf")
+        for candidate in proposals:
+            if candidate in selected:
+                continue
+            predicted = predict_marginals(graph, selected + [candidate], "IC")
+            error = float(((predicted - observation) ** 2).sum())
+            if error < best_error:
+                best, best_error = candidate, error
+
+        selected.append(best)
+
+    return selected
+```
+
+Three properties of this example generalize to the whole design. It is **interpretable**: the recovered sources come with a stated reason, which for forensic attribution and outbreak tracing is a substantive advantage over a latent vector. It is **degenerate-friendly**: a program is free to set $C = 0$ and never call the forward model at all, which means pure-LPSI is inside the search space and the outer loop can discover that the forward model is not helping. And its expensive line is the `predict_marginals` call inside a double loop, which is exactly the inner-loop cost accounting of §2.3.2.
+
+### 2.4 The contract the agent writes
+
+#### 2.4.1 The strategy method
+
+The existing `Strategy` Protocol in `coding_agent/types.py` declares `plan_horizon(graph, budget, horizon) -> list[list[ActionOp]]` and `act(state, graph, timestep) -> list[ActionOp]`, and the executor validates that the method its outer-loop method needs is present. Source localization adds one more:
+
+```python
+def localize(self, graph: GraphInfo, observation: np.ndarray, budget: int | None) -> list[int]: ...
+```
+
+| Argument | Type | Meaning |
+| -------- | ---- | ------- |
+| `graph` | `GraphInfo` | the same read-only view IM strategies already receive: `edge_index`, `ic_probs`, `out_neighbors`, `degree`, plus the cached community labels |
+| `observation` | `np.ndarray`, shape `(N,)` | $y$. Under our data this is the MC marginal $P(\text{infected at } T) \in [0,1]$, which is continuous and is precisely the input type SL-VAE assumes [verified, §2.1]. A binarized single draw is the harder variant (§2.9). |
+| `budget` | `int \| None` | $k$, the source count. An `int` matches SL-VAE's given-$k$ convention; `None` is the inferred-$k$ variant, which is NETSLEUTH's MDL setting and a strictly harder problem. |
+| **returns** | `list[int]` | the recovered source node ids |
+
+**This changes nothing else in the loop.** The environment converts $\hat{x}$ into `[[ActionOp("add_node", v) for v in x̂]]` for any re-simulation it needs, which is the identical seed-commit bag the generator already writes at `t = 0` (§2.1), so `rollout()`, the refinement loop, the checkpointing and all four evaluators are reused unchanged.
+
+#### 2.4.2 Scored mode
+
+`ScoredStrategy` already exists for IM: it fixes `plan_horizon` as a greedy harness the agent cannot override and permits edits only to `score()` and `schedule()`, which forces the model to edit an algorithm's internals rather than emit free-form programs. The source-localization analogue is the same trick:
+
+```python
+def source_score(self, node: int, graph: GraphInfo, observation: np.ndarray, selected: tuple) -> float: ...
+```
+
+with a fixed top-$k$ harness. This is the constrained arm to reach for if free-form `localize` generation proves too loose to converge, and it makes the search space directly comparable to the classical methods, since LPSI, the Comin–Costa centralities and rumor centrality are all exactly node-scoring functions.
+
+#### 2.4.3 The one new primitive, and its four bindings
+
+`coding_agent/tools/primitives.py` already exposes `mc_simulate_spread(graph, seeds, diffusion_model, mc_runs, horizon, seed) -> float` to generated code. That is already $x \mapsto \sigma(x)$. Source localization needs the same call returning the per-node vector rather than its sum:
+
+```python
+def predict_marginals(graph, seeds, diffusion_model, horizon) -> np.ndarray:  # shape: (N,)
+```
+
+`Trajectory.final_marginals` in `coding_agent/envs/world_model_env.py` already computes exactly this quantity ("per-node `P(infected at end)` across the ensemble"), so the world-model binding is plumbing rather than new modelling. **The four experimental conditions are four bindings of this single name**, which is what keeps the arms honest: the generated program is byte-identical across arms and only its oracle changes.
+
+| Binding | `predict_marginals` resolves to |
+| ------- | ------------------------------- |
+| `@native` | **absent from the namespace.** The program must be a pure structural heuristic. |
+| `@monte_carlo` | NDlib, `mc_runs` draws, the sampling estimator |
+| `@oracle` | NDlib, treated as ground truth |
+| `@world_model` | $f_\theta$, one batched forward pass per timestep |
+
+### 2.5 The mapping onto `f_θ(G, s_t, a_t) → s_{t+1}`
+
+| Element | Source localization under the world model |
+| ------- | ----------------------------------------- |
+| **State** $s_t$ | `(infected, frontier)`, unchanged. The observation $y$ is `infected` at the terminal step. |
+| **Action** $a_t$ | `NULL` for all $t > 0$. At $t = 0$ the seed commit _is_ the unknown being solved for. |
+| **$T_{\text{exo}}$** | identity in the base formulation (no interventions); the probe operator in the adaptive variant (§2.8). |
+| **$T_{\text{endo}}$** | the IC/LT step the structured head already learns. |
+| **Role of $f_\theta$** | a **forward oracle called from inside generated code**, not a network being inverted. It is frozen, it is never differentiated through, and no gradient with respect to $x$ is ever formed. |
+| **Decision variable** | none in the model. The search happens in program space; the world model only answers "what would this seed set produce?". |
+| **Objective** | $\arg\max_{A} \mathbb{E}\left[F_1(A_{f_\theta}(G,y,k), x)\right]$ over programs, evaluated by the outer loop. |
+
+The row that matters is the fifth. In §2.2's framing the world model is the thing being inverted, which makes it the method's centrepiece and makes the method someone else's. Here it is a subroutine, and the method is the search over programs that call it.
+
+### 2.6 The six baseline conditions
+
+The framing of §2.3 restores the project's standard comparison table, which the component-swap framing cannot support (with no agent there is no arm 3–6). Conditions 3 through 6 hold the generated program fixed and vary only the binding of §2.4.3.
+
+| # | Arm | What it is | What it isolates |
+| - | --- | ---------- | ---------------- |
+| **1** | Pure algorithm | LPSI, NETSLEUTH, OJC, GCNSI via `pip install GraphSL` | the no-learning floor |
+| **2** | GA routing | genetic routing over that fixed pool | is program _generation_ worth more than program _selection_? |
+| **3** | agent `@native` | agent writes structural heuristics; no forward model available | **is a forward model in the search loop worth anything at all?** |
+| **4** | agent `@monte_carlo` | same programs, NDlib sampling oracle | the cost axis: how much search fits in a fixed budget |
+| **5** | agent `@oracle` | same programs, exact NDlib | the fidelity ceiling any learned oracle could reach |
+| **6** | agent `@world_model` | same programs, $f_\theta$ | **ours** |
+| **A** | ablation | §2.2's framing: freeze $f_\theta$, gradient-descend $\tilde{x}$, VAE prior | what program search buys over per-instance descent on the same likelihood |
+
+Reading across is the experiment. **3 vs 6** answers whether the learned simulator contributes anything beyond structure. **4 vs 6** is the cost claim of §2.3.2 and is the reason the world model exists. **5 vs 6** bounds the loss from using a learned oracle instead of the true one. **6 vs A** is the methodological claim, and it is the one that distinguishes this from SL-VAE. **1 vs everything** is the bar, and §5.5 shows that bar is higher than it looks (§2.9).
+
+External baselines (SL-VAE, IVGD, DDMSL, SIDSL) enter as published rows alongside arm 1 rather than as the thing we are a component of. That reversal is the whole point of the reframing.
+
+### 2.7 What has to be built
+
+Smaller than the §2.2 framing's estimate, because it reuses the entire agent loop rather than adding a parallel one. Nothing in `data/` changes.
+
+| # | Piece | Where | Est. |
+| - | ----- | ----- | ---- |
+| 1 | `predict_marginals` primitive plus the four bindings | `coding_agent/tools/primitives.py`, both envs | ~60 lines, mostly plumbing; `Trajectory.final_marginals` exists |
+| 2 | `localize` on the `Strategy` Protocol, and the executor's presence check | `coding_agent/types.py`, `executor.py` | ~30 lines |
+| 3 | F1-against-true-sources reward, replacing final spread for this task | `coding_agent/methods/base.py` | ~40 lines. Note the outer loop hardcodes `argmax` in three places (`one_shot.py`, `evolve.py` ×2); F1 maximizes, so no sign work is needed here, unlike the containment tasks. |
+| 4 | Episode regrouping: `(x, y)` pairs from `transitions_*.jsonl` by `episode_id` | `world_model/wm_data.py` | ~50 lines, §2.1 |
+| 5 | `PR / RE / F1 / AUC` plus a true re-simulated error | `world_model/wm_eval.py` | ~40 lines |
+| 6 | Prompt scaffolding: task statement, the `localize` contract, the primitive's signature | `coding_agent/prompts.py` | ~40 lines |
+| 7 | **Arm A** (the ablation): frozen-model gradient descent on $\tilde{x}$, plus the VAE prior | `world_model/wm_sl.py` | ~200 lines, and it is the _only_ genuinely new modelling code |
+| 8 | Registry entry: flip `source_localization` from `planned`, set `objective`, keep `action_ops = ()` | `pipeline/tasks.py` | ~10 lines |
+
+Items 1–6 and 8 are the method; item 7 is the control it is measured against. **Multi-source is our default**, not an extension: our seed sets are $k = 1$–$20\%$ of $N$, squarely the multi-source regime (§8.2). A single-source arm needs a `--budget 1` generation run, which is cheap but changes which baselines are admissible, since rumor centrality and the Jordan centre only make sense there.
+
+### 2.8 The adaptive variant: probing as an action
+
+The base formulation exercises **zero action ops**, which means the one property that distinguishes our forward model from every published one (action-conditioning, §2.2 point 2) sits idle. The variant that cashes it in is **adaptive source localization**: instead of a full snapshot, the algorithm gets a budget of $k_{\text{probe}}$ node queries and must choose them sequentially.
+
+```
+localize_adaptive(graph, probe_budget, source_budget) -> list[int]
+    repeat probe_budget times:
+        v ← choose the next node to observe          ← the agent writes this policy
+        observe y[v]
+    return the inferred source set                   ← and this inference rule
+```
+
+The world model becomes **necessary rather than merely cheap**: scoring a candidate probe means predicting what that probe would reveal under each surviving source hypothesis, which is one forward simulation per hypothesis per candidate probe, nested inside the probe loop. Expected-information-gain planning of this shape is not affordable against a sampling simulator.
+
+| Aspect | Base (§2.3) | Adaptive (§2.8) |
+| ------ | ----------- | --------------- |
+| Observation | full snapshot | $k_{\text{probe}}$ chosen nodes |
+| Action ops used | none | a probe/query op, or a sixth op |
+| World model's role | cheap scorer | required for information-gain planning |
+| Published baselines | LPSI, NETSLEUTH, OJC, GCNSI, SL-VAE, IVGD | Pinto–Thiran–Vetterli (2012), OJC (2017); both **fixed** observer sets, neither adaptive |
+| Comparable table | ⭐ §5.1, four byte-identical graphs | none |
+
+**Build the base version first.** Adaptive is a generalization rather than a rewrite (full observation is the $k_{\text{probe}} = |V|$ special case), but it costs a query channel or a sixth op, a regeneration run with partial observations, and it forfeits the comparability that makes §5.1 worth having. It is where this goes if the base version clears the bar in §2.9.
+
+### 2.9 Honest cost and honest risks
+
+**Cost.** Roughly 2–4 days for items 1–6 and 8, plus 1–2 days for arm A. The increase over the §2.2 framing's "1–2 days" buys the ablation table of §2.6; the original estimate was for arm A alone, which is now the control rather than the method.
+
+**Risk 1: LPSI is a higher bar than it looks, and it is the one that could kill this.** §5.5 has LPSI, a 2017 label-propagation method with no learning whatsoever, scoring F1 `0.544` on Digg and beating both SL-VAE (`0.479`) and DDMSL (`0.517`) [verified]. Any method that does not clear LPSI on every dataset has not cleared the bar. The mitigating structure is that LPSI is roughly fifteen lines and sits _inside_ the agent's expressible space, so the realistic floor is "the search rediscovers LPSI" and the live question is only whether forward-model-guided refinement improves on it. **Test that first**, before building items 4–7: run the search on one graph with a small $P$, and check whether any generated program beats a hand-written LPSI. If nothing does, the rest of the plan is not worth building.
+
+**Risk 2: the zeroth-order objection.** A referee will say the agent is doing derivative-free optimization of the same objective SL-VAE descends analytically, and is therefore strictly worse per instance. The answer must be the amortization and must be stated first, not defensively: SL-VAE optimizes $\tilde{x}$ per cascade and discards it; the program is selected once and applied to every instance, and what transfers is the _search strategy_, not just the prior. If the transfer experiments of §8.5 fail, this objection lands and the method reduces to an expensive way of doing what SL-VAE does.
+
+**Risk 3: the ill-posedness ceiling is unknown.** The Bayes-optimal F1 for this problem is below 1 and nobody has characterized it. A disappointing absolute number might reflect the problem rather than the method. Arm 5 (`@oracle`, exact NDlib, unlimited candidate budget) is the diagnostic: it upper-bounds what _any_ program in $\mathcal{A}$ can achieve with a perfect forward model, so the gap between arm 5 and arm 6 attributes error to the learned oracle, and the gap between arm 5 and 1.0 attributes it to the problem.
+
+**Risk 4: the forward model's failure mode propagates, and asymmetrically.** A rollout that saturates (`ens_count_bias ≫ 0`) destroys source information, so the inverse problem gets _harder_ exactly when the forward model is wrong in the direction this project already fought (`wm-rollout-saturation-diagnosis-2026-06`). This is a risk and simultaneously the strongest secondary reason to build the task: source-localization F1 fails loudly where one-step `delta_f1`, dominated by unchanged nodes, stays comfortable. It is a sharp new regression test for a bug that has already bitten once.
+
+**Risk 5: our observation is easier than the literature's.** Our marginals are averaged over `--mc-marginals` draws; SL-VAE observes a single binary realization. Ours is a strictly more informative $y$, so our F1 will be optimistic against §5.1 unless we also evaluate on a single binarized draw. **Report both**, and treat the binarized column as the comparable one.
+
+**Risk 6: no published SL result under IC or LT.** SL-VAE uses SI/SIR; SL-Diff, SIDSL and DDMSL use real cascades; the GNN benchmark uses SIR. Our graphs match §5.1 byte-for-byte and our dynamics do not (§11). Either add SI/SIR to `data/wm_simulator.py`, which NDlib ships and `epidemic_control.md` also wants, or report ours as self-contained and say so. This is unchanged by the reframing and is the single biggest comparability gap in this file.
+
+**Risk 7: the absolute numbers in §5.2 are not a realistic target.** IVGD's `FS ≈ 0.97` with `RE = 1.0000` on five of six graphs comes from a very permissive simulated setting with matched train/test distributions. The 2026 GNN benchmark's ~73% top-5 accuracy on a 34-node graph (§5.6) is the more honest picture of how hard this problem is.
 
 ---
 
@@ -557,13 +787,61 @@ These are effectively two literatures and their numbers never mix.
 4. **Diffusion model.** SL-VAE runs SI and SIR for 200 iterations to convergence, folding `S` and `R` together as `y = 0` [verified]. **Nobody in this literature evaluates on IC or LT** — the two models our simulator produces. That is the single biggest protocol gap between us and them (§11).
 5. **Repeats.** SL-VAE averages 10 runs; the GNN benchmark averages 3 seeds and publishes 95% CIs [verified]. Most other papers state nothing.
 
+### 8.5 Protocol for the program-search formulation
+
+§8.1–§8.4 describe the protocol this literature uses, and every number we report for comparability must follow it. The formulation in §2.3 additionally needs a protocol the literature has no reason to define, because no published method produces a reusable artifact. Getting this wrong is the easiest way to publish an invalid table.
+
+#### 8.5.1 Splitting: two axes, not one
+
+Because the outer loop selects a program, the split has to prevent that program from having seen its test instances. There are two independent leakage paths and the literature's single train/test split only closes one.
+
+| Axis | Train | Test | What a failure here means |
+| ---- | ----- | ---- | ------------------------- |
+| **Episodes** (required) | episodes used to compute the outer-loop reward | held-out episodes, same graph, same dynamics | the program memorized specific cascades |
+| **Graphs** (required for the amortization claim) | program selected on graph set $\mathcal{G}_{\text{train}}$ | evaluated on a graph never seen during search | the program is a graph-specific hack, not an algorithm |
+| **Dynamics** (optional, the strongest claim) | selected under IC | evaluated under LT | the program encodes IC-specific structure |
+| **Source fraction** (optional) | selected at $k = 10\%$ | evaluated at $k = 5\%$ and $20\%$ | the program is budget-brittle |
+
+**The graph axis is the one that carries §2.3's claim.** A program selected and evaluated on Jazz alone proves nothing about amortization, because per-instance methods are not disadvantaged in that setting. The headline result is a program selected on one graph set and run unmodified on another, which is a comparison no per-instance method can even enter.
+
+#### 8.5.2 Budget parity across arms
+
+Arms 3–6 differ only in the binding of `predict_marginals` (§2.4.3), so any difference in their _outer_ budget invalidates the comparison. This is the same requirement `--compare` already enforces for influence maximization, and it has two halves:
+
+1. **Equal outer-loop budget.** Identical $P$ (generations × population), identical LLM model, identical prompt scaffolding, identical seeds. An arm that gets more generations wins for the wrong reason.
+2. **Equal inner-loop budget, reported two ways.** Fix either the number of `predict_marginals` calls (which favours `@monte_carlo`, since each of its calls is more accurate) or the wall-clock (which favours `@world_model`). **Report both.** Only reporting the second is the version of this table that a reviewer will correctly disbelieve.
+
+#### 8.5.3 Cost accounting
+
+The claim in §2.3.2 is a cost claim, so cost is a headline number rather than a footnote. `Trajectory.cost` already carries a dict for this. Report, per arm:
+
+| Quantity | Why |
+| -------- | --- |
+| Forward-model calls during program search, $P \cdot M \cdot C$ | the feasibility claim: shows `@monte_carlo` cannot reach the same $P$ |
+| Wall-clock of the full search | what a practitioner actually pays |
+| Forward-model calls **per test instance**, $C$ | the inference-cost claim of §2.3.2, which is empirical and may come out flat |
+| Wall-clock per test instance | comparable against SL-VAE's per-instance optimization loop |
+| LLM tokens consumed by the outer loop | the honest cost that arms 1 and 2 do not pay at all |
+
+#### 8.5.4 Baseline parity
+
+LPSI, NETSLEUTH, OJC and the centralities do no training, so "training cost" is not a fair axis against them and inference cost is. State the agent's offline search cost as a separate line rather than folding it into a per-instance comparison. GCNSI, IVGD and SL-VAE _do_ train, so their training cost belongs in the same column as ours; SL-VAE additionally pays a per-instance optimization loop at test time, which is the row where the amortization shows up if it shows up anywhere.
+
+#### 8.5.5 What to report
+
+For each (graph, dynamics, arm): `PR / RE / F1 / AUC` on the multi-source convention of §8.2, on **both** the MC-marginal observation and a binarized single draw (§2.9, risk 5); the true re-simulated error using NDlib as referee; the cost block of §8.5.3; and the source code of the winning program, since an interpretable artifact that is never shown forfeits its own advantage.
+
 ---
 
 ## 9. Implications for this project
 
 ### 9.1 The one-line case
 
-**Every strong method in this literature builds a learned forward diffusion model and then inverts it. We already have the forward model.** SL-VAE trains `p_ψ(y|x,G)` from scratch and states outright that it is pluggable — the paper swaps in GAT, MONSTOR and DeepIS and reports no significant difference [verified, Fig. 3 discussion]. IVGD pre-trains a diffusion GNN in `pretrain.py` purely so `main.py` has something to invert. DDMSL builds a discrete Markov chain for the same reason. **Our `WorldModel` with a `structured` head is a strictly better version of that component**: it is action-conditioned, mechanism-shaped (per-edge transmission probabilities rather than a black-box regressor), and already validated against a ground-truth simulator.
+**Nothing published is both amortized and forward-model-using, and that empty cell is the shape of our two loops.** The generative line (SL-VAE, IVGD, DDMSL, SIDSL) exploits a learned forward model but pays a fresh optimization loop for every cascade. The amortized line (GCNSI, GIN-SD, LPSI, NETSLEUTH, OJC) runs in one pass but throws the forward model away, and it is the weakest family in every table in §5. §1 shows the cross-product with one cell empty. §2.3 fills it: the coding-agent outer loop searches the space of inversion _programs_, and the world model is the forward oracle those programs query while they run.
+
+**The obvious alternative is a trap worth naming.** "Every strong method builds a learned forward model and then inverts it, and we already have the forward model" is true, and it is a component swap that SL-VAE has already declared a no-op: the paper plugs in GAT, MONSTOR and DeepIS and reports no significant difference [verified, Fig. 3 discussion]. Building that is worth doing exactly once, as arm A of §2.6, so there is a control to measure program search against. It is not the contribution, and treating it as one would put this project's name on someone else's method.
+
+What our `WorldModel` genuinely brings to the subroutine role is narrower than "a better $p_\psi$" but real: it is **mechanism-shaped** (per-edge transmission composed into $p_{\text{new}}$, so it cannot saturate by construction, which matters because saturation destroys source information) and **action-conditioned** (which buys nothing in the base formulation and is the entire point of the adaptive variant, §2.8).
 
 ### 9.2 Why it costs almost nothing
 
@@ -573,29 +851,39 @@ These are effectively two literatures and their numbers never mix.
 | New action ops                           | **nothing** — actions are `NULL` throughout (`--inject-p 0`, omit `--action-ops`); the transition degenerates to `f_θ(G, s_t) → s_{t+1}`, a case we already train                                                                                            |
 | `(seed set, final state)` training pairs | **nothing** — `data/generate_wm_data.py` already writes them. The `t = 0, branch=main` record's `action` field _is_ the seed set (a bag of `add_node` ops); the episode's last `next_state` is the observation. Group `transitions_*.jsonl` by `episode_id`. |
 | Graphs with published baselines          | **nothing** — Jazz, Cora-ML, Power Grid, Network Science and Karate are all already loaded, and four of the five are byte-comparable (§6.4)                                                                                                                  |
-| New model code                           | one inversion loop, one source prior, three metrics (§2.3)                                                                                                                                                                                                   |
+| An outer loop over algorithms            | **nothing**: `coding_agent/` already generates, executes, scores and refines strategies against four interchangeable evaluators. Source localization adds one Protocol method and one primitive (§2.7)                                                     |
+| A forward oracle callable from generated code | **almost nothing**: `primitives.mc_simulate_spread` already exposes `x → σ(x)`; the vector-valued version is the same call, and `Trajectory.final_marginals` already computes it                                                                       |
+| New model code                           | items 1–6 and 8 of §2.7 are plumbing; **item 7 (arm A) is the only genuinely new modelling code, and it is the control rather than the method**                                                                                                             |
 
-**Estimated cost: 1–2 days.** No other task in this folder is close.
+**Estimated cost: 2–4 days for the method, plus 1–2 days for the ablation arm.** Still the cheapest task in this folder by a wide margin.
 
 ### 9.3 Build order
 
-1. **`SL-VAE (a)` equivalent first.** Freeze the world model, gradient-descend a relaxed source vector to minimize `‖y − f_θ(x̃, G)‖²`. SL-VAE's own ablation shows this alone beats every classical baseline on Jazz, Cora-ML and Karate (`F1 0.6254` on Jazz vs LPSI's `0.1716`) [verified, §5.1]. It is one module and it produces a publishable row.
-2. **Add the generative prior.** `(a) → full` is worth `+0.19` F1 on Jazz and `+0.26` on Network Science [verified, Table 4]. Small VAE, ~80 lines.
-3. **Compare against LPSI, NETSLEUTH, OJC and GCNSI by installing GraphSL** (`pip install GraphSL`) rather than reimplementing — it ships all four plus the six benchmark graphs, and it packages **our** Network Science version.
-4. **Report on Jazz, Cora-ML, Power Grid, Karate** against §5.1 and §5.2 directly. Report Network Science against IVGD/GraphSL/SIDSL and state explicitly that SL-VAE's column is a different graph.
+Ordered so the risk that kills the project is tested before the work that depends on it.
+
+1. **Kill-test LPSI first, before building anything else.** Hand-write LPSI (roughly fifteen lines), run the outer loop on one graph with a small $P$, and check whether any generated program beats it. §5.5 has LPSI beating both SL-VAE and DDMSL on Digg [verified], and LPSI sits _inside_ the agent's expressible space, so the realistic floor is "the search rediscovers LPSI". If forward-model-guided refinement cannot improve on that floor, stop: items 2–5 are not worth building. This is §2.9 risk 1 and it is cheap to run.
+2. **Build the loop: items 1–6 and 8 of §2.7.** The primitive and its four bindings, `localize` on the Protocol, the F1 reward, episode regrouping, metrics, prompts, registry entry. This produces arms 3–6.
+3. **Build arm A** (`world_model/wm_sl.py`): freeze the world model, gradient-descend a relaxed source vector against $\lVert y - f_\theta(\tilde{x}, G)\rVert^2$, then add the VAE prior. This is SL-VAE (a) → SL-VAE, whose own ablation is worth `+0.19` F1 on Jazz and `+0.26` on Network Science [verified, Table 4]. **6 vs A is the methodological claim**, so the control has to be built well rather than strawmanned.
+4. **Install GraphSL rather than reimplementing** (`pip install GraphSL`) for arms 1 and 2. It ships LPSI, NETSLEUTH, OJC, GCNSI, IVGD and SL-VAE behind one API returning accuracy / precision / recall / F1 / AUC, plus the six benchmark graphs, and it packages **our** Network Science version.
+5. **Run the transfer experiments of §8.5.1.** A program selected and evaluated on the same graph proves nothing about amortization. Select on one graph set, run unmodified on another, and report that as the headline.
+6. **Report on Jazz, Cora-ML, Power Grid and Karate** against §5.1 and §5.2 directly, on both the marginal and the binarized observation. Report Network Science against IVGD / GraphSL / SIDSL and state explicitly that SL-VAE's column is a different graph (§11).
 
 ### 9.4 What this buys beyond a new task row
 
+- **It is the only task in this folder that turns the coding agent onto an inverse problem.** Every other both-loops task (influence maximization, blocking, critical-node detection, epidemic control) has the agent selecting interventions to steer a forward process. Here it writes an inference algorithm instead, which exercises a different half of the contract and tests whether the outer loop generalizes past intervention selection.
+- **It produces an artifact that transfers.** Every published method here either re-optimizes per cascade or ships network weights. A selected program is source code that runs on a graph it was never selected on, and §8.5.1 makes that claim testable. Nothing in the literature can enter that comparison.
 - **It is a sharp, new diagnostic for forward-model fidelity.** A model that saturates in rollout (`ens_count_bias ≫ 0`) has destroyed the information the inverse problem needs. Source-localization F1 fails loudly where one-step `delta_f1` — which is dominated by unchanged nodes — stays comfortable. Given that saturation was this project's hardest bug (`wm-rollout-saturation-diagnosis-2026-06`), a metric that regresses when it recurs is worth having.
-- **It exercises the model in the direction it was never trained.** Everything in `wm_eval.py` scores forward prediction. Nothing yet asks whether the learned transition kernel is _invertible_, which is a genuinely different property.
-- **It is the natural companion to `cascade_reconstruction.md`.** DDMSL, DDMIX and DIPT all recover the whole path `s_0 … s_T`, not just `x`; that is the same inference procedure over the same kernel with a different read-out.
+- **It exercises the model in the direction it was never trained.** Everything in `wm_eval.py` scores forward prediction. Nothing yet asks whether the learned transition kernel supports _inference about its own inputs_, which is a genuinely different property.
+- **The recovered algorithm is interpretable.** Source attribution is used for forensics, outbreak tracing and misinformation provenance, where "these five nodes, because they are the label-field maxima of their communities" is worth more than an equally accurate latent vector. §8.5.5 requires publishing the winning program for exactly this reason.
+- **It is the natural companion to `cascade_reconstruction.md`.** DDMSL, DDMIX and DIPT all recover the whole path `s_0 … s_T`, not just `x`; that is the same inference procedure over the same kernel with a different read-out, and the same program-search framing applies unchanged.
 
 ### 9.5 Honest limitations
 
-- **Nobody in this literature evaluates under IC or LT.** SL-VAE uses SI/SIR, SL-Diff and SIDSL use real cascades. Our numbers on Jazz-under-IC will have **no direct precedent** — the graph matches, the diffusion model does not. Either add SI/SIR to the simulator (NDlib ships both; see `epidemic_control.md`) or report ours as self-contained.
-- **Our observation is easier than theirs.** MC-averaged marginals carry more information than one binary realization. Evaluate on a binarized single draw too, and report both.
-- **Zero action ops exercised.** This task adds no coverage of the four idle ops; its value is as an inverse probe, not as action-space breadth.
-- **The absolute numbers in §5.2 are not a realistic target.** IVGD's `FS ≈ 0.97` with `RE = 1.0000` on five of six graphs comes from a very permissive simulated setting. The GNN benchmark's ~73% top-5 on a 34-node graph (§5.6) is the more honest picture of how hard this problem is.
+Task-level risks are enumerated in §2.9 (the LPSI floor, the zeroth-order objection, the unknown ill-posedness ceiling, saturation propagation, our easier observation, no IC/LT precedent, and §5.2's unrealistic absolute numbers). Three limitations are project-level rather than task-level:
+
+- **Zero action ops exercised in the base formulation.** This task adds no coverage of the four idle ops, so it cannot double as action-space breadth. §2.8 is the variant that fixes it, at the cost of a new op and a regeneration run.
+- **The outer loop's reward needs ground-truth sources, which only a simulator provides.** §2.3.3 makes the selected program label-free _at inference_, which is what allows deployment on real cascades, but program _selection_ requires labelled episodes, so this method cannot be trained directly on Digg or Memetracker. That is a real scope limit and it should be stated rather than discovered by a reviewer.
+- **It adds a second stochastic search on top of an already stochastic pipeline.** Outer-loop variance across LLM seeds compounds with MC variance in the reward. §8.5.2's seed and budget parity is the minimum control; multiple outer-loop seeds with reported spread is the honest version, and it multiplies the cost of every arm.
 
 ---
 
@@ -664,3 +952,13 @@ Honest list of what this review could **not** establish.
 - **`RE` is an overloaded column name** — Recall in SL-Diff and SIDSL, re-simulated error elsewhere. **No paper surveyed reports a genuine re-simulated error**, so that metric would have no baseline.
 - **Source-fraction conventions are irreconcilable**: 10% uniform-random (SL-VAE), first 5% by infection time (SL-Diff), top 10% by influence time (SIDSL). Any cross-paper table is invalid without re-running.
 - **Dolphins (62 / 159) is the only benchmark graph we lack.** Not a gap in the review — a ~6-line loader (§6.1).
+
+### Gaps specific to the program-search formulation (§2.3)
+
+These are gaps in the _literature_, not in this review. They are what makes §2.3 a contribution and simultaneously what makes it hard to benchmark.
+
+- **No published SL method is amortized across graphs.** Every method here is either re-optimized per instance (SL-VAE, IVGD, DDMSL) or is a network trained and tested on one graph (GCNSI, GIN-SD). **No paper reports what happens when a method selected on graph A is run unmodified on graph B**, because per-instance methods have no artifact to transfer and the supervised GNNs are not evaluated that way. The transfer experiment of §8.5.1 is therefore our headline result _and_ has no published number to sit beside. Cross-graph generalization is the closest published relative (CNSL's cross-network setting, §4), and it is a different problem.
+- **No published SL method reports inference cost.** IVGD's Table 5 is the only runtime table in this file and its column assignment could not be confirmed (§5.2, marked [claim]). SL-VAE, DDMSL, SIDSL and SL-Diff report no wall-clock or call counts at all. The cost comparison of §8.5.3 will therefore be against numbers we measure ourselves by re-running their code where it exists (SL-VAE and IVGD ship repositories; DDMSL, SL-Diff and SIDSL do not), and against nothing at all for the five methods with no public code.
+- **No published SL method is LLM-generated.** The only LLM-in-the-loop method found is LLM-advisor (IJCAI 2025), which uses an LLM to embed rumour-comment _semantics_ as an extra input signal, not to write the inference algorithm (§4). There is no prior work on program search for this task, so there is no baseline for arm 2 (GA routing over a fixed pool) beyond what we construct ourselves.
+- **No baseline exists for re-simulated error.** Carried from above and now load-bearing: §2.3.3 uses re-simulation error as an inside-the-program signal and §8.5.5 reports it as a metric, but **no paper surveyed reports a genuine re-simulated error**, so that column is self-contained. Do not present it as a comparison.
+- **The Bayes-optimal F1 is uncharacterized.** No paper in this file establishes an upper bound on achievable F1 under a given source fraction and horizon, so a mediocre absolute number cannot be attributed to method or problem without our own arm-5 diagnostic (§2.9, risk 3). The nearest published anchor is the 2026 GNN benchmark's observation that the best GNN reaches ~73% top-5 on a 34-node graph (§5.6), which is a different metric and a different source count.

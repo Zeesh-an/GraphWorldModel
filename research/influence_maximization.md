@@ -59,12 +59,12 @@ Computing `σ(S)` exactly is **#P-hard** under both (Chen, Wang & Wang KDD 2010 
 **Status: implemented.** IM is the task this repo was built around, so this section documents what exists rather than what it would cost.
 
 | Element          | How IM maps onto `f_θ(G, s_t, a_t) → s_{t+1}`                                                                                                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------------------------------------------------ |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **State** `s_t`  | `(infected, frontier)` per node — ever-activated, and activated on this step. Channels 0–1 of `X`.                                                                              |
 | **Action** `a_t` | `add_node(v)` — commit `v` to the seed set. At `t = 0` a whole seed set is committed at once; at `t > 0` an action is injected with probability `--inject-p`. Channel 3 of `X`. |
 | **`T_exo`**      | deterministic: mark the targeted nodes active before the diffusion step.                                                                                                        |
 | **`T_endo`**     | the IC or LT step itself, harvested from NDlib and learned by the structured head.                                                                                              |
-| **Objective**    | `σ(S) = ` final `                                                                                                                                                               | infected | `, evaluated by ground-truth Monte-Carlo replay. |
+| **Objective**    | `σ(S) = ` final `\|infected\|`, evaluated by ground-truth Monte-Carlo replay.                                                                                                   |
 | **Planning**     | `planning_regret_multi` — use the model to pick a one-step intervention, score regret against the oracle.                                                                       |
 
 The other four ops (`remove_node`, `remove_edge`, `add_edge`, `set_edge_weight`) are supported by the simulator and the feature builder but are **not exercised by pure IM**. That is the single strongest argument for adding [`influence_blocking.md`](influence_blocking.md) next: it is the same simulator and the same graphs, and it puts the idle three-quarters of the action space to work.

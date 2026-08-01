@@ -86,13 +86,13 @@ The graph changes: edge/node insertions and deletions arrive as a stream, and th
 ### 2.1 The mapping is an identity, not an analogy
 
 | Element            | Adaptive IM                                   | What we already have                                                     |
-| ------------------ | --------------------------------------------- | ------------------------------------------------------------------------ | ------------------ | ------- | -------- | ----------------------------- |
+| ------------------ | --------------------------------------------- | ------------------------------------------------------------------------ |
 | **State** `s_t`    | realized activations after round `t`          | `(infected, frontier)` — channels 0–1 of `X`                             |
 | **Feedback model** | full-adoption vs myopic                       | `infected` = full-adoption, `frontier` = myopic. Both are inputs already |
 | **Action** `a_t`   | the round-`t` seed batch, `b = k/r` nodes     | a **bag** of `add_node` ops — the same object `t = 0` already commits    |
 | **`T_exo`**        | mark the batch active                         | already deterministic, already implemented                               |
 | **`T_endo`**       | one IC/LT step (or the cascade to quiescence) | the structured head                                                      |
-| **Objective**      | `E[                                           | ⋃ activated                                                              | ]` over the policy | final ` | infected | `, MC-replayed by `--compare` |
+| **Objective**      | `E[\|⋃ activated\|]` over the policy          | final `\|infected\|`, MC-replayed by `--compare`                         |
 | **Metric**         | adaptivity gap, spread vs non-adaptive        | needs a multi-round evaluation loop (§9)                                 |
 
 ### 2.2 Our generator already emits adaptive-IM transitions

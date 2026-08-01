@@ -103,16 +103,16 @@ A coding agent proposing `add_edge(u, v, w)` moves is therefore doing _hypothesi
 
 Nothing in `wm_eval.py` scores an edge set. The field's metric suite is:
 
-| Metric                      | Definition                                            | Who reports it                  |
-| --------------------------- | ----------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------- |
-| **Precision / Recall / F1** | over inferred vs true edge sets                       | everyone                        |
-| **Break-even point (BEP)**  | precision at the sweep point where precision = recall | NetInf, ConNIe                  |
-| **AUC**                     | area under the PR or ROC curve as `k` sweeps          | NetInf (Table II), MultiTree    |
-| **Accuracy**                | `1 − Σ                                                | I(α\*) − I(α̂)                   | / (Σ I(α*) + Σ I(α̂))` — a symmetric-difference score, *not\* classification accuracy | NETRATE, MultiTree, InfoPath |
-| **Normalised MAE**          | `E[                                                   | α\* − α̂                         | ] / α\*` on rates                                                                    | NETRATE                      |
-| **MSE**                     | on transmission probabilities                         | ConNIe, InfoPath                |
-| **KL divergence**           | between estimated and true transmission _function_    | KernelCascade                   |
-| **Sample complexity**       | #cascades to reach a target recovery probability      | Netrapalli, Abrahao, Daneshmand |
+| Metric                      | Definition                                                                                                 | Who reports it                  |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| **Precision / Recall / F1** | over inferred vs true edge sets                                                                            | everyone                        |
+| **Break-even point (BEP)**  | precision at the sweep point where precision = recall                                                      | NetInf, ConNIe                  |
+| **AUC**                     | area under the PR or ROC curve as `k` sweeps                                                               | NetInf (Table II), MultiTree    |
+| **Accuracy**                | `1 − Σ\|I(α*) − I(α̂)\| / (Σ I(α*) + Σ I(α̂))` — a symmetric-difference score, _not_ classification accuracy | NETRATE, MultiTree, InfoPath    |
+| **Normalised MAE**          | `E[\|α* − α̂\|] / α*` on rates                                                                              | NETRATE                         |
+| **MSE**                     | on transmission probabilities                                                                              | ConNIe, InfoPath                |
+| **KL divergence**           | between estimated and true transmission _function_                                                         | KernelCascade                   |
+| **Sample complexity**       | #cascades to reach a target recovery probability                                                           | Netrapalli, Abrahao, Daneshmand |
 
 The last one is the headline in the theory papers and the one our pipeline is best positioned to measure empirically — `--num-graphs` × rollouts already sweeps cascade counts.
 
@@ -127,6 +127,27 @@ The last one is the headline in the theory papers and the one our pipeline is be
 | Edge-set metrics (P/R/F1/BEP/AUC/MAE) | **S**  | Self-contained additions to `wm_metrics.py`                                                                         |
 
 **Ranking against the other candidate tasks:** below `source_localization` (free — inverts the model we already have), below `influence_estimation` (already computed), below `influence_blocking` / `epidemic_control` / `cascade_reconstruction` (all keep `G` as a condition), and roughly level with `cascade_prediction` — both need data our simulator does not currently emit. **Recommended role: a §-length robustness/limitation section, or a weights-only experiment on a fixed support**, not a headline task. §9 spells out the cheap version.
+
+### 2.6 Verdict on the two-loop formulation
+
+[`source_localization.md`](source_localization.md) §2.3 formalizes inverse tasks as **amortized program search**: the coding-agent outer loop searches the space of inference algorithms, the world model is the forward oracle those algorithms call, and the reward is ground-truth accuracy over labelled training instances. That framing rescued source localization from being a component swap, and [`cascade_reconstruction.md`](cascade_reconstruction.md) §2.4 applies it again. **It does not work here**, and it is worth recording exactly why, because this is the only task in the folder where the failure is on the _inner_ loop rather than the outer one.
+
+The framing needs four things. This task has one and a half of them.
+
+| #   | Requirement                                                          | Here                                                                                                                                                                                                                                                           |
+| --- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | An inference algorithm with real design freedom                      | ✅ **yes.** §2.2 enumerates four route families and §3–§4 differ almost entirely in search strategy: greedy submodular (NetInf, MultiTree), convex relaxation (NETRATE, ConNIe), dense threshold (FIM), non-parametric (KernelCascade). Wide, contested space. |
+| 2   | The world model callable as a forward oracle, with `G` a _condition_ | ❌ **no.** See below.                                                                                                                                                                                                                                          |
+| 3   | A dense reward with ground truth we own                              | ⚠️ edge-F1 against `G*` is well defined, but needs a Kronecker loader (§9.3) and a continuous-time simulator (§2.5, effort **L**) before any instance exists.                                                                                                  |
+| 4   | No cheaper exact alternative                                         | ❌ **no.** NETRATE's likelihood is **convex and closed-form**.                                                                                                                                                                                                 |
+
+**Why (2) fails.** §2.1's coincidence is real: an agent proposing `add_edge(u, v, w)` against a cascade likelihood is doing hypothesis search over `G`, and §2.3 already frames the ops correctly as search moves. The outer loop would work. The problem is what scores those moves. Our model is `f_θ(G, s_t, a_t) → s_{t+1}`; it _reads_ `G`. A hypothesis search hands it a candidate `Ĝ` and asks how well that explains the observed cascades, and **the search spends most of its time on wrong hypotheses.** Our kernel was trained on transitions from one graph distribution, so scoring adversarially-chosen off-distribution graphs is exactly where a learned model is least trustworthy, and the signal is corrupted precisely where the search most needs guidance. Source localization and cascade reconstruction never face this: there `G` is fixed and correct and only the state varies, so the model is always being asked about the graph it was trained on.
+
+**Why (4) fails, and this one is decisive.** §1 states that the whole methodological history of this field is dodging the super-exponential sum over propagation trees, and that NETRATE and ConNIe **succeeded** by reformulating so the sum has a closed form. NETRATE's objective is convex. Replacing an exact, convex, cheap likelihood with an approximate, non-convex, expensive learned one is a regression, not a contribution. Contrast source localization, whose posterior has no closed form, and cascade reconstruction, whose tree sum is genuinely intractable: in both, a learned kernel is the only affordable option. Here the field solved tractability in 2011.
+
+Three further blockers, each independently sufficient: the observation type is wrong (continuous infection times vs our discrete steps, and a continuous-time `T_endo` is rated **L** in §2.5); the dense `N×N` scorer is feasible only at `N ≤ 2,048`; and the benchmark is Kronecker synthetics we have no loader for, so there is no comparable published table on a graph we load.
+
+**Verdict: the agent half fits, the world-model half does not.** This is the mirror image of `influence_estimation` and `cascade_prediction`, where the world model fits and there is nothing for an agent to write. **What would flip it**: a continuous-time simulator, a Kronecker loader, and an accepted off-distribution-scoring risk. That is weeks of work, landing us competing against FIM's `F1 = 0.58–0.75` (§5.6) with a strictly worse objective than NETRATE's convex one. Not worth it. §9 items 2 and 4 remain the right things to take from this file, and both use only the inner loop.
 
 ---
 
@@ -249,24 +270,24 @@ Fewer real tables than the IM literature — most of this field publishes precis
 
 **The most reproducible table in this file.** All networks: **1,024 nodes, 1,446 edges** (directed). Exponential incubation, `α = 1`, `β` chosen per row so that mean cascade size `r/|C|` is neither tiny nor huge (`β ∈ (0.1, 0.6)`). `f` = fraction of true edges that participate in ≥1 cascade; `|C|` = number of cascades generated to reach that `f`; `r` = total edge transmissions (so mean cascade size = `r/|C|`).
 
-| Network                  | `f`  | `     | C      | `        | `r`      | **BEP** | **AUC** |
-| ------------------------ | ---- | ----- | ------ | -------- | -------- | ------- | ------- |
-| Forest Fire              | 0.5  | 388   | 2,898  | 0.393    | 0.29     |
-| Forest Fire              | 0.9  | 2,017 | 14,027 | 0.75     | 0.67     |
-| Forest Fire              | 0.95 | 2,717 | 19,418 | 0.82     | 0.74     |
-| Forest Fire              | 0.99 | 4,038 | 28,663 | 0.92     | 0.86     |
-| Hierarchical Kronecker   | 0.5  | 289   | 1,341  | 0.37     | 0.30     |
-| Hierarchical Kronecker   | 0.9  | 1,209 | 5,502  | 0.81     | 0.80     |
-| Hierarchical Kronecker   | 0.95 | 1,972 | 9,391  | 0.90     | 0.90     |
-| Hierarchical Kronecker   | 0.99 | 5,078 | 25,643 | **0.98** | **0.98** |
-| Core-periphery Kronecker | 0.5  | 140   | 1,392  | 0.31     | 0.23     |
-| Core-periphery Kronecker | 0.9  | 884   | 9,498  | 0.84     | 0.80     |
-| Core-periphery Kronecker | 0.95 | 1,506 | 14,125 | 0.93     | 0.91     |
-| Core-periphery Kronecker | 0.99 | 3,110 | 30,453 | **0.98** | 0.96     |
-| Flat (random) Kronecker  | 0.5  | 200   | 1,324  | 0.34     | 0.26     |
-| Flat (random) Kronecker  | 0.9  | 1,303 | 7,707  | 0.84     | 0.83     |
-| Flat (random) Kronecker  | 0.95 | 1,704 | 9,749  | 0.89     | 0.88     |
-| Flat (random) Kronecker  | 0.99 | 3,652 | 21,153 | 0.97     | 0.97     |
+| Network                  | `f`  | `\|C\|` | `r`    | **BEP**  | **AUC**  |
+| ------------------------ | ---- | ------- | ------ | -------- | -------- |
+| Forest Fire              | 0.5  | 388     | 2,898  | 0.393    | 0.29     |
+| Forest Fire              | 0.9  | 2,017   | 14,027 | 0.75     | 0.67     |
+| Forest Fire              | 0.95 | 2,717   | 19,418 | 0.82     | 0.74     |
+| Forest Fire              | 0.99 | 4,038   | 28,663 | 0.92     | 0.86     |
+| Hierarchical Kronecker   | 0.5  | 289     | 1,341  | 0.37     | 0.30     |
+| Hierarchical Kronecker   | 0.9  | 1,209   | 5,502  | 0.81     | 0.80     |
+| Hierarchical Kronecker   | 0.95 | 1,972   | 9,391  | 0.90     | 0.90     |
+| Hierarchical Kronecker   | 0.99 | 5,078   | 25,643 | **0.98** | **0.98** |
+| Core-periphery Kronecker | 0.5  | 140     | 1,392  | 0.31     | 0.23     |
+| Core-periphery Kronecker | 0.9  | 884     | 9,498  | 0.84     | 0.80     |
+| Core-periphery Kronecker | 0.95 | 1,506   | 14,125 | 0.93     | 0.91     |
+| Core-periphery Kronecker | 0.99 | 3,110   | 30,453 | **0.98** | 0.96     |
+| Flat (random) Kronecker  | 0.5  | 200     | 1,324  | 0.34     | 0.26     |
+| Flat (random) Kronecker  | 0.9  | 1,303   | 7,707  | 0.84     | 0.83     |
+| Flat (random) Kronecker  | 0.95 | 1,704   | 9,749  | 0.89     | 0.88     |
+| Flat (random) Kronecker  | 0.99 | 3,652   | 21,153 | 0.97     | 0.97     |
 
 [verified, TKDD Table II]
 
@@ -315,12 +336,12 @@ Setup [verified, §3.1]: directed scale-free (preferential attachment) and Erdő
 Setup [verified, §4.1]: three **1,024-node** Kronecker networks; rates `α ~ U(0.5, 1.5)`; `β = 0.5`; **200 observed cascades** for the headline precision-recall figures; the AUC-gain figures use **1,024 nodes / 1,024 edges**. The deliberate design choice is the _small_-cascade regime, on the argument that real social networks change faster than you can record cascades.
 
 | Claim                                               | Value                                                                                                                   | Tier                   |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------- | ---------------------------------------- | --- | --- | --------------- |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | Recall vs NetInf / ConNIe / NETRATE at 200 cascades | MultiTree reaches **higher recall than all three**; at recalls NetInf can reach, precision is "very similar"            | [verified, §4.1 prose] |
 | Accuracy vs NetInf                                  | beats NetInf on **> half** of NetInf's solutions, matches the rest                                                      | [verified, §4.1 prose] |
 | ConNIe / NETRATE accuracy at 200 cascades           | "typically significantly lower" — **ConNIe degrades the most** under cascade scarcity                                   | [verified, §4.1 prose] |
 | Exception                                           | NETRATE beats everything on the **hierarchical** Kronecker network                                                      | [verified, §4.1 prose] |
-| AUC gain over NetInf vs #cascades                   | large at small `                                                                                                        | C                      | `, → 0 (or slightly negative) at large ` | C   | `   | [figure, Fig 3] |
+| AUC gain over NetInf vs #cascades                   | large at small `\|C\|`, → 0 (or slightly negative) at large `\|C\|`                                                     | [figure, Fig 3]        |
 | Runtime vs NETRATE                                  | MultiTree and NetInf ≈ **1 order of magnitude faster**; even one full-gradient NETRATE iteration is slower              | [verified, §4.1 prose] |
 | Scalability                                         | 100,000-node and 200,000-node graphs (avg 2 edges/node), 10,000 cascades → **10.12 ms** and **12.14 ms** per edge added | [verified, §4.1 prose] |
 
@@ -675,7 +696,9 @@ The honest ceiling on real data is therefore **F1 ≈ 0.6–0.7** (KernelCascade
 
 7. **The `add_edge` / `remove_edge` / `set_edge_weight` ops mean something different here.** §2.3: a search move over a hypothesis, not an intervention on the world. If the coding-agent loop ever proposes edge ops against a cascade likelihood, that is _hypothesis search_, and the writeup should say so — a reader seeing the same five ops will assume otherwise.
 
-8. **This is a limitation section, not a chapter.** Ranked in §2.5 below `source_localization`, `influence_estimation`, `influence_blocking`, `epidemic_control` and `cascade_reconstruction`. The one paragraph worth writing: _"our world model conditions on a known `G`; recovering `G` from traces alone is a distinct inverse problem with its own literature, whose modern state of the art reaches F1 ≈ 0.6 at 20K cascades on 1K nodes."_
+8. **The two-loop formulation does not apply, and the failure is on the world-model side.** §2.6 is the full argument. The coding-agent outer loop fits fine: hypothesis search over `G`, scored by cascade likelihood, is a legitimate program-search problem and §2.2 shows the algorithm space is wide. It fails on the inner loop for two independent reasons: **`G` is the variable rather than a condition**, so the search asks our kernel to score off-distribution graphs precisely where it is least reliable; and **NETRATE's likelihood is already convex and closed-form**, so a learned approximation is a regression rather than a contribution. This makes network inference the mirror image of `influence_estimation` and `cascade_prediction`: there the world model fits and there is no algorithm to write; here there is an algorithm to write and no role for the world model. Worth stating explicitly in any writeup that enumerates which tasks use which loop.
+
+9. **This is a limitation section, not a chapter.** Ranked in §2.5 below `source_localization`, `influence_estimation`, `influence_blocking`, `epidemic_control` and `cascade_reconstruction`. The one paragraph worth writing: _"our world model conditions on a known `G`; recovering `G` from traces alone is a distinct inverse problem with its own literature, whose modern state of the art reaches F1 ≈ 0.6 at 20K cascades on 1K nodes."_
 
 ---
 

@@ -68,13 +68,13 @@ Chen et al. also note the approximation problem is itself hard: *"finding an eff
 
 `world_model/wm_eval.py::rollout_ensemble` rolls `n_samples` trajectories, sampling each step from the predicted frontier marginal, and compares against `n_samples` true NDlib rollouts under the same recorded action sequence. Its return dict is, verbatim:
 
-| our metric (`wm_eval.py`) | what the IE literature calls it |
-| ------------------------- | ------------------------------- |
-| `ens_final_count_model` | the estimate `σ̂(S)` |
-| `ens_final_count_true` | the ground truth `σ(S)` (MC replay) |
-| `ens_count_bias` | signed error `σ̂(S) − σ(S)`, averaged per step |
-| `ens_count_w1` | Wasserstein-1 between the model's and the simulator's *distribution* of cascade sizes — strictly more than the field reports, which is almost always a point estimate |
-| `ens_marg_mae` | **susceptibility MAE** — the DeepIS / DySuse metric exactly (per-node `|x̂_v − x_v|`) |
+| our metric (`wm_eval.py`) | what the IE literature calls it                                                                                                                                       |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ens_final_count_model`   | the estimate `σ̂(S)`                                                                                                                                                  |
+| `ens_final_count_true`    | the ground truth `σ(S)` (MC replay)                                                                                                                                   |
+| `ens_count_bias`          | signed error `σ̂(S) − σ(S)`, averaged per step                                                                                                                        |
+| `ens_count_w1`            | Wasserstein-1 between the model's and the simulator's *distribution* of cascade sizes — strictly more than the field reports, which is almost always a point estimate |
+| `ens_marg_mae`            | **susceptibility MAE** — the DeepIS / DySuse metric exactly (per-node `\|x̂_v − x_v\|`)                                                                               |
 
 `ens_count_bias` is the load-bearing one and it is *signed*, where the field almost universally reports unsigned relative error. Signed is the better choice and we should say so: a saturating estimator and a collapsing estimator both score badly on MAE, but only the signed statistic tells you which failure you have. Our own history is the argument — the linear head's `count_bias ≈ +49` diagnosed runaway saturation that an MAE column would have merely called "large".
 
