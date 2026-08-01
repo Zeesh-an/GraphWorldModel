@@ -137,8 +137,10 @@ def _results_table(agent_results: list[dict]) -> list[str]:
         header += " estimate | est − spread |"
         divider += " --- | --- |"
 
-    header += " real episodes | seconds |"
-    divider += " --- | --- |"
+    # eval calls / eval s are the inner-loop cost axis; total s is dominated by
+    # LLM latency and says little about which evaluator is cheaper
+    header += " real episodes | eval calls | eval s | total s |"
+    divider += " --- | --- | --- | --- |"
 
     rows = []
     ordered = sorted(
@@ -171,6 +173,8 @@ def _results_table(agent_results: list[dict]) -> list[str]:
             )
 
         row += f" {result.get('real_env_episodes', 0)} |"
+        row += f" {result.get('evaluator_calls', 0)} |"
+        row += f" {_format_number(result.get('evaluator_seconds'), 1)} |"
         row += f" {_format_number(result.get('elapsed_seconds'), 1)} |"
         rows.append(row)
 

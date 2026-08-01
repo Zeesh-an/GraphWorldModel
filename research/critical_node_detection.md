@@ -112,6 +112,8 @@ What is missing is small: a minimize-mode planner objective, a data-generation m
 
 ### 2.3 ⚠️ What `remove_node` actually means in our simulator
 
+> **✅ Resolved.** This section describes the behaviour before `--remove-semantics` existed, and is kept because it is the argument for why the flag has to exist. `--remove-semantics blocked` (now the registry default for this task) deletes the node and its incident edges, stops counting it, and prevents re-activation under both dynamics; the `+k` bias below is gone and the "lazy fix" paragraph is what shipped. `spent` keeps the old behaviour for influence maximization. See `data/README.md`.
+
 `data/wm_simulator.py::apply_actions` sets, for target `v`:
 
 ```python
@@ -874,7 +876,7 @@ That paragraph is worth more than a mediocre connectivity regressor. §5.8 (Lü'
 
 | #   | Task                                                                                                                                                                                  | Effort      | What it buys                                                                                                |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
-| 1   | Fix `remove_node` semantics (§2.3): node deletion as a bag `remove_node(v) + remove_edge(v,u) ∀u`, and an IC branch that does **not** count an immunized susceptible node as infected | ~half a day | Removes a systematic `+k` bias from every containment number we would report. **Blocking — do this first.** |
+| 1   | ~~Fix `remove_node` semantics (§2.3): node deletion as a bag `remove_node(v) + remove_edge(v,u) ∀u`, and an IC branch that does **not** count an immunized susceptible node as infected~~ ✅ **done**: `--remove-semantics blocked`, and this task's registry entry defaults to it | ~half a day | Removed a systematic `+k` bias from every containment number we would report                             |
 | 2   | `--action-ops remove_node` generation mode + a minimize flag on `planning_regret_multi`                                                                                               | ~1 day      | The whole diffusion-CND task, reusing the existing backbone, heads, features, and eval                      |
 | 3   | Add `usair97` (332/2,126), `crime` (754/2,127) and `corruption` (309/3,281) loaders                                                                                                   | ~2 h each   | Three tiny graphs that let us report on the same networks as GND, FINDER and SPR                            |
 | 4   | Sequential-removal evaluator computing `R` / ANC / ρ-at-Θ in `wm_metrics.py`, reusing `data/old/connectivity.py`                                                                      | ~half a day | Lets us print a structural column next to the diffusion column for context                                  |

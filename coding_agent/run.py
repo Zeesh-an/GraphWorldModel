@@ -80,7 +80,7 @@ from coding_agent.prompts import (
 )
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo, TaskSpec
-from data.wm_simulator import valid_action_ops
+from data.wm_simulator import spent, valid_action_ops, valid_remove_semantics
 from pipeline.conditions import parse_arm
 from pipeline.layout import budget_label, checkpoint_suffix
 from world_model.wm_data import load_graph_store
@@ -109,6 +109,9 @@ class ExperimentConfig:
         None  # LLM sampling temperature; None -> provider default
     )
     diffusion_model: str = "IC"  # IC | LT
+    # What remove_node does. Must match the checkpoint's for the world_model
+    # evaluator, which reads it back from the results JSON.
+    remove_semantics: str = spent
     budget: int = 5
     budget_pct: float | None = None  # overrides budget: % of the graph's num_nodes
     horizon: int = 10
@@ -259,19 +262,36 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
             config.diffusion_model,
             mc_runs=config.mc_runs,
             base_seed=config.seed,
+            remove_semantics=config.remove_semantics,
         )
 
     if config.evaluator == world_model:
         if config.wm_results_json is None:
             raise ValueError("evaluator=world_model requires config.wm_results_json")
 
-        return WorldModelEnvironment.from_results_json(
+        # Semantics comes from the checkpoint, not from --remove-semantics: the
+        # head's T_exo was fixed at training time and cannot be reinterpreted here
+        environment = WorldModelEnvironment.from_results_json(
             config.wm_results_json,
             graph,
             device=config.device,
             n_samples=config.n_samples,
             base_seed=config.seed,
         )
+
+        # Everything else in the run (the prompt, the --compare referee) follows
+        # config.remove_semantics, so a disagreement would have the arm plan under
+        # one reading and be scored under the other
+        if environment.remove_semantics != config.remove_semantics:
+            raise ValueError(
+                f"checkpoint {config.wm_results_json} was trained with "
+                f"remove_semantics={environment.remove_semantics!r} but this run "
+                f"is configured for {config.remove_semantics!r}; pass "
+                f"--remove-semantics {environment.remove_semantics} or use a "
+                f"checkpoint trained for {config.remove_semantics}"
+            )
+
+        return environment
 
     if config.evaluator == oracle:
         # Ground-truth dynamics ceiling: no checkpoint, no --wm-results-json
@@ -281,6 +301,7 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
             device=config.device,
             n_samples=config.n_samples,
             base_seed=config.seed,
+            remove_semantics=config.remove_semantics,
         )
 
     raise ValueError(f"unknown evaluator {config.evaluator!r}")
@@ -338,6 +359,7 @@ def run_experiment(
         budget=config.budget,
         horizon=config.horizon,
         allowed_ops=tuple(config.allowed_ops),
+        remove_semantics=config.remove_semantics,
     )
 
     # GA routing: one LLM call selects from the algorithm pool (no synthesis),
@@ -527,9 +549,23 @@ class Baseline(Strategy):
             and graph.num_nodes <= max_serialized_marginals
             else None
         ),
-        # Inner-loop real-environment episodes only (0 for model-based
-        # evaluators); the --compare referee replay is deliberately excluded
+        # Inner-loop cost, and the reason this block sits ABOVE the --credit and
+        # --compare sections rather than below them: both call rollout() again on
+        # this same environment for post-hoc analysis, and counting those would
+        # charge the search for work it did not do. The referee replay is excluded
+        # for the same reason, and separately by using its own environment.
+        #
+        # real_env_episodes  simulator episodes consumed; 0 for world_model/oracle,
+        #                    the sample-efficiency axis for the native arm
+        # evaluator_calls    how many times the search queried its evaluator
+        # evaluator_seconds  wall clock spent inside it, the axis the six-condition
+        #                    cost claim is actually read on, since elapsed_seconds
+        #                    is dominated by LLM latency
+        # forward_passes     the model-based unit of work (0 for monte_carlo)
         "real_env_episodes": getattr(environment, "episodes_used", 0),
+        "evaluator_calls": getattr(environment, "rollout_calls", 0),
+        "evaluator_seconds": round(getattr(environment, "evaluator_seconds", 0.0), 3),
+        "forward_passes": getattr(environment, "forward_passes", 0),
         "timeline": timeline,
     }
 
@@ -561,6 +597,7 @@ class Baseline(Strategy):
             config.diffusion_model,
             mc_runs=referee_runs,
             base_seed=config.seed,
+            remove_semantics=config.remove_semantics,
         )
 
         # Replay the actions that EARNED the reward rather than re-planning. A
@@ -757,6 +794,15 @@ if __name__ == "__main__":
         help="diffusion dynamics (default: IC).",
     )
     parser.add_argument(
+        "--remove-semantics",
+        type=str,
+        default=spent,
+        choices=list(valid_remove_semantics),
+        help="what remove_node means: spent = stays counted, stops spreading; "
+        "blocked = deleted from the graph, uncounted, cannot transmit or be "
+        "infected. Must match the --wm-results-json checkpoint (default: spent).",
+    )
+    parser.add_argument(
         "--budget",
         type=int,
         default=5,
@@ -887,6 +933,7 @@ if __name__ == "__main__":
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,
+        remove_semantics=args.remove_semantics,
         budget=args.budget,
         budget_pct=args.budget_pct,
         horizon=args.horizon,

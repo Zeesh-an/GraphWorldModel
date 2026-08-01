@@ -2,7 +2,7 @@
 
 One markdown file per graph task, all in the same format. Each is self-contained: task definition, fit with our methodology, every baseline method with paper and code URLs, every dataset those baselines evaluate on with node/edge counts and source URLs, transcribed result tables, evaluation protocols, and an honest list of what the review could **not** establish.
 
-**9,400 lines · 13 tasks · ~450 methods · ~400 datasets · 1,060 unique URLs**, compiled 2026-07-28/29.
+**9,450 lines · 13 tasks · ~450 methods · ~400 datasets · 1,060 unique URLs**, compiled 2026-07-28/29.
 
 These files are **literature references**, not design documents. What we built lives in `../CLAUDE.md` and the per-package READMEs; what the field published lives here.
 
@@ -19,9 +19,9 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | File                                                       | Fit                     | Lines | Comparable published table on a graph we load?                          |
 | ---------------------------------------------------------- | ----------------------- | ----- | ----------------------------------------------------------------------- |
 | [`influence_maximization.md`](influence_maximization.md)   | ✅ **implemented**      | 809   | ⭐ DeepIM Tables 2/3 — Jazz, Cora-ML, Power Grid byte-identical         |
-| [`influence_blocking.md`](influence_blocking.md)           | ✅ direct               | 742   | ⭐ SandIMIN PVLDB'24 Table 5 — email-Eu-core, YouTube, our exact metric |
+| [`influence_blocking.md`](influence_blocking.md)           | ✅ direct               | 743   | ⭐ SandIMIN PVLDB'24 Table 5 — email-Eu-core, YouTube, our exact metric |
 | [`source_localization.md`](source_localization.md)         | ✅ **cheapest**         | 964   | ⭐ SL-VAE KDD'22 Tables 1–4 — 5 of its 7 graphs are ours                |
-| [`critical_node_detection.md`](critical_node_detection.md) | ✅ direct               | 971   | ⭐ CoreHD/BPD Table I — "Grid" is our `power_grid` byte-for-byte        |
+| [`critical_node_detection.md`](critical_node_detection.md) | ✅ direct               | 974   | ⭐ CoreHD/BPD Table I — "Grid" is our `power_grid` byte-for-byte        |
 | [`epidemic_control.md`](epidemic_control.md)               | ✅ direct               | 690   | partial — different dataset family (contact networks)                   |
 | [`influence_estimation.md`](influence_estimation.md)       | ✅ **already computed** | 553   | ⭐ GLIE + SIEA — `ca_grqc`, `nethept`, `netphy`, `youtube` match        |
 | [`cascade_reconstruction.md`](cascade_reconstruction.md)   | ✅ direct               | 763   | DIPT 2025 — Cora-ML and Power Grid                                      |
@@ -40,7 +40,7 @@ The two ❌ files exist because "we considered it and here is exactly why it doe
 
 Things that emerged from more than one file, or that change what we should do.
 
-1. **`remove_node` does not mean immunization.** Found independently by `critical_node_detection.md` §2.3 and `influence_blocking.md` §2. Under IC it sets NDlib status `2`, which `active_nodes()` still counts as infected — so pre-emptively immunizing `k` nodes inflates measured spread by `+k` before any diffusion runs. Under LT it resets to Susceptible and the node re-activates next step. Neither op touches `G`. This is correct for IM ("this spreader is spent") and **wrong for every containment task**, three of which assume otherwise. Blocking issue for tasks 2, 4 and 5.
+1. **`remove_node` did not mean immunization. ✅ FIXED.** Found independently by `critical_node_detection.md` §2.3 and `influence_blocking.md` §2. Under IC it set NDlib status `2`, which `active_nodes()` still counted as infected, so pre-emptively immunizing `k` nodes inflated measured spread by `+k` before any diffusion ran; under LT it reset to Susceptible and the node re-activated next step; neither op touched `G`. Correct for IM ("this spreader is spent"), wrong for every containment task. Resolved by `--remove-semantics {spent,blocked}` (`data/wm_simulator.py`): `blocked` deletes the node from the graph, stops counting it, and prevents transmission and re-infection under both dynamics, with deletion expressed as `remove_node(v)` plus a `remove_edge` per incident arc so nothing downstream changed. The value crosses data generation, the head's `T_exo`, and the agent's prompt, and `pipeline/tasks.py` now carries the right one per task. `spent` output is byte-identical to before, so existing checkpoints are unaffected.
 
 2. **NDlib ships no competitive/multi-cascade model.** Verified by enumerating `available_statuses` across every model — `Blocked: -1` is a static non-adopter set, and `CompositeModel` can only express one global tie-break. Influence blocking needs a competitive step written on top of `data/wm_simulator.py`.
 

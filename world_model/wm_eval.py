@@ -26,7 +26,7 @@ from world_model.wm_metrics import (
     score_predictions,
 )
 
-from data.wm_simulator import ActionOp, Simulator
+from data.wm_simulator import ActionOp, Simulator, blocked, spent
 
 seed_upper_bound = 1 << 30
 
@@ -299,6 +299,7 @@ def rollout_ensemble(
     n_samples: int = 20,
     max_episodes: int = 50,
     seed: int = 0,
+    remove_semantics: str = spent,
 ) -> dict[str, float]:
     """
     Stochastic ensemble rollout (Lever 1): treat the world model as a stochastic
@@ -408,8 +409,10 @@ def rollout_ensemble(
 
                 post_exo_infected = current_infected | adds
 
-                if diffusion_model == "LT":
-                    # LT remove_node returns the node to Susceptible; IC keeps it counted.
+                if diffusion_model == "LT" or remove_semantics == blocked:
+                    # LT remove_node returns the node to Susceptible, and a blocked
+                    # node leaves the graph under either dynamics. Only spent IC
+                    # keeps the node counted.
                     post_exo_infected -= removes
 
                 new_draw = rng.random(num_nodes) < probs[:, 1]

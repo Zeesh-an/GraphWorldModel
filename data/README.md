@@ -168,10 +168,34 @@ The action space is unified across tasks: every action is `(op, target, [destina
 | op                | fields in the record                | IC effect                                    | LT effect                              |
 | ----------------- | ----------------------------------- | -------------------------------------------- | -------------------------------------- |
 | `add_node`        | `target=v`                          | status→1 (node becomes a spreader next step) | status→1                               |
-| `remove_node`     | `target=v`                          | status→2 (Removed/spent, stays counted)      | status→0 (back to Susceptible)         |
+| `remove_node`     | `target=v`                          | depends on `--remove-semantics`, see below   | depends on `--remove-semantics`        |
 | `add_edge`        | `target=u, destination=v, weight=w` | add arc u→v, set transmission p=`w`          | add edge structurally (weight ignored) |
 | `remove_edge`     | `target=u, destination=v`           | remove arc u→v                               | remove edge structurally               |
 | `set_edge_weight` | `target=u, destination=v, weight=w` | set arc u→v transmission p=`w`               | **no-op** (LT ignores edge weights)    |
+
+### `--remove-semantics`: what `remove_node` means
+
+Two readings, and they are different problems. The value is recorded in `metadata.json`, and `train_wm.py` refuses to train a head whose `T_exo` disagrees with it.
+
+| | `spent` (default) | `blocked` |
+| --- | --- | --- |
+| reading | the spreader is used up | the node is deleted from the graph |
+| IC status | `2` (Removed) | `2`, plus tracked in `Simulator.blocked` |
+| LT status | `0` (Susceptible) | `0`, plus tracked in `Simulator.blocked` |
+| counted as infected? | **yes** under IC, no under LT | **no**, under both |
+| can transmit? | no | no |
+| can (re-)activate? | no under IC, **yes** under LT | no, under both |
+| edges removed? | no | **yes** (the bag carries them) |
+| right for | influence maximization | containment: critical node detection, influence blocking, immunization |
+
+Under `spent`, pre-emptively removing `k` susceptible nodes under IC inflates the measured final spread by exactly `+k`, because `active_nodes()` counts NDlib status `2`. That is correct for "this spreader has already spent its shot" and wrong for any minimize-the-spread objective.
+
+Under `blocked`, `wm_actions.delete_node_bag()` expands one deletion into `remove_node(v)` plus a `remove_edge` per incident arc, so the whole existing pipeline handles it unchanged: `build_features` marks `CH_EDGE`, `reconstruct_episode_adjacency` replays the removals, and both rollout paths call `apply_edge_ops`. No sixth op. `Simulator._enforce_blocked()` additionally holds the node down after each step, so a bare `remove_node` from a hand-written strategy is still correct.
+
+Two consequences worth knowing before reading a `blocked` dataset:
+
+- Injected removals target **susceptible** nodes (containment blocks ahead of the cascade), not active ones as `spent` does.
+- Counterfactual forks carry **no** removals, because `Simulator.restore()` rewinds status but not the graph, so a fork's edge deletions would leak into the main branch. Blocked removals reach the data through main-branch injection only.
 
 The three data "settings" are just which ops you pass to `--action-ops`:
 

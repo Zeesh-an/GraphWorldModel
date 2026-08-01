@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from data.wm_simulator import blocked, spent, valid_remove_semantics
 from world_model.wm_data import GraphInput, ch_add, ch_frontier, ch_infected, ch_remove
 from world_model.model.gcn import GCNEncoder
 from world_model.model.graphsage import GraphSAGEEncoder
@@ -37,15 +38,25 @@ class ICTransmissionHead(nn.Module):
     y_inf(v) = infected_v + (1 - infected_v) * p_new(v)   (monotone)
     y_fr(v)  = (1 - infected_v) * p_new(v)               (new frontier = newly infected)
 
+    `remove_semantics` must match the dataset's: under `spent` a removed node stays
+    infected (NDlib status 2 is still counted), under `blocked` it leaves the graph
+    and T_exo zeroes it. Getting this wrong puts the head's T_exo permanently at
+    odds with the targets it is fit against.
+
     Returns logits (N, 2) so training (BCEWithLogits) and eval (sigmoid) are unchanged.
     """
 
     def __init__(
-        self, hidden_dim: int, oracle: bool = False, residual: bool = False
+        self,
+        hidden_dim: int,
+        oracle: bool = False,
+        residual: bool = False,
+        remove_semantics: str = spent,
     ) -> None:
         super().__init__()
         self.oracle = oracle
         self.residual = residual
+        self.remove_semantics = remove_semantics
 
         if not oracle:
             # [h_u, h_v, edge_weight] -> transmission logit
@@ -68,9 +79,17 @@ class ICTransmissionHead(nn.Module):
         num_nodes = hidden.shape[0]
 
         # Apply the exogenous action (T_exo) first: add_node -> infected + active spreader;
-        # remove_node -> stays infected (IC) but drops out of the frontier. Edge actions
-        # are already reflected in graph.edge_index / edge_weight.
+        # remove_node -> drops out of the frontier, and under `spent` STAYS infected
+        # (NDlib status 2 is still counted). Edge actions are already reflected in
+        # graph.edge_index / edge_weight.
         infected = torch.clamp(X[:, ch_infected] + X[:, ch_add], max=1.0)  # shape: (N,)
+
+        if self.remove_semantics == blocked:
+            # The node left the graph, so it is not part of the spread. Its edges
+            # are gone from edge_index too (the deletion bag carries them), which
+            # is what also stops it transmitting and being re-infected.
+            infected = infected * (1.0 - X[:, ch_remove])  # shape: (N,)
+
         frontier = torch.clamp(X[:, ch_frontier] + X[:, ch_add], max=1.0) * (
             1.0 - X[:, ch_remove]
         )  # shape: (N,)
@@ -168,8 +187,11 @@ class LTThresholdHead(nn.Module):
     ) -> torch.Tensor:
         num_nodes = hidden.shape[0]
 
-        # Apply the exogenous action (T_exo): add_node -> active; remove_node -> susceptible
-        # (LT remove resets the node to status 0, so it can re-activate).
+        # Apply the exogenous action (T_exo): add_node -> active; remove_node -> susceptible.
+        # One expression covers both remove semantics: under `spent` the node resets to
+        # status 0 and may re-activate through its (intact) edges; under `blocked` those
+        # edges are gone from edge_index, so active_fraction is 0 and the gate holds it
+        # down. No remove_semantics branch is needed here.
         active = torch.clamp(X[:, ch_infected] + X[:, ch_add], max=1.0) * (
             1.0 - X[:, ch_remove]
         )  # shape: (N,)
@@ -220,6 +242,7 @@ class WorldModel(nn.Module):
         dropout: float = 0.1,
         head_type: str = "linear",
         diffusion_model: str = "IC",
+        remove_semantics: str = spent,
         **backbone_kwargs: object,
     ) -> None:
         super().__init__()
@@ -229,7 +252,14 @@ class WorldModel(nn.Module):
                 f"unknown backbone {backbone}; choose from {list(backbones)}"
             )
 
+        if remove_semantics not in valid_remove_semantics:
+            raise ValueError(
+                f"unknown remove_semantics {remove_semantics!r}; "
+                f"choose one of {valid_remove_semantics}"
+            )
+
         self.head_type = head_type
+        self.remove_semantics = remove_semantics
 
         # Encoder produces (N, hidden_dim) node embeddings
         self.encoder = backbones[backbone](
@@ -245,7 +275,7 @@ class WorldModel(nn.Module):
             self.head = (
                 LTThresholdHead(hidden_dim)
                 if diffusion_model == "LT"
-                else ICTransmissionHead(hidden_dim)
+                else ICTransmissionHead(hidden_dim, remove_semantics=remove_semantics)
             )
         elif head_type == "structured_residual":
             # IC-only: anchors q on the IC edge transmission prob (q = w at zero
@@ -255,10 +285,14 @@ class WorldModel(nn.Module):
                     "structured_residual is IC-only: it anchors q on the IC edge "
                     "transmission prob; LT edge weights carry no transmission meaning"
                 )
-            self.head = ICTransmissionHead(hidden_dim, residual=True)
+            self.head = ICTransmissionHead(
+                hidden_dim, residual=True, remove_semantics=remove_semantics
+            )
         elif head_type == "structured_oracle":
             # Oracle is IC-only (LT thresholds are not stored, so no oracle there)
-            self.head = ICTransmissionHead(hidden_dim, oracle=True)
+            self.head = ICTransmissionHead(
+                hidden_dim, oracle=True, remove_semantics=remove_semantics
+            )
         elif head_type == "linear":
             # Free head: each node embedding -> 2 logits [next_infected, next_frontier]
             self.head = nn.Linear(in_features=hidden_dim, out_features=2)

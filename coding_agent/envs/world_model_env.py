@@ -19,6 +19,7 @@ from world_model.wm_data import (
 )
 from world_model.wm_model import WorldModel
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory
+from data.wm_simulator import blocked, spent
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 
@@ -37,15 +38,26 @@ class WorldModelEnvironment:
         device: str = "cpu",
         n_samples: int = 20,
         base_seed: int = 0,
+        remove_semantics: str = spent,
     ) -> None:
         self.model = model.to(device).eval()
         self.graph = graph
         self.diffusion_model = diffusion_model
         self.device = torch.device(device)
         self.n_samples = n_samples
+        self.remove_semantics = remove_semantics
         # Seed every rollout uses unless one is named explicitly; shared across
         # candidates so the DIFFERENCE between two strategies is well resolved
         self.base_seed = base_seed
+        # Cumulative inner-loop cost, mirroring MonteCarloEnvironment so the two
+        # are directly comparable in the arm table. episodes_used stays 0 by
+        # definition: this evaluator consumes no real-environment experience,
+        # which is the point of the condition. forward_passes is its own unit of
+        # work: one batched pass over the n_samples block graph per timestep.
+        self.rollout_calls = 0
+        self.evaluator_seconds = 0.0
+        self.episodes_used = 0
+        self.forward_passes = 0
 
         self.base_edges = {
             (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge])): float(
@@ -67,6 +79,9 @@ class WorldModelEnvironment:
 
         # Read the config block of a results JSON file
         config = json.loads(Path(results_json).read_text())["config"]
+        # Absent in checkpoints trained before --remove-semantics existed, all of
+        # which were spent
+        remove_semantics = config.get("remove_semantics", spent)
         backbone_kwargs = {
             "n_heads": config["n_heads"],
             "ffn_dim": config["ffn_dim"],
@@ -83,6 +98,7 @@ class WorldModelEnvironment:
             dropout=config["dropout"],
             head_type=config.get("head", "linear"),
             diffusion_model=config["diffusion_model"],
+            remove_semantics=remove_semantics,
             **backbone_kwargs,
         )
 
@@ -109,6 +125,7 @@ class WorldModelEnvironment:
             device=device,
             n_samples=n_samples,
             base_seed=base_seed,
+            remove_semantics=remove_semantics,
         )
 
     @classmethod
@@ -119,6 +136,7 @@ class WorldModelEnvironment:
         device: str = "cpu",
         n_samples: int = 20,
         base_seed: int = 0,
+        remove_semantics: str = spent,
     ) -> "WorldModelEnvironment":
         """Ground-truth dynamics baseline: same rollout machinery, q = true edge weight."""
         if diffusion_model != "IC":
@@ -136,6 +154,7 @@ class WorldModelEnvironment:
             dropout=0.0,
             head_type="structured_oracle",
             diffusion_model=diffusion_model,
+            remove_semantics=remove_semantics,
         )
 
         return cls(
@@ -145,6 +164,7 @@ class WorldModelEnvironment:
             device=device,
             n_samples=n_samples,
             base_seed=base_seed,
+            remove_semantics=remove_semantics,
         )
 
     def _block_graph_input(self, sample_arrays: list[tuple]) -> GraphInput:
@@ -244,6 +264,7 @@ class WorldModelEnvironment:
                 .numpy()
                 .reshape(num_samples, num_nodes, 2)
             )  # shape: (n_samples, N, 2)
+            self.forward_passes += 1
 
             # Coupled sampling: draw the new infections once from the frontier
             # marginal, then derive both channels (frontier = new wave, infected
@@ -269,8 +290,10 @@ class WorldModelEnvironment:
 
                 post_exo_infected = infected[sample] | adds
 
-                if self.diffusion_model == "LT":
-                    # LT remove_node returns the node to Susceptible; IC keeps it counted
+                if self.diffusion_model == "LT" or self.remove_semantics == blocked:
+                    # LT remove_node returns the node to Susceptible, and a blocked
+                    # node leaves the graph under either dynamics. Only spent IC
+                    # keeps the node counted.
                     post_exo_infected -= removes
 
                 new_nodes = (
@@ -314,6 +337,10 @@ class WorldModelEnvironment:
         counts = representative_counts
         counts[-1] = reward
 
+        elapsed = time.perf_counter() - start
+        self.rollout_calls += 1
+        self.evaluator_seconds += elapsed
+
         return Trajectory(
             states=states,
             actions=actions,
@@ -326,7 +353,7 @@ class WorldModelEnvironment:
                 # is drawn from it, so replaying it reproduces the number
                 "seed": int(seed),
                 "reward_se": reward_se,
-                "rollout_seconds": time.perf_counter() - start,
+                "rollout_seconds": elapsed,
             },
             final_marginals=(final_infected_freq / num_samples).round(3).tolist(),
         )

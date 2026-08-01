@@ -12,7 +12,7 @@ import networkx as nx
 import numpy as np
 
 from coding_agent.types import GraphInfo
-from data.wm_simulator import ActionOp, Simulator
+from data.wm_simulator import ActionOp, Simulator, spent
 
 seed_upper_bound = 1 << 30
 convergence_tol = 1e-9
@@ -20,7 +20,12 @@ norm_floor = 1e-12
 power_iterations = 100
 
 
-def build_simulator(graph: GraphInfo, diffusion_model: str, seed: int = 0) -> Simulator:
+def build_simulator(
+    graph: GraphInfo,
+    diffusion_model: str,
+    seed: int = 0,
+    remove_semantics: str = spent,
+) -> Simulator:
     """Construct an NDlib Simulator from a GraphInfo."""
     nx_graph = nx.DiGraph() if graph.directed else nx.Graph()
     nx_graph.add_nodes_from(range(graph.num_nodes))
@@ -32,7 +37,12 @@ def build_simulator(graph: GraphInfo, diffusion_model: str, seed: int = 0) -> Si
         nx_graph.add_edge(source, target)
         ic_prob_map[(source, target)] = float(graph.ic_probs[edge])
 
-    simulator = Simulator(nx_graph, ic_prob_map=ic_prob_map, seed=seed)
+    simulator = Simulator(
+        nx_graph,
+        ic_prob_map=ic_prob_map,
+        seed=seed,
+        remove_semantics=remove_semantics,
+    )
     simulator.reset(diffusion_model)
 
     return simulator

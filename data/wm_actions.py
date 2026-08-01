@@ -8,7 +8,7 @@ import networkx as nx
 import numpy as np
 
 from data.wm_graphs import GraphBundle
-from data.wm_simulator import ActionOp, State, Simulator
+from data.wm_simulator import ActionOp, State, Simulator, blocked, spent
 
 spine_algorithms = (
     "random",
@@ -211,12 +211,47 @@ def _random_non_edge(
     return None
 
 
+def delete_node_bag(
+    graph: nx.Graph | nx.DiGraph, node: int
+) -> list[ActionOp]:
+    """
+    Node deletion written in the existing op set: remove_node(v) plus one
+    remove_edge per incident arc. This is what `blocked` semantics means
+    structurally, and it needs no sixth op.
+
+    The edge ops go in the BAG rather than into the simulator, which is what
+    keeps every downstream consumer correct for free: build_features marks
+    CH_EDGE on both endpoints, reconstruct_episode_adjacency replays the
+    removals so each step sees the post-deletion adjacency, and both rollout
+    paths already call apply_edge_ops.
+
+    Both orientations are emitted for undirected graphs because the edge store
+    is keyed by arc; the extra key is a no-op wherever it does not exist.
+    """
+    node = int(node)
+    bag = [ActionOp("remove_node", node)]
+
+    if graph.is_directed():
+        incident = [(node, int(other)) for other in graph.successors(node)]
+        incident += [(int(other), node) for other in graph.predecessors(node)]
+    else:
+        neighbours = [int(other) for other in graph.neighbors(node)]
+        incident = [(node, other) for other in neighbours]
+        incident += [(other, node) for other in neighbours]
+
+    return bag + [
+        ActionOp("remove_edge", source, destination)
+        for source, destination in incident
+    ]
+
+
 def _build_action(
     op: str,
     state: State,
     graph: nx.Graph | nx.DiGraph,
     rng: np.random.Generator,
     weight_range: tuple,
+    remove_semantics: str = spent,
 ) -> list[ActionOp]:
     """One injected action of type op with a randomly chosen valid target."""
     infected = set(state.infected)
@@ -229,10 +264,24 @@ def _build_action(
         if susceptible:
             return [ActionOp("add_node", int(rng.choice(susceptible)))]
     elif op == "remove_node":
-        # Build an action that randomly removes an infected/frontier node
-        active = list(state.frontier) if state.frontier else list(state.infected)
-        if active:
-            return [ActionOp("remove_node", int(rng.choice(active)))]
+        if remove_semantics == blocked:
+            # Containment blocks a node BEFORE the cascade reaches it, so the
+            # target pool is the susceptibles, not the active nodes that `spent`
+            # draws from. Without this the data would carry no example of the
+            # semantics at all.
+            # ponytail: uniform over susceptibles, so most blocks land far from
+            # the frontier and change nothing. Restrict to susceptible
+            # neighbours of the frontier if the containment signal is too sparse.
+            pool = [
+                node for node in range(graph.number_of_nodes()) if node not in infected
+            ]
+            if pool:
+                return delete_node_bag(graph, int(rng.choice(pool)))
+        else:
+            # Build an action that randomly removes an infected/frontier node
+            active = list(state.frontier) if state.frontier else list(state.infected)
+            if active:
+                return [ActionOp("remove_node", int(rng.choice(active)))]
     elif op == "add_edge":
         # Build an action that randomly adds an edge where there previously was not one
         edge = _random_non_edge(graph, rng)
@@ -270,6 +319,7 @@ def sample_injection(
     p_inject: float,
     action_ops: list[str],
     weight_range: tuple[float, float],
+    remove_semantics: str = spent,
 ) -> list[ActionOp]:
     """
     NULL (no action, just diffusion dynamics) with prob (1 - p_inject), else a
@@ -280,22 +330,33 @@ def sample_injection(
 
     # Pick one enabled op uniformly, then a random valid target from the live graph
     op = action_ops[int(rng.integers(len(action_ops)))]
-    return _build_action(op, state, graph, rng, weight_range)
+    return _build_action(op, state, graph, rng, weight_range, remove_semantics)
 
 
 def counterfactual_actions(
     state: State,
-    num_nodes: int,
+    graph: nx.Graph | nx.DiGraph,
     main_bag: list[ActionOp],
     count: int,
     rng: np.random.Generator,
     action_ops: list[str],
+    remove_semantics: str = spent,
 ) -> list[list[ActionOp]]:
     """
     Up to `count` action bags distinct from main_bag and each other. Forks cover
     node ops only (NULL, a random add_node, a random remove_node) so the
     snapshot/restore branch never has to undo an edge mutation.
+
+    Under `blocked` that rules remove_node out entirely: node deletion IS an edge
+    mutation (delete_node_bag), and Simulator.restore() rewinds status and the
+    blocked set but not the graph, so a fork would strip the node's edges from
+    the main branch permanently. Blocked removals therefore reach the training
+    data through main-branch injection only.
+    ponytail: costs counterfactual coverage of removals. Fix by snapshotting the
+    graph, or by re-adding the fork's removed edges with their captured weights,
+    if the action-sensitivity metric comes out weak on a containment dataset.
     """
+    num_nodes = graph.number_of_nodes()
     infected = set(state.infected)
     susceptible = [node for node in range(num_nodes) if node not in infected]
     active = list(state.frontier) if state.frontier else list(state.infected)
@@ -318,7 +379,7 @@ def counterfactual_actions(
     if "add_node" in action_ops and susceptible:
         pool.append([ActionOp("add_node", int(rng.choice(susceptible)))])
 
-    if "remove_node" in action_ops and active:
+    if "remove_node" in action_ops and active and remove_semantics == spent:
         pool.append([ActionOp("remove_node", int(rng.choice(active)))])
 
     bags = []

@@ -8,7 +8,7 @@ from coding_agent.executor import (
     validate_actions,
 )
 from coding_agent.methods.base import OuterLoopMethod
-from coding_agent.prompts import build_user_prompt, system_prompts
+from coding_agent.prompts import build_system_prompt, build_user_prompt
 from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
 
@@ -21,7 +21,7 @@ class PerStepReprompt(OuterLoopMethod):
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
-        system = system_prompts["per_step"]
+        system = build_system_prompt("per_step", task=task)
         self.effective_budget = task.budget
         # The thread runs WITHIN one episode: the agent sees the states its own
         # earlier actions produced. It resets at t=0 because the next episode is

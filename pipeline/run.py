@@ -69,7 +69,7 @@ from data.generate_wm_data import (
 )
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.types import GraphInfo
-from data.wm_simulator import valid_action_ops
+from data.wm_simulator import valid_action_ops, valid_remove_semantics
 from pipeline.conditions import (
     Arm,
     condition_names,
@@ -82,7 +82,7 @@ from pipeline.conditions import (
     valid_evaluators,
 )
 from pipeline.layout import Layout, budget_label, skip_marker_suffix
-from pipeline.tasks import default_run, require_runnable, task_names
+from pipeline.tasks import default_run, get_task, require_runnable, task_names
 from pipeline.plots import build_plots
 from pipeline.report import write_report
 from pipeline.summary import write_environment, write_summary
@@ -112,6 +112,10 @@ class PipelineConfig:
     gen_models: tuple = ("IC", "LT")
     gen_algorithms: tuple = ("random", "degree", "pagerank", "betweenness")
     gen_action_ops: tuple = ("add_node", "remove_node")
+    # Crosses all three stages: it decides how the data is generated, how the
+    # head's T_exo is built, and what the agent is told remove_node does. One
+    # value so they cannot disagree; defaulted from the task registry.
+    remove_semantics: str | None = None
     prob_model: str = "weighted"
     uniform_p: float = 0.1
     budget_pct_range: tuple = default_budget_pct_range
@@ -334,6 +338,7 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         horizon=config.gen_horizon,
         inject_p=config.inject_p,
         action_ops=list(config.gen_action_ops),
+        remove_semantics=config.remove_semantics,
         weight_lo=0.0,
         weight_hi=1.0,
         cf_prob=config.cf_prob,
@@ -366,6 +371,7 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
             diffusion_model=config.diffusion_model,
             model=config.wm_model,
             head=config.head,
+            remove_semantics=config.remove_semantics,
             hidden_dim=config.hidden_dim,
             n_layers=config.n_layers,
             n_heads=config.n_heads,
@@ -521,6 +527,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 model=config.llm_model,
                 temperature=config.temperature,
                 diffusion_model=config.diffusion_model,
+                remove_semantics=config.remove_semantics,
                 budget=budget or 5,
                 budget_pct=budget_pct,
                 horizon=config.horizon,
@@ -688,6 +695,12 @@ def _write_manifest(layout: Layout, config: PipelineConfig) -> None:
 
 def run_pipeline(config: PipelineConfig) -> dict:
     pipeline_start = time.perf_counter()
+
+    # Resolved here rather than only in __main__, so a programmatically built
+    # config gets the task's semantics instead of leaking None into GenConfig
+    if config.remove_semantics is None:
+        config.remove_semantics = get_task(config.task).remove_semantics
+
     layout = Layout(
         config.task, config.dataset, config.run, root=config.results_root
     )
@@ -927,6 +940,15 @@ if __name__ == "__main__":
         default=["add_node", "remove_node"],
         choices=list(valid_action_ops),
         help="action ops injected during generation (default: add_node remove_node).",
+    )
+    parser.add_argument(
+        "--remove-semantics",
+        type=str,
+        default=None,
+        choices=list(valid_remove_semantics),
+        help="what remove_node means across all three stages: spent = stays "
+        "counted, stops spreading; blocked = deleted from the graph, uncounted, "
+        "cannot transmit or be infected (default: the task registry's value).",
     )
     parser.add_argument(
         "--prob-model",
@@ -1257,7 +1279,13 @@ if __name__ == "__main__":
 
     # Fail before any stage runs: a planned task has no head, no simulator, or
     # no data, and the message names which
-    require_runnable(args.task)
+    task = require_runnable(args.task)
+
+    # The task registry is the default so a containment task cannot be generated
+    # with maximization semantics by forgetting a flag; --remove-semantics still
+    # overrides for ablations
+    if args.remove_semantics is None:
+        args.remove_semantics = task.remove_semantics
 
     if args.dataset not in synthetic_families and args.num_graphs != 1:
         raise ValueError(
@@ -1281,6 +1309,7 @@ if __name__ == "__main__":
         gen_models=tuple(args.gen_models),
         gen_algorithms=tuple(args.gen_algorithms),
         gen_action_ops=tuple(args.gen_action_ops),
+        remove_semantics=args.remove_semantics,
         prob_model=args.prob_model,
         uniform_p=args.uniform_p,
         budget_pct_range=tuple(args.budget_pct_range),

@@ -1,4 +1,5 @@
 from coding_agent.types import GraphInfo, TaskSpec
+from data.wm_simulator import blocked, spent
 from coding_agent.executor import (
     allowed_imports,
     mc_blocked_algorithms,
@@ -39,13 +40,33 @@ ACTION RULES:
 - A seed is ActionOp("add_node", node). Emit at most `budget` add_node actions in total.
 - Seeding the same node twice is REJECTED: it spends two units of budget on one node.
 - Node ids must be in [0, num_nodes).
-- remove_node under IC sets the node to Removed: it STAYS counted as infected and
-  simply stops spreading, so it can only ever lower your score. Under LT it
-  returns the node to Susceptible. For influence MAXIMIZATION it is almost never
-  the right action — do not spend budget on it without a specific reason.
 - add_edge / remove_edge / set_edge_weight rewire the graph the cascade runs on;
   under LT edge weights are ignored and only the structural change applies.
+- what remove_node does is stated below; read it before using the op.
 """
+
+# What remove_node means is a property of the dataset, so it cannot be baked into
+# the module-level preamble. build_system_prompt appends the matching one.
+remove_semantics_notes = {
+    spent: """\
+
+REMOVE_NODE (this task: spent): under IC it sets the node to Removed, so it STAYS
+counted as infected and simply stops spreading; it can only ever lower your score.
+Under LT it returns the node to Susceptible, which it may re-cross later. Neither
+deletes the node or its edges. For influence MAXIMIZATION this is almost never the
+right action: do not spend budget on it without a specific reason.
+""",
+    blocked: """\
+
+REMOVE_NODE (this task: blocked): it DELETES the node from the graph. The node
+stops counting toward the spread, cannot transmit, and cannot be infected or
+re-infected, under both IC and LT. Its incident edges go with it, so its
+neighbours lose that path entirely. This is the containment action: use it to cut
+the routes a cascade would otherwise take, and remember that deleting a node the
+cascade already passed through only removes its onward reach, not the infections
+it already caused.
+""",
+}
 
 # Two worked strategies at the quality the search should START from. The trivial
 # high_degree stub they replaced set the anchor far too low: the model would
@@ -281,16 +302,23 @@ def build_system_prompt(
     method: str, strategy_mode: str = "free", task: TaskSpec | None = None
 ) -> str:
     horizon_note = ""
+    remove_note = remove_semantics_notes[spent]
+
     if task is not None:
         horizon_note = (
             temporal_scheduling_note
             if any(op in task.allowed_ops for op in edge_ops)
             else seed_timing_note
         )
+        remove_note = remove_semantics_notes[task.remove_semantics]
+
+    # Only worth stating when the strategy may actually emit the op
+    if "remove_node" not in (task.allowed_ops if task is not None else ()):
+        remove_note = ""
 
     if strategy_mode == "scored":
         if method in ("one_shot", "evolve"):
-            return scored_system + horizon_note
+            return scored_system + remove_note + horizon_note
 
         raise ValueError(
             f"strategy_mode='scored' is not supported for method {method!r}; "
@@ -300,7 +328,10 @@ def build_system_prompt(
     # evolve generates plan_horizon strategies under the same contract as one_shot
     base = system_prompts["one_shot" if method == "evolve" else method]
 
-    return base + horizon_note if method in ("one_shot", "evolve") else base
+    if method in ("one_shot", "evolve"):
+        return base + remove_note + horizon_note
+
+    return base + remove_note
 
 
 # Evolve method: each generation is an EDIT of a parent from the population

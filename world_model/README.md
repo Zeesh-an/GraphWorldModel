@@ -115,7 +115,7 @@ Shared knobs: `--hidden-dim` (`H`), `--n-layers`, `--dropout`; attention models 
 
 Predict the **mechanism**, not the state. The head:
 
-1. applies `T_exo` from the action channels: `infected = clamp(CH_INFECTED + CH_ADD)`, `frontier = clamp(CH_FRONTIER + CH_ADD)·(1 − CH_REMOVE)`;
+1. applies `T_exo` from the action channels: `infected = clamp(CH_INFECTED + CH_ADD)`, `frontier = clamp(CH_FRONTIER + CH_ADD)·(1 − CH_REMOVE)`. Under `--remove-semantics blocked` the first term also picks up `·(1 − CH_REMOVE)`, because a blocked node has left the graph and stops counting (see [`data/README.md`](../data/README.md));
 2. predicts a per-edge transmission propensity `q(u→v) = sigmoid(MLP([h_u, h_v, w_uv]))`;
 3. gates by an active source `t_uv = q_uv · frontier_u` and derives the IC infection form `p_new(v) = 1 − ∏_{u→v} (1 − t_uv)` (via a stable log-sum-exp scatter);
 4. composes the next state monotonically: `y_inf = infected + (1 − infected)·p_new`, `y_fr = (1 − infected)·p_new`.
@@ -128,7 +128,7 @@ LT thresholds are hidden and re-drawn per episode, so the head predicts the acti
 
 - `f_v = (active in-neighbor weight) / (total in-neighbor weight)`,
 - `p_new(v) = [f_v > 0]·sigmoid(τ·(f_v − θ̂_v))`, with per-node `θ̂_v = sigmoid(Linear(h_v))` and learned sharpness `τ = softplus(param)`,
-- `T_exo`: `add_node → active`, `remove_node → susceptible` (LT removal resets to status 0, so a removed node can legitimately re-activate).
+- `T_exo`: `add_node → active`, `remove_node → susceptible`. One expression covers both remove semantics: under `spent` the node resets to status 0 and may re-activate through its intact edges; under `blocked` those edges are gone from `edge_index`, so `f_v = 0` and the gate holds it down. Unlike the IC head, this one needs no `remove_semantics` branch.
 
 The `f_v > 0` gate gives the same self-terminating bound as IC. One-step metrics are looser than IC by design (the best a state-only model can do is the threshold marginal `P(activate | f_v)`), but the rollout is faithful.
 
@@ -190,7 +190,7 @@ Teacher-forced, threshold 0.5; soft targets are thresholded at 0.5 for the binar
 | `new_infection_f1`                  | F1 on **newly infected** nodes (restricted to nodes susceptible at `t`)                                                              |
 | `delta_f1`                          | F1 on nodes whose state **changed** `t → t+1` — the early-stop / headline metric                                                     |
 | `add_seed_success`                  | fraction of `add_node` targets the model predicts as infected (should be 1.0)                                                        |
-| `remove_frontier_success`           | fraction of `remove_node` targets predicted as not-frontier                                                                          |
+| `remove_frontier_success`           | fraction of `remove_node` targets predicted as not-frontier. Under `--remove-semantics blocked` a structured head zeroes those nodes in `T_exo`, so this reads ~1.0 by construction and stops being informative |
 | `action_sensitivity`                | mean # of distinct outputs across counterfactual actions at the same state (>0 ⇒ the model reacts to the action, not just the state) |
 | `brier_infected` / `brier_frontier` | MSE of predicted prob vs the soft marginal — calibration, lower better                                                               |
 | `persistence`                       | the "predict next = current" baseline; its `delta_f1`/`new_infection_f1` are 0 by construction                                       |

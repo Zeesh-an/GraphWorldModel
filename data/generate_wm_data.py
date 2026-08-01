@@ -25,7 +25,14 @@ from data.wm_graphs import (
     make_synthetic_bundle,
     real_directed,
 )
-from data.wm_simulator import ActionOp, Simulator, State, valid_action_ops
+from data.wm_simulator import (
+    ActionOp,
+    Simulator,
+    State,
+    spent,
+    valid_action_ops,
+    valid_remove_semantics,
+)
 
 synthetic_families = ("er", "ba", "ws", "sbm", "karate")
 seed_upper_bound = 2**31 - 1
@@ -173,6 +180,9 @@ class GenConfig:
     seed: int
     mc_marginals: int
     out_dir: str
+    # What remove_node means in this dataset; see data/wm_simulator.py. Recorded
+    # in metadata.json so a checkpoint can never be trained on the wrong reading.
+    remove_semantics: str = spent
     ba_m: int = 3
     ws_k: int = 6
     ws_p: float = 0.1
@@ -251,7 +261,10 @@ def _episode_transitions(
         bundle, num_seeds=budget, algorithm=algorithm, model=model, rng=selection_rng
     )
     simulator = Simulator(
-        bundle.nx_graph, ic_prob_map=bundle.ic_prob_map, seed=simulator_seed
+        bundle.nx_graph,
+        ic_prob_map=bundle.ic_prob_map,
+        seed=simulator_seed,
+        remove_semantics=config.remove_semantics,
     )
     simulator.reset(model)
 
@@ -271,6 +284,7 @@ def _episode_transitions(
                 p_inject=config.inject_p,
                 action_ops=config.action_ops,
                 weight_range=(config.weight_lo, config.weight_hi),
+                remove_semantics=config.remove_semantics,
             )
         )
 
@@ -279,11 +293,12 @@ def _episode_transitions(
             snapshot = simulator.snapshot()
             cf_bags = counterfactual_actions(
                 s_t,
-                num_nodes=bundle.nx_graph.number_of_nodes(),
+                graph=simulator.model.graph.graph,
                 main_bag=action,
                 count=config.cf_branches,
                 rng=injection_rng,
                 action_ops=config.action_ops,
+                remove_semantics=config.remove_semantics,
             )
             for branch_index, cf_bag in enumerate(cf_bags):
                 simulator.restore(snapshot)
@@ -577,6 +592,15 @@ def parse_args() -> GenConfig:
         help="ops to inject; empty = diffusion-only (default: []).",
     )
     parser.add_argument(
+        "--remove-semantics",
+        type=str,
+        default=spent,
+        choices=list(valid_remove_semantics),
+        help="what remove_node means: spent = stays counted, stops spreading "
+        "(influence maximization); blocked = deleted from the graph, uncounted, "
+        "cannot transmit or be infected (containment) (default: spent).",
+    )
+    parser.add_argument(
         "--weight-lo",
         type=float,
         default=0.0,
@@ -683,6 +707,7 @@ def parse_args() -> GenConfig:
         horizon=args.horizon,
         inject_p=args.inject_p,
         action_ops=args.action_ops,
+        remove_semantics=args.remove_semantics,
         weight_lo=args.weight_lo,
         weight_hi=args.weight_hi,
         cf_prob=args.cf_prob,

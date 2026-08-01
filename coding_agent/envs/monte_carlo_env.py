@@ -9,6 +9,7 @@ import numpy as np
 
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory
 from coding_agent.tools.primitives import build_simulator
+from data.wm_simulator import spent
 
 seed_upper_bound = 1 << 30
 
@@ -20,10 +21,12 @@ class MonteCarloEnvironment:
         diffusion_model: str,
         mc_runs: int = 30,
         base_seed: int = 0,
+        remove_semantics: str = spent,
     ) -> None:
         self.graph = graph
         self.diffusion_model = diffusion_model
         self.mc_runs = mc_runs
+        self.remove_semantics = remove_semantics
         # Seed every rollout uses unless one is named explicitly. Shared across
         # candidates on purpose: common random numbers make the DIFFERENCE
         # between two strategies far better resolved than either absolute score.
@@ -31,6 +34,12 @@ class MonteCarloEnvironment:
         # Cumulative real-environment episodes across all rollout calls — the
         # sample-efficiency axis for the native-agent condition (--mc-runs 1)
         self.episodes_used = 0
+        # Cumulative inner-loop cost. evaluator_seconds is the axis the condition
+        # ladder is read on: it grows with mc_runs x rounds here and stays flat in
+        # WorldModelEnvironment, which is the whole claim. Reported per arm as
+        # evaluator_calls / evaluator_seconds.
+        self.rollout_calls = 0
+        self.evaluator_seconds = 0.0
 
     def rollout(
         self, action_fn: ActionFn, horizon: int, budget: int, seed: int | None = None
@@ -53,6 +62,7 @@ class MonteCarloEnvironment:
                 self.graph,
                 self.diffusion_model,
                 seed=int(rng.integers(seed_upper_bound)),
+                remove_semantics=self.remove_semantics,
             )
 
             # Start from an empty state
@@ -95,6 +105,10 @@ class MonteCarloEnvironment:
         # Report the averaged final count as the endpoint
         representative_counts[-1] = reward
 
+        elapsed = time.perf_counter() - start
+        self.rollout_calls += 1
+        self.evaluator_seconds += elapsed
+
         return Trajectory(
             states=representative_states,
             actions=representative_actions,
@@ -107,7 +121,7 @@ class MonteCarloEnvironment:
                 # seed is drawn from it, so replaying it reproduces the number
                 "seed": int(seed),
                 "reward_se": reward_se,
-                "rollout_seconds": time.perf_counter() - start,
+                "rollout_seconds": elapsed,
             },
             final_marginals=(final_infected_freq / self.mc_runs).round(3).tolist(),
         )

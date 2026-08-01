@@ -3,7 +3,7 @@
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.executor import build_strategy, call_strategy, validate_actions
 from coding_agent.methods.base import OuterLoopMethod
-from coding_agent.prompts import build_user_prompt, system_prompts
+from coding_agent.prompts import build_system_prompt, build_user_prompt
 from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
 
@@ -20,7 +20,7 @@ class WindowedOnline(OuterLoopMethod):
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
-        system = system_prompts["windowed"]
+        system = build_system_prompt("windowed", task=task)
         user = build_user_prompt(
             "windowed", task, graph, allow_mc_algorithms=self.allow_mc_algorithms
         )

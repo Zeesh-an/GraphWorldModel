@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Protocol
 import numpy as np
 
-from data.wm_simulator import ActionOp, State, valid_action_ops
+from data.wm_simulator import ActionOp, State, spent, valid_action_ops
 
 # ActionFn is the interface between strategies and environments (every environment's rollout() consumes one of these; every method produces one):
 # ActionFn is a function mapping (current state, timestep) -> action bag for that timestep
@@ -93,6 +93,9 @@ class TaskSpec:
     budget: int = 5
     horizon: int = 10
     allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
+    # What remove_node does; the system prompt states the matching rule, and
+    # stating the wrong one has the agent plan against dynamics it will not get
+    remove_semantics: str = spent
 
 
 @dataclass

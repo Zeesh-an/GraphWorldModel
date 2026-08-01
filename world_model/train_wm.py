@@ -26,6 +26,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
+from data.wm_simulator import spent, valid_remove_semantics
 from world_model.wm_data import TransitionDataset, collate_transitions, in_channels
 from world_model.wm_model import WorldModel, backbones
 from world_model.wm_eval import (
@@ -48,6 +49,8 @@ class TrainConfig:
     diffusion_model: str = "IC"
     model: str = "gcn"
     head: str = "linear"
+    # Must match the dataset's; cross-checked against metadata.json below
+    remove_semantics: str = spent
     hidden_dim: int = 64
     n_layers: int = 3
     n_heads: int = 4
@@ -109,8 +112,34 @@ def resolve_paths(config: TrainConfig) -> TrainConfig:
     return config
 
 
+def check_remove_semantics(config: TrainConfig) -> None:
+    """
+    Refuse to train a head whose T_exo disagrees with the data that produced the
+    targets. The mismatch is otherwise silent: the model simply never fits the
+    removal transitions, and the containment numbers come out biased with no
+    error anywhere.
+    """
+    metadata_path = Path(config.data_dir) / "metadata.json"
+    if not metadata_path.exists():
+        return
+
+    # Datasets generated before --remove-semantics existed are all `spent`
+    dataset_semantics = json.loads(metadata_path.read_text())["config"].get(
+        "remove_semantics", spent
+    )
+
+    if dataset_semantics != config.remove_semantics:
+        raise ValueError(
+            f"--remove-semantics {config.remove_semantics!r} does not match the "
+            f"dataset at {config.data_dir}, which was generated with "
+            f"{dataset_semantics!r} (see {metadata_path}). Regenerate the data or "
+            f"pass --remove-semantics {dataset_semantics}."
+        )
+
+
 def train_world_model(config: TrainConfig) -> dict:
     config = resolve_paths(config)
+    check_remove_semantics(config)
 
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
@@ -148,6 +177,7 @@ def train_world_model(config: TrainConfig) -> dict:
         dropout=config.dropout,
         head_type=config.head,
         diffusion_model=diffusion_model,
+        remove_semantics=config.remove_semantics,
         **backbone_kwargs,
     ).to(device)
 
@@ -257,6 +287,7 @@ def train_world_model(config: TrainConfig) -> dict:
         device,
         "test",
         seed=config.seed,
+        remove_semantics=config.remove_semantics,
     )
 
     if config.plan_demo:
@@ -307,6 +338,14 @@ if __name__ == "__main__":
         default="linear",
         choices=["linear", "structured", "structured_residual"],
         help="output head type; structured_residual anchors IC transmission on the true edge prob and learns only a correction (default: linear).",
+    )
+    parser.add_argument(
+        "--remove-semantics",
+        type=str,
+        default=spent,
+        choices=list(valid_remove_semantics),
+        help="what remove_node means; must match the dataset's, which is checked "
+        "against its metadata.json (default: spent).",
     )
     parser.add_argument(
         "--hidden-dim",

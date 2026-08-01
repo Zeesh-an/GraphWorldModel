@@ -48,6 +48,9 @@ summary_columns = (
     "n_samples",
     "mc_runs",
     "real_env_episodes",
+    "evaluator_calls",
+    "evaluator_seconds",
+    "forward_passes",
     "llm_calls",
     "llm_prompt_tokens",
     "llm_completion_tokens",
@@ -113,7 +116,13 @@ def _row(result: dict) -> dict:
         "rollout_seconds": cost.get("rollout_seconds"),
         "n_samples": cost.get("n_samples"),
         "mc_runs": cost.get("mc_runs"),
+        # Inner-loop cost, excluding the --credit and --compare post-hoc replays.
+        # evaluator_seconds is the cross-condition axis: elapsed_seconds is mostly
+        # LLM latency, and rollout_seconds above is only the final rollout.
         "real_env_episodes": result.get("real_env_episodes"),
+        "evaluator_calls": result.get("evaluator_calls"),
+        "evaluator_seconds": result.get("evaluator_seconds"),
+        "forward_passes": result.get("forward_passes"),
         # LLM spend for this arm. cost_usd is None unless --llm-price-in/-out
         # were supplied; the token counts are exact either way.
         "llm_calls": usage.get("calls"),

@@ -19,6 +19,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
+from data.wm_simulator import spent
 from world_model.wm_data import in_channels, load_graph_store
 from world_model.wm_eval import planning_regret_multi
 from world_model.wm_model import WorldModel
@@ -40,6 +41,9 @@ def load_trained_model(config: dict, device: torch.device) -> nn.Module:
         dropout=config["dropout"],
         head_type=config.get("head", "linear"),
         diffusion_model=config["diffusion_model"],
+        # Absent in runs trained before --remove-semantics existed, all of which
+        # were spent
+        remove_semantics=config.get("remove_semantics", spent),
         **backbone_kwargs,
     ).to(device)
 

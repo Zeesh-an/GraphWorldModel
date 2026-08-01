@@ -11,7 +11,7 @@ add X" is answered here; why it is worth adding is answered in `research/<X>.md`
 
 from dataclasses import dataclass
 
-from data.wm_simulator import valid_action_ops
+from data.wm_simulator import blocked, spent, valid_action_ops, valid_remove_semantics
 
 implemented = "implemented"
 planned = "planned"
@@ -36,6 +36,11 @@ class Task:
     dynamics: tuple
     action_ops: tuple
     summary: str
+    # What remove_node means for this task. `spent` (the node is a used-up
+    # spreader, stays counted) is right for maximization; every containment task
+    # needs `blocked` (the node is deleted from the graph), because `spent`
+    # counts each immunized node as infected and biases the spread by +k.
+    remove_semantics: str = spent
     blocker: str | None = None
 
     @property
@@ -64,11 +69,13 @@ tasks = {
         objective=minimize,
         dynamics=("IC", "LT"),
         action_ops=valid_action_ops,
+        remove_semantics=blocked,
         summary="Two competing cascades; place blockers to minimize the negative one.",
         blocker="NDlib ships no competitive model (`Blocked: -1` is a static "
         "non-adopter set, and CompositeModel expresses only one global "
         "tie-break). Needs a CompetitiveSimulator, an 8-channel state, and a "
-        "CompetitiveICHead. Fix `remove_node` semantics first.",
+        "CompetitiveICHead. Phase 0 (single-cascade node-blocking IMIN) needs "
+        "none of that and is runnable once the objective sign flips.",
     ),
     "critical_node_detection": Task(
         name="critical_node_detection",
@@ -77,10 +84,12 @@ tasks = {
         objective=minimize,
         dynamics=("IC", "LT"),
         action_ops=("remove_node", "remove_edge"),
+        remove_semantics=blocked,
         summary="Remove k nodes to minimize eventual spread or connectivity.",
-        blocker="`remove_node` does not delete a node or its edges, so the "
-        "structural objective has nothing to measure. The diffusion variant "
-        "needs only a planner sign flip plus a remove_node injection mode.",
+        blocker="Needs a minimize-mode planner objective. `remove_semantics="
+        "blocked` now deletes the node and its edges and stops counting it, so "
+        "the +k spread bias is gone; what is left is the objective sign and the "
+        "containment metrics (see research/critical_node_detection.md 9.2).",
     ),
     "epidemic_control": Task(
         name="epidemic_control",
@@ -89,6 +98,11 @@ tasks = {
         objective=minimize,
         dynamics=("SIR", "SIS", "SEIR"),
         action_ops=("remove_node", "remove_edge", "set_edge_weight"),
+        # Vaccination: immune, non-infectious, never counted in the outbreak.
+        # Note this collides with SIR's own Removed compartment, where a
+        # RECOVERED node must stay counted, so the compartment head has to carry
+        # that distinction, `blocked` only covers the intervention.
+        remove_semantics=blocked,
         summary="Vaccinate, quarantine, or reduce contact to minimize an outbreak.",
         blocker="NDlib already ships SIR/SIS/SEIR, so the simulator is ~60 "
         "lines — but ICTransmissionHead composes "
@@ -170,6 +184,8 @@ tasks = {
         objective=minimize,
         dynamics=("motter_lai", "dc_power_flow"),
         action_ops=("remove_node", "remove_edge", "add_edge", "set_edge_weight"),
+        # A bus outage takes the substation and its lines out of the network
+        remove_semantics=blocked,
         summary="Line trips redistribute load and trigger further failures.",
         blocker="T_endo is global load redistribution, not local edge-wise "
         "propagation, so a k-hop encoder structurally cannot see the next "
@@ -210,6 +226,12 @@ for _task in tasks.values():
         raise ValueError(
             f"task {_task.name!r} declares unknown action ops {sorted(_unknown)}; "
             f"valid ops are {sorted(valid_action_ops)}"
+        )
+
+    if _task.remove_semantics not in valid_remove_semantics:
+        raise ValueError(
+            f"task {_task.name!r} declares unknown remove_semantics "
+            f"{_task.remove_semantics!r}; valid values are {valid_remove_semantics}"
         )
 
 

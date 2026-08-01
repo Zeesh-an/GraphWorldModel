@@ -15,6 +15,7 @@ import os
 import torch
 from pathlib import Path
 
+from data.wm_simulator import spent, valid_remove_semantics
 from world_model.wm_data import in_channels, load_graph_store
 from world_model.wm_eval import rollout_ensemble
 from world_model.wm_model import WorldModel
@@ -35,6 +36,13 @@ if __name__ == "__main__":
         default="IC",
         choices=["IC", "LT"],
         help="diffusion dynamics (default: IC).",
+    )
+    parser.add_argument(
+        "--remove-semantics",
+        type=str,
+        default=spent,
+        choices=list(valid_remove_semantics),
+        help="what remove_node means; must match the dataset's (default: spent).",
     )
     parser.add_argument(
         "--model",
@@ -95,6 +103,7 @@ if __name__ == "__main__":
         hidden_dim=args.hidden_dim,
         n_layers=args.n_layers,
         head_type="structured_oracle",
+        remove_semantics=args.remove_semantics,
     ).to(device)
 
     store = load_graph_store(args.data_dir)
@@ -108,6 +117,7 @@ if __name__ == "__main__":
         n_samples=args.n_samples,
         max_episodes=args.max_episodes,
         seed=args.seed,
+        remove_semantics=args.remove_semantics,
     )
 
     print(

@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import torch
 
+from data.wm_simulator import spent
 from world_model.eval_planning import load_trained_model
 from world_model.wm_data import load_graph_store
 from world_model.wm_eval import rollout_ensemble
@@ -82,6 +83,7 @@ if __name__ == "__main__":
             n_samples=args.n_samples,
             max_episodes=args.max_episodes,
             seed=args.seed,
+            remove_semantics=config.get("remove_semantics", spent),
         )
 
         results["rollout_ensemble"] = ensemble

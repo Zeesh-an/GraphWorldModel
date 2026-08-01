@@ -4,6 +4,9 @@ injection, plus the shared State / ActionOp value types.
 
 advance(bag) applies the action bag (mutating model.status) then runs one
 diffusion iteration, returning s_{t + 1} = T_endo(T_exo(s_t, a_t)).
+
+`remove_semantics` picks what remove_node means: `spent` (the IM reading, the
+default) or `blocked` (the containment reading). See the constants below.
 """
 
 from dataclasses import dataclass
@@ -20,6 +23,23 @@ valid_action_ops = (
     "remove_edge",
     "set_edge_weight",
 )
+
+# What `remove_node` means. The two readings are genuinely different problems and
+# the wrong one silently biases every number:
+#
+#   spent    the spreader is used up. IC status 2 (Removed) STAYS counted as
+#            infected; LT status 0 lets the node re-cross its threshold later.
+#            Correct for influence maximization, where removing an active node
+#            models "this node has already spent its shot".
+#
+#   blocked  the node is deleted from the graph: not counted, cannot transmit,
+#            cannot be (re-)infected. Correct for every containment task
+#            (critical node detection, influence blocking, immunization), where
+#            `spent` inflates the measured final spread by exactly +k because
+#            active_nodes() counts each immunized node as infected.
+spent = "spent"
+blocked = "blocked"
+valid_remove_semantics = (spent, blocked)
 
 
 @dataclass
@@ -66,18 +86,29 @@ class Simulator:
         graph: nx.Graph | nx.DiGraph,
         ic_prob_map: dict | None = None,
         seed: int = 0,
+        remove_semantics: str = spent,
     ) -> None:
+        if remove_semantics not in valid_remove_semantics:
+            raise ValueError(
+                f"unknown remove_semantics {remove_semantics!r}; "
+                f"choose one of {valid_remove_semantics}"
+            )
+
         self.graph = graph
         self.ic_prob_map = ic_prob_map
         self.rng = np.random.default_rng(seed)
         self.seed = seed
+        self.remove_semantics = remove_semantics
         self.model_name = None
         self.model = None
+        # Nodes deleted from the graph under `blocked`; empty under `spent`
+        self.blocked = set()
 
     def reset(
         self, model_name: str, lt_thresholds: dict[int, float] | None = None
     ) -> None:
         self.model_name = model_name
+        self.blocked = set()
         config = model_config_module.Configuration()
 
         if model_name == "IC":
@@ -118,7 +149,7 @@ class Simulator:
         if self.model_name == "IC":
             # IC: 0 = Susceptible, 1 = Infected (currently infectious), 2 = Removed (already spread, spent)
             # Active: 1, 2
-            return {
+            active = {
                 int(node)
                 for node, status in self.model.status.items()
                 if status in (1, 2)
@@ -126,9 +157,15 @@ class Simulator:
         else:
             # LT: 0 = Susceptible, 1 = Infected
             # Active: 1
-            return {
+            active = {
                 int(node) for node, status in self.model.status.items() if status == 1
             }
+
+        # A blocked node is no longer part of the graph, so it is not part of the
+        # spread either. Returned unchanged under `spent`: the set difference
+        # would rebuild the hash table and reorder iteration, which reorders the
+        # marginal dicts written to the JSONL for no semantic gain.
+        return active - self.blocked if self.blocked else active
 
     def current_state(self) -> State:
         # IC frontier = status-1 spreaders; LT's "newly flipped" delta is only available via advance()
@@ -155,6 +192,12 @@ class Simulator:
                 self.model.status[int(action.target)] = (
                     2 if self.model_name == "IC" else 0
                 )
+
+                # Under `blocked` the node also leaves the graph: active_nodes()
+                # stops counting it, and the incident remove_edge ops that the
+                # deletion bag carries alongside stop it transmitting
+                if self.remove_semantics == blocked:
+                    self.blocked.add(int(action.target))
             elif action.op == "add_edge":
                 # New edge u -> v: diffusion can traverse it from the next iteration onwards
                 source, destination = int(action.target), int(action.destination)
@@ -182,6 +225,20 @@ class Simulator:
                         (source, destination)
                     ] = float(action.weight)
 
+    def _enforce_blocked(self) -> None:
+        """
+        Hold blocked nodes out of the dynamics after a diffusion step.
+
+        delete_node_bag() normally strips the incident edges too, which is what
+        makes a block structural. This is the guard for a caller that emits a bare
+        remove_node: without it an LT node that was blocked but not isolated
+        re-crosses its threshold and starts feeding its neighbours again. NDlib
+        computes each iteration from a pre-step status snapshot, so re-zeroing
+        afterwards is enough to keep it out of every subsequent step.
+        """
+        for node in self.blocked:
+            self.model.status[node] = 2 if self.model_name == "IC" else 0
+
     def advance(self, bag: list[ActionOp]) -> State:
         # s_{t + 1} = T_endo(T_exo(s_t, a_t))
         # Snapshot previous active nodes before actions
@@ -189,6 +246,7 @@ class Simulator:
 
         self.apply_actions(bag)  # Apply the actions (exogenous effect)
         self.model.iteration()  # Run one diffusion iteration (endogenous diffusion dynamics)
+        self._enforce_blocked()
 
         active = self.active_nodes()
 
@@ -228,6 +286,7 @@ class Simulator:
             # Restores status only for a fresh stochastic draw
             self.restore(post_action)
             self.model.iteration()
+            self._enforce_blocked()
 
             active = self.active_nodes()
             if self.model_name == "IC":
@@ -257,10 +316,17 @@ class Simulator:
 
         return last_state, infected_marginal, frontier_marginal
 
-    def snapshot(self) -> tuple[dict, int]:
-        return (dict(self.model.status), int(self.model.actual_iteration))
+    def snapshot(self) -> tuple[dict, int, set]:
+        # `blocked` belongs in here: a counterfactual fork that blocks a node
+        # would otherwise leak that block back into the main branch on restore
+        return (
+            dict(self.model.status),
+            int(self.model.actual_iteration),
+            set(self.blocked),
+        )
 
-    def restore(self, snapshot: tuple[dict, int]) -> None:
-        status, actual_iteration = snapshot
+    def restore(self, snapshot: tuple[dict, int, set]) -> None:
+        status, actual_iteration, blocked_nodes = snapshot
         self.model.status = dict(status)
         self.model.actual_iteration = actual_iteration
+        self.blocked = set(blocked_nodes)
