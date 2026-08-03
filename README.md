@@ -273,19 +273,24 @@ Every run is scoped to a **graph task**. `pipeline/tasks.py` is the registry —
 
 ```bash
 python -m pipeline.run --dataset jazz                          # influence_maximization
+python -m pipeline.run --dataset ppi_yeast \
+    --task critical_node_detection --compare                   # contain an outbreak
 python -m pipeline.run --dataset jazz --run gcnii_ablation \
     --wm-model gcnii --n-layers 8                              # a second variant
-python -c "from pipeline.tasks import tasks; print(sorted(tasks))"
+python -c "from pipeline.tasks import runnable_task_names; print(runnable_task_names())"
 ```
 
-**Only `influence_maximization` runs today.** The other twelve are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
+**Three run today:** `influence_maximization`, `adaptive_online_im`, and `critical_node_detection`. The other ten are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
 
 ```
 $ python -m pipeline.run --dataset ba --task influence_blocking
 ValueError: task 'influence_blocking' is planned, not runnable by this pipeline.
 NDlib ships no competitive model ... See research/influence_blocking.md for the
-full analysis. Runnable today: ['influence_maximization']
+full analysis. Runnable today: ['adaptive_online_im', 'critical_node_detection',
+'influence_maximization']
 ```
+
+The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it — it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
 
 Adding one is a registry entry plus whatever its `blocker` names — usually a head in `wm_model.py` and a simulator branch in `wm_simulator.py`. The stages, feature builder, encoders, collate, plots, and report are task-agnostic.
 

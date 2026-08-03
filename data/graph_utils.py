@@ -4,12 +4,108 @@ Shared graph utilities for data generation
 Common graph preprocessing functions used across inverse graph problem data generators.
 """
 
+import gzip
 import os
+import tarfile
+import urllib.request
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.csgraph as csgraph
+
+# KONECT and networkrepository/nrvis reject the default urllib agent
+browser_agent = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+
+
+def fetch(url: str, path: Path) -> Path:
+    """Download `url` to `path` unless it is already there."""
+    os.makedirs(path.parent, exist_ok=True)
+
+    if path.exists():
+        return path
+
+    print(f"[↓] Downloading {url} ...")
+    request = urllib.request.Request(url, headers={"User-Agent": browser_agent})
+
+    with urllib.request.urlopen(request) as response:
+        path.write_bytes(response.read())
+
+    print(f"[✓] Saved to {path}")
+
+    return path
+
+
+def extract(archive: Path, into: Path) -> Path:
+    """Unpack a .zip / .tar.bz2 / .tar.gz / .gz archive into `into`."""
+    os.makedirs(into, exist_ok=True)
+    name = archive.name
+
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(archive) as zip_file:
+            zip_file.extractall(into)
+    elif name.endswith((".tar.bz2", ".tar.gz", ".tgz")):
+        with tarfile.open(archive) as tar_file:
+            tar_file.extractall(into)
+    elif name.endswith(".gz"):
+        target = into / name[: -len(".gz")]
+        with gzip.open(archive, "rb") as gz_file:
+            target.write_bytes(gz_file.read())
+    else:
+        raise ValueError(f"unknown archive format for {archive}")
+
+    print(f"[✓] Extracted to {into}")
+
+    return into
+
+
+def read_pairs(path: Path, skip_rows: int = 0) -> np.ndarray:
+    """
+    (E, 2) int64 edge list from a whitespace/tab/comma-separated file.
+
+    `%` (KONECT, Matrix Market) and `#` (SNAP) comment lines are dropped, as are
+    trailing weight columns. `skip_rows` drops leading NON-comment lines, which
+    is what a Matrix Market dimension header is.
+    """
+    pairs = []
+
+    with open(path) as file:
+        for line in file:
+            line = line.strip()
+
+            if not line or line[0] in "%#":
+                continue
+
+            if skip_rows > 0:
+                skip_rows -= 1
+                continue
+
+            parts = line.replace(",", " ").split()
+            pairs.append((int(float(parts[0])), int(float(parts[1]))))
+
+    if not pairs:
+        raise ValueError(f"no edges parsed from {path}")
+
+    return np.asarray(pairs, dtype=np.int64)
+
+
+def konect_edge_file(directory: Path) -> Path:
+    """
+    The `out.<name>` payload inside an extracted KONECT tarball.
+
+    The inner name is not always the download name (`subelj_euroroad` ships
+    `out.subelj_euroroad_euroroad`), so it is globbed rather than constructed.
+    """
+    matches = sorted(directory.glob("*/out.*")) + sorted(directory.glob("out.*"))
+
+    if not matches:
+        raise FileNotFoundError(f"no KONECT `out.*` edge file under {directory}")
+
+    return matches[0]
 
 
 def edges_to_adjacency(

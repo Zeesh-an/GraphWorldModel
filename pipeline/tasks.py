@@ -51,6 +51,19 @@ class Task:
     # algorithm overrides it: adaptive IM's are per-round policies, and running
     # only static ones would leave its own literature off the table.
     default_baselines: tuple | None = None
+    # Which ops a generated strategy may EMIT, and which the data generator
+    # injects. Both default to `action_ops`, which is right whenever the task's
+    # intervention vocabulary is the same at planning time and generation time.
+    # CND narrows the planner to `remove_node` (edge removals ride along inside
+    # the deletion bag, and are not the planner's to spend budget on).
+    default_allowed_ops: tuple | None = None
+    default_gen_action_ops: tuple | None = None
+    # The op one unit of budget buys. `add_node` for a seeding task, `remove_node`
+    # for a containment one; the executor counts it and the prompt states it.
+    budget_op: str = "add_node"
+    # Fraction of N the exogenous outbreak seeds, for a task whose cascade the
+    # planner does not start. 0 = the planner seeds it (every maximize task).
+    outbreak_pct: float = 0.0
     blocker: str | None = None
 
     @property
@@ -61,6 +74,25 @@ class Task:
     def runnable(self) -> bool:
         return self.status == implemented
 
+    @property
+    def allowed_ops(self) -> tuple:
+        return self.default_allowed_ops or self.action_ops
+
+    @property
+    def gen_action_ops(self) -> tuple:
+        return self.default_gen_action_ops or self.action_ops
+
+    @property
+    def contains(self) -> bool:
+        """
+        True when the planner fights a cascade it did not start.
+
+        The one structural difference between this task family and the seeding
+        one: an exogenous outbreak has to be injected, the budget buys removals
+        rather than seeds, and every "is this better" comparison flips sign.
+        """
+        return self.objective == minimize
+
 
 tasks = {
     "influence_maximization": Task(
@@ -68,8 +100,17 @@ tasks = {
         title="Influence Maximization",
         status=implemented,
         objective=maximize,
+        # The INTERVENTION this task is defined by. The two `default_*_ops` below
+        # are the wider set the pipeline has always shipped, and they are pinned
+        # rather than derived: `remove_node` under `spent` is a legal (if almost
+        # always bad) move, and the model is trained on both node ops so the
+        # action channels are exercised. Every checkpoint in `results/` was
+        # produced under these, so narrowing them to `action_ops` would silently
+        # change what a rerun means.
         dynamics=("IC", "LT"),
         action_ops=("add_node",),
+        default_allowed_ops=("add_node", "remove_node"),
+        default_gen_action_ops=("add_node", "remove_node"),
         summary="Choose k seeds maximizing expected spread sigma(S).",
     ),
     "influence_blocking": Task(
@@ -90,16 +131,55 @@ tasks = {
     "critical_node_detection": Task(
         name="critical_node_detection",
         title="Critical Node Detection",
-        status=planned,
+        status=implemented,
         objective=minimize,
         dynamics=("IC", "LT"),
         action_ops=("remove_node", "remove_edge"),
         remove_semantics=blocked,
-        summary="Remove k nodes to minimize eventual spread or connectivity.",
-        blocker="Needs a minimize-mode planner objective. `remove_semantics="
-        "blocked` now deletes the node and its edges and stops counting it, so "
-        "the +k spread bias is gone; what is left is the objective sign and the "
-        "containment metrics (see research/critical_node_detection.md 9.2).",
+        summary="Remove k nodes to minimize the eventual spread of an outbreak.",
+        # The DIFFUSION variant (research/critical_node_detection.md §2.2), not
+        # the structural one. §2.1 argues at length that structural CNDP is a bad
+        # fit for a world model — its T_endo is nothing, and its ground truth
+        # (`nx.connected_components`, O(N+E)) is cheaper than one forward pass, so
+        # a learned surrogate has nothing to amortize. The connectivity
+        # functionals are still computed and reported per arm as descriptive
+        # context (§8.3), just never as the learned target.
+        #
+        # A planner emits `remove_node` only. Edge removals are the deletion bag
+        # `containment.expand_removals` builds around each one, so charging the
+        # planner for them would make k mean deg(v) different things per node.
+        default_allowed_ops=("remove_node",),
+        default_gen_action_ops=("remove_node",),
+        budget_op="remove_node",
+        # The cascade is exogenous: 1% of N is the standard immunization setup
+        # and matches the smallest point of our own --budget-pcts sweep, so the
+        # k=1% row is "one blocker per source"
+        outbreak_pct=1.0,
+        # §8.3 and §9.3, in ascending order of danger. `adaptive_degree` is the
+        # one that hurts: MIND's Table 5 puts plain HDA at 119.9 against FINDER's
+        # 115.0, so a learned dismantler that does not clearly beat it has
+        # demonstrated nothing. `iterative_betweenness` is Wandelt's best-in-70-80%
+        # method that almost no learned paper reports, and omitting it would
+        # reproduce the exact methodological gap that survey calls out.
+        # One representative per family, and the reinserting variant wherever the
+        # published method HAS one — §8.2 trap 2 is that `X` and `X+R` are cited
+        # under one name and are not the same method. `bpd` and `min_sum` are the
+        # message-passing pair; `corehd` and `decycling` are the greedy versions of
+        # the same two stages, so the four together isolate what inference buys.
+        default_baselines=(
+            "adaptive_degree",
+            "iterative_betweenness",
+            "collective_influence_r",
+            "corehd",
+            "bpd_r",
+            "decycling",
+            "explosive_immunization",
+            "gnd",
+            "netshield",
+            "degree_removal",
+            "random_removal",
+        ),
+        blocker=None,
     ),
     "epidemic_control": Task(
         name="epidemic_control",
@@ -159,6 +239,10 @@ tasks = {
         objective=maximize,
         dynamics=("IC", "LT"),
         action_ops=("add_node",),
+        # Same reasoning as influence_maximization: the pipeline's shipped pair,
+        # pinned so the checkpoints already on disk keep meaning what they meant
+        default_allowed_ops=("add_node", "remove_node"),
+        default_gen_action_ops=("add_node", "remove_node"),
         summary="Choose seeds over rounds, observing realized activations between them.",
         # The published adaptive algorithms (AdaptGreedy, EPIC) plus the per-round
         # heuristic floor and `static_split`, the same-machinery control that
@@ -272,6 +356,24 @@ for _task in tasks.values():
         raise ValueError(
             f"task {_task.name!r} declares unknown remove_semantics "
             f"{_task.remove_semantics!r}; valid values are {valid_remove_semantics}"
+        )
+
+    # A budget op the planner may not emit is a task whose every candidate is
+    # rejected at validation — cheaper to catch here than one budget in. Only the
+    # runnable tasks are held to it: a planned entry's ops are documentation of
+    # what it WOULD need, and `budget_op` is not settled until it ships.
+    if _task.runnable and _task.budget_op not in _task.allowed_ops:
+        raise ValueError(
+            f"task {_task.name!r} spends budget on {_task.budget_op!r} but does "
+            f"not allow the planner to emit it (allowed_ops={_task.allowed_ops})"
+        )
+
+    # `spent` counts an immunized node as infected, which biases any containment
+    # objective by exactly +k (research/critical_node_detection.md §2.3)
+    if _task.contains and _task.remove_semantics != blocked:
+        raise ValueError(
+            f"task {_task.name!r} minimizes spread but uses remove_semantics="
+            f"{_task.remove_semantics!r}; a containment task needs {blocked!r}"
         )
 
 

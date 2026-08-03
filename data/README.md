@@ -114,7 +114,7 @@ A fresh `Simulator` is reset for the chosen dynamics, then stepped over `--horiz
 
 ### 4. Counterfactual forks (same state, different action)
 
-At intermediate steps, with probability `--cf-prob`, the simulator is snapshotted and `--cf-branches` alternative action bags (drawn by `counterfactual_actions`, restricted to node ops so the snapshot never has to undo an edge mutation) are each applied from the _same_ `s_t`. Each fork is written as a `cf_i` branch. This gives the trainer matched `(s_t, a, s_{t+1})` vs `(s_t, a', s'_{t+1})` pairs — the only signal that forces the model to be _action-conditioned_ rather than state-autoregressive, and the basis of the **action-sensitivity** eval metric.
+At intermediate steps, with probability `--cf-prob`, the simulator is snapshotted and `--cf-branches` alternative action bags (drawn by `counterfactual_actions`) are each applied from the _same_ `s_t`. Under `--remove-semantics blocked` a removal fork is a full node-deletion bag, so it mutates the graph as well as the status; `Simulator.restore()` rewinds status and the blocked set but not the graph, so the generator pairs every fork with `Simulator.revert_edges(bag)`, which re-adds the stripped arcs at their original probabilities. Each fork is written as a `cf_i` branch. This gives the trainer matched `(s_t, a, s_{t+1})` vs `(s_t, a', s'_{t+1})` pairs — the only signal that forces the model to be _action-conditioned_ rather than state-autoregressive, and the basis of the **action-sensitivity** eval metric.
 
 ### 5. Monte-Carlo soft marginals (`Simulator.advance_marginal`)
 
@@ -195,13 +195,14 @@ Under `blocked`, `wm_actions.delete_node_bag()` expands one deletion into `remov
 Two consequences worth knowing before reading a `blocked` dataset:
 
 - Injected removals target **susceptible** nodes (containment blocks ahead of the cascade), not active ones as `spent` does.
-- Counterfactual forks carry **no** removals, because `Simulator.restore()` rewinds status but not the graph, so a fork's edge deletions would leak into the main branch. Blocked removals reach the data through main-branch injection only.
+- Counterfactual forks DO carry removals, as full deletion bags, and the generator reverts their edge deletions afterwards (see step 4). Skipping the fork instead — which is what this used to do, on the argument that `restore()` cannot rewind the graph — left a containment dataset with no two actions from the same state, so `action_sensitivity` read exactly **0.0**. `data/check_remove_semantics.py::revert_edges_undoes_a_deletion_fork` is the guard.
 
 The three data "settings" are just which ops you pass to `--action-ops`:
 
 - **Setting 1 (diffusion-only):** omit `--action-ops`
 - **Setting 2 (node):** `--action-ops add_node remove_node`
 - **Setting 3 (edge):** `--action-ops add_edge remove_edge set_edge_weight`
+- **Containment (critical node detection):** `--action-ops remove_node --remove-semantics blocked`. Through `pipeline.run --task critical_node_detection` neither flag is needed: `pipeline/tasks.py` supplies both, so the ops the data teaches and the ops the planner may emit come from one registry entry and cannot disagree.
 
 How these become model inputs is documented in [`world_model/README.md`](../world_model/README.md): node ops set the `act_add` / `act_remove` input channels, and edge ops set the `act_edge_endpoint` channel and mutate the per-episode adjacency.
 

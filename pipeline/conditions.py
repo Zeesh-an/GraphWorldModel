@@ -29,6 +29,9 @@ candidate, so the agent pays real experience for every noisy number it gets back
 from dataclasses import dataclass
 
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
+from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.types import improves
+from pipeline.tasks import get_task, maximize, minimize, tasks
 
 native = "native"
 monte_carlo = "monte_carlo"
@@ -76,6 +79,18 @@ default_baselines = (
     "imm",
     "random_seeds",
 )
+
+# A `baseline:<name>` arm resolves against three pools, and which one it lands in
+# decides how it is driven: a static seed set, a per-round policy (method
+# "adaptive"), or a node-removal set. Collisions would make that silent, so they
+# are caught here rather than at the first budget.
+_collisions = set(adaptive_algorithms) & set(dismantling_algorithms)
+if _collisions:
+    raise ValueError(
+        f"algorithm names collide across the adaptive and dismantling pools, so "
+        f"parse_arm cannot tell which one a --baselines entry means: "
+        f"{sorted(_collisions)}"
+    )
 
 # Conditions 2-6. The method is held fixed across 3-6 so the only thing that
 # varies down that ladder is the inner-loop evaluator — the clean ablation.
@@ -230,6 +245,33 @@ def ground_truth_reward(result: dict) -> float:
     return float(mc_reward if mc_reward is not None else result["reward"])
 
 
+def result_sense(results: list[dict]) -> str:
+    """
+    maximize or minimize, for a set of results read back off disk.
+
+    Every reader that picks a winner asks this rather than assuming argmax: on a
+    containment task the best arm is the one with the FEWEST infected nodes, and a
+    plot or table that took the max there would name the worst arm as the winner.
+    Read from the per-arm JSON's `objective` field when present, and from the task
+    registry otherwise, so results written before that field existed still resolve.
+    """
+    for result in results:
+        objective = result.get("objective")
+        if objective in (maximize, minimize):
+            return objective
+
+        name = result.get("task")
+        if name in tasks and get_task(name).objective in (maximize, minimize):
+            return get_task(name).objective
+
+    return maximize
+
+
+def reward_direction(sense: str) -> str:
+    """The one-word phrase a table header needs so a number is not read backwards."""
+    return "lower is better" if sense == minimize else "higher is better"
+
+
 def is_ground_truth(results: list[dict]) -> bool:
     return bool(results) and all(
         result.get("mc_reward") is not None for result in results
@@ -256,6 +298,7 @@ def adaptivity_gaps(results: list[dict]) -> list[dict]:
     produced under the same measurement conditions. `control_arm` records which
     it was, since that changes with the arm set.
     """
+    sense = result_sense(results)
     controls = {}
 
     for result in results:
@@ -264,7 +307,9 @@ def adaptivity_gaps(results: list[dict]) -> list[dict]:
 
         key = (result.get("budget"), result.get("evaluator"))
         best = controls.get(key)
-        if best is None or ground_truth_reward(result) > ground_truth_reward(best):
+        if best is None or improves(
+            ground_truth_reward(result), ground_truth_reward(best), sense
+        ):
             controls[key] = result
 
     paired = []

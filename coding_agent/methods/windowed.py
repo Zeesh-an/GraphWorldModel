@@ -2,7 +2,11 @@
 
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.executor import build_strategy, call_strategy, validate_actions
-from coding_agent.methods.base import OuterLoopMethod
+from coding_agent.methods.base import (
+    OuterLoopMethod,
+    attach_context,
+    wrap_exogenous,
+)
 from coding_agent.prompts import build_system_prompt, build_user_prompt
 from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
@@ -31,8 +35,12 @@ class WindowedOnline(OuterLoopMethod):
         conversation = Conversation(agent, system)
         # Read back by run.py for the closing plain-English write-up
         self.conversation = conversation
-        strategy = build_strategy(
-            conversation.send(user), allow_mc_algorithms=self.allow_mc_algorithms
+        strategy = attach_context(
+            build_strategy(
+                conversation.send(user),
+                allow_mc_algorithms=self.allow_mc_algorithms,
+            ),
+            task,
         )
 
         window_length = max(1, (task.horizon + 1) // self.windows)
@@ -56,13 +64,22 @@ class WindowedOnline(OuterLoopMethod):
                     strategy.act, state, graph, timestep // window_length
                 )
                 # Budget applies per window call, which is exactly the per-bag check
-                validate_actions(bag, graph.num_nodes, task.budget, task.allowed_ops)
+                validate_actions(
+                    bag,
+                    graph.num_nodes,
+                    task.budget,
+                    task.allowed_ops,
+                    task.budget_op,
+                    task.outbreak,
+                )
 
                 return bag
 
             return []
 
         # Roll the plan out and get the trajectory's reward, which is the score
-        trajectory = environment.rollout(action_fn, task.horizon, task.budget)
+        trajectory = environment.rollout(
+            wrap_exogenous(action_fn, task, graph), task.horizon, task.budget
+        )
 
         return strategy, trajectory

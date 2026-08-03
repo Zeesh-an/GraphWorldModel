@@ -10,6 +10,7 @@ import numpy as np
 
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
+from coding_agent.envs.world_model_env import WorldModelEnvironment
 from coding_agent.executor import StrategyError
 from coding_agent.methods.base import _AdaptiveAnchor, evaluate_strategy
 from coding_agent.prompts import build_round_block, build_system_prompt
@@ -580,6 +581,60 @@ def the_spread_curve_makes_sigma_s_t_readable() -> None:
     assert pad_counts([float(v) for v in full], horizon) == [float(v) for v in full]
 
 
+def adaptive_runs_under_the_world_model_loop_order() -> None:
+    """
+    The (timestep, sample) nesting, which MonteCarloEnvironment never exercises.
+
+    Every other check here drives the MC environment, which loops (episode, then
+    timestep). WorldModelEnvironment loops the other way and calls action_fn once
+    per sample per timestep, so a round schedule that quietly depended on call
+    order would pass all of them and fail on condition 6 — the arm the whole
+    project is about. The oracle head needs no checkpoint, so this pins the loop
+    order without a trained model.
+    """
+    bundle = make_synthetic_bundle("powerlaw_cluster", index=6, num_nodes=70, seed=9)
+    graph = GraphInfo(
+        num_nodes=70,
+        edge_index=bundle.edge_index.astype(np.int64),
+        ic_probs=bundle.ic_probs.astype(np.float32),
+        directed=False,
+    )
+    environment = WorldModelEnvironment.oracle(graph, "IC", n_samples=6, base_seed=0)
+
+    class Greedy:
+        source_script = ""
+
+        def act(self, state, graph, timestep):
+            active = set(state.infected) | set(state.frontier)
+            fresh = [node for node in range(graph.num_nodes) if node not in active]
+            return [ActionOp("add_node", node) for node in fresh[:2]]
+
+    task = TaskSpec(budget=6, horizon=5, rounds=3)
+    trajectory, _ = evaluate_strategy(Greedy(), environment, task, graph)
+
+    committed = [
+        action.target
+        for bag in trajectory.actions
+        for action in bag
+        if action.op == "add_node"
+    ]
+    # Per SAMPLE, not shared across the ensemble: a cross-call counter would make
+    # sample 2 onwards run out of budget at t=0
+    assert len(committed) == 6, committed
+    assert environment.forward_passes > 0
+    assert len(trajectory.spread_curve) == task.horizon + 2
+
+    # ...and the same holds with a stream and with campaigns wrapped around it
+    streamed = TaskSpec(budget=6, horizon=5, rounds=3, edit_rate=0.05, seed=2)
+    evaluate_strategy(Greedy(), environment, streamed, graph)
+
+    multi = MultiRoundEnvironment(environment, campaigns=3, base_seed=0)
+    before = environment.forward_passes
+    union, _ = evaluate_strategy(Greedy(), multi, task, graph)
+    assert environment.forward_passes > before, "campaigns must drive the inner env"
+    assert union.cost["campaigns"] == 3
+
+
 def the_new_synthetic_families_generate() -> None:
     plc = make_synthetic_bundle("powerlaw_cluster", index=0, num_nodes=200, seed=1)
     assert plc.nx_graph.number_of_nodes() == 200
@@ -620,6 +675,7 @@ if __name__ == "__main__":
         the_stream_reaches_every_arm_and_only_adaptive_sees_it,
         multi_round_unions_separate_campaigns,
         the_spread_curve_makes_sigma_s_t_readable,
+        adaptive_runs_under_the_world_model_loop_order,
         the_new_synthetic_families_generate,
     ]
 

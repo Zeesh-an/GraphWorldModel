@@ -68,7 +68,9 @@ from data.generate_wm_data import (
     synthetic_families,
 )
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithm_names
+from coding_agent.tools.dismantling_algorithms import dismantling_algorithm_names
 from coding_agent.tools.library_api import algorithm_names
+from coding_agent.containment import outbreak_selectors
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
 from data.wm_graphs import kronecker_seeds
 from data.wm_simulator import valid_action_ops, valid_remove_semantics
@@ -116,7 +118,11 @@ class PipelineConfig:
     kron_variant: str = "core_periphery"
     gen_models: tuple = ("IC", "LT")
     gen_algorithms: tuple = ("random", "degree", "pagerank", "betweenness")
-    gen_action_ops: tuple = ("add_node", "remove_node")
+    # None = the task registry's own op set, so `--task critical_node_detection`
+    # generates remove_node transitions without a flag. Paired with `allowed_ops`
+    # below, which resolves the same way: the ops the data teaches and the ops the
+    # planner may emit come from one registry entry and cannot disagree.
+    gen_action_ops: tuple | None = None
     # Crosses all three stages: it decides how the data is generated, how the
     # head's T_exo is built, and what the agent is told remove_node does. One
     # value so they cannot disagree; defaulted from the task registry.
@@ -170,7 +176,7 @@ class PipelineConfig:
     windows: int = 3
     mc_runs: int = 200
     n_samples: int = 50
-    allowed_ops: tuple = ("add_node", "remove_node")
+    allowed_ops: tuple | None = None
     # Adaptive IM; read only by `adaptive` arms, so one sweep can hold adaptive
     # and non-adaptive arms side by side and divide one by the other
     rounds: int = 4
@@ -180,6 +186,11 @@ class PipelineConfig:
     # Dynamic/streaming IM and multi-round IM; both apply to every arm
     edit_rate: float = 0.0
     campaigns: int = 1
+    # Critical node detection: the exogenous outbreak every arm contains. None =
+    # the task registry's value (0 for every seeding task). Deterministic in
+    # --seed, so all arms in one sweep face the same one.
+    outbreak_pct: float | None = None
+    outbreak_selector: str = "random"
     allow_mc_algorithms: bool = False
     strategy_timeout: float = executor.strategy_timeout_seconds
     # USD per 1M tokens for the cost line; None -> tokens counted, cost null
@@ -253,6 +264,22 @@ def resolve_baselines(config: PipelineConfig) -> tuple:
         return tuple(config.baselines)
 
     return get_task(config.task).default_baselines or default_baselines
+
+
+def resolve_allowed_ops(config: PipelineConfig) -> tuple:
+    """--allowed-ops, else the ops the task's planner is defined to emit."""
+    if config.allowed_ops is not None:
+        return tuple(config.allowed_ops)
+
+    return get_task(config.task).allowed_ops
+
+
+def resolve_gen_action_ops(config: PipelineConfig) -> tuple:
+    """--gen-action-ops, else the ops the task's data generator should inject."""
+    if config.gen_action_ops is not None:
+        return tuple(config.gen_action_ops)
+
+    return get_task(config.task).gen_action_ops
 
 
 def build_arms(config: PipelineConfig) -> list[Arm]:
@@ -375,7 +402,7 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         rollouts=config.rollouts,
         horizon=config.gen_horizon,
         inject_p=config.inject_p,
-        action_ops=list(config.gen_action_ops),
+        action_ops=list(resolve_gen_action_ops(config)),
         remove_semantics=config.remove_semantics,
         weight_lo=0.0,
         weight_hi=1.0,
@@ -576,6 +603,10 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 feedback_model=config.feedback_model,
                 edit_rate=config.edit_rate,
                 campaigns=config.campaigns,
+                # Inert unless the task registry gives this task an outbreak;
+                # passed always so one code path serves both families
+                outbreak_pct=config.outbreak_pct,
+                outbreak_selector=config.outbreak_selector,
                 budget=budget or 5,
                 budget_pct=budget_pct,
                 horizon=config.horizon,
@@ -594,7 +625,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 credit=config.credit,
                 baseline=arm.baseline,
                 routing=arm.routing,
-                allowed_ops=tuple(config.allowed_ops),
+                allowed_ops=resolve_allowed_ops(config),
                 allow_mc_algorithms=config.allow_mc_algorithms,
                 strategy_timeout=config.strategy_timeout,
                 llm_price_in=config.llm_price_in,
@@ -1006,9 +1037,9 @@ if __name__ == "__main__":
         "--gen-action-ops",
         type=str,
         nargs="+",
-        default=["add_node", "remove_node"],
+        default=None,
         choices=list(valid_action_ops),
-        help="action ops injected during generation (default: add_node remove_node).",
+        help="action ops injected during generation. Unset = the task registry's own set, which is add_node remove_node for influence maximization and remove_node for critical node detection (default: None).",
     )
     parser.add_argument(
         "--remove-semantics",
@@ -1237,6 +1268,24 @@ if __name__ == "__main__":
         "campaign (default: 1).",
     )
     parser.add_argument(
+        "--outbreak-pct",
+        type=float,
+        default=None,
+        help="critical node detection: size of the exogenous outbreak every arm "
+        "must contain, as a percentage of N. Unset = the task registry's value, "
+        "which is 1.0 for critical_node_detection and 0 for every seeding task "
+        "(default: None).",
+    )
+    parser.add_argument(
+        "--outbreak-selector",
+        type=str,
+        default="random",
+        choices=list(outbreak_selectors),
+        help="how the outbreak's sources are chosen; deterministic in --seed so "
+        "every arm faces the same one. `random` is the honest default: a targeted "
+        "outbreak makes blocking the same ranking problem (default: random).",
+    )
+    parser.add_argument(
         "--baselines",
         type=str,
         nargs="*",
@@ -1244,14 +1293,17 @@ if __name__ == "__main__":
         choices=(
             list(algorithm_names)
             + list(adaptive_algorithm_names)
+            + list(dismantling_algorithm_names)
             + [f"external:{name}" for name in external_baselines]
             + ["all", "all-classical", "all-external"]
         ),
         metavar="NAME",
-        help="baselines to run: a library algorithm (condition 1), "
-        "'external:<name>' for a published repo (condition 7), or the aliases "
-        "'all' / 'all-classical' / 'all-external'. 'all' includes only external "
-        f"baselines already installed (default: {' '.join(default_baselines)}).",
+        help="baselines to run: a static IM algorithm, a per-round adaptive "
+        "policy, a network dismantler (all condition 1), 'external:<name>' for a "
+        "published repo (condition 7), or the aliases 'all' / 'all-classical' / "
+        "'all-external'. 'all' includes only external baselines already installed. "
+        "Unset = the task registry's own pool (default for "
+        f"influence_maximization: {' '.join(default_baselines)}).",
     )
     parser.add_argument(
         "--baseline-timeout",
@@ -1350,9 +1402,9 @@ if __name__ == "__main__":
         "--allowed-ops",
         type=str,
         nargs="+",
-        default=["add_node", "remove_node"],
+        default=None,
         choices=list(valid_action_ops),
-        help="action ops the strategies may emit (default: add_node remove_node).",
+        help="action ops the strategies may emit. Unset = the task registry's own set, which is add_node remove_node for influence maximization and remove_node for critical node detection (default: None).",
     )
     parser.add_argument(
         "--allow-mc-algorithms",
@@ -1438,7 +1490,9 @@ if __name__ == "__main__":
         kron_variant=args.kron_variant,
         gen_models=tuple(args.gen_models),
         gen_algorithms=tuple(args.gen_algorithms),
-        gen_action_ops=tuple(args.gen_action_ops),
+        gen_action_ops=(
+            None if args.gen_action_ops is None else tuple(args.gen_action_ops)
+        ),
         remove_semantics=args.remove_semantics,
         prob_model=args.prob_model,
         uniform_p=args.uniform_p,
@@ -1482,13 +1536,17 @@ if __name__ == "__main__":
         windows=args.windows,
         mc_runs=args.mc_runs,
         n_samples=args.n_samples,
-        allowed_ops=tuple(args.allowed_ops),
+        allowed_ops=(
+            None if args.allowed_ops is None else tuple(args.allowed_ops)
+        ),
         rounds=args.rounds,
         per_round_budget=args.per_round_budget,
         round_gap=args.round_gap,
         feedback_model=args.feedback_model,
         edit_rate=args.edit_rate,
         campaigns=args.campaigns,
+        outbreak_pct=args.outbreak_pct,
+        outbreak_selector=args.outbreak_selector,
         allow_mc_algorithms=args.allow_mc_algorithms,
         strategy_timeout=args.strategy_timeout,
         llm_price_in=args.llm_price_in,

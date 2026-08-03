@@ -1296,6 +1296,279 @@ external_baselines: dict[str, ExternalBaseline] = {
             "cannot be reproduced regardless."
         ),
     ),
+    # -- critical node detection -------------------------------------------
+    # Registered, none wired. Every one of these solves the STRUCTURAL variant:
+    # it returns a removal set optimizing a connectivity functional, whereas our
+    # arms are scored on the diffusion the removal set fails to stop
+    # (research/critical_node_detection.md §2.2). That is not a blocker for
+    # comparison — their seed set crosses the process boundary and OUR referee
+    # scores it, exactly as on the IM side — but it does mean a fair report has to
+    # show both columns, which is what the report's structural section is for.
+    # ⚠️ Two shared traps before any of these is wired (§8.2): almost all of them
+    # run on the LARGEST CONNECTED COMPONENT of the input silently (trap 7), and
+    # several ship a REINSERTION pass that makes `X` and `X+R` different methods
+    # cited under one name (trap 2).
+    "finder": ExternalBaseline(
+        name="finder",
+        kind=learned,
+        title="FINDER: finding key players via deep RL",
+        venue="Nature Machine Intelligence 2, 2020",
+        repo="https://github.com/FFrankyy/FINDER",
+        paper="https://pmc.ncbi.nlm.nih.gov/articles/PMC8191335/",
+        entry="Cython + TensorFlow 1.x (make)",
+        task="critical_node_detection",
+        status="needs_setup",
+        python="3.7",
+        build=["make"],
+        notes=(
+            "The most-cited learned dismantler and the one every later paper "
+            "compares to. Ships four trained variants (CN / ND, unit and "
+            "node-weighted cost); pick the ND unit-cost one to match a cardinality "
+            "budget. TO WIRE: clone, build the Cython extensions, read which of "
+            "`FINDER_CN` / `FINDER_ND` the entry point drives and what its graph "
+            "format is. ⚠️ TensorFlow 1.x and Cython pin this to Python 3.7, which "
+            "is why it is the most expensive entry here to install. ⚠️ §11 records "
+            "that its per-network results are HEATMAP-ONLY (no arXiv version, "
+            "paywalled PDF, and the `results/` directory its README advertises does "
+            "not exist in master), so there is no published table to validate an "
+            "adapter against — you would be generating the number, not checking it."
+        ),
+    ),
+    "gdm": ExternalBaseline(
+        name="gdm",
+        kind=learned,
+        title="GDM: geometric deep learning for network dismantling",
+        venue="Nature Communications 12, 2021",
+        repo="https://github.com/NetworkScienceLab/GDM",
+        paper="https://arxiv.org/abs/2101.02453",
+        entry="PyTorch Geometric",
+        task="critical_node_detection",
+        status="needs_setup",
+        notes=(
+            "Supervised (not RL) on brute-force-optimal dismantling of small "
+            "graphs, and STATIC: one scoring pass with no recomputation, which "
+            "makes it the cheapest learned entry to run. `GDM+R` adds reinsertion "
+            "and is a different method with different numbers (§8.2 trap 2). TO "
+            "WIRE: clone, install PyG, read its graph format and which pretrained "
+            "checkpoint corresponds to the ND objective. Relevant to us beyond its "
+            "score: MIND measured GDM's dismantling order at Spearman 0.762 against "
+            "a PCA of its own input features (§9.5), which is the correlation our "
+            "report's `degree_rank_spearman` column measures for our arms."
+        ),
+    ),
+    "mind": ExternalBaseline(
+        name="mind",
+        kind=learned,
+        title="MIND: message-iteration network dismantling",
+        venue="AAAI 2026",
+        repo="https://github.com/HaozheTian/MIND-ND",
+        paper="https://arxiv.org/abs/2508.00706",
+        entry="PyTorch",
+        task="critical_node_detection",
+        status="needs_setup",
+        notes=(
+            "Current SOTA and the ONLY paper with FINDER + GDM + a 2026 method on "
+            "one 47-network table, which makes its Table 5 the single most useful "
+            "comparison target in this literature. Drops handcrafted structural "
+            "features entirely; O(|V|+|E|). TO WIRE: clone, read the graph format "
+            "and which of MIND-AM / MIND-MP the entry point drives. ⚠️ Its table is "
+            "published AUC RELATIVE TO ITSELF = 100 (§8.2 trap 5), so it is "
+            "internally consistent and externally useless — you cannot combine it "
+            "with an absolute number, only re-run it. The rows to read first are "
+            "adaptive degree at 119.9 vs FINDER at 115.0 (§9.3) and the "
+            "power-grid rows where FINDER scores 161.7 against EI's 80.6 (§9.4)."
+        ),
+    ),
+    "spr": ExternalBaseline(
+        name="spr",
+        kind=learned,
+        title="SPR / HoGNN: higher-order GNN dismantling",
+        venue="Communications Physics 9:181, 2026",
+        repo="https://github.com/zhouwn/spr",
+        paper="https://www.nature.com/articles/s42005-026-02601-y",
+        entry="PyTorch",
+        task="critical_node_detection",
+        status="needs_setup",
+        notes=(
+            "The one learned dismantler with an ABSOLUTE per-network table that "
+            "beats FINDER, GDM, NIRM and DCRS in one printed comparison (§5.4), so "
+            "it is the cheapest published number to check an adapter against. Its "
+            "graphs overlap ours: `netscience`, Yeast PPI, Crime and Human PPI "
+            "(Vidal / Figeys) are all loadable here. TO WIRE: clone, read the graph "
+            "format and the rho-at-Theta reduction it reports."
+        ),
+    ),
+    "nirm": ExternalBaseline(
+        name="nirm",
+        kind=learned,
+        title="NIRM: neural influence ranking for target attack",
+        venue="CIKM 2022",
+        repo="https://github.com/JiazhengZhang/NIRM",
+        paper="https://arxiv.org/abs/2208.07792",
+        entry="PyTorch (GAT)",
+        task="critical_node_detection",
+        status="needs_setup",
+        notes=(
+            "Supervised on brute-forced optimal removal sets of 20-30-node "
+            "synthetic graphs, applied zero-shot — the same train-tiny/apply-large "
+            "claim our BA-100 regime makes (§9.5). Its Table 3 is the ONLY numeric "
+            "table in this file that separates adaptive from one-pass removal on "
+            "the same method and graph (`UsPower`: rho 8.58% vs 16.81%, a 1.96x "
+            "gap), which is the measurement §8.2 trap 1 exists for and which our "
+            "`degree_removal` vs `adaptive_degree` pair reproduces. TO WIRE: clone, "
+            "read its graph format; note it runs on the LCC (its `Ca-GrQc` is "
+            "4,158/13,422 where ours is 5,242/14,484)."
+        ),
+    ),
+    "dcrs": ExternalBaseline(
+        name="dcrs",
+        kind=learned,
+        title="DCRS: diffusion competence and role significance",
+        venue="WWW 2023",
+        repo="https://github.com/JiazhengZhang/DCRS",
+        paper="https://arxiv.org/abs/2301.12349",
+        entry="PyTorch",
+        task="critical_node_detection",
+        status="needs_setup",
+        notes=(
+            "The direct NIRM follow-up, and the learned entry closest in spirit to "
+            "what we do: it encodes a node's DIFFUSION COMPETENCE rather than pure "
+            "topology, which is the same observation §2.2 builds our variant on. "
+            "Best on 21 of 22 networks in its own table. TO WIRE: clone, read its "
+            "graph format; same LCC caveat as NIRM."
+        ),
+    ),
+    "gnd": ExternalBaseline(
+        name="gnd",
+        kind=classical,
+        title="GND / GNDR: generalized network dismantling",
+        venue="PNAS 116(14), 2019",
+        repo="https://github.com/renxiaolong/Generalized-Network-Dismantling",
+        paper="https://arxiv.org/abs/1801.01357",
+        entry="C++ (make)",
+        task="critical_node_detection",
+        status="needs_setup",
+        requirements=None,
+        build=["make"],
+        notes=(
+            "The authors' spectral-partitioning + weighted-vertex-cover code, and "
+            "the reference for our own `gnd` / `gndr`, which reproduce its two "
+            "stages with a greedy cover instead of its LP 2-approximation. Also "
+            "the SOURCE of six of our datasets (`crime`, `corruption`, "
+            "`hamsterster`, `road_eu`, `intnet1`, `ppi_yeast` all load its "
+            "`Datasets_*` files), so the graphs already match byte for byte. "
+            "⚠️ Its contribution is COST-weighted dismantling, so comparing its "
+            "cost-optimal set against a cardinality budget is unfair in both "
+            "directions (§8.2 trap 4) — run it with unit costs, or report a cost "
+            "budget. TO WIRE: clone, make, read the flag that selects unit vs "
+            "degree cost and whether reinsertion is on."
+        ),
+    ),
+    "decycler": ExternalBaseline(
+        name="decycler",
+        kind=classical,
+        title="Min-Sum: decycling and dismantling by message passing",
+        venue="PNAS 113(44), 2016",
+        repo="https://github.com/abraunst/decycler",
+        paper="https://arxiv.org/abs/1603.08883",
+        entry="C++ (make)",
+        task="critical_node_detection",
+        status="needs_setup",
+        requirements=None,
+        build=["make"],
+        notes=(
+            "The authors' 1RSB cavity Min-Sum code: near-minimal decycling set, "
+            "O(N log N) tree breaking, then reverse-greedy reinsertion. Our "
+            "`decycling` reproduces the SHAPE with a greedy first stage and is "
+            "explicitly not this; wire it before quoting any Min-Sum comparison. "
+            "⚠️ §11 records that its real-network table does not exist — the PNAS "
+            "paper reports two graphs in prose, and the Hamsterster/PGP/Enron rows "
+            "commonly attributed to Min-Sum actually come from CoreHD and BPD."
+        ),
+    ),
+    "collective_influence": ExternalBaseline(
+        name="collective_influence",
+        kind=classical,
+        title="Collective Influence: optimal percolation",
+        venue="Nature 524, 2015",
+        repo="https://github.com/makselab/Collective-Influence",
+        paper="https://arxiv.org/abs/1506.08326",
+        entry="C (make)",
+        task="critical_node_detection",
+        status="needs_setup",
+        requirements=None,
+        build=["make"],
+        notes=(
+            "The authors' O(N log N) CI, and the reference for our own "
+            "`collective_influence_removal`, which reproduces the score and the "
+            "adaptive removal but NOT the greedy reinsertion pass the paper runs "
+            "afterwards (§8.2 trap 2). Cheap to wire relative to the learned "
+            "entries: one C binary, no framework. Third-party alternative at "
+            "zhfkt/ComplexCi if the original does not build."
+        ),
+    ),
+    "explosive_immunization": ExternalBaseline(
+        name="explosive_immunization",
+        kind=classical,
+        title="Explosive Immunization",
+        venue="Phys. Rev. Lett. 117:208301, 2016",
+        repo="https://github.com/pclus/explosive-immunization",
+        paper="https://arxiv.org/abs/1604.00073",
+        entry="C (make)",
+        task="critical_node_detection",
+        status="needs_setup",
+        requirements=None,
+        build=["make"],
+        notes=(
+            "The authors' inverse/Achlioptas construction, and the reference for "
+            "our `explosive_immunization`, which uses one regime rather than their "
+            "two. Worth wiring specifically for §9.4: MIND's Table 5 puts EI at "
+            "80.6 on `eu-powergrid` and 23.4 on `roads-california` where FINDER "
+            "scores 161.7 and 116.3 — the physics heuristic beating the RL method "
+            "by up to 5x on mesh graphs is the limitation we predict and should "
+            "confirm rather than discover."
+        ),
+    ),
+    "dismantling_review": ExternalBaseline(
+        name="dismantling_review",
+        kind=classical,
+        title="NetworkDismantling: the Artime et al. runnable baseline suite",
+        venue="Nature Reviews Physics 6, 2024",
+        repo="https://github.com/NetworkDismantling/review",
+        paper="https://arxiv.org/abs/2509.19867",
+        entry="Python + C++ (see repo)",
+        task="critical_node_detection",
+        status="needs_setup",
+        notes=(
+            "Not one method — the survey's harness, which already wires CI, "
+            "CoreHD, GND, EI, MinSum, FINDER and GDM behind one interface. Wiring "
+            "THIS instead of the seven repos above is almost certainly the right "
+            "trade (§9.2 item 5), and it is also the only practical route to a "
+            "FINDER number given §11's note that FINDER publishes no table. TO "
+            "WIRE: clone, follow its own install (it builds several C++ "
+            "dependencies), and read which of its drivers emits a removal ORDER "
+            "rather than a curve."
+        ),
+    ),
+    "selinda": ExternalBaseline(
+        name="selinda",
+        kind=learned,
+        title="Selinda: symbolized RL for network resilience",
+        venue="preprint 2025",
+        repo="https://github.com/tsinghua-fib-lab/selinda",
+        paper="https://arxiv.org/abs/2507.08827",
+        entry="PyTorch",
+        task="critical_node_detection",
+        status="needs_setup",
+        notes=(
+            "Learns an RL attack policy and then SYMBOLIC-REGRESSES it into a "
+            "closed-form resilience law coupling topology and dynamics. Registered "
+            "less as a baseline than as the closest published relative of the "
+            "coding-agent framing: its output IS a formula, which is what our "
+            "generated `score()` is. Its numbers are not directly comparable — it "
+            "reports a fitted law's accuracy, not a dismantling set size."
+        ),
+    ),
 }
 
 

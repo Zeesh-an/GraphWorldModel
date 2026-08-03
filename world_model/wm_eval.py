@@ -30,6 +30,11 @@ from data.wm_simulator import ActionOp, Simulator, blocked, spent
 
 seed_upper_bound = 1 << 30
 
+# Decimal places the action-sensitivity comparison rounds predicted probabilities
+# to. Two outputs that agree to 1e-3 per node ARE the same prediction; anything
+# finer would count floating-point noise as a reaction to the action.
+sensitivity_decimals = 3
+
 
 def _cat_arrays(arrays: list[np.ndarray]) -> np.ndarray:
     return np.concatenate(arrays) if arrays else np.zeros(0)
@@ -113,7 +118,16 @@ def evaluate_one_step(
                 for action_op in record["action"]
             )
         )
-        sensitivity_groups[state_key][action_key] = tuple(pred_infected.tolist())
+        # Keyed on the rounded PROBABILITIES, not the thresholded prediction.
+        # Under a seeding task the two agree — seeding A flips A itself, a
+        # decisive 0 -> 1. Under containment they do not: blocking A rather than B
+        # shifts its neighbours' infection probabilities without moving any of them
+        # across 0.5, so the binary version reports "the model ignored the action"
+        # for a model that reacted correctly. Measured at exactly 0.0 on the first
+        # containment dataset, with counterfactual pairs present in the split.
+        sensitivity_groups[state_key][action_key] = tuple(
+            np.round(probs[:, 0], sensitivity_decimals).tolist()
+        )
 
     # Targets are soft marginals: threshold at 0.5 for the binary F1/accuracy suite,
     # keep the raw probabilities + soft targets for Brier (calibration vs the marginal).

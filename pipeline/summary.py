@@ -17,7 +17,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pipeline.conditions import ground_truth_reward
+from coding_agent.types import best_by
+from pipeline.conditions import ground_truth_reward, result_sense
 from pipeline.layout import Layout
 
 # Flattened in this order; missing keys become empty cells rather than errors
@@ -25,6 +26,9 @@ summary_columns = (
     "arm",
     "arm_spec",
     "task",
+    # maximize | minimize. Without it a reader has no way to know whether the
+    # spread column's smallest or largest value is the good one.
+    "objective",
     "method",
     "condition",
     "condition_name",
@@ -81,10 +85,27 @@ summary_columns = (
     "multi_round",
     "campaigns",
     "campaign_rewards",
+    # Critical node detection: the outbreak faced, the set removed, and what that
+    # set did to connectivity. Empty for every seeding arm.
+    "containment",
+    "outbreak_pct",
+    "outbreak_selector",
+    "removed_nodes",
+    "pairwise_conn",
+    "pairwise_conn_drop_pct",
+    "largest_cc_size",
+    "largest_cc_drop_pct",
+    "gcc_fraction",
+    "n_components",
+    "schneider_r",
+    "anc",
+    "anc_sigma",
+    "rho_at_threshold",
+    "degree_rank_spearman",
 )
 
 
-def _row(result: dict) -> dict:
+def _row(result: dict, sense: str = "maximize") -> dict:
     graph = result.get("graph", {})
     cost = result.get("cost", {})
     history = result.get("history") or []
@@ -97,14 +118,20 @@ def _row(result: dict) -> dict:
     estimate = result.get("wm_reeval_mean", result.get("reward"))
     scored = [entry for entry in history if entry.get("reward") is not None]
 
+    # argmin on a containment task; the search itself already picks its winner
+    # this way, so taking the max here would report an iteration it discarded
     best_iteration = (
-        max(scored, key=lambda entry: entry["reward"])["iteration"] if scored else None
+        best_by(scored, lambda entry: entry["reward"], sense)["iteration"]
+        if scored
+        else None
     )
+    structural = result.get("structural") or {}
 
     return {
         "arm": result.get("arm"),
         "arm_spec": result.get("arm_spec"),
         "task": result.get("task"),
+        "objective": result.get("objective"),
         "method": result.get("method"),
         "condition": result.get("condition"),
         "condition_name": result.get("condition_name"),
@@ -179,14 +206,33 @@ def _row(result: dict) -> dict:
         "multi_round": result.get("multi_round"),
         "campaigns": result.get("campaigns"),
         "campaign_rewards": result.get("campaign_rewards"),
+        # Critical node detection. Empty for every seeding arm, so one table holds
+        # both families; the connectivity functionals are DESCRIPTIVE context, never
+        # the objective (research/critical_node_detection.md §8.3).
+        "containment": result.get("containment"),
+        "outbreak_pct": result.get("outbreak_pct"),
+        "outbreak_selector": result.get("outbreak_selector"),
+        "removed_nodes": structural.get("removed"),
+        "pairwise_conn": structural.get("pairwise_conn"),
+        "pairwise_conn_drop_pct": structural.get("pairwise_conn_drop_pct"),
+        "largest_cc_size": structural.get("largest_cc_size"),
+        "largest_cc_drop_pct": structural.get("largest_cc_drop_pct"),
+        "gcc_fraction": structural.get("gcc_fraction"),
+        "n_components": structural.get("n_components"),
+        "schneider_r": structural.get("schneider_r"),
+        "anc": structural.get("anc"),
+        "anc_sigma": structural.get("anc_sigma"),
+        "rho_at_threshold": structural.get("rho_at_threshold"),
+        "degree_rank_spearman": structural.get("degree_rank_spearman"),
     }
 
 
 def write_summary(layout: Layout, results: list[dict]) -> tuple[Path, Path]:
     """One row per (arm, budget), sorted the way the report table reads."""
     os.makedirs(layout.root, exist_ok=True)
+    sense = result_sense(results)
     rows = sorted(
-        (_row(result) for result in results),
+        (_row(result, sense) for result in results),
         key=lambda row: (
             row["budget"] or 0,
             row["condition"] or 99,

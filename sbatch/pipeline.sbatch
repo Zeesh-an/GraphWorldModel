@@ -244,7 +244,15 @@
 #   N_SAMPLES       rollout samples for @world_model and @oracle
 #   HORIZON         agent rollout horizon
 #   ALLOWED_OPS     ops the strategies may emit (add_node remove_node
-#                   add_edge remove_edge set_edge_weight)
+#                   add_edge remove_edge set_edge_weight). UNSET = the task
+#                   registry's own set, which is the right answer for every
+#                   task: add_node remove_node for influence maximization,
+#                   remove_node for critical node detection
+#   OUTBREAK_PCT    critical node detection: size of the exogenous outbreak
+#                   every arm must contain, as a % of N. Unset = registry (1.0)
+#   OUTBREAK_SELECTOR  how its sources are picked: random (default) degree
+#                   pagerank betweenness kshell. Deterministic in SEED, so
+#                   every arm in a sweep faces the same outbreak
 #   EVALUATOR       fallback for arms written without an @evaluator suffix
 #   BUDGET_PCTS     seed budgets as % of N, one run per value
 #   BUDGETS         absolute k, overrides BUDGET_PCTS entirely
@@ -332,9 +340,11 @@
 #                    celf local_search. betweenness is exact Brandes, O(V*E)
 #                    in pure networkx, so it is dropped by default on the big
 #                    graphs (hours at 15K+ nodes).
-#   GEN_ACTION_OPS   ops injected during generation. Omitting all of them
-#                    gives diffusion-only data; node ops are the default; add
-#                    the three edge ops for the full action space.
+#   GEN_ACTION_OPS   ops injected during generation. UNSET = the task
+#                    registry's own set (add_node remove_node for influence
+#                    maximization, remove_node for critical node detection);
+#                    set it explicitly for diffusion-only data or to add the
+#                    three edge ops for the full action space.
 #   PROB_MODEL       weighted (p = 1/in_degree) | uniform (UNIFORM_P)
 #   BUDGET_PCT_RANGE per-episode k drawn from this band, which is what lets ONE
 #                    checkpoint serve the whole budget sweep. It must cover
@@ -444,6 +454,11 @@ EDIT_RATE="${EDIT_RATE:-}"
 CAMPAIGNS="${CAMPAIGNS:-}"
 HIDE_EDGE_WEIGHTS="${HIDE_EDGE_WEIGHTS:-0}"
 
+# Critical node detection: the exogenous outbreak every arm contains.
+# Empty means the task registry's own value.
+OUTBREAK_PCT="${OUTBREAK_PCT:-}"
+OUTBREAK_SELECTOR="${OUTBREAK_SELECTOR:-}"
+
 # Dataset class drives the settings that genuinely cannot share a default:
 # graph population, seed selectors, encoder width, and memory.
 case "$DATASET" in
@@ -487,7 +502,10 @@ SBM_P_IN="${SBM_P_IN:-0.15}"
 SBM_P_OUT="${SBM_P_OUT:-0.01}"
 GEN_MODELS="${GEN_MODELS:-IC LT}"
 GEN_ALGORITHMS="${GEN_ALGORITHMS:-$class_selectors}"
-GEN_ACTION_OPS="${GEN_ACTION_OPS:-add_node remove_node}"
+# Unset = the TASK REGISTRY decides, which is what makes --task
+# critical_node_detection generate remove_node transitions and let its
+# planner emit remove_node without any flag here. Set it to override.
+GEN_ACTION_OPS="${GEN_ACTION_OPS:-}"
 PROB_MODEL="${PROB_MODEL:-weighted}"
 UNIFORM_P="${UNIFORM_P:-0.1}"
 BUDGET_PCT_RANGE="${BUDGET_PCT_RANGE:-1 20}"
@@ -543,7 +561,8 @@ OUTER_ITERS="${OUTER_ITERS:-5}"
 WINDOWS="${WINDOWS:-3}"
 MC_RUNS="${MC_RUNS:-200}"
 N_SAMPLES="${N_SAMPLES:-50}"
-ALLOWED_OPS="${ALLOWED_OPS:-add_node remove_node}"
+# Unset = the task registry decides; see GEN_ACTION_OPS above
+ALLOWED_OPS="${ALLOWED_OPS:-}"
 COMPARE="${COMPARE:-1}"
 CREDIT="${CREDIT:-0}"
 ALLOW_MC_ALGOS="${ALLOW_MC_ALGOS:-0}"
@@ -567,7 +586,6 @@ flags=(
   --sbm-blocks "$SBM_BLOCKS" --sbm-p-in "$SBM_P_IN" --sbm-p-out "$SBM_P_OUT"
   --gen-models $GEN_MODELS
   --gen-algorithms $GEN_ALGORITHMS
-  --gen-action-ops $GEN_ACTION_OPS
   --prob-model "$PROB_MODEL" --uniform-p "$UNIFORM_P"
   --budget-pct-range $BUDGET_PCT_RANGE
   --rollouts "$ROLLOUTS" --gen-horizon "$GEN_HORIZON"
@@ -587,8 +605,13 @@ flags=(
   --diffusion-model "$DIFFUSION_MODEL" --horizon "$HORIZON"
   --outer-iters "$OUTER_ITERS" --windows "$WINDOWS"
   --mc-runs "$MC_RUNS" --n-samples "$N_SAMPLES"
-  --allowed-ops $ALLOWED_OPS
 )
+
+# Op lists are omitted when unset so the task registry supplies them; passing
+# the influence-maximization pair unconditionally would make every task look
+# like influence maximization to the generator and the planner
+[ -n "$GEN_ACTION_OPS" ] && flags+=(--gen-action-ops $GEN_ACTION_OPS)
+[ -n "$ALLOWED_OPS" ]    && flags+=(--allowed-ops $ALLOWED_OPS)
 
 # `none` means the empty list: argparse's nargs="*" takes zero values when the
 # next token is another flag, which is exactly how you ask for no baselines
@@ -625,6 +648,8 @@ fi
 [ -n "$FEEDBACK_MODEL" ]    && flags+=(--feedback-model "$FEEDBACK_MODEL")
 [ -n "$EDIT_RATE" ]         && flags+=(--edit-rate "$EDIT_RATE")
 [ -n "$CAMPAIGNS" ]         && flags+=(--campaigns "$CAMPAIGNS")
+[ -n "$OUTBREAK_PCT" ]      && flags+=(--outbreak-pct "$OUTBREAK_PCT")
+[ -n "$OUTBREAK_SELECTOR" ] && flags+=(--outbreak-selector "$OUTBREAK_SELECTOR")
 [ "$HIDE_EDGE_WEIGHTS" = "1" ] && flags+=(--hide-edge-weights)
 
 # ---------------------------------------------------------------------------

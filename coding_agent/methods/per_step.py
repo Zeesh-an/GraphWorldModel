@@ -7,7 +7,11 @@ from coding_agent.executor import (
     call_strategy,
     validate_actions,
 )
-from coding_agent.methods.base import OuterLoopMethod
+from coding_agent.methods.base import (
+    OuterLoopMethod,
+    attach_context,
+    wrap_exogenous,
+)
 from coding_agent.prompts import build_system_prompt, build_user_prompt
 from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
 
@@ -81,16 +85,26 @@ class PerStepReprompt(OuterLoopMethod):
                 )
 
             # Build the strategy object from the LLM generated code, and call it
-            last_strategy = build_strategy(
-                conversation.send(user),
-                allow_mc_algorithms=self.allow_mc_algorithms,
+            last_strategy = attach_context(
+                build_strategy(
+                    conversation.send(user),
+                    allow_mc_algorithms=self.allow_mc_algorithms,
+                ),
+                task,
             )
 
             bag = call_strategy(last_strategy.act, state, graph, timestep)
-            validate_actions(bag, graph.num_nodes, remaining, task.allowed_ops)
+            validate_actions(
+                bag,
+                graph.num_nodes,
+                remaining,
+                task.allowed_ops,
+                task.budget_op,
+                task.outbreak,
+            )
 
             for action in bag:
-                if action.op == "add_node":
+                if action.op == task.budget_op:
                     if int(action.target) in seeded:
                         raise StrategyError(
                             f"node {action.target} was already seeded earlier in "
@@ -103,7 +117,9 @@ class PerStepReprompt(OuterLoopMethod):
             return bag
 
         # Roll the plan out and get the trajectory's reward, which is the score
-        trajectory = environment.rollout(action_fn, task.horizon, task.budget)
+        trajectory = environment.rollout(
+            wrap_exogenous(action_fn, task, graph), task.horizon, task.budget
+        )
 
         if last_strategy is None:
             raise StrategyError("per-step method produced no strategy")

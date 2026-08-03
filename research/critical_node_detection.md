@@ -607,6 +607,8 @@ Authoritative rows for the social graphs we already load live in [`influence_max
 
 ### 6.1 ✅ What we already load that this literature also uses
 
+> **Twelve more were added for this task** and are now `--dataset` values: `usair97`, `crime`, `corruption`, `hamsterster`, `road_eu`, `euroroad`, `intnet1`, `ppi_yeast`, `human_ppi_vidal`, `pgp`, `openflights`, `p2p_gnutella`. Ten match their published counts byte for byte; `human_ppi_vidal` (3,023 / 6,149 after dropping self-loops and repeated pairs, against KONECT's raw 3,133 / 6,726) and `p2p_gnutella` (62,561 / 147,878 giant component, against SNAP's raw 62,586 / 147,892) say so in their loader docstrings. Every §6.4 collision is named in the loader that resolves it.
+
 | `--dataset`        | Our counts                       | Appears in                                                                                                      | Their counts                          | Verdict                                                                                        |
 | ------------------ | -------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | `power_grid`       | 4,941 / 6,594 undirected         | CoreHD & BPD Table I ("Grid"), NIRM Table 1 ("UsPower"), Wandelt Table 2 ("power"), Ventresca weighted set, EML | 4,941 / 6,594                         | **byte-identical.** The single best comparison target in this file                             |
@@ -877,12 +879,19 @@ That paragraph is worth more than a mediocre connectivity regressor. §5.8 (Lü'
 | #   | Task                                                                                                                                                                                  | Effort      | What it buys                                                                                                |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
 | 1   | ~~Fix `remove_node` semantics (§2.3): node deletion as a bag `remove_node(v) + remove_edge(v,u) ∀u`, and an IC branch that does **not** count an immunized susceptible node as infected~~ ✅ **done**: `--remove-semantics blocked`, and this task's registry entry defaults to it | ~half a day | Removed a systematic `+k` bias from every containment number we would report                             |
-| 2   | `--action-ops remove_node` generation mode + a minimize flag on `planning_regret_multi`                                                                                               | ~1 day      | The whole diffusion-CND task, reusing the existing backbone, heads, features, and eval                      |
-| 3   | Add `usair97` (332/2,126), `crime` (754/2,127) and `corruption` (309/3,281) loaders                                                                                                   | ~2 h each   | Three tiny graphs that let us report on the same networks as GND, FINDER and SPR                            |
-| 4   | Sequential-removal evaluator computing `R` / ANC / ρ-at-Θ in `wm_metrics.py`, reusing `data/old/connectivity.py`                                                                      | ~half a day | Lets us print a structural column next to the diffusion column for context                                  |
-| 5   | Coding-agent dismantling arm against [NetworkDismantling/review](https://github.com/NetworkDismantling/review)                                                                        | ~2–3 days   | Puts us on the FINDER/GDM/MIND table without pretending the world model is doing the work                   |
+| 2   | ~~`--action-ops remove_node` generation mode + a minimize objective~~ ✅ **done**: the task is `implemented`. `Task.objective` drives `improves`/`best_by`/`rank_by` through the whole outer loop; `containment.py` injects the exogenous outbreak and expands removals into deletion bags; `dismantling_algorithms.py` supplies the condition-1 pool | ~1 day      | The whole diffusion-CND task, reusing the existing backbone, heads, features, and eval                      |
+| 3   | ~~Add `usair97` (332/2,126), `crime` (754/2,127) and `corruption` (309/3,281) loaders~~ ✅ **done**, plus nine more from §6.2: `hamsterster`, `ppi_yeast`, `road_eu`, `euroroad`, `intnet1`, `human_ppi_vidal`, `pgp`, `openflights`, `p2p_gnutella`. Ten of the twelve match their published counts byte for byte | ~2 h each   | Twelve graphs that let us report on the same networks as GND, FINDER, SPR, NIRM, DCRS and MIND              |
+| 4   | ~~Sequential-removal evaluator computing `R` / ANC / ρ-at-Θ in `wm_metrics.py`~~ ✅ **done**: `wm_metrics.containment_metrics` (pairwise conn, GCC, components, `R`, ANC, ρ-at-Θ, and the §9.5 degree-rank Spearman), stamped into every containment result and printed as the report's structural section | ~half a day | Lets us print a structural column next to the diffusion column for context                                  |
+| 5   | Coding-agent dismantling arm against [NetworkDismantling/review](https://github.com/NetworkDismantling/review) — **registered, not wired** (`baselines/registry.py`, `task="critical_node_detection"`), alongside FINDER, GDM, MIND, SPR, NIRM, DCRS, GND, decycler, CI, EI and Selinda | ~2–3 days   | Puts us on the FINDER/GDM/MIND table without pretending the world model is doing the work                   |
 
-Total for a defensible CND section: **~1 week**, of which item 2 is the only part that touches the model.
+Total for a defensible CND section: **~1 week**, of which item 2 is the only part that touches the model. Items 1-4 have shipped; item 5 is what remains, and `dismantling_review` is one adapter that covers seven of the others.
+
+**Three things the build found that this review did not predict.** Recorded here because each is a decision the paper has to state:
+
+1. **The outbreak's sources must be un-removable.** §2.2 says "minimize the eventual IC/LT spread from a given seed set" and does not say what happens if the blocker set intersects the seed set. It happens: at `k = 10%` of `N` with a 1%-of-`N` outbreak, a uniform random removal set hits a source often enough to win outright, scoring spread 0.00 and beating every dismantler by luck. Deleting patient zero ends the outbreak rather than containing it — that is source localization. The published immunization protocol (Cohen et al., EI, Lü's spreading evaluation) always vaccinates first and then infects a *non*-immunized node, so protecting the sources is that protocol, not a house rule.
+2. **§5.8 reproduces on our own data, immediately.** On a 4-block SBM at `k = 10%`, `articulation_removal` was the best arm by giant-component drop and the *worst* by contained spread, while `pagerank_removal` was the reverse. The connectivity and spreading objectives really do rank in opposite orders, which is what makes the "report both columns" recommendation in §8.3 load-bearing rather than decorative.
+3. **Min-Sum did not reproduce; BPD did.** BPD is implemented from Mugisha & Zhou's equations and behaves exactly as published — past the decycling threshold it crushes the greedy methods (ER-500 at k=25%: giant component 26 against CoreHD's 80 and adaptive degree's 133) and loses below it, which is the papers' own caveat that decycling-first only pays once you can finish it. Min-Sum, implemented from the same kind of source, came out erratic and worse than greedy decycling; it was removed rather than shipped. See §11.
+4. **`action_sensitivity` was structurally blind to containment.** It compared *thresholded* predictions across counterfactual actions. Under seeding that works — seeding A flips A itself. Under containment, blocking A rather than B shifts its neighbours' probabilities without moving any of them across 0.5, so the metric read exactly 0.0 with counterfactual pairs present in the split. It now compares probabilities rounded to 1e-3, and reads 1.5 on the same checkpoint. (Separately, the generator had been skipping removal forks entirely under `blocked`, which this review's own `ponytail:` note in `wm_actions.py` predicted would need fixing "if the action-sensitivity metric comes out weak on a containment dataset". It did. `Simulator.revert_edges` is the fix.)
 
 ### 9.3 Baselines we must beat, and the one that will hurt
 
@@ -908,9 +917,23 @@ Our existing `coding_agent/tools/algorithms.py` already has degree, pagerank and
 
 ### 9.6 What already exists in the repo
 
-- `data/old/connectivity.py` — `simulate_removal()` already returns `(connectivity_vec, n_components, largest_cc_size, pairwise_conn)`, i.e. three of the six objectives in §1.1, exactly.
+**Shipped for this task** (`--task critical_node_detection` is runnable):
+
+- `pipeline/tasks.py` — the registry entry, `status=implemented`. It carries `objective=minimize`, `remove_semantics=blocked` (asserted, not defaulted), `budget_op="remove_node"`, `default_allowed_ops=("remove_node",)`, `default_gen_action_ops=("remove_node",)`, `outbreak_pct=1.0`, and the nine-member `default_baselines` pool.
+- `coding_agent/containment.py` — outbreak selection (deterministic in `--seed`, so every arm faces the same one), the `t=0` injection wrapper, `delete_node_ops` / `expand_removals` (node deletion as a bag), and `removal_plan` (filters sources out of a published dismantler's output and tops the set back up).
+- `coding_agent/tools/dismantling_algorithms.py` — nineteen node-removal selectors: HDA, BI/ABI, CI, CoreHD(+R), decycling, articulation points, EI, GND(+R), NetShield, k-shell, PageRank, degree, betweenness, acquaintance immunization, random, and the simulation-based `greedy_blocking`.
+- `coding_agent/types.py` — `improves` / `best_by` / `rank_by`, the single sign-aware comparison every winner-picking site in the search, the report, the plots and the summary routes through.
+- `world_model/wm_metrics.py` — `containment_metrics`, computing §1.1's objectives 1, 2, 4 and 6 exactly by BFS, plus Schneider `R`, ANC (with σ named), ρ-at-Θ, and §9.5's degree-rank Spearman.
+- `data/datasets/` — twelve dismantling benchmarks from §6.2, each documenting which of §6.4's colliding versions it is.
+- `coding_agent/check_containment.py` — fourteen runnable assertions on the contract: the sign, the outbreak, the removal budget, the source protection, and the structural metrics.
+- `baselines/registry.py` — twelve published repos under `task="critical_node_detection"`, none wired.
+- `sbatch/critical_node_detection/` — generation, training and the cross-dataset sweep.
+
+**Pre-existing, and still what §2.1 argues against reviving:**
+
+- `data/old/connectivity.py` — `simulate_removal()` already returns `(connectivity_vec, n_components, largest_cc_size, pairwise_conn)`, i.e. three of the six objectives in §1.1, exactly. `wm_metrics.connectivity_profile` now computes the same three from one BFS pass, so this file is superseded rather than needed.
 - `data/old/generate_cnd_data.py` — the archived structural-CND generator. Its docstring documents the same `removal_sets → connectivity_vecs` schema this file argues is a _regressor_, not a world model. It is evidence for §2.1, not code to revive.
-- `wm_eval.py::remove_frontier_success` — already a containment metric under another name.
+- `wm_eval.py::remove_frontier_success` — already a containment metric under another name. ⚠️ Under `blocked` a structured head zeroes the removed node in `T_exo`, so it reads ~1.0 by construction and is **not** informative on this task; read `delta_f1` and the rollout `ens_count_bias` instead.
 
 ---
 
@@ -953,6 +976,9 @@ Honest list of what this review could **not** establish.
 
 ### Facts not established
 
+- **Min-Sum's stage 1 could not be reproduced from the published equations.** We implemented it — the removal-time encoding `t_i ∈ {0..T}`, `L/R/M` prefix-suffix minima, the `h⁰/h¹` message pair, `T = 35`, tie-break noise — and it does not work. On ER-500 at `⟨k⟩ = 3.7`, `k = 25%`: BPD reaches a giant component of **26**, CoreHD **80**, adaptive degree **133**, and our Min-Sum **256**. It is also non-monotone in its own parameters (200 iterations + a 0.002 decimation step gives **320**, worse than 60 iterations at **76**) and unresponsive to damping (0.0 → 256, 0.3 → 217, 0.5 → 287, 0.7 → 311, 0.9 → 131), which is the signature of a formulation error rather than a convergence problem. It also loses to the GREEDY `decycling` it is supposed to improve on (BA-500: 25 vs 16). **The implementation was therefore removed rather than shipped**, and `abraunst/decycler` stays the registered external route. What is not established is which part of the encoding is wrong — the most likely candidates are the orientation of the `h⁰`/`h¹` pair and whether the paper's stage 1 is meant to be decimated at all, since it reads off a single assignment.
+
+
 - **A single table containing both an OR metaheuristic and a learned dismantler.** None was found. The two branches use different objectives, budgets and graphs (§7), so "MA-CNP vs FINDER" has no published answer.
 - **Complexity results per graph class**, beyond the paper titles. The precise statement of what Di Summa 2011 proves about trees (NP-hardness in the weighted case vs polynomial DP in the unweighted case) was **not** verified against the paper text — §1.4 deliberately defers to §3.1's citations rather than asserting a boundary. Same for Hermelin's FPT/W[1] split.
 - **CoreHD's `Email` row in BPD's Table I** appears to have TAS and FVS swapped relative to every other row (§5.1). Not resolved; flagged as suspect.
@@ -968,6 +994,8 @@ Honest list of what this review could **not** establish.
 
 ### Things we should measure ourselves rather than cite
 
-- Whether a 3-layer GCN/SAGE can learn GCC membership on our graphs at all. §2.1 argues it cannot on receptive-field grounds; that is an argument, not a measurement, and it is cheap to check (`data/old/connectivity.py` gives labels for free).
-- The Spearman correlation between our model's node ranking and its own `CH_DEGREE` channel (§9.5). MIND measured this for GDM and got 0.762. We have not measured it for ours.
+> Two of the three below have now been measured; §9.2's closing note records what came out.
+
+- Whether a 3-layer GCN/SAGE can learn GCC membership on our graphs at all. §2.1 argues it cannot on receptive-field grounds; that is an argument, not a measurement, and it is cheap to check (`wm_metrics.connectivity_profile` gives labels for free). **Still open** — and deliberately so: the shipped task never asks the model to predict connectivity, so this would be a paper claim rather than a pipeline dependency.
+- ~~The Spearman correlation between our model's node ranking and its own `CH_DEGREE` channel (§9.5). MIND measured this for GDM and got 0.762.~~ ✅ **measured per arm**, as `degree_rank_spearman` in every containment result and in the report's structural table. On the first smoke sweep it ran from −0.395 (`random_removal`) to +0.944 (`degree_removal`), with `corehd` and `adaptive_degree` both at +0.901 — i.e. the two strongest structural dismantlers on that graph ARE the degree heuristic, which is exactly the re-derivation §9.5 warns about. Still to do: run it on a trained world model's own ranking rather than only on the classical arms.
 - Whether NIRM's `UsPower` ρ of 8.58% and CoreHD's `Grid` 6.62% really differ only by reinsertion + protocol, or whether the graphs differ. Both cite 4,941/6,594, so they should be identical — one run of each would settle it.

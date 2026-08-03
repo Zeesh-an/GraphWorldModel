@@ -6,10 +6,16 @@ injected into the coding-agent prompts so the model sees the exact callable surf
 import inspect
 from typing import Callable
 
-from coding_agent.tools import adaptive_algorithms, algorithms, primitives
+from coding_agent.tools import (
+    adaptive_algorithms,
+    algorithms,
+    dismantling_algorithms,
+    primitives,
+)
 
 algorithm_names = list(algorithms.algorithms.keys())
 adaptive_names = list(adaptive_algorithms.adaptive_algorithms.keys())
+dismantling_names = list(dismantling_algorithms.dismantling_algorithms.keys())
 
 # Three implementations shown in full, one per idiom the library uses: neighbour
 # discounting, per-community budget allocation, and RIS-then-refine. Signatures
@@ -90,6 +96,45 @@ def build_adaptive_reference() -> str:
         "round, chosen against the state you were handed. These are the published\n"
         "baselines you are being compared against: call one, beat one, or take\n"
         "its idea and improve on it:\n" + "\n".join(lines)
+    )
+
+
+def build_dismantling_menu() -> str:
+    """Return one `- name: summary` line per dismantling algorithm (routing prompt)."""
+    lines = []
+    for name in dismantling_names:
+        doc_lines = (
+            dismantling_algorithms.dismantling_algorithms[name].__doc__ or ""
+        ).strip().splitlines()
+        lines.append(f"- {name}: {doc_lines[0] if doc_lines else ''}")
+
+    return "\n".join(lines)
+
+
+def build_dismantling_reference(exclude: tuple = ()) -> str:
+    """The node-REMOVAL surface, shown only to a containment task's prompt."""
+    lines = [
+        _signature_line(dismantling_algorithms.dismantling_algorithms[name])
+        for name in dismantling_names
+        if name not in exclude
+    ]
+
+    blocked_note = (
+        "\n  NOT AVAILABLE (calling one raises): "
+        + ", ".join(name for name in dismantling_names if name in exclude)
+        + " — it simulates the contained cascade for every candidate node, which\n"
+        "  bypasses the metered evaluator."
+        if exclude
+        else ""
+    )
+
+    return (
+        "DISMANTLING ALGORITHMS  (from coding_agent.tools.dismantling_algorithms,\n"
+        "imported as `dismantling_algorithms`). Each returns a list of nodes to\n"
+        "REMOVE, of length `budget`. These are the published baselines you are being\n"
+        "compared against: call one, beat one, or take its idea and improve on it.\n"
+        "`adaptive_degree` is the one that actually has to be beaten:\n" + "\n".join(lines)
+        + blocked_note
     )
 
 

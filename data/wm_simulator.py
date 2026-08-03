@@ -316,6 +316,43 @@ class Simulator:
 
         return last_state, infected_marginal, frontier_marginal
 
+    def revert_edges(self, bag: list[ActionOp]) -> None:
+        """
+        Undo the edge deletions in `bag`, restoring their original IC weights.
+
+        `snapshot`/`restore` rewind status and the blocked set but NOT the graph,
+        because the graph lives inside NDlib's model. That is fine for a fork whose
+        bag is node-only, and wrong for a `blocked` removal, whose deletion bag
+        strips the node's incident arcs permanently — the main branch would resume
+        on a graph the fork edited.
+
+        Weights come from `ic_prob_map`, the episode's own edge table, so a
+        restored arc carries the probability it had rather than a guess. Only
+        `remove_edge` is invertible here: reverting an `add_edge` or a
+        `set_edge_weight` needs the pre-op weight, which nothing records, and
+        silently skipping them would leave the graph subtly wrong instead of
+        loudly wrong.
+        """
+        inverse = []
+
+        for action in bag:
+            if action.op == "remove_edge":
+                source, destination = int(action.target), int(action.destination)
+                weight = (self.ic_prob_map or {}).get((source, destination))
+
+                if weight is not None:
+                    inverse.append(
+                        ActionOp("add_edge", source, destination, float(weight))
+                    )
+            elif action.op in ("add_edge", "set_edge_weight"):
+                raise ValueError(
+                    f"cannot revert {action.op!r}: the pre-op edge weight is not "
+                    f"recorded anywhere. Only remove_edge is invertible, which is "
+                    f"all a node-deletion bag emits."
+                )
+
+        self.apply_actions(inverse)
+
     def snapshot(self) -> tuple[dict, int, set]:
         # `blocked` belongs in here: a counterfactual fork that blocks a node
         # would otherwise leak that block back into the main branch on restore

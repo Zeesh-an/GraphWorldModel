@@ -140,7 +140,14 @@ def prepare_round_bag(
         policy budget. That cost is the price of the weaker observation, which is
         exactly what the feedback model is supposed to charge for.
     """
-    validate_actions(bag, graph.num_nodes, batch_size, task.allowed_ops)
+    validate_actions(
+        bag,
+        graph.num_nodes,
+        batch_size,
+        task.allowed_ops,
+        task.budget_op,
+        task.outbreak,
+    )
 
     active = set(state.infected)
     reseeds = [

@@ -20,7 +20,7 @@ from coding_agent.prompts import (
     build_system_prompt,
     build_user_prompt,
 )
-from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
+from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory, improves
 
 
 # A script that fails to build or run teaches the next turn something, but it is
@@ -220,7 +220,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             # both refer to the incumbent this attempt was measured against
             previous_best = best
 
-            if best is None or trajectory.reward > best[1].reward:
+            if best is None or improves(
+                trajectory.reward, best[1].reward, task.sense
+            ):
                 best = (strategy, trajectory)
 
             self.history.append(
@@ -267,7 +269,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 credit_report=report,
                 # Free: both marginal vectors are already paid for
                 reference_report=(
-                    reference_diff(trajectory, anchor_trajectory, graph, anchor_name)
+                    reference_diff(
+                        trajectory, anchor_trajectory, graph, anchor_name, task.sense
+                    )
                     if anchor_trajectory is not None
                     else None
                 ),
@@ -277,7 +281,11 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 ),
                 incumbent_reward=best[1].reward,
                 delta_report=(
-                    paired_delta(trajectory, previous_best[1])
+                    paired_delta(
+                        trajectory,
+                        previous_best[1],
+                        sense=task.sense,
+                    )
                     if previous_best is not None
                     else None
                 ),

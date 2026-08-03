@@ -23,7 +23,15 @@ from coding_agent.prompts import (
     build_system_prompt,
     build_user_prompt,
 )
-from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
+from coding_agent.types import (
+    GraphInfo,
+    Strategy,
+    TaskSpec,
+    Trajectory,
+    best_by,
+    improves,
+    rank_by,
+)
 
 reward_improvement_epsilon = 1e-9
 
@@ -152,11 +160,13 @@ class EvolveSearch(OuterLoopMethod):
 
                 # Deterministic exploit/explore: parent is the population best;
                 # the operator (not parent sampling) supplies the variation
-                parent = max(population, key=lambda record: record["reward"])
-                inspirations = sorted(
-                    (record for record in population if record is not parent),
-                    key=lambda record: record["reward"],
-                    reverse=True,
+                parent = best_by(
+                    population, lambda record: record["reward"], task.sense
+                )
+                inspirations = rank_by(
+                    [record for record in population if record is not parent],
+                    lambda record: record["reward"],
+                    task.sense,
                 )[: self.inspiration_count]
 
                 # No base_user here: the task is already the thread's opening turn
@@ -218,9 +228,13 @@ class EvolveSearch(OuterLoopMethod):
             last_error = None
             # The reference diff rides along in the summary, so it reaches the
             # prompt wherever a population record is shown as parent or inspiration
-            diff = reference_diff(trajectory, anchor_trajectory, graph, anchor_name)
+            diff = reference_diff(
+                trajectory, anchor_trajectory, graph, anchor_name, task.sense
+            )
             last_delta = (
-                paired_delta(trajectory, best[1], "the population best")
+                paired_delta(
+                    trajectory, best[1], "the population best", task.sense
+                )
                 if best is not None
                 else None
             )
@@ -234,9 +248,11 @@ class EvolveSearch(OuterLoopMethod):
                 }
             )
 
-            if (
-                best is None
-                or trajectory.reward > best[1].reward + reward_improvement_epsilon
+            if best is None or improves(
+                trajectory.reward,
+                best[1].reward,
+                task.sense,
+                reward_improvement_epsilon,
             ):
                 best = (strategy, trajectory)
                 stagnation = 0

@@ -27,8 +27,18 @@ def counterfactual_credit(
     horizon: int,
     budget: int,
     seed: int | None = None,
+    creditable_ops: tuple | None = None,
 ) -> tuple[float, list[dict]]:
-    """Return (base_reward, one credit entry per action in the plan)."""
+    """
+    Return (base_reward, one credit entry per creditable action in the plan).
+
+    `creditable_ops` restricts WHICH actions get ablated, not which are replayed.
+    Under a graph-edit stream the executed bags also carry exogenous edge ops that
+    the policy never chose (coding_agent/stream.py), and ablating one of those
+    would report the graph's own churn as something the strategy is responsible
+    for. Passing the task's allowed_ops keeps the report to the policy's own
+    decisions while the stream stays in the base rollout, where it belongs.
+    """
     # Base rollout with the full plan
     base_reward = environment.rollout(
         partial(planned_action, plan), horizon, budget, seed=seed
@@ -37,6 +47,9 @@ def counterfactual_credit(
     entries = []
     for timestep, bag in enumerate(plan[: horizon + 1]):
         for action_index, action in enumerate(bag):
+            if creditable_ops is not None and action.op not in creditable_ops:
+                continue
+
             # Same plan minus exactly this one action (bags shallow-copied so the original plan is untouched)
             ablated = [list(action_bag) for action_bag in plan]
             del ablated[timestep][action_index]

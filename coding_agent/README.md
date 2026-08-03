@@ -167,6 +167,46 @@ Results carry `rounds`, `round_batches`, `round_gap`, `feedback_model` and `roun
 
 **Budget the greedy one.** `adapt_greedy` costs `batch x candidates x mc_runs` simulations per round. Measured on an 80-node graph at `k=8, r=3`: 70.5 evaluator-seconds against `adapt_epic`'s 0.3. That is the published reason EPIC exists, and the axis the world model is meant to flatten.
 
+### Containment: `critical_node_detection` (condition 1 and the sign flip)
+
+The one task family where the outer loop MINIMIZES. Everything else is shared — same simulator, same features, same heads, same six conditions — and four things differ:
+
+1. **The sign.** `pipeline.tasks.Task.objective` is the single source of it. `coding_agent.types.improves` / `best_by` / `rank_by` route every "is this better" in `evolve`, `one_shot`, `baseline_anchor`, `paired_delta`, the report, the plots and the summary, so a maximize-shaped harness cannot silently name the worst arm the winner. `paired_delta` also flips the verdict text, or the model would be coached to undo every improvement it makes.
+2. **The outbreak.** The planner does not start the cascade. `coding_agent/containment.py` selects `--outbreak-pct` of `N` by `--outbreak-selector`, deterministically in `--seed`, and injects it at `t=0` through an action-fn wrapper shaped exactly like `stream.wrap`. Applied **after** validation, because the sources' `add_node` ops are exogenous and `--allowed-ops remove_node` would reject them. Every path that builds an `ActionFn` goes through `methods.base.wrap_exogenous`, so an anchor or a `per_step` arm cannot accidentally face no outbreak and post an unbeatable zero.
+3. **The budget buys removals.** `validate_actions` counts `task.budget_op`, and the planner emits a **bare** `remove_node`; the harness expands it into the deletion bag. Both structured heads document that a blocked node's edges are gone from `edge_index` and rely on it, so the expansion is required rather than tidy. Letting the planner emit the edge ops itself would be an unbudgeted second intervention, so it is rejected with a message that says so.
+4. **Outbreak sources cannot be removed.** Deleting patient zero ends the outbreak instead of containing it — that is `source_localization`, a different task. Without the rule a uniform random removal set beats every dismantler whenever it happens to include a source, which is what the first end-to-end run actually produced.
+
+`coding_agent/check_containment.py` asserts all four on graphs where the answer is known by hand. Run it after touching any of them.
+
+### Baselines for `critical_node_detection` (condition 1)
+
+`tools/dismantling_algorithms.py`, signature `(graph, budget, diffusion_model, **kw) -> list[int]`, returning a **removal** set:
+
+| name | what it is |
+| --- | --- |
+| `adaptive_degree` | **HDA**: remove the highest-degree node, recompute, repeat. **The row that has to be beaten** — MIND's Table 5 puts it at 119.9 against FINDER's 115.0 across 47 networks |
+| `iterative_betweenness`, `approx_iterative_betweenness` | **BI / ABI** (Wandelt et al. 2018), best in 70-80% of their cases and almost never reported by a learned paper |
+| `collective_influence_removal`, `collective_influence_r` | **CI** (Morone & Makse, Nature 2015): optimal percolation, adaptive removal. The paper's CI is the `_r` one — adaptive removal **plus** greedy reinsertion |
+| `corehd`, `corehd_r` | **CoreHD** (Zdeborová et al. 2016): 2-core + highest degree |
+| `bpd`, `bpd_r` | **BPD** (Mugisha & Zhou, PRE 2016): belief propagation over the feedback-vertex-set spin model at `x = 12`, decimated, then tree breaking. The inference version of what CoreHD does with degree alone |
+| `decycling`, `decycling_r` | the same two stages with a GREEDY stage 1 — the control that isolates what BPD's message passing buys |
+| `articulation_removal` | cut vertices, ranked by the split they cause |
+| `explosive_immunization` | **EI** (Clusella et al. 2016): inverse Achlioptas construction |
+| `gnd`, `gndr`, `egnd` | **GND** (Ren et al. PNAS 2019): spectral bisection + weighted vertex cover, recursed. `egnd` sweeps the Fiedler split point and keeps the best cut |
+| `netshield` | **NetShield** (Tong et al. 2010): greedy eigenvalue drop — the only member whose objective is epidemic rather than structural |
+| `kshell_removal`, `pagerank_removal`, `degree_removal`, `betweenness_removal` | one-pass centrality controls |
+| `acquaintance_immunization` | Cohen et al. 2003: pick a random node, immunize a random neighbour. The zero-knowledge floor |
+| `random_removal` | the trivial floor |
+| `greedy_blocking` | CELF with the sign flipped: add the node whose deletion most reduces the SIMULATED spread. The honest strong bar, and unaffordable — which is the whole argument for `f_θ` |
+
+`greedy_blocking` is in `mc_dismantling_algorithms` and blocked from generated scripts unless `--allow-mc-algorithms`, exactly as `celf` is and for the same reason: it simulates once per candidate per pick, so its episodes never reach `MonteCarloEnvironment.episodes_used`.
+
+**On the `_r` variants.** §8.2 trap 2: `X` and `X+R` are different methods routinely cited under one name, so both are registered. The published reinsertion pass is defined only once the graph is dismantled below `threshold * N`, which a fixed budget rarely reaches — under that bar every `_r` variant was a bit-for-bit copy of its base (measured on BA-500 at k=15%: giant component 21, bar 5). `_reinsert` therefore holds the ACHIEVED giant component when the absolute bar is out of reach, and `_reinsert_and_refill` puts the freed budget back through tree breaking. That is the paper's rule wherever the paper's rule applies, and the same idea extended to the budgets we run; the docstrings say so.
+
+**Min-Sum is deliberately absent.** It was implemented from the published equations and measured to be wrong — erratic in its own parameters, and worse than the greedy `decycling` it should improve on. `abraunst/decycler` is the registered external route. The measurements are in [`research/critical_node_detection.md`](../research/critical_node_detection.md) §11 so the next attempt does not start from zero.
+
+**Expect the ranking to disagree with the structural columns.** On the smoke SBM, `articulation_removal` was the best dismantler by giant-component drop and the *worst* by contained spread. That is [`research/critical_node_detection.md`](../research/critical_node_detection.md) §5.8 reproducing itself, not a bug.
+
 ### Streaming graphs and multi-round campaigns
 
 Two more §1 branches of the adaptive-IM literature, both of which apply to **every** arm rather than only the adaptive ones. An arm whose graph moved compared against one whose graph did not, or a union compared against a single campaign, measures the setting instead of the method.
@@ -212,7 +252,7 @@ Five operations, shared with the data generator and the world model (`data.wm_si
 
 **`--remove-semantics`** picks what `remove_node` does: `spent` (the default: stays counted, stops spreading, keeps its edges) or `blocked` (deleted from the graph, uncounted, cannot transmit or be infected, edges gone). The full table is in [`data/README.md`](../data/README.md). It is not just a simulator setting: `build_system_prompt` appends the matching rule to the system prompt, so the agent plans against the semantics it will actually be scored under, and with `--evaluator world_model` the run **refuses to start** unless it matches the checkpoint's, since the head's `T_exo` was fixed at training time. The rule is only appended when `remove_node` is in `--allowed-ops`.
 
-**Budget semantics (and a known sharp edge):** `validate_actions` charges only `add_node` against the budget — edge ops are currently **free**. Left unconstrained, capable models reliably discover the degenerate exploit: boost every frontier out-edge to ~1.0 and convert stochastic IC into deterministic percolation (observed: `mc_reward` 99.97/100). Two controls exist today:
+**Budget semantics (and a known sharp edge):** `validate_actions` charges only `task.budget_op` against the budget (`add_node` for a seeding task, `remove_node` for a containment one) — edge ops are otherwise **free**. Left unconstrained, capable models reliably discover the degenerate exploit: boost every frontier out-edge to ~1.0 and convert stochastic IC into deterministic percolation (observed: `mc_reward` 99.97/100). Two controls exist today:
 
 - `--allowed-ops add_node remove_node` — restricts the ops a strategy may emit; enforced in the prompt (`any other op is REJECTED`) _and_ by `validate_actions`, whose rejection message feeds the repair loop.
 - A per-op cost/budget model is the planned fix for making edge ops a fair, non-degenerate part of the game.

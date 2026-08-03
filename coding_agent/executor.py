@@ -5,6 +5,7 @@ for feeding back to the agent as a repair turn.
 """
 
 import ast
+import importlib
 import inspect
 import signal
 import threading
@@ -14,7 +15,12 @@ from functools import partial
 from types import SimpleNamespace
 from typing import Callable
 
-from coding_agent.tools import adaptive_algorithms, algorithms, primitives
+from coding_agent.tools import (
+    adaptive_algorithms,
+    algorithms,
+    dismantling_algorithms,
+    primitives,
+)
 from coding_agent.types import ActionOp, GraphInfo, ScoredStrategy, State, Strategy
 from data.wm_simulator import valid_action_ops
 
@@ -94,6 +100,20 @@ if _unknown_blocked:
     raise ValueError(
         f"mc_blocked_algorithms names {sorted(_unknown_blocked)}, which are not "
         f"in algorithms.algorithms; fix the list or the rename"
+    )
+
+# Same rule on the dismantling side: `greedy_blocking` simulates the contained
+# cascade once per candidate per pick, so it leaks episodes past
+# MonteCarloEnvironment.episodes_used exactly as `celf` does
+mc_blocked_dismantling = dismantling_algorithms.mc_dismantling_algorithms
+
+_unknown_blocked = set(mc_blocked_dismantling) - set(
+    dismantling_algorithms.dismantling_algorithms
+)
+if _unknown_blocked:
+    raise ValueError(
+        f"mc_dismantling_algorithms names {sorted(_unknown_blocked)}, which are "
+        f"not in dismantling_algorithms; fix the list or the rename"
     )
 
 
@@ -178,6 +198,17 @@ def _blocked_algorithm(name: str, *_args, **_kwargs) -> None:
     )
 
 
+def _blocked_dismantler(name: str, *_args, **_kwargs) -> None:
+    raise StrategyError(
+        f"dismantling_algorithms.{name} is not available: it simulates the "
+        f"contained cascade once per candidate per pick, which bypasses the "
+        f"metered evaluator and dominates wall clock. Blocked: "
+        f"{', '.join(mc_blocked_dismantling)}. Use a structural dismantler "
+        f"(adaptive_degree, corehd, collective_influence_removal, "
+        f"explosive_immunization, netshield) or write your own selection logic."
+    )
+
+
 def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -> dict:
     if strategy_mode == "scored":
         # No algorithms module: the agent must write its own scoring logic
@@ -223,7 +254,25 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         "adaptive_algorithms": SimpleNamespace(
             **adaptive_algorithms.adaptive_algorithms
         ),
+        # Node-REMOVAL selectors for critical node detection, on the same terms:
+        # present under every task, and the MC-heavy member blocked unless
+        # --allow-mc-algorithms, exactly like `celf` on the seeding side
+        "dismantling_algorithms": SimpleNamespace(
+            **{
+                name: (
+                    function
+                    if allow_mc_algorithms or name not in mc_blocked_dismantling
+                    else partial(_blocked_dismantler, name)
+                )
+                for name, function in dismantling_algorithms.dismantling_algorithms.items()
+            }
+        ),
         "primitives": primitives,
+        # Containment helpers a canned dismantling baseline needs (removal_plan
+        # filters the outbreak's sources out of a published algorithm's output).
+        # Imported here rather than at module scope: containment imports the tools
+        # package, which imports this module.
+        "containment": importlib.import_module("coding_agent.containment"),
         "__builtins__": __builtins__,
     }
 
@@ -296,10 +345,31 @@ def build_strategy(
 
 
 def call_strategy(method: Callable, *args) -> object:
-    """Invoke generated-strategy code, converting any runtime failure into a StrategyError repair turn."""
+    """
+    Invoke generated-strategy code, converting any runtime failure into a
+    StrategyError repair turn.
+
+    A `None` return is caught here rather than downstream: every entry point
+    (`plan_horizon`, `act`, and the scored hooks) must return a list, and the
+    commonest way to get None is a model that implemented the wrong method for the
+    task's own harness — `plan_horizon` when the method wanted `act`, or an `act`
+    that falls off the end without returning. Left alone it surfaces as
+    `TypeError: 'NoneType' object is not iterable` from inside validation, which
+    is an opaque traceback instead of a turn the model can act on.
+    """
     try:
         with _time_limit(strategy_timeout_seconds):
-            return method(*args)
+            result = method(*args)
+
+        if result is None:
+            raise StrategyError(
+                f"{getattr(method, '__name__', 'the strategy method')}() returned "
+                f"None; it must return a list of ActionOp bags. The usual cause is "
+                f"implementing the wrong entry point for this method, or an early "
+                f"code path that falls off the end without a return statement."
+            )
+
+        return result
     except StrategyError:
         raise
     except _StrategyTimeout:
@@ -318,17 +388,54 @@ def call_strategy(method: Callable, *args) -> object:
 
 
 def validate_actions(
-    bag: list, num_nodes: int, budget: int, allowed_ops: tuple = valid_action_ops
+    bag: list,
+    num_nodes: int,
+    budget: int,
+    allowed_ops: tuple = valid_action_ops,
+    budget_op: str = "add_node",
+    protected: tuple = (),
 ) -> None:
-    """Raise StrategyError if an action bag references invalid nodes, uses a disallowed op, repeats a seed, or exceeds budget."""
-    num_adds = 0
-    seeded = set()
+    """
+    Raise StrategyError if an action bag references invalid nodes, uses a
+    disallowed op, repeats a budgeted target, touches a protected node, or exceeds
+    budget.
+
+    `budget_op` is what one unit of budget buys: `add_node` for a seeding task,
+    `remove_node` for a containment one. Only that op is counted — a containment
+    plan's `remove_edge` ops are the mechanics of a node deletion
+    (`containment.delete_node_ops`), so charging them would make k mean deg(v)
+    different things per node.
+
+    `protected` is the outbreak's source set on a containment task. Deleting a
+    source ENDS the outbreak instead of containing it, which collapses the problem
+    to "find the sources" — a different task (`source_localization`) with a
+    different objective, and one where a uniform random removal set beats every
+    dismantler by luck. The published immunization protocol vaccinates first and
+    then infects a NON-immunized node, so this rule is that protocol rather than a
+    house restriction.
+    """
+    spent_units = 0
+    targeted = set()
+    guarded = {int(node) for node in protected}
+    noun = "seeds" if budget_op == "add_node" else "removes"
 
     for action in bag:
         if action.op not in allowed_ops:
+            # The likeliest way a containment strategy hits this is by writing out
+            # the incident edge removals itself, so name the reason rather than
+            # only the rule: those ops are free, and a plan that buys them is
+            # spending an intervention the budget never charged for
+            hint = (
+                " A node deletion is emitted as a BARE remove_node — the harness "
+                "expands it into the incident remove_edge ops for you, and letting "
+                "you emit them would be an unbudgeted second intervention."
+                if action.op in ("add_edge", "remove_edge", "set_edge_weight")
+                and budget_op == "remove_node"
+                else ""
+            )
             raise StrategyError(
                 f"action op '{action.op}' is not allowed for this task; "
-                f"must be one of {allowed_ops}."
+                f"must be one of {allowed_ops}.{hint}"
             )
 
         if not (0 <= int(action.target) < num_nodes):
@@ -336,21 +443,30 @@ def validate_actions(
                 f"action targets node {action.target} out of range [0,{num_nodes})."
             )
 
-        if action.op == "add_node":
-            num_adds += 1
+        if action.op == "remove_node" and int(action.target) in guarded:
+            raise StrategyError(
+                f"node {action.target} is an OUTBREAK SOURCE and cannot be removed. "
+                f"Deleting a source ends the outbreak rather than containing it, "
+                f"which is not the problem you are being scored on. The sources are "
+                f"{sorted(guarded)} — filter them out of your candidates and spend "
+                f"the budget on the routes out of them instead."
+            )
 
-            # Seeding a node twice spends two of k on one node and would
+        if action.op == budget_op:
+            spent_units += 1
+
+            # Targeting a node twice spends two of k on one node and would
             # otherwise pass silently as a budget the strategy never used
-            if int(action.target) in seeded:
+            if int(action.target) in targeted:
                 raise StrategyError(
-                    f"action bag seeds node {action.target} more than once; a "
-                    f"duplicate add_node spends budget without adding a node. "
-                    f"Deduplicate the seed set before returning it."
+                    f"action bag {noun} node {action.target} more than once; a "
+                    f"duplicate {budget_op} spends budget without changing the "
+                    f"graph. Deduplicate the set before returning it."
                 )
 
-            seeded.add(int(action.target))
+            targeted.add(int(action.target))
 
-    if num_adds > budget:
+    if spent_units > budget:
         raise StrategyError(
-            f"action bag adds {num_adds} seeds, exceeds budget {budget}."
+            f"action bag {noun} {spent_units} nodes, exceeds budget {budget}."
         )

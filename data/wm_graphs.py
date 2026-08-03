@@ -35,6 +35,22 @@ real_directed = {
     "facebook": False,
     "ca_grqc": False,
     "lastfm_asia": False,
+    # Network-dismantling benchmarks (research/critical_node_detection.md §6.2).
+    # Every one is loaded undirected: that literature is undirected almost
+    # end to end, and symmetrizing to reuse a published baseline is a stated
+    # preprocessing choice rather than an accident (§8.2 trap 9).
+    "usair97": False,
+    "crime": False,
+    "corruption": False,
+    "hamsterster": False,
+    "road_eu": False,
+    "euroroad": False,
+    "intnet1": False,
+    "ppi_yeast": False,
+    "human_ppi_vidal": False,
+    "pgp": False,
+    "openflights": False,
+    "p2p_gnutella": False,
 }
 
 

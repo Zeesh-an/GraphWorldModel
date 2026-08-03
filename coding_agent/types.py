@@ -6,10 +6,11 @@ strategies, environments, and the trained world model all speak the same action 
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, Protocol
+from typing import Callable, Iterable, Protocol
 import numpy as np
 
 from data.wm_simulator import ActionOp, State, spent, valid_action_ops
+from pipeline.tasks import maximize, minimize
 
 # ActionFn is the interface between strategies and environments (every environment's rollout() consumes one of these; every method produces one):
 # ActionFn is a function mapping (current state, timestep) -> action bag for that timestep
@@ -19,6 +20,30 @@ ActionFn = Callable[[State, int], list[ActionOp]]
 full_adoption = "full_adoption"
 myopic = "myopic"
 valid_feedback_models = (full_adoption, myopic)
+
+
+def improves(candidate: float, incumbent: float, sense: str, epsilon: float = 0.0) -> bool:
+    """
+    Whether `candidate` beats `incumbent` under the task's objective sense.
+
+    Every "is this better" in the outer loop routes through here, so flipping one
+    registry field flips the whole search rather than N scattered comparisons —
+    and a place that forgets to ask is a place that silently maximizes.
+    """
+    if sense == minimize:
+        return candidate < incumbent - epsilon
+
+    return candidate > incumbent + epsilon
+
+
+def best_by(items: Iterable, key: Callable, sense: str):
+    """argmax or argmin over `items`, whichever the sense asks for."""
+    return (min if sense == minimize else max)(items, key=key)
+
+
+def rank_by(items: Iterable, key: Callable, sense: str) -> list:
+    """`items` best-first under the sense."""
+    return sorted(items, key=key, reverse=sense != minimize)
 
 
 def pad_counts(counts: list[float], horizon: int) -> list[float]:
@@ -117,6 +142,17 @@ class TaskSpec:
     budget: int = 5
     horizon: int = 10
     allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
+    # maximize | minimize, from the task registry. Read by improves()/best_by()
+    # everywhere the search picks a winner.
+    sense: str = maximize
+    # Which op one unit of budget buys: `add_node` seeding, `remove_node`
+    # containment. The executor counts it and the prompt states it.
+    budget_op: str = "add_node"
+    # Containment tasks (critical node detection): the cascade is started by an
+    # EXOGENOUS outbreak the planner does not control and cannot spend budget on,
+    # injected at t=0 by coding_agent.containment. Empty for every seeding task,
+    # where the planner's own add_node ops are the outbreak.
+    outbreak: tuple = ()
     # What remove_node does; the system prompt states the matching rule, and
     # stating the wrong one has the agent plan against dynamics it will not get
     remove_semantics: str = spent
@@ -150,6 +186,11 @@ class TaskSpec:
     @property
     def adaptive(self) -> bool:
         return self.rounds is not None or self.per_round_budget is not None
+
+    @property
+    def contains(self) -> bool:
+        """True when the planner is fighting a cascade it did not start."""
+        return self.sense == minimize
 
     @property
     def streaming(self) -> bool:
@@ -205,13 +246,22 @@ class ScoredStrategy:
     composition over the library.
     """
 
+    # Both are stamped by methods.base.attach_context before plan_horizon runs.
+    # Defaulted here so the class is usable standalone (tests, a bare harness) and
+    # so a seeding task needs no context at all.
+    budget_op: str = "add_node"
+    outbreak: tuple = ()
+
     def score(self, node: int, selected: tuple, graph: GraphInfo) -> float:
         return float(graph.degree(node))
 
     def schedule(
         self, seeds: list[int], graph: GraphInfo, horizon: int
     ) -> list[list[ActionOp]]:
-        return [[ActionOp("add_node", node) for node in seeds]] + [
+        # The op the TASK budgets, not `add_node`: this harness is shared by
+        # seeding and containment, and emitting the wrong one is rejected by
+        # validate_actions before the strategy is ever scored
+        return [[ActionOp(self.budget_op, node) for node in seeds]] + [
             [] for _ in range(horizon)
         ]
 
@@ -219,15 +269,23 @@ class ScoredStrategy:
         self, graph: GraphInfo, budget: int, horizon: int
     ) -> list[list[ActionOp]]:
         selected = []
-        for _ in range(min(budget, graph.num_nodes)):
+        # Deleting an outbreak source ends the cascade rather than containing it
+        # and is rejected; skipping them here spends the whole budget on legal
+        # picks instead of losing the arm to a repair turn the scorer cannot fix
+        protected = set(self.outbreak)
+
+        for _ in range(min(budget, graph.num_nodes - len(protected))):
             best_node, best_score = -1, float("-inf")
             for node in range(graph.num_nodes):
-                if node in selected:
+                if node in selected or node in protected:
                     continue
 
                 node_score = float(self.score(node, tuple(selected), graph))
                 if node_score > best_score:
                     best_node, best_score = node, node_score
+
+            if best_node < 0:
+                break
 
             selected.append(best_node)
 

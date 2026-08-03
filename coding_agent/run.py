@@ -65,6 +65,11 @@ from coding_agent.agent import (
     empty_usage,
     merge_usage,
 )
+from coding_agent.containment import (
+    outbreak_selectors,
+    removal_set,
+    select_outbreak,
+)
 from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
@@ -77,7 +82,7 @@ from coding_agent.methods.windowed import WindowedOnline
 from coding_agent.prompts import (
     build_explanation_prompt,
     build_routing_prompt,
-    routing_system,
+    build_routing_system,
 )
 from coding_agent.rounds import (
     describe_schedule,
@@ -86,12 +91,15 @@ from coding_agent.rounds import (
     round_spreads,
 )
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
-from coding_agent.tools.library_api import algorithm_names
+from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.library_api import algorithm_names, dismantling_names
 from coding_agent.types import GraphInfo, TaskSpec, full_adoption, valid_feedback_models
 from data.wm_simulator import spent, valid_action_ops, valid_remove_semantics
 from pipeline.conditions import parse_arm
 from pipeline.layout import budget_label, checkpoint_suffix
+from pipeline.tasks import get_task, maximize
 from world_model.wm_data import load_graph_store
+from world_model.wm_metrics import containment_metrics
 
 world_model = "world_model"
 monte_carlo = "monte_carlo"
@@ -140,6 +148,14 @@ class ExperimentConfig:
     # Multi-round IM: r SEPARATE campaigns of k seeds, scored on their union.
     # 1 = a single campaign.
     campaigns: int = 1
+    # Critical node detection: the exogenous outbreak the planner is containing,
+    # as a percentage of N and the rule that picks its sources. None -> the task
+    # registry's own value, which is 0 for every seeding task (the planner starts
+    # its own cascade there). Deterministic in --seed, so every arm in a sweep
+    # fights the SAME outbreak — an arm facing a different one would be measuring
+    # the outbreak, not the method.
+    outbreak_pct: float | None = None
+    outbreak_selector: str = "random"
     outer_iters: int = 3
     mc_runs: int = 200
     # Runs for the --compare ground-truth replay; None -> mc_runs. Kept separate
@@ -336,14 +352,20 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
     raise ValueError(f"unknown evaluator {config.evaluator!r}")
 
 
-def _parse_routing_choice(reply: str) -> str:
+def _parse_routing_choice(reply: str, menu: list[str] = algorithm_names) -> str:
     cleaned = reply.strip().strip("`'\".")
 
-    if cleaned in algorithm_names:
+    if cleaned in menu:
         return cleaned
 
-    # Models sometimes wrap the name in prose; accept iff exactly one menu name appears
-    mentioned = [name for name in algorithm_names if re.search(rf"\b{name}\b", reply)]
+    # Models sometimes wrap the name in prose; accept iff exactly one menu name
+    # appears. Longest first, so `adaptive_degree` is not shadowed by a shorter
+    # name that happens to be its substring.
+    mentioned = [
+        name
+        for name in sorted(menu, key=len, reverse=True)
+        if re.search(rf"\b{name}\b", reply)
+    ]
     if len(mentioned) == 1:
         return mentioned[0]
 
@@ -395,13 +417,40 @@ def run_experiment(
     # rounds=None for every non-adaptive method, which is what TaskSpec.adaptive
     # reads: the round machinery is inert unless this arm asked for it
     adaptive = config.method == "adaptive"
+    registry = get_task(config.task)
+
+    # The exogenous outbreak, resolved BEFORE the arm runs and derived only from
+    # (graph, size, selector, seed), so every arm in the sweep fights the same one
+    outbreak_pct = (
+        registry.outbreak_pct if config.outbreak_pct is None else config.outbreak_pct
+    )
+    outbreak = (
+        tuple(
+            select_outbreak(
+                graph,
+                max(1, round(graph.num_nodes * outbreak_pct / 100)),
+                config.outbreak_selector,
+                config.seed,
+            )
+        )
+        if outbreak_pct
+        else ()
+    )
+
     task = TaskSpec(
         task=config.task,
+        objective=registry.summary,
         diffusion_model=config.diffusion_model,
         budget=config.budget,
         horizon=config.horizon,
         allowed_ops=tuple(config.allowed_ops),
         remove_semantics=config.remove_semantics,
+        # From the registry, never from a flag: the objective sign and what a unit
+        # of budget buys are properties of the TASK, and a run that disagreed with
+        # its own registry entry would optimize one thing and be reported as another
+        sense=registry.objective if registry.objective in (maximize, "minimize") else maximize,
+        budget_op=registry.budget_op,
+        outbreak=outbreak,
         rounds=config.rounds if adaptive else None,
         per_round_budget=config.per_round_budget if adaptive else None,
         round_gap=config.round_gap,
@@ -412,6 +461,13 @@ def run_experiment(
         campaigns=config.campaigns,
         seed=config.seed,
     )
+
+    if outbreak:
+        print(
+            f"[run] outbreak: {len(outbreak)} source(s) "
+            f"({outbreak_pct:g}% of N, selector={config.outbreak_selector}, "
+            f"seed={config.seed}) — MINIMIZING final infected count"
+        )
 
     batches = (
         round_batches(task.budget, task.rounds, task.per_round_budget)
@@ -435,22 +491,29 @@ def run_experiment(
         providers.append(router)
         routing_reply = router.complete(
             [
-                {"role": "system", "content": routing_system},
+                {"role": "system", "content": build_routing_system(task)},
                 {"role": "user", "content": build_routing_prompt(task, graph)},
             ]
         )
-        config.baseline = _parse_routing_choice(routing_reply)
+        # A containment task's menu is the DISMANTLING pool; routing into the IM
+        # pool would return a seed set the executor then rejects
+        config.baseline = _parse_routing_choice(
+            routing_reply, dismantling_names if task.contains else algorithm_names
+        )
         print(f"[run] routing picked {config.baseline!r}")
 
     if canned_script is not None:
         provider_label = "canned"
     elif config.baseline is not None:
         # Classical-library baseline: same pipeline, envs, and metrics — no LLM
-        if config.baseline not in algorithm_names + list(adaptive_algorithms):
+        if config.baseline not in (
+            algorithm_names + list(adaptive_algorithms) + dismantling_names
+        ):
             raise ValueError(
                 f"unknown baseline {config.baseline!r}; choose a static algorithm "
-                f"from {algorithm_names} or an adaptive policy from "
-                f"{sorted(adaptive_algorithms)}"
+                f"from {algorithm_names}, an adaptive policy from "
+                f"{sorted(adaptive_algorithms)}, or a dismantler from "
+                f"{dismantling_names}"
             )
 
         provider_label = (
@@ -491,6 +554,27 @@ class AdaptiveBaseline(Strategy):
                 total_budget={config.budget},
             )
         ]
+"""
+        elif config.baseline in dismantling_algorithms:
+            # A dismantler is a static REMOVAL set, committed at t=0. It is handed
+            # the outbreak because the simulation-based member scores candidates
+            # against it; the structural members take **kw and ignore it.
+            # `removal_plan` then drops any source it picked anyway and tops the
+            # set back up, which is what keeps a published algorithm runnable
+            # without rewriting it to know an outbreak exists.
+            canned_script = f"""\
+class DismantlingBaseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        removals = dismantling_algorithms.{config.baseline}(
+            graph,
+            budget,
+            "{config.diffusion_model}",
+            horizon=horizon,
+            outbreak={tuple(outbreak)!r},
+        )
+        return containment.removal_plan(
+            removals, graph, budget, {tuple(outbreak)!r}, horizon
+        )
 """
         else:
             # A classical baseline is a static seed set, committed at t=0
@@ -558,7 +642,8 @@ class Baseline(Strategy):
     strategy, trajectory = method.optimize(agent, environment, task, graph)
     print(
         f"[run] winner: reward={trajectory.reward:.2f} "
-        f"({100.0 * trajectory.reward / graph.num_nodes:.2f}% of N)"
+        f"({100.0 * trajectory.reward / graph.num_nodes:.2f}% of N"
+        f"{', lower is better' if task.contains else ''})"
     )
 
     # One closing turn on the generation thread: what it tried each iteration and
@@ -573,7 +658,7 @@ class Baseline(Strategy):
                 strategy.source_script,
                 trajectory.reward,
                 getattr(method, "history", []),
-                summarize(trajectory, graph),
+                summarize(trajectory, graph, task),
             )
         )
         print(f"\n{'=' * 78}\nALGORITHM WRITE-UP\n{'=' * 78}\n{explanation}\n")
@@ -610,7 +695,7 @@ class Baseline(Strategy):
         "effective_budget": getattr(method, "effective_budget", None) or config.budget,
         "reward": trajectory.reward,
         "spread_pct": round(100.0 * trajectory.reward / graph.num_nodes, 2),
-        "summary": summarize(trajectory, graph),
+        "summary": summarize(trajectory, graph, task),
         # For per_step this is the last timestep's script (one is generated per step)
         "script": strategy.source_script,
         # Markdown; None for canned arms, which synthesized nothing to explain
@@ -673,6 +758,34 @@ class Baseline(Strategy):
         ),
     }
 
+    # Sense first, because everything downstream that picks a winner needs it and
+    # the per-arm JSON is read standalone by plots/report/summary
+    result["objective"] = task.sense
+
+    if task.contains:
+        result["containment"] = True
+        result["outbreak"] = list(outbreak)
+        result["outbreak_pct"] = outbreak_pct
+        result["outbreak_selector"] = config.outbreak_selector
+        # §8.3: the connectivity functionals reported ALONGSIDE the diffusion
+        # number, computed exactly, as context — never as the learned target.
+        # Read off the executed bags rather than re-planning, for the same reason
+        # --compare replays them: a randomized strategy returns a different set on
+        # a second call, and this has to describe the set that earned the reward.
+        result["structural"] = containment_metrics(
+            graph.edge_index, graph.num_nodes, removal_set(trajectory.actions)
+        )
+        structural = result["structural"]
+        print(
+            f"[run] structural: removed {structural['k']}, "
+            f"GCC {structural['largest_cc_intact']:.0f} -> "
+            f"{structural['largest_cc_size']:.0f} "
+            f"({structural['largest_cc_drop_pct']:.1f}% drop), "
+            f"pairwise conn -{structural['pairwise_conn_drop_pct']:.1f}%, "
+            f"R={structural['schneider_r']:.4f}, "
+            f"degree-rank rho={structural['degree_rank_spearman']:+.3f}"
+        )
+
     if config.edit_rate:
         result["streaming"] = True
         result["edit_rate"] = config.edit_rate
@@ -709,7 +822,11 @@ class Baseline(Strategy):
         print("[run] per-action counterfactual credit (one rollout per action)...")
         # Credit of the executed action sequence; for state-dependent strategies (per_step/windowed) the recorded bags are replayed as a fixed plan
         base_reward, entries = counterfactual_credit(
-            environment, trajectory.actions, config.horizon, config.budget
+            environment,
+            trajectory.actions,
+            config.horizon,
+            config.budget,
+            creditable_ops=tuple(config.allowed_ops),
         )
         result["credit_base_reward"] = base_reward
         result["credit"] = entries
@@ -957,6 +1074,19 @@ if __name__ == "__main__":
         help="multi-round IM: separate campaigns of `budget` seeds each, scored on the union of what they activate. 1 = a single campaign (default: 1).",
     )
     parser.add_argument(
+        "--outbreak-pct",
+        type=float,
+        default=None,
+        help="critical node detection: size of the exogenous outbreak the planner must contain, as a percentage of N. Unset = the task registry's value, 0 for every seeding task (default: None).",
+    )
+    parser.add_argument(
+        "--outbreak-selector",
+        type=str,
+        default="random",
+        choices=list(outbreak_selectors),
+        help="how the outbreak's source nodes are chosen; deterministic in --seed so every arm faces the same one. `random` is the honest default: a targeted outbreak makes blocking the same ranking problem (default: random).",
+    )
+    parser.add_argument(
         "--strategy-mode",
         type=str,
         default="free",
@@ -1121,6 +1251,8 @@ if __name__ == "__main__":
         feedback_model=args.feedback_model,
         edit_rate=args.edit_rate,
         campaigns=args.campaigns,
+        outbreak_pct=args.outbreak_pct,
+        outbreak_selector=args.outbreak_selector,
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,

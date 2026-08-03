@@ -4,13 +4,17 @@ import json
 import re
 from pathlib import Path
 
+from coding_agent.types import best_by, rank_by
 from pipeline.conditions import (
     adaptivity_gaps,
     condition_names,
     ground_truth_reward,
     is_ground_truth,
+    result_sense,
+    reward_direction,
 )
 from pipeline.layout import Layout
+from pipeline.tasks import minimize
 
 # The agent writes its own `##` headings; demoting them one level keeps the
 # report's outline intact instead of the write-up opening new top-level sections
@@ -35,6 +39,8 @@ reported_config_keys = (
     "feedback_model",
     "edit_rate",
     "campaigns",
+    "outbreak_pct",
+    "outbreak_selector",
     "wm_model",
     "head",
     "hide_edge_weights",
@@ -122,7 +128,17 @@ def _results_table(agent_results: list[dict]) -> list[str]:
         return []
 
     has_mc = any(result.get("mc_reward") is not None for result in agent_results)
+    sense = result_sense(agent_results)
     lines = ["## Results", ""]
+
+    if sense == minimize:
+        lines += [
+            "> **`spread` is the objective and LOWER IS BETTER.** This is a "
+            "containment task: an exogenous outbreak is already running, the budget "
+            "buys node deletions, and the column reports how many nodes the cascade "
+            "still reached. The best arm is the one with the SMALLEST number.",
+            "",
+        ]
 
     if has_mc:
         lines += [
@@ -141,7 +157,10 @@ def _results_table(agent_results: list[dict]) -> list[str]:
             "",
         ]
 
-    header = "| # | budget k | % of N | arm | evaluator | spread | % of N |"
+    header = (
+        f"| # | budget k | % of N | arm | evaluator | spread "
+        f"({reward_direction(sense)}) | % of N |"
+    )
     divider = "| --- | --- | --- | --- | --- | --- | --- |"
 
     if has_mc:
@@ -246,6 +265,88 @@ def _adaptivity_section(agent_results: list[dict]) -> list[str]:
     return lines + [""]
 
 
+def _structural_section(agent_results: list[dict]) -> list[str]:
+    """
+    What each removal set did to the graph's CONNECTIVITY — context, not the score.
+
+    Empty for every task that does not remove nodes. The framing matters as much
+    as the numbers: `research/critical_node_detection.md` §2.1 argues that
+    structural CNDP is not a world-model problem at all (its transition is
+    deterministic and `nx.connected_components` is cheaper than one forward pass),
+    so this table exists to bridge to the published dismantling literature, which
+    reports these functionals and not spread. §5.8 is the reason it can disagree
+    with the results table above: the same centralities rank in OPPOSITE orders
+    under a spreading objective and a connectivity objective.
+    """
+    with_structural = [
+        result for result in agent_results if result.get("structural") is not None
+    ]
+    if not with_structural:
+        return []
+
+    largest = max(result["budget"] for result in with_structural)
+    at_largest = rank_by(
+        [result for result in with_structural if result["budget"] == largest],
+        ground_truth_reward,
+        result_sense(with_structural),
+    )
+    intact = at_largest[0]["structural"]
+
+    lines = [
+        f"## Structural context at k={largest}",
+        "",
+        "Computed exactly by BFS on the residual graph, and **never a training "
+        "target** — a k-layer message-passing model cannot represent "
+        "giant-component membership on a graph of diameter > k, so the world model "
+        "is fit on the diffusion transition and these describe the same removal "
+        "sets afterwards "
+        "([`research/critical_node_detection.md`](../../../../research/critical_node_detection.md) "
+        "§2.1, §8.3). They are the units the published dismantling literature "
+        "reports in, so they are the bridge to it — and §5.8 shows a method can "
+        "win the column above and lose every column here.",
+        "",
+        f"Intact graph: pairwise connectivity {intact['pairwise_conn_intact']:,.0f}, "
+        f"largest component {intact['largest_cc_intact']:,.0f}, "
+        f"{intact['n_components_intact']:.0f} component(s). "
+        f"`rho` is the fraction of N removed to drive the giant component below "
+        f"{intact['gcc_threshold']:.0%} of N; `—` means the budget ran out first, "
+        f"which is the common case at these budgets and is the honest answer.",
+        "",
+        "| arm | spread | GCC after | GCC drop | pairwise conn drop | components | "
+        "Schneider R | ANC (sigma = GCC) | rho at threshold | degree-rank rho |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+
+    for result in at_largest:
+        structural = result["structural"]
+        rho = structural.get("rho_at_threshold")
+        lines.append(
+            f"| `{result['arm']}` "
+            f"| {_format_number(ground_truth_reward(result))} "
+            f"| {structural['largest_cc_size']:,.0f} "
+            f"| {structural['largest_cc_drop_pct']:.1f}% "
+            f"| {structural['pairwise_conn_drop_pct']:.1f}% "
+            f"| {structural['n_components']:.0f} "
+            f"| {_format_number(structural['schneider_r'], 4)} "
+            f"| {_format_number(structural['anc'], 4)} "
+            f"| {'—' if rho is None else f'{rho:.3f}'} "
+            f"| {structural['degree_rank_spearman']:+.3f} |"
+        )
+
+    lines += [
+        "",
+        "**`degree-rank rho`** is the Spearman correlation between an arm's removal "
+        "ORDER and the degree of the nodes it removed — the self-measurement "
+        "§9.5 asks for. MIND found GDM's dismantling order correlates at **0.762** "
+        "with a PCA of its own handcrafted input features. We feed `log1p(degree)` "
+        "as feature channel 2, so an arm near that value has re-derived the degree "
+        "heuristic with extra steps, whatever its spread number says.",
+        "",
+    ]
+
+    return lines
+
+
 def _winner_section(agent_results: list[dict]) -> list[str]:
     """Best arm at the largest budget, with the program it produced."""
     if not agent_results:
@@ -253,7 +354,10 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
 
     largest = max(result["budget"] for result in agent_results)
     at_largest = [result for result in agent_results if result["budget"] == largest]
-    winner = max(at_largest, key=ground_truth_reward)
+    sense = result_sense(agent_results)
+    # argmin on a containment task: the winner is the arm that let the FEWEST
+    # nodes get infected, and taking the max there would name the worst arm
+    winner = best_by(at_largest, ground_truth_reward, sense)
     spread = ground_truth_reward(winner)
 
     judged = "ground-truth MC" if is_ground_truth(at_largest) else "its own evaluator"
@@ -263,7 +367,8 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
         f"**`{winner['arm']}`** (condition {winner.get('condition', '—')} — "
         f"{condition_names.get(winner.get('condition'), 'unknown')}) — spread "
         f"{_format_number(spread)} "
-        f"({_format_number(100.0 * spread / winner['graph']['num_nodes'])}% of N) "
+        f"({_format_number(100.0 * spread / winner['graph']['num_nodes'])}% of N, "
+        f"{reward_direction(sense)}) "
         f"by {judged}, model `{winner.get('model')}`",
         "",
         "```",
@@ -381,6 +486,7 @@ def write_report(
     lines += _taxonomy_section(agent_results)
     lines += _results_table(agent_results)
     lines += _adaptivity_section(agent_results)
+    lines += _structural_section(agent_results)
     lines += _winner_section(agent_results)
     lines += _world_model_section(wm_results)
     lines += _figures_section(layout.plots_dir, layout.root)

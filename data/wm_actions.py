@@ -343,18 +343,16 @@ def counterfactual_actions(
     remove_semantics: str = spent,
 ) -> list[list[ActionOp]]:
     """
-    Up to `count` action bags distinct from main_bag and each other. Forks cover
-    node ops only (NULL, a random add_node, a random remove_node) so the
-    snapshot/restore branch never has to undo an edge mutation.
+    Up to `count` action bags distinct from main_bag and each other: NULL, a
+    random add_node, and a random remove_node.
 
-    Under `blocked` that rules remove_node out entirely: node deletion IS an edge
-    mutation (delete_node_bag), and Simulator.restore() rewinds status and the
-    blocked set but not the graph, so a fork would strip the node's edges from
-    the main branch permanently. Blocked removals therefore reach the training
-    data through main-branch injection only.
-    ponytail: costs counterfactual coverage of removals. Fix by snapshotting the
-    graph, or by re-adding the fork's removed edges with their captured weights,
-    if the action-sensitivity metric comes out weak on a containment dataset.
+    Under `blocked` the removal fork is a full node-deletion bag, so it mutates
+    the graph as well as the status — `Simulator.restore()` rewinds status and the
+    blocked set but not the graph. The caller must therefore pair every fork with
+    `Simulator.revert_edges(bag)`, which re-adds the stripped arcs at their
+    original probabilities. Skipping the fork instead (what this used to do) left
+    a containment dataset with NO two actions from the same state, which is
+    exactly what `action_sensitivity` measures — it read 0.0.
     """
     num_nodes = graph.number_of_nodes()
     infected = set(state.infected)
@@ -379,8 +377,14 @@ def counterfactual_actions(
     if "add_node" in action_ops and susceptible:
         pool.append([ActionOp("add_node", int(rng.choice(susceptible)))])
 
-    if "remove_node" in action_ops and active and remove_semantics == spent:
-        pool.append([ActionOp("remove_node", int(rng.choice(active)))])
+    if "remove_node" in action_ops:
+        if remove_semantics == blocked:
+            # Containment blocks a node BEFORE the cascade reaches it, so the fork
+            # draws from the susceptibles the main-branch injection draws from
+            if susceptible:
+                pool.append(delete_node_bag(graph, int(rng.choice(susceptible))))
+        elif active:
+            pool.append([ActionOp("remove_node", int(rng.choice(active)))])
 
     bags = []
 

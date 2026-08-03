@@ -12,7 +12,9 @@ from pipeline.conditions import (
     condition_names,
     ground_truth_reward,
     is_ground_truth,
+    result_sense,
 )
+from pipeline.tasks import minimize
 
 # Headless: SLURM nodes have no display
 matplotlib.use("Agg")
@@ -66,11 +68,35 @@ def _reward_se(result: dict) -> float:
     return float(result.get("cost", {}).get("reward_se", 0.0) or 0.0)
 
 
-def _reward_label(results: list[dict]) -> str:
+def _reward_label(results: list[dict], normalize: bool = False) -> str:
+    """
+    Y-axis text, including which direction is the good one.
+
+    Stating it on the axis rather than only in the report: a containment figure
+    with an unlabelled y-axis is read as a win for the highest curve, which is
+    exactly backwards.
+    """
+    unit = "% of nodes" if normalize else "nodes"
+    judge = "ground-truth MC" if is_ground_truth(results) else "mixed evaluators"
+
+    if result_sense(results) == minimize:
+        return f"final infected ({unit}, {judge}) — LOWER IS BETTER"
+
+    return f"final spread ({unit}, {judge})"
+
+
+def _budget_label(results: list[dict], normalize: bool = False) -> str:
+    unit = "% of nodes" if normalize else "k"
+    noun = "removal" if result_sense(results) == minimize else "seed"
+
+    return f"{noun} budget ({unit})" if normalize else f"{noun} budget {unit}"
+
+
+def _spread_title(results: list[dict]) -> str:
     return (
-        "final spread (nodes, ground-truth MC)"
-        if is_ground_truth(results)
-        else "final spread (nodes, mixed evaluators)"
+        "contained spread vs removal budget"
+        if result_sense(results) == minimize
+        else "influence spread vs seed budget"
     )
 
 
@@ -117,11 +143,9 @@ def plot_budget_vs_spread(
             **_arm_style(index),
         )
 
-    axes.set_xlabel("seed budget (% of nodes)" if normalize else "seed budget k")
-    axes.set_ylabel(
-        "final spread (% of nodes)" if normalize else _reward_label(results)
-    )
-    axes.set_title(f"{title_prefix}: influence spread vs seed budget")
+    axes.set_xlabel(_budget_label(results, normalize))
+    axes.set_ylabel(_reward_label(results, normalize))
+    axes.set_title(f"{title_prefix}: {_spread_title(results)}")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=8)
 
@@ -187,10 +211,8 @@ def plot_ours_vs_baselines(
             **style,
         )
 
-    axes.set_xlabel("seed budget (% of nodes)" if normalize else "seed budget k")
-    axes.set_ylabel(
-        "final spread (% of nodes)" if normalize else _reward_label(results)
-    )
+    axes.set_xlabel(_budget_label(results, normalize))
+    axes.set_ylabel(_reward_label(results, normalize))
     axes.set_title(f"{title_prefix}: our method vs all baselines")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
@@ -235,6 +257,7 @@ def plot_condition_comparison(
     axes.set_xticklabels(arms, rotation=35, ha="right", fontsize=8)
     axes.set_ylim(0, max(v + e for v, e in zip(values, errors, strict=True)) * 1.15)
     axes.set_ylabel(_reward_label(at_largest))
+    # Bars start at 0 either way, so the shortest bar is the winner under minimize
     axes.set_title(f"{title_prefix}: baseline conditions at k={largest}")
     axes.grid(alpha=0.3, axis="y")
 
@@ -296,6 +319,7 @@ def plot_sample_efficiency(
     axes.set_xscale("log")
     axes.set_xlabel("real-environment episodes consumed (log; left edge = none)")
     axes.set_ylabel(_reward_label(at_largest))
+    # Bars start at 0 either way, so the shortest bar is the winner under minimize
     axes.set_title(f"{title_prefix}: quality vs real-experience cost at k={largest}")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=7)
@@ -664,6 +688,121 @@ def plot_wm_rollout(wm_results: dict, out_path: Path, title_prefix: str) -> Path
     return _save(figure, out_path)
 
 
+def plot_dismantling_curve(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    s(q) = |GCC| / N after each sequential removal — the physics branch's own figure.
+
+    None for every sweep that removes nothing. This is the curve the published
+    dismantling numbers collapse to a scalar, so plotting it is what lets a reader
+    place our arms next to that literature at all. It can and does disagree with
+    the spread figure: research/critical_node_detection.md §5.8 shows the same
+    centralities rank in opposite orders under the two objectives.
+    """
+    with_curve = [
+        result
+        for result in results
+        if (result.get("structural") or {}).get("gcc_curve")
+    ]
+    if not with_curve:
+        return None
+
+    largest = max(result["budget"] for result in with_curve)
+    at_largest = [result for result in with_curve if result["budget"] == largest]
+
+    figure, axes = plt.subplots(figsize=figure_size)
+
+    for index, arm in enumerate(_sorted_arms(at_largest)):
+        run = _by_arm(at_largest, arm)[0]
+        curve = run["structural"]["gcc_curve"]
+        nodes = run["graph"]["num_nodes"]
+
+        axes.plot(
+            [100.0 * step / nodes for step in range(len(curve))],
+            curve,
+            marker=marker_cycle[index % len(marker_cycle)],
+            markersize=4,
+            markevery=max(1, len(curve) // 8),
+            color=condition_colors.get(_condition_of(at_largest, arm)),
+            label=arm,
+            linewidth=1.8,
+        )
+
+    threshold = at_largest[0]["structural"].get("gcc_threshold", 0.01)
+    axes.axhline(
+        threshold,
+        color="#888888",
+        linestyle="--",
+        linewidth=1.0,
+        label=f"dismantled threshold ({threshold:.0%} of N)",
+    )
+
+    axes.set_xlabel("nodes removed (% of N), sequentially")
+    axes.set_ylabel("|GCC| / N — LOWER IS BETTER")
+    axes.set_title(f"{title_prefix}: dismantling curve at k={largest}")
+    axes.set_ylim(0, 1.02)
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+
+    return _save(figure, out_path)
+
+
+def plot_structural_vs_spread(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Every arm as one point: what its removals did to CONNECTIVITY against what they
+    did to the CASCADE.
+
+    The figure that makes §5.8 visible. If the two objectives agreed the points
+    would lie on a line; the literature says they do not, and this is where our own
+    data either confirms that or does not.
+    """
+    with_structural = [
+        result for result in results if result.get("structural") is not None
+    ]
+    if len(with_structural) < 3:
+        return None
+
+    largest = max(result["budget"] for result in with_structural)
+    at_largest = [result for result in with_structural if result["budget"] == largest]
+
+    figure, axes = plt.subplots(figsize=(7.0, 4.8))
+
+    for arm in _sorted_arms(at_largest):
+        run = _by_arm(at_largest, arm)[0]
+        axes.scatter(
+            run["structural"]["largest_cc_drop_pct"],
+            100.0 * ground_truth_reward(run) / run["graph"]["num_nodes"],
+            s=70,
+            color=condition_colors.get(run.get("condition", 99), "#4C72B0"),
+            edgecolors="white",
+            linewidths=0.8,
+            zorder=3,
+        )
+        axes.annotate(
+            arm,
+            (
+                run["structural"]["largest_cc_drop_pct"],
+                100.0 * ground_truth_reward(run) / run["graph"]["num_nodes"],
+            ),
+            fontsize=6,
+            xytext=(4, 4),
+            textcoords="offset points",
+        )
+
+    axes.set_xlabel("giant-component drop (%) — structural objective, higher is better")
+    axes.set_ylabel("final infected (% of N) — diffusion objective, lower is better")
+    axes.set_title(
+        f"{title_prefix}: connectivity vs containment at k={largest} "
+        f"(bottom-right is best on both)"
+    )
+    axes.grid(alpha=0.3)
+
+    return _save(figure, out_path)
+
+
 def build_plots(
     agent_results: list[dict],
     wm_results: dict | None,
@@ -708,6 +847,14 @@ def build_plots(
         ),
         plot_round_spreads(
             agent_results, plots_dir / "round_spreads.png", title_prefix
+        ),
+        # Both return None on a sweep that removes nothing, same as the adaptive
+        # pair above, so no guard is needed here either
+        plot_dismantling_curve(
+            agent_results, plots_dir / "dismantling_curve.png", title_prefix
+        ),
+        plot_structural_vs_spread(
+            agent_results, plots_dir / "structural_vs_spread.png", title_prefix
         ),
     ]
 

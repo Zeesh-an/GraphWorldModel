@@ -12,7 +12,7 @@ import networkx as nx
 import numpy as np
 
 from coding_agent.types import GraphInfo
-from data.wm_simulator import ActionOp, Simulator, spent
+from data.wm_simulator import ActionOp, Simulator, blocked, spent
 
 seed_upper_bound = 1 << 30
 convergence_tol = 1e-9
@@ -169,6 +169,60 @@ def mc_simulate_spread(
             graph, diffusion_model, seed=int(rng.integers(seed_upper_bound))
         )
         state = simulator.advance(seed_bag)
+
+        for _ in range(horizon):
+            if not state.frontier:
+                break
+
+            state = simulator.advance([])
+
+        totals.append(len(state.infected))
+
+    return float(np.mean(totals))
+
+
+def mc_simulate_containment(
+    graph: GraphInfo,
+    outbreak: list[int],
+    removed: list[int],
+    diffusion_model: str,
+    mc_runs: int = 20,
+    horizon: int = 20,
+    seed: int = 0,
+) -> float:
+    """
+    Mean final infected count when `removed` is deleted and `outbreak` then spreads.
+
+    The containment counterpart of `mc_simulate_spread`, and the honest classical
+    cost of scoring one blocker set: LOWER is better. Runs under `blocked`
+    semantics, so a deleted node is uncounted, cannot transmit and cannot be
+    infected — the `spent` reading would report each blocker as infected and
+    inflate every number by exactly +k
+    (research/critical_node_detection.md §2.3).
+    """
+    if not outbreak:
+        return 0.0
+
+    # Imported here rather than at module scope: containment imports primitives
+    from coding_agent.containment import delete_node_ops
+
+    rng = np.random.default_rng(seed)
+    removed_set = {int(node) for node in removed}
+    bag = [ActionOp("add_node", int(node)) for node in outbreak if int(node) not in removed_set]
+
+    for node in removed_set:
+        bag += delete_node_ops(graph, node)
+
+    totals = []
+
+    for _ in range(mc_runs):
+        simulator = build_simulator(
+            graph,
+            diffusion_model,
+            seed=int(rng.integers(seed_upper_bound)),
+            remove_semantics=blocked,
+        )
+        state = simulator.advance(bag)
 
         for _ in range(horizon):
             if not state.frontier:

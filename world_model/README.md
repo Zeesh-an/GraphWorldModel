@@ -199,7 +199,7 @@ Teacher-forced, threshold 0.5; soft targets are thresholded at 0.5 for the binar
 | `delta_f1`                          | F1 on nodes whose state **changed** `t → t+1` — the early-stop / headline metric                                                     |
 | `add_seed_success`                  | fraction of `add_node` targets the model predicts as infected (should be 1.0)                                                        |
 | `remove_frontier_success`           | fraction of `remove_node` targets predicted as not-frontier. Under `--remove-semantics blocked` a structured head zeroes those nodes in `T_exo`, so this reads ~1.0 by construction and stops being informative |
-| `action_sensitivity`                | mean # of distinct outputs across counterfactual actions at the same state (>0 ⇒ the model reacts to the action, not just the state) |
+| `action_sensitivity`                | mean # of distinct outputs across counterfactual actions at the same state (>0 ⇒ the model reacts to the action, not just the state). Compared on **probabilities rounded to 1e-3**, not on the thresholded prediction: under a seeding task the two agree, because seeding A flips A itself, but under containment blocking A rather than B shifts its neighbours without moving any of them across 0.5. The binary version read exactly 0.0 on the first containment dataset with counterfactual pairs present |
 | `brier_infected` / `brier_frontier` | MSE of predicted prob vs the soft marginal — calibration, lower better                                                               |
 | `persistence`                       | the "predict next = current" baseline; its `delta_f1`/`new_infection_f1` are 0 by construction                                       |
 
@@ -248,10 +248,11 @@ These rebuild a model from a results JSON's `config`, reload its `.pt` checkpoin
 | `train_wm.py`               | training loop, early stopping, results JSON                                                                                                      |
 | `wm_model.py`               | `WorldModel`, backbone registry, `ICTransmissionHead` / `LTThresholdHead` / linear head                                                          |
 | `wm_data.py`                | feature builder (`X`, channels), `GraphInput`, per-episode adjacency, dataset + collate                                                          |
-| `wm_metrics.py`             | F1 / accuracy / Brier / persistence primitives                                                                                                   |
+| `wm_metrics.py`             | F1 / accuracy / Brier / persistence primitives, plus the exact connectivity functionals (`containment_metrics`: pairwise conn, GCC, components, Schneider `R`, ANC, `rho` at `Theta`, degree-rank Spearman) |
 | `wm_eval.py`                | one-step eval, ensemble rollout, planning regret, simulator rebuild                                                                              |
 | `eval_planning.py`          | recompute planning regret on a checkpoint                                                                                                        |
 | `eval_rollout_ensemble.py`  | recompute ensemble rollout on a checkpoint                                                                                                       |
 | `eval_structured_oracle.py` | IC structural-form oracle check                                                                                                                  |
+| `../coding_agent/check_containment.py` | runnable self-check for the critical-node-detection contract (outbreak, removal budget, minimize sense, structural metrics) |
 | `model/*.py`                | the five backbone encoders + `model_utils.py` (each file also retains an unused legacy `*ForwardModel` class from the old seed→outcome pipeline) |
 | `checkpoints/`              | trained `.pt` weights, per-run results JSONs, and `RESULTS.md`                                                                                   |

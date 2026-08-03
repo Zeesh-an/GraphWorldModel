@@ -130,8 +130,14 @@ def snapshot_rewinds_the_blocked_set() -> None:
     assert simulator.blocked == set(), simulator.blocked
 
 
-def blocked_forks_carry_no_removals() -> None:
-    """A blocked remove_node fork would strip edges the main branch still needs."""
+def blocked_forks_are_deletion_bags() -> None:
+    """
+    A blocked remove_node fork is a full node-DELETION bag, not a bare op.
+
+    Skipping the fork instead (what this used to assert) left a containment
+    dataset with no two actions from the same state, which is exactly what
+    `action_sensitivity` measures — it read 0.0.
+    """
     graph = nx.DiGraph([(0, 1), (1, 2)])
     rng = np.random.default_rng(0)
     state = State(infected=[0], frontier=[0])
@@ -139,12 +145,36 @@ def blocked_forks_carry_no_removals() -> None:
     bags = counterfactual_actions(
         state, graph, [], 4, rng, ["add_node", "remove_node"], remove_semantics=blocked
     )
-    assert all(op.op != "remove_node" for bag in bags for op in bag), bags
+    removals = [bag for bag in bags if any(op.op == "remove_node" for op in bag)]
+    assert removals, bags
+    assert any(op.op == "remove_edge" for op in removals[0]), removals[0]
 
     bags = counterfactual_actions(
         state, graph, [], 4, rng, ["add_node", "remove_node"], remove_semantics=spent
     )
     assert any(op.op == "remove_node" for bag in bags for op in bag), bags
+
+
+def revert_edges_undoes_a_deletion_fork() -> None:
+    """
+    ...and the caller must put those edges back, because restore() cannot.
+
+    Without this the main branch resumes on a graph the fork edited: node 1's
+    arcs would be gone, so the cascade from 0 would stop dead at 0 forever.
+    """
+    simulator = build("IC", blocked)
+    simulator.advance(seed_bag)
+    snapshot = simulator.snapshot()
+
+    fork = delete_node_bag(simulator.model.graph.graph, 1)
+    simulator.advance(fork)
+    simulator.restore(snapshot)
+    simulator.revert_edges(fork)
+
+    # The main branch's cascade still reaches node 2 through the restored arcs
+    simulator.advance([])
+    state = simulator.advance([])
+    assert 2 in state.infected, state
 
 
 def blocked_injection_expands_to_a_deletion() -> None:
@@ -231,7 +261,8 @@ if __name__ == "__main__":
         bare_remove_node_is_still_held_down,
         deletion_bag_covers_both_orientations,
         snapshot_rewinds_the_blocked_set,
-        blocked_forks_carry_no_removals,
+        blocked_forks_are_deletion_bags,
+        revert_edges_undoes_a_deletion_fork,
         blocked_injection_expands_to_a_deletion,
         head_t_exo_matches_the_simulator,
         environments_count_their_own_cost,

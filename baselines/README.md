@@ -78,6 +78,22 @@ These are **not** "not done yet" — each has a concrete, stated reason:
 
 All five appear in DeepIM's published tables, which are transcribed in [`../research/influence_maximization.md`](../research/influence_maximization.md) §5.1 — so numeric comparison against them is available from the paper on Jazz and Power Grid even with their code blocked.
 
+### Per-task registration
+
+`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. Three tasks have entries today:
+
+| task | registered | wired |
+| --- | --- | --- |
+| `influence_maximization` | 15 | 7 |
+| `adaptive_online_im` | 5 (`adaptiveim`, `mrim`, `rl4im`, `oim_lt`, `timlinucb`) | 0 |
+| `critical_node_detection` | 12 (`finder`, `gdm`, `mind`, `spr`, `nirm`, `dcrs`, `gnd`, `decycler`, `collective_influence`, `explosive_immunization`, `dismantling_review`, `selinda`) | 0 |
+
+**For critical node detection, wire `dismantling_review` first.** It is the Artime et al. survey's harness rather than a method, and it already drives CI, CoreHD, GND, EI, MinSum, FINDER and GDM behind one interface — so it is one adapter instead of seven, and it is the only practical route to a FINDER number at all, since [`../research/critical_node_detection.md`](../research/critical_node_detection.md) §11 records that FINDER publishes its real-network results as heatmaps only, has no arXiv version, and the `results/` directory its README advertises does not exist in `master`.
+
+Two traps apply to every entry in that group before any number is quoted (§8.2): almost all of them run on the **largest connected component** of the input silently (trap 7), and several ship a **reinsertion** pass that makes `X` and `X+R` different methods cited under one name (trap 2). A third is specific to `gnd`: its contribution is *cost*-weighted dismantling, so scoring its cost-optimal set on a cardinality budget is unfair in both directions (trap 4).
+
+Our own `tools/dismantling_algorithms.py` reimplements CI, CoreHD, EI, GND and the Min-Sum pipeline shape in Python. Those are honest condition-1 arms and are **not** substitutes for the authors' code: each docstring states where it deviates (greedy cover instead of GND's LP 2-approximation, one EI regime instead of two, greedy decycling instead of Min-Sum's 1RSB message passing). Wire the repo before quoting a comparison to the paper.
+
 ---
 
 ## Usage

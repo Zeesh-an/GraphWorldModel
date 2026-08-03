@@ -321,6 +321,10 @@ def _episode_transitions(
                 s_cf, cf_infected_marginal, cf_frontier_marginal = (
                     simulator.advance_marginal(cf_bag, config.mc_marginals)
                 )
+                # A blocked-removal fork is a node-DELETION bag, so it stripped
+                # arcs that restore() cannot put back; without this the main
+                # branch resumes on a graph the fork edited
+                simulator.revert_edges(cf_bag)
                 writer.write(
                     build_record(
                         graph_id=bundle.graph_id,
@@ -342,6 +346,8 @@ def _episode_transitions(
             simulator.restore(snapshot)
 
         # In the main transition, apply the real action, advance one step, and write the (s_t, action, s_next) record
+        # Reading the graph AFTER the forks reverted theirs, so the main branch's
+        # deletion bag is built against the adjacency it actually runs on
         # The reward is the spread gain (the increase in activated-node count this step)
         s_next, infected_marginal, frontier_marginal = simulator.advance_marginal(
             action, config.mc_marginals
