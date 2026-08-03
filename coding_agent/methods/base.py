@@ -1,13 +1,17 @@
 """OuterLoopMethod contract + shared helpers."""
 
 import math
+import time
 from functools import partial
 from typing import Protocol
 
 from coding_agent.agent import CodingAgent
 from coding_agent.credit import planned_action
-from coding_agent.executor import StrategyError, validate_actions
+from coding_agent.executor import StrategyError, call_strategy, validate_actions
+from coding_agent.rounds import adaptive_action_fn, round_batches, round_schedule
+from coding_agent.stream import build_stream
 from coding_agent.tools import algorithms, primitives
+from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.types import ActionOp, GraphInfo, Strategy, TaskSpec, Trajectory
 
 # Ensemble P(infected) below this counts as "unreached" in feedback
@@ -33,6 +37,12 @@ anchor_algorithms = (
     "random_seeds",
 )
 ic_only_anchors = ("imm",)
+
+# Added to the leaderboard only for an adaptive task. AdaptGreedy is deliberately
+# absent: it costs batch x candidates x mc_runs simulations per round, which
+# would dominate startup for a table that exists to set a bar, not to be the
+# result. Run it as its own --baselines arm when you want its number.
+adaptive_anchor_algorithms = ("adapt_epic", "adapt_degree_discount", "static_split")
 
 # Residual-gain feedback is built from reverse-reachable sets, so it is IC-only.
 # theta is small relative to what IMM would ask for: this ranks candidates for a
@@ -326,6 +336,75 @@ def validate_plan(plan: list, task: TaskSpec, graph: GraphInfo) -> None:
         )
 
 
+def evaluate_strategy(
+    strategy: Strategy, environment: object, task: TaskSpec, graph: GraphInfo
+) -> tuple[Trajectory, float]:
+    """
+    Score one generated program, and return how long building its plan took.
+
+    The single point where adaptive and non-adaptive diverge. Non-adaptive calls
+    plan_horizon() once up front and replays the result; adaptive calls act() at
+    each round boundary against the state the previous round produced. Everything
+    else about the search (the population, the feedback, the checkpoints) is
+    identical, which is what makes the adaptivity gap an A/B on one variable.
+    """
+    start = time.perf_counter()
+    # Built once here and applied to EVERY arm: an arm whose graph moved against
+    # one whose graph did not would be measuring the stream, not the method
+    stream = build_stream(graph, task.horizon, task.edit_rate, task.seed)
+
+    if task.adaptive:
+        batches = round_batches(task.budget, task.rounds, task.per_round_budget)
+        # act() runs inside the rollout, so there is no plan to time here; the
+        # policy's own compute lands in the environment's rollout_seconds
+        action_fn = adaptive_action_fn(strategy, task, graph, batches, stream)
+    else:
+        plan = call_strategy(strategy.plan_horizon, graph, task.budget, task.horizon)
+        validate_plan(plan, task, graph)
+        action_fn = partial(planned_action, plan)
+
+    if stream is not None:
+        # After validation, not before: the edits are exogenous, so they are not
+        # the policy's to be charged for and an --allowed-ops add_node task would
+        # otherwise reject them
+        action_fn = stream.wrap(action_fn)
+
+    plan_seconds = time.perf_counter() - start
+    trajectory = environment.rollout(action_fn, task.horizon, task.budget)
+
+    return trajectory, plan_seconds
+
+
+class _AdaptiveAnchor:
+    """Wraps a per-round policy as the act()-shaped object evaluate_strategy wants."""
+
+    def __init__(self, policy, task: TaskSpec) -> None:
+        self.policy = policy
+        self.task = task
+        self.source_script = ""
+
+    def act(self, state, graph: GraphInfo, timestep: int) -> list[ActionOp]:
+        batches = round_batches(
+            self.task.budget, self.task.rounds, self.task.per_round_budget
+        )
+        batch = round_schedule(batches, self.task.round_gap, self.task.horizon).get(
+            timestep, 0
+        )
+        if not batch:
+            return []
+
+        return [
+            ActionOp("add_node", int(node))
+            for node in self.policy(
+                state,
+                graph,
+                batch,
+                self.task.diffusion_model,
+                total_budget=self.task.budget,
+            )
+        ]
+
+
 def baseline_anchor(
     environment: object, task: TaskSpec, graph: GraphInfo
 ) -> tuple[str, Trajectory, str]:
@@ -355,11 +434,25 @@ def baseline_anchor(
         )
         scored.append((name, trajectory))
 
+    # Under an adaptive task the static table alone sets the wrong bar: it shows
+    # what a one-shot algorithm gets and says nothing about what the published
+    # ADAPTIVE algorithms get on the same rounds. AdaptGreedy is the number a
+    # generated policy actually has to beat.
+    for name in adaptive_anchor_algorithms if task.adaptive else ():
+        policy = _AdaptiveAnchor(adaptive_algorithms[name], task)
+        trajectory, _ = evaluate_strategy(policy, environment, task, graph)
+        scored.append((name, trajectory))
+
     scored.sort(key=lambda entry: entry[1].reward, reverse=True)
     best_name, best_trajectory = scored[0]
 
+    kind = (
+        "classical baselines, static and per-round adaptive,"
+        if task.adaptive
+        else "classical baselines"
+    )
     lines = [
-        "REFERENCE SCORES — classical baselines run on THIS graph, under THIS "
+        f"REFERENCE SCORES: {kind} run on THIS graph, under THIS "
         "evaluator, at the same budget and horizon. Beating the top row is the bar:"
     ]
     lines += [
@@ -390,7 +483,7 @@ def _diff_node_list(
 
 def reference_diff(
     trajectory: Trajectory,
-    reference: Trajectory,
+    reference: Trajectory | None,
     graph: GraphInfo,
     reference_name: str = "degree_discount",
 ) -> str | None:
@@ -400,6 +493,11 @@ def reference_diff(
     Both marginal vectors already exist from rollouts that have been paid for, so
     this is the richest feedback available at zero additional cost.
     """
+    # No anchor at all when use_anchor is False, which is every canned arm: the
+    # baseline rollouts would be pure cost for a script that never reads a prompt
+    if reference is None:
+        return None
+
     mine, theirs = trajectory.final_marginals, reference.final_marginals
     if mine is None or theirs is None:
         return None

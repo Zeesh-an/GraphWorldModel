@@ -53,6 +53,7 @@ def build_graph_input(
     num_nodes: int,
     diffusion_model: str,
     device: torch.device,
+    hide_edge_weights: bool = False,
 ) -> GraphInput:
     edge_index_tensor = torch.as_tensor(edge_index, dtype=torch.long, device=device)
 
@@ -63,7 +64,15 @@ def build_graph_input(
 
     # LT ignores edge weights (structure + hidden node thresholds)
     # IC keeps p(u -> v)
-    if diffusion_model == "IC":
+    #
+    # hide_edge_weights feeds ones under IC too. That is the online/bandit
+    # information state: the graph is known, the transmission probabilities are
+    # not, and the encoder has to infer them from structure. It is also the
+    # honest ablation for the wrinkle that our IC heads otherwise consume the
+    # true w as an input feature; see research/adaptive_online_im.md §2.4b, §9.3
+    # item 7. The SIMULATOR still uses the true probabilities: this masks the
+    # model's view of the world, not the world.
+    if diffusion_model == "IC" and not hide_edge_weights:
         weights = torch.as_tensor(edge_weight, dtype=torch.float32, device=device)
     else:
         weights = torch.ones(
@@ -310,6 +319,7 @@ def collate_transitions(
     batch: list[dict],
     diffusion_model: str,
     device: torch.device,
+    hide_edge_weights: bool = False,
 ) -> dict:
     """Stack B transitions into one disjoint block-diagonal graph + a GraphInput."""
     x_parts = []
@@ -347,7 +357,12 @@ def collate_transitions(
         else torch.zeros(0, dtype=torch.float32)
     )
     graph_input = build_graph_input(
-        edge_index.numpy(), edge_weight.numpy(), offset, diffusion_model, device
+        edge_index.numpy(),
+        edge_weight.numpy(),
+        offset,
+        diffusion_model,
+        device,
+        hide_edge_weights,
     )
 
     return {

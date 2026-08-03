@@ -24,6 +24,8 @@ from pipeline.layout import Layout
 summary_columns = (
     "arm",
     "arm_spec",
+    "task",
+    "method",
     "condition",
     "condition_name",
     "evaluator",
@@ -65,6 +67,20 @@ summary_columns = (
     "external_selection_seconds",
     "cascade_steps",
     "final_infected_count",
+    # Adaptive IM: (k, b, r) together, because the literature splits three ways
+    # on the budget convention and a spread is not comparable without all three
+    "adaptive",
+    "rounds",
+    "round_batches",
+    "round_gap",
+    "feedback_model",
+    "round_spreads",
+    "spread_at_horizon",
+    "streaming",
+    "edit_rate",
+    "multi_round",
+    "campaigns",
+    "campaign_rewards",
 )
 
 
@@ -88,6 +104,8 @@ def _row(result: dict) -> dict:
     return {
         "arm": result.get("arm"),
         "arm_spec": result.get("arm_spec"),
+        "task": result.get("task"),
+        "method": result.get("method"),
         "condition": result.get("condition"),
         "condition_name": result.get("condition_name"),
         "evaluator": result.get("evaluator"),
@@ -145,6 +163,22 @@ def _row(result: dict) -> dict:
         "final_infected_count": (
             timeline[-1].get("infected_count") if timeline else None
         ),
+        # Empty for every non-adaptive arm, so one table holds both sides of the
+        # adaptivity gap without a second file
+        "adaptive": result.get("adaptive"),
+        "rounds": result.get("rounds"),
+        "round_batches": result.get("round_batches"),
+        "round_gap": result.get("round_gap"),
+        "feedback_model": result.get("feedback_model"),
+        "round_spreads": result.get("round_spreads"),
+        # sigma(S, T) at T = horizon, readable at any smaller T from spread_curve
+        # in the per-arm JSON
+        "spread_at_horizon": result.get("spread_at_horizon"),
+        "streaming": result.get("streaming"),
+        "edit_rate": result.get("edit_rate"),
+        "multi_round": result.get("multi_round"),
+        "campaigns": result.get("campaigns"),
+        "campaign_rewards": result.get("campaign_rewards"),
     }
 
 

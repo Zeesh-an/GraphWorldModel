@@ -41,6 +41,16 @@ class Task:
     # needs `blocked` (the node is deleted from the graph), because `spent`
     # counts each immunized node as infected and biases the spread by +k.
     remove_semantics: str = spent
+    # Arms this task sweeps by default. None = pipeline.conditions.default_arms
+    # (the six-condition ladder). A task overrides this only when its question
+    # needs a second method held alongside the ladder, the way adaptive IM needs
+    # a matched non-adaptive control to divide by.
+    default_arms: tuple | None = None
+    # Condition-1 pool. None = pipeline.conditions.default_baselines (the static
+    # IM classics). A task whose published baselines are a different KIND of
+    # algorithm overrides it: adaptive IM's are per-round policies, and running
+    # only static ones would leave its own literature off the table.
+    default_baselines: tuple | None = None
     blocker: str | None = None
 
     @property
@@ -145,11 +155,41 @@ tasks = {
     "adaptive_online_im": Task(
         name="adaptive_online_im",
         title="Adaptive and Online Influence Maximization",
-        status=planned,
+        status=implemented,
         objective=maximize,
         dynamics=("IC", "LT"),
         action_ops=("add_node",),
         summary="Choose seeds over rounds, observing realized activations between them.",
+        # The published adaptive algorithms (AdaptGreedy, EPIC) plus the per-round
+        # heuristic floor and `static_split`, the same-machinery control that
+        # isolates the timing penalty from the adaptivity benefit. `celf_pp` and
+        # `imm` ride along as the strongest STATIC seed sets, which is what the
+        # adaptivity gap divides by (research/adaptive_online_im.md §8.1).
+        default_baselines=(
+            "adapt_greedy",
+            "adapt_epic",
+            "adapt_degree_discount",
+            "adapt_random",
+            "static_split",
+            "celf_pp",
+            "imm",
+        ),
+        # Every adaptive arm needs the non-adaptive arm at the same k to divide
+        # by: the adaptivity gap is a RATIO, and a multi-round spread number on
+        # its own says nothing (research/adaptive_online_im.md 5.1, 9.3 item 3).
+        # Same evaluator on both sides of each pair, so the gap is not confounded
+        # by evaluator fidelity.
+        default_arms=(
+            "routing",
+            "evolve_free@native",
+            "adaptive_free@native",
+            "evolve_free@monte_carlo",
+            "adaptive_free@monte_carlo",
+            "evolve_free@oracle",
+            "adaptive_free@oracle",
+            "evolve_free@world_model",
+            "adaptive_free@world_model",
+        ),
         blocker=None,
     ),
     "network_inference": Task(

@@ -42,6 +42,7 @@ def evaluate_one_step(
     diffusion_model: str,
     device: torch.device,
     threshold: float = 0.5,
+    hide_edge_weights: bool = False,
 ) -> dict[str, float]:
     """
     Teacher-forced one-step evaluation over an entire dataset.
@@ -66,7 +67,9 @@ def evaluate_one_step(
 
     for index in range(len(dataset)):
         item = dataset[index]
-        batch = collate_transitions([item], diffusion_model, device)
+        batch = collate_transitions(
+            [item], diffusion_model, device, hide_edge_weights
+        )
         logits = model(batch["X"], batch["graph"])  # (N, 2)
         probs = torch.sigmoid(logits).cpu().numpy()
 
@@ -175,6 +178,7 @@ def rollout_episodes(
     device: torch.device,
     split: str = "test",
     threshold: float = 0.5,
+    hide_edge_weights: bool = False,
 ) -> dict[str, float]:
     """
     Feed the model its own thresholded prediction + recorded action; compare to truth.
@@ -224,7 +228,12 @@ def rollout_episodes(
             }
             X, _, _ = build_features(rolled, edge_index, num_nodes)
             graph_input = build_graph_input(
-                edge_index, weights, num_nodes, diffusion_model, device
+                edge_index,
+                weights,
+                num_nodes,
+                diffusion_model,
+                device,
+                hide_edge_weights,
             )
 
             probs = (
@@ -300,6 +309,7 @@ def rollout_ensemble(
     max_episodes: int = 50,
     seed: int = 0,
     remove_semantics: str = spent,
+    hide_edge_weights: bool = False,
 ) -> dict[str, float]:
     """
     Stochastic ensemble rollout (Lever 1): treat the world model as a stochastic
@@ -382,7 +392,12 @@ def rollout_ensemble(
                 }
                 X, _, _ = build_features(rolled, edge_index, num_nodes)
                 graph_input = build_graph_input(
-                    edge_index, weights, num_nodes, diffusion_model, device
+                    edge_index,
+                    weights,
+                    num_nodes,
+                    diffusion_model,
+                    device,
+                    hide_edge_weights,
                 )
 
                 probs = (
@@ -494,6 +509,7 @@ def planning_regret(
     mc_runs: int = 8,
     seed: int = 0,
     threshold: float = 0.5,
+    hide_edge_weights: bool = False,
 ) -> dict[str, float]:
     """One-step greedy: model picks argmax predicted spread; compare true spread to oracle."""
     rng = np.random.default_rng(seed)
@@ -502,7 +518,7 @@ def planning_regret(
     ic_probs = store_entry["ic_probs"]
 
     graph_input = build_graph_input(
-        edge_index, ic_probs, num_nodes, diffusion_model, device
+        edge_index, ic_probs, num_nodes, diffusion_model, device, hide_edge_weights
     )
     degrees = np.zeros(num_nodes)
     np.add.at(degrees, edge_index[0], 1)
@@ -592,6 +608,7 @@ def planning_regret_multi(
     mc_runs: int = 8,
     seed: int = 0,
     threshold: float = 0.5,
+    hide_edge_weights: bool = False,
 ) -> dict[str, float]:
     """
     Average planning regret over the first n_graphs graphs in the store.
@@ -616,6 +633,7 @@ def planning_regret_multi(
             mc_runs=mc_runs,
             seed=seed + offset,
             threshold=threshold,
+            hide_edge_weights=hide_edge_weights,
         )
         for offset, graph_id in enumerate(graph_ids)
     ]

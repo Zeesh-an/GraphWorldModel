@@ -67,6 +67,7 @@ from coding_agent.agent import (
 )
 from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
+from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
 from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.evolve import EvolveSearch
@@ -78,8 +79,15 @@ from coding_agent.prompts import (
     build_routing_prompt,
     routing_system,
 )
+from coding_agent.rounds import (
+    describe_schedule,
+    round_batches,
+    round_schedule,
+    round_spreads,
+)
+from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.tools.library_api import algorithm_names
-from coding_agent.types import GraphInfo, TaskSpec
+from coding_agent.types import GraphInfo, TaskSpec, full_adoption, valid_feedback_models
 from data.wm_simulator import spent, valid_action_ops, valid_remove_semantics
 from pipeline.conditions import parse_arm
 from pipeline.layout import budget_label, checkpoint_suffix
@@ -99,7 +107,10 @@ max_serialized_marginals = 200_000
 
 @dataclass
 class ExperimentConfig:
-    method: str = "one_shot"  # one_shot | per_step | windowed | evolve
+    # Key of pipeline.tasks.tasks; reaches the agent through TaskSpec, so the
+    # prompt names the problem the arm is actually being scored on
+    task: str = "influence_maximization"
+    method: str = "one_shot"  # one_shot | per_step | windowed | evolve | adaptive
     strategy_mode: str = (
         "free"  # free (whole Strategy) | scored (score/schedule hooks only)
     )
@@ -116,6 +127,19 @@ class ExperimentConfig:
     budget_pct: float | None = None  # overrides budget: % of the graph's num_nodes
     horizon: int = 10
     windows: int = 3
+    # Adaptive IM (method="adaptive"): k is committed in `rounds` batches, each
+    # chosen after seeing what the previous one activated. Ignored by every other
+    # method, so a single sweep can hold adaptive and non-adaptive arms together.
+    rounds: int = 4
+    per_round_budget: int | None = None  # fix b and derive r instead of fixing r
+    round_gap: int = 1  # timesteps of diffusion between rounds
+    feedback_model: str = full_adoption
+    # Dynamic / streaming IM: exogenous edge edits per timestep as a fraction of
+    # |E|, applied to every arm. 0 = the static graph.
+    edit_rate: float = 0.0
+    # Multi-round IM: r SEPARATE campaigns of k seeds, scored on their union.
+    # 1 = a single campaign.
+    campaigns: int = 1
     outer_iters: int = 3
     mc_runs: int = 200
     # Runs for the --compare ground-truth replay; None -> mc_runs. Kept separate
@@ -225,10 +249,14 @@ def build_method(
             windows=config.windows, allow_mc_algorithms=allow_mc_algorithms
         )
 
-    if config.method == "evolve":
+    # Same population search for both: `adaptive` differs only in what the
+    # generated program is (a per-round policy vs a static plan), which
+    # methods.base.evaluate_strategy dispatches on via TaskSpec.rounds
+    if config.method in ("evolve", "adaptive"):
         return EvolveSearch(
             outer_iters=config.outer_iters,
             strategy_mode=strategy_mode,
+            label=config.method,
             allow_mc_algorithms=allow_mc_algorithms,
             use_anchor=use_anchor,
             checkpoint_path=checkpoint_path,
@@ -236,7 +264,8 @@ def build_method(
         )
 
     raise ValueError(
-        f"unknown method {config.method!r}; choose one_shot|per_step|windowed|evolve"
+        f"unknown method {config.method!r}; "
+        f"choose one_shot|per_step|windowed|evolve|adaptive"
     )
 
 
@@ -352,15 +381,45 @@ def run_experiment(
     executor.strategy_timeout_seconds = config.strategy_timeout
 
     environment = _build_environment(config, graph)
+
+    if config.campaigns > 1:
+        # Wraps any evaluator: multi-round is a scoring change (r separate
+        # diffusions, union objective), not a dynamics change, so it composes
+        # with monte_carlo / oracle / world_model without touching any of them
+        environment = MultiRoundEnvironment(
+            environment, campaigns=config.campaigns, base_seed=config.seed
+        )
+
     print(f"[run] {config.evaluator} environment ready")
 
+    # rounds=None for every non-adaptive method, which is what TaskSpec.adaptive
+    # reads: the round machinery is inert unless this arm asked for it
+    adaptive = config.method == "adaptive"
     task = TaskSpec(
+        task=config.task,
         diffusion_model=config.diffusion_model,
         budget=config.budget,
         horizon=config.horizon,
         allowed_ops=tuple(config.allowed_ops),
         remove_semantics=config.remove_semantics,
+        rounds=config.rounds if adaptive else None,
+        per_round_budget=config.per_round_budget if adaptive else None,
+        round_gap=config.round_gap,
+        feedback_model=config.feedback_model,
+        # Both apply to every method, adaptive or not: a stream only one arm sees
+        # and a union only one arm is scored on are not comparisons
+        edit_rate=config.edit_rate,
+        campaigns=config.campaigns,
+        seed=config.seed,
     )
+
+    batches = (
+        round_batches(task.budget, task.rounds, task.per_round_budget)
+        if task.adaptive
+        else None
+    )
+    if batches is not None:
+        print(f"[run] adaptive: {describe_schedule(task, batches)}")
 
     # GA routing: one LLM call selects from the algorithm pool (no synthesis),
     # then the pick runs through the identical --baseline canned path below
@@ -387,19 +446,55 @@ def run_experiment(
         provider_label = "canned"
     elif config.baseline is not None:
         # Classical-library baseline: same pipeline, envs, and metrics — no LLM
-        if config.baseline not in algorithm_names:
+        if config.baseline not in algorithm_names + list(adaptive_algorithms):
             raise ValueError(
-                f"unknown baseline {config.baseline!r}; choose one of {algorithm_names}"
+                f"unknown baseline {config.baseline!r}; choose a static algorithm "
+                f"from {algorithm_names} or an adaptive policy from "
+                f"{sorted(adaptive_algorithms)}"
             )
 
-        # For classical baseline, construct a canned one-shot script that calls algorithms.<name>(graph, budget, dynamics, horizon=horizon)
-        # Seeds at t=0
         provider_label = (
             f"routing:{config.baseline}"
             if config.routing
             else f"baseline:{config.baseline}"
         )
-        canned_script = f"""\
+
+        if config.baseline in adaptive_algorithms:
+            if batches is None:
+                raise ValueError(
+                    f"baseline {config.baseline!r} is a per-round adaptive policy, "
+                    f"but this arm is not adaptive. parse_arm marks adaptive "
+                    f"baselines with method='adaptive'; a hand-built "
+                    f"ExperimentConfig must set method='adaptive' too."
+                )
+
+            # A published adaptive algorithm is a per-round POLICY: act() runs
+            # once per round on the realized state. The schedule is inlined rather
+            # than passed, because act() receives only the timestep and the batch
+            # size varies between rounds when k does not divide evenly by r.
+            # total_budget is for static_split, which needs to know how long its
+            # static ranking should be.
+            schedule = round_schedule(batches, config.round_gap, config.horizon)
+            canned_script = f"""\
+class AdaptiveBaseline(Strategy):
+    def act(self, state, graph, timestep):
+        batch = {schedule!r}.get(timestep, 0)
+        if not batch:
+            return []
+        return [
+            ActionOp("add_node", node)
+            for node in adaptive_algorithms.{config.baseline}(
+                state,
+                graph,
+                batch,
+                "{config.diffusion_model}",
+                total_budget={config.budget},
+            )
+        ]
+"""
+        else:
+            # A classical baseline is a static seed set, committed at t=0
+            canned_script = f"""\
 class Baseline(Strategy):
     def plan_horizon(self, graph, budget, horizon):
         seeds = algorithms.{config.baseline}(
@@ -495,6 +590,7 @@ class Baseline(Strategy):
     ]
 
     result = {
+        "task": config.task,
         "method": config.method,
         "evaluator": config.evaluator,
         "model": provider_label,
@@ -567,7 +663,43 @@ class Baseline(Strategy):
         "evaluator_seconds": round(getattr(environment, "evaluator_seconds", 0.0), 3),
         "forward_passes": getattr(environment, "forward_passes", 0),
         "timeline": timeline,
+        # sigma(S, T) at every T <= horizon, ensemble-mean and padded, so a
+        # horizon-conditional number is readable instead of only the endpoint
+        # (research/adaptive_online_im.md §8.2 trap 5). Index t is the count
+        # AFTER the step at t - 1.
+        "spread_curve": trajectory.spread_curve,
+        "spread_at_horizon": (
+            trajectory.spread_curve[-1] if trajectory.spread_curve else None
+        ),
     }
+
+    if config.edit_rate:
+        result["streaming"] = True
+        result["edit_rate"] = config.edit_rate
+
+    if config.campaigns > 1:
+        result["multi_round"] = True
+        result["campaigns"] = config.campaigns
+        # Per-campaign spread alongside the union: a union that barely grows
+        # after campaign 1 means the later campaigns bought nothing
+        result["campaign_rewards"] = trajectory.cost.get("campaign_rewards")
+
+    if batches is not None:
+        # (k, b, r) together, because the adaptive-IM literature splits three ways
+        # on the budget convention and a spread number is not comparable without
+        # all three (research/adaptive_online_im.md §8.2 trap 3)
+        result["adaptive"] = True
+        result["rounds"] = len(batches)
+        result["round_batches"] = batches
+        result["per_round_budget"] = config.per_round_budget
+        result["round_gap"] = config.round_gap
+        result["feedback_model"] = config.feedback_model
+        result["round_schedule"] = describe_schedule(task, batches)
+        # Spread after each round: the per-round benefit curve the cost argument
+        # is read against. Shorter than `rounds` when the cascade died early.
+        result["round_spreads"] = round_spreads(
+            trajectory.infected_counts, batches, config.round_gap
+        )
 
     if routing_reply is not None:
         result["routing_reply"] = routing_reply
@@ -599,6 +731,15 @@ class Baseline(Strategy):
             base_seed=config.seed,
             remove_semantics=config.remove_semantics,
         )
+
+        if config.campaigns > 1:
+            # The referee has to score the SAME quantity the arm was scored on.
+            # Without this the arm reports a 3-campaign union and the shared
+            # referee reports a 1-campaign spread, and the report silently puts
+            # the two in one column.
+            mc_environment = MultiRoundEnvironment(
+                mc_environment, campaigns=config.campaigns, base_seed=config.seed
+            )
 
         # Replay the actions that EARNED the reward rather than re-planning. A
         # generated script that samples (RIS with a live seed, a randomized local
@@ -769,8 +910,51 @@ if __name__ == "__main__":
         "--method",
         type=str,
         default="one_shot",
-        choices=["one_shot", "per_step", "windowed", "evolve"],
-        help="outer-loop method; evolve = population edits with refine/restructure operators (default: one_shot).",
+        choices=["one_shot", "per_step", "windowed", "evolve", "adaptive"],
+        help="outer-loop method; evolve = population edits with refine/restructure operators; adaptive = the same search over a per-round policy for adaptive IM (default: one_shot).",
+    )
+    parser.add_argument(
+        "--task",
+        type=str,
+        default="influence_maximization",
+        help="task name shown to the agent in its prompt (default: influence_maximization).",
+    )
+    parser.add_argument(
+        "--rounds",
+        type=int,
+        default=4,
+        help="adaptive IM: batches the budget is committed in, each chosen after seeing the previous one's diffusion (default: 4).",
+    )
+    parser.add_argument(
+        "--per-round-budget",
+        type=int,
+        default=None,
+        help="adaptive IM: fix seeds per round b and derive r = ceil(k/b), instead of fixing r with --rounds (default: None).",
+    )
+    parser.add_argument(
+        "--round-gap",
+        type=int,
+        default=1,
+        help="adaptive IM: timesteps of diffusion between consecutive rounds (default: 1).",
+    )
+    parser.add_argument(
+        "--feedback-model",
+        type=str,
+        default=full_adoption,
+        choices=list(valid_feedback_models),
+        help="adaptive IM: what the policy observes at a round boundary; myopic hides state.infected and leaves only the current wave (default: full_adoption).",
+    )
+    parser.add_argument(
+        "--edit-rate",
+        type=float,
+        default=0.0,
+        help="dynamic/streaming IM: exogenous edge edits per timestep as a fraction of |E|, applied to every arm. 0 = static graph (default: 0.0).",
+    )
+    parser.add_argument(
+        "--campaigns",
+        type=int,
+        default=1,
+        help="multi-round IM: separate campaigns of `budget` seeds each, scored on the union of what they activate. 1 = a single campaign (default: 1).",
     )
     parser.add_argument(
         "--strategy-mode",
@@ -929,7 +1113,14 @@ if __name__ == "__main__":
         llm_price_in=args.llm_price_in,
         llm_price_out=args.llm_price_out,
         resume=not args.no_resume,
+        task=args.task,
         method=args.method,
+        rounds=args.rounds,
+        per_round_budget=args.per_round_budget,
+        round_gap=args.round_gap,
+        feedback_model=args.feedback_model,
+        edit_rate=args.edit_rate,
+        campaigns=args.campaigns,
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,

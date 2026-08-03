@@ -20,6 +20,11 @@ real_directed = {
     "weibo": True,
     "wiki_vote": True,
     "email_eu_core": True,
+    # Adaptive/online IM benchmarks (Han et al. PVLDB 2018); all three are
+    # scale targets, not day-one datasets; see each loader's SCALE WARNING
+    "epinions": True,
+    "livejournal": True,
+    "orkut": False,
     # Cora-ML is symmetrized by standardize(), matching DeepIM/MOEIM
     "cora_ml": False,
     "jazz": False,
@@ -104,6 +109,66 @@ def bundle_from_nx(
     )
 
 
+# ConTinEst's three 2x2 Kronecker seed matrices (research/adaptive_online_im.md
+# 6.3b). The generator is the k-fold tensor power of one of these; edge (i, j)
+# is sampled with the resulting probability.
+kronecker_seeds = {
+    "core_periphery": ((0.9, 0.5), (0.5, 0.3)),
+    "random": ((0.5, 0.5), (0.5, 0.5)),
+    "hierarchical": ((0.9, 0.1), (0.1, 0.9)),
+}
+# Kronecker sampling is O(N^2) because every pair carries its own probability.
+# Fine at the sizes this pipeline can simulate; a guard beats an OOM at 1M.
+kronecker_max_nodes = 20_000
+
+
+def kronecker_graph(
+    num_nodes: int, variant: str, seed: int
+) -> tuple[nx.Graph, int]:
+    """
+    Stochastic Kronecker graph, returned with the power-of-two order it was
+    generated at.
+
+    The construction only defines graphs on 2^k nodes, so we generate at the
+    next power of two and induce on the first `num_nodes` of them. Returning the
+    order lets the graph_id record what was actually generated rather than
+    implying `num_nodes` was native.
+    """
+    if variant not in kronecker_seeds:
+        raise ValueError(
+            f"unknown kronecker variant {variant!r}; "
+            f"choose one of {sorted(kronecker_seeds)}"
+        )
+
+    if num_nodes > kronecker_max_nodes:
+        raise ValueError(
+            f"kronecker sampling is O(N^2); {num_nodes} nodes exceeds the "
+            f"{kronecker_max_nodes} guard. Raise kronecker_max_nodes if you "
+            f"genuinely want a dense N x N draw."
+        )
+
+    order = 1
+    while order < num_nodes:
+        order *= 2
+
+    probabilities = np.array(kronecker_seeds[variant], dtype=np.float64)
+    full = probabilities
+    while full.shape[0] < order:
+        full = np.kron(full, probabilities)
+
+    rng = np.random.default_rng(seed)
+    # Upper triangle only, then mirrored: the seed matrices are symmetric, so
+    # drawing both directions independently would double every edge's chance
+    draws = rng.random((order, order)) < full
+    draws = np.triu(draws, k=1)
+
+    graph = nx.Graph()
+    graph.add_nodes_from(range(order))
+    graph.add_edges_from(zip(*np.nonzero(draws)))
+
+    return graph.subgraph(range(num_nodes)).copy(), order
+
+
 def make_synthetic_bundle(
     family: str,
     index: int,
@@ -115,6 +180,9 @@ def make_synthetic_bundle(
     sbm_blocks: int = 4,
     sbm_p_in: float = 0.15,
     sbm_p_out: float = 0.01,
+    plc_m: int = 2,
+    plc_p: float = 0.05,
+    kron_variant: str = "core_periphery",
     seed: int = 0,
     prob_model: str = "weighted",
     uniform_p: float = 0.1,
@@ -145,6 +213,16 @@ def make_synthetic_bundle(
             f"sbm_n{num_nodes}_b{sbm_blocks}_pin{sbm_p_in}_pout{sbm_p_out}"
             f"_s{instance_seed}"
         )
+    elif family == "powerlaw_cluster":
+        # RL4IM's family (research/adaptive_online_im.md 6.3b): BA growth plus a
+        # triangle-closing step, so it has the clustering BA lacks while keeping
+        # the heavy tail. RL4IM quotes average degree 3; this generator gives
+        # ~2*m, so m=2 is the nearest setting above and m=1 the one below.
+        graph = nx.powerlaw_cluster_graph(num_nodes, plc_m, plc_p, seed=instance_seed)
+        graph_id = f"plc_n{num_nodes}_m{plc_m}_p{plc_p}_s{instance_seed}"
+    elif family == "kronecker":
+        graph, order = kronecker_graph(num_nodes, kron_variant, instance_seed)
+        graph_id = f"kron_{kron_variant}_n{num_nodes}_o{order}_s{instance_seed}"
     elif family == "karate":
         graph = nx.karate_club_graph()
         graph_id = "karate"

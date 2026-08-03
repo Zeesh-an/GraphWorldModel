@@ -7,7 +7,7 @@ This is the baseline the world-model environment is compared against.
 import time
 import numpy as np
 
-from coding_agent.types import ActionFn, GraphInfo, State, Trajectory
+from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
 from coding_agent.tools.primitives import build_simulator
 from data.wm_simulator import spent
 
@@ -49,6 +49,7 @@ class MonteCarloEnvironment:
         rng = np.random.default_rng(seed)
 
         final_counts = []
+        per_run_curves = []
         final_infected_freq = np.zeros(self.graph.num_nodes)
         representative_states = []
         representative_actions = []
@@ -85,6 +86,7 @@ class MonteCarloEnvironment:
                     break
 
             final_counts.append(float(len(state.infected)))
+            per_run_curves.append(pad_counts(counts, horizon))
             final_infected_freq[list(state.infected)] += 1.0
 
             # Keep the first run as the representative trajectory
@@ -124,4 +126,5 @@ class MonteCarloEnvironment:
                 "rollout_seconds": elapsed,
             },
             final_marginals=(final_infected_freq / self.mc_runs).round(3).tolist(),
+            spread_curve=np.mean(per_run_curves, axis=0).round(4).tolist(),
         )

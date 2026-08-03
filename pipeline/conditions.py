@@ -28,13 +28,23 @@ candidate, so the agent pays real experience for every noisy number it gets back
 
 from dataclasses import dataclass
 
+from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
+
 native = "native"
 monte_carlo = "monte_carlo"
 oracle = "oracle"
 world_model = "world_model"
 
 valid_evaluators = (native, monte_carlo, oracle, world_model)
-valid_methods = ("one_shot", "per_step", "windowed", "evolve")
+# `adaptive` runs the same population search as `evolve` and differs in one
+# thing: the program is a per-round policy called on the realized state instead
+# of a static plan decided up front. Pairing `adaptive_<mode>@E` with
+# `evolve_<mode>@E` at the same budget is what makes the adaptivity gap an A/B
+# on that one variable (research/adaptive_online_im.md §9.3 item 3).
+valid_methods = ("one_shot", "per_step", "windowed", "evolve", "adaptive")
+adaptive_method = "adaptive"
+# The non-adaptive counterpart an adaptive arm is divided by
+non_adaptive_method = "evolve"
 valid_modes = ("free", "scored")
 
 pure_ga_condition = 1
@@ -154,10 +164,16 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
         if not algorithm:
             raise ValueError(f"arm {spec!r} is missing an algorithm after 'baseline:'")
 
+        # A published ADAPTIVE algorithm (AdaptGreedy, EPIC, ...) is a per-round
+        # policy, not a static seed set, so it runs down the round path like any
+        # other adaptive arm. Recorded as method="adaptive" so adaptivity_gaps
+        # divides it by a static baseline rather than treating it as one.
         return Arm(
             spec=spec,
             name=f"baseline_{algorithm}{suffix}",
-            method="one_shot",
+            method=(
+                adaptive_method if algorithm in adaptive_algorithms else "one_shot"
+            ),
             strategy_mode="free",
             evaluator=evaluator,
             condition=pure_ga_condition,
@@ -218,3 +234,73 @@ def is_ground_truth(results: list[dict]) -> bool:
     return bool(results) and all(
         result.get("mc_reward") is not None for result in results
     )
+
+
+def adaptivity_gaps(results: list[dict]) -> list[dict]:
+    """
+    Pair every adaptive arm with its matched non-adaptive control.
+
+    gap = sigma(adaptive policy) / sigma(best static seed set) at the SAME budget
+    and the SAME evaluator (research/adaptive_online_im.md §8.1). Both sides are
+    read on the ground-truth MC replay, because each arm's own reward is measured
+    by its own evaluator and a ratio of two different rulers means nothing.
+
+    Calibration, so a small number is not misread as a failure: theory caps the
+    myopic gap at 4 and proves non-adaptive greedy is no worse than adaptive
+    greedy across all graphs (§5.1). A gap near 1 is the expected outcome; the
+    claim this task makes is about COST, not spread.
+
+    The denominator is the BEST non-adaptive arm at that (budget, evaluator), not
+    a nominated one: §1.1 defines the gap against `max_{|S|=k} E[sigma(S)]`, so
+    the closest available estimate is the strongest static seed set anyone
+    produced under the same measurement conditions. `control_arm` records which
+    it was, since that changes with the arm set.
+    """
+    controls = {}
+
+    for result in results:
+        if result.get("method") == adaptive_method:
+            continue
+
+        key = (result.get("budget"), result.get("evaluator"))
+        best = controls.get(key)
+        if best is None or ground_truth_reward(result) > ground_truth_reward(best):
+            controls[key] = result
+
+    paired = []
+
+    for result in results:
+        if result.get("method") != adaptive_method:
+            continue
+
+        control = controls.get((result.get("budget"), result.get("evaluator")))
+        if control is None:
+            continue
+
+        adaptive_spread = ground_truth_reward(result)
+        control_spread = ground_truth_reward(control)
+        paired.append(
+            {
+                "budget": result.get("budget"),
+                "budget_label": result.get("budget_label"),
+                "evaluator": result.get("evaluator"),
+                "rounds": result.get("rounds"),
+                "round_batches": result.get("round_batches"),
+                "feedback_model": result.get("feedback_model"),
+                "adaptive_arm": result.get("arm"),
+                "control_arm": control.get("arm"),
+                "adaptive_spread": adaptive_spread,
+                "control_spread": control_spread,
+                "gap": (
+                    adaptive_spread / control_spread if control_spread else None
+                ),
+                # The cost axis the task is actually about: how much the two arms
+                # spent inside their evaluators to reach those spreads
+                "adaptive_evaluator_seconds": result.get("evaluator_seconds"),
+                "control_evaluator_seconds": control.get("evaluator_seconds"),
+                "adaptive_real_episodes": result.get("real_env_episodes"),
+                "control_real_episodes": control.get("real_env_episodes"),
+            }
+        )
+
+    return sorted(paired, key=lambda entry: (entry["budget"] or 0, entry["evaluator"]))

@@ -67,8 +67,10 @@ from data.generate_wm_data import (
     run_generation,
     synthetic_families,
 )
+from coding_agent.tools.adaptive_algorithms import adaptive_algorithm_names
 from coding_agent.tools.library_api import algorithm_names
-from coding_agent.types import GraphInfo
+from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
+from data.wm_graphs import kronecker_seeds
 from data.wm_simulator import valid_action_ops, valid_remove_semantics
 from pipeline.conditions import (
     Arm,
@@ -109,6 +111,9 @@ class PipelineConfig:
     sbm_blocks: int = 4
     sbm_p_in: float = 0.15
     sbm_p_out: float = 0.01
+    plc_m: int = 2
+    plc_p: float = 0.05
+    kron_variant: str = "core_periphery"
     gen_models: tuple = ("IC", "LT")
     gen_algorithms: tuple = ("random", "degree", "pagerank", "betweenness")
     gen_action_ops: tuple = ("add_node", "remove_node")
@@ -144,10 +149,15 @@ class PipelineConfig:
     patience: int = 50
     plan_demo: bool = True
     plan_graphs: int = 5
+    # Feed the world model ones instead of the true p(u->v): the online/bandit
+    # information state (research/adaptive_online_im.md §2.4b, §9.3 item 7)
+    hide_edge_weights: bool = False
     wm_results_json: str | None = None
     # agent stage
-    baselines: tuple = default_baselines
-    arms: tuple = default_arms
+    # None = the task registry's pool, falling back to the static IM classics
+    baselines: tuple | None = None
+    # None = the task registry's arms, falling back to the six-condition ladder
+    arms: tuple | None = None
     budget_pcts: tuple | None = (1.0, 5.0, 10.0, 20.0)
     budgets: tuple | None = None
     evaluator: str = "oracle"
@@ -161,6 +171,15 @@ class PipelineConfig:
     mc_runs: int = 200
     n_samples: int = 50
     allowed_ops: tuple = ("add_node", "remove_node")
+    # Adaptive IM; read only by `adaptive` arms, so one sweep can hold adaptive
+    # and non-adaptive arms side by side and divide one by the other
+    rounds: int = 4
+    per_round_budget: int | None = None
+    round_gap: int = 1
+    feedback_model: str = full_adoption
+    # Dynamic/streaming IM and multi-round IM; both apply to every arm
+    edit_rate: float = 0.0
+    campaigns: int = 1
     allow_mc_algorithms: bool = False
     strategy_timeout: float = executor.strategy_timeout_seconds
     # USD per 1M tokens for the cost line; None -> tokens counted, cost null
@@ -220,10 +239,26 @@ def expand_baselines(names: tuple, task: str) -> list[str]:
     return specs
 
 
+def resolve_arms(config: PipelineConfig) -> tuple:
+    """--arms, else the task's own arm set, else the six-condition ladder."""
+    if config.arms is not None:
+        return tuple(config.arms)
+
+    return get_task(config.task).default_arms or default_arms
+
+
+def resolve_baselines(config: PipelineConfig) -> tuple:
+    """--baselines, else the task's own pool, else the static IM classics."""
+    if config.baselines is not None:
+        return tuple(config.baselines)
+
+    return get_task(config.task).default_baselines or default_baselines
+
+
 def build_arms(config: PipelineConfig) -> list[Arm]:
     """Classical pool + external published baselines + the named conditions."""
-    specs = expand_baselines(config.baselines, config.task)
-    specs += list(config.arms)
+    specs = expand_baselines(resolve_baselines(config), config.task)
+    specs += list(resolve_arms(config))
 
     arms = [parse_arm(spec, default_evaluator=config.evaluator) for spec in specs]
 
@@ -327,6 +362,9 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         sbm_blocks=config.sbm_blocks,
         sbm_p_in=config.sbm_p_in,
         sbm_p_out=config.sbm_p_out,
+        plc_m=config.plc_m,
+        plc_p=config.plc_p,
+        kron_variant=config.kron_variant,
         models=list(config.gen_models),
         prob_model=config.prob_model,
         uniform_p=config.uniform_p,
@@ -391,6 +429,7 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
             results=str(results_path),
             plan_demo=config.plan_demo,
             plan_graphs=config.plan_graphs,
+            hide_edge_weights=config.hide_edge_weights,
         )
     )
 
@@ -521,6 +560,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     continue
 
             experiment = ExperimentConfig(
+                task=config.task,
                 method=arm.method,
                 strategy_mode=arm.strategy_mode,
                 evaluator=evaluator,
@@ -528,6 +568,14 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 temperature=config.temperature,
                 diffusion_model=config.diffusion_model,
                 remove_semantics=config.remove_semantics,
+                # Inert unless arm.method == "adaptive"; passing them always is
+                # what lets one sweep hold both sides of the adaptivity gap
+                rounds=config.rounds,
+                per_round_budget=config.per_round_budget,
+                round_gap=config.round_gap,
+                feedback_model=config.feedback_model,
+                edit_rate=config.edit_rate,
+                campaigns=config.campaigns,
                 budget=budget or 5,
                 budget_pct=budget_pct,
                 horizon=config.horizon,
@@ -919,6 +967,27 @@ if __name__ == "__main__":
         help="SBM across-block edge probability (default: 0.01).",
     )
     parser.add_argument(
+        "--plc-m",
+        type=int,
+        default=2,
+        help="powerlaw_cluster: edges added per new node; average degree ~2m "
+        "(RL4IM quotes 3) (default: 2).",
+    )
+    parser.add_argument(
+        "--plc-p",
+        type=float,
+        default=0.05,
+        help="powerlaw_cluster: triangle-closing probability (RL4IM: 0.05) "
+        "(default: 0.05).",
+    )
+    parser.add_argument(
+        "--kron-variant",
+        type=str,
+        default="core_periphery",
+        choices=sorted(kronecker_seeds),
+        help="kronecker seed matrix, from ConTinEst (default: core_periphery).",
+    )
+    parser.add_argument(
         "--gen-models",
         type=str,
         nargs="+",
@@ -1110,15 +1179,71 @@ if __name__ == "__main__":
         default=5,
         help="graphs used for the planning demo (default: 5).",
     )
+    parser.add_argument(
+        "--hide-edge-weights",
+        action="store_true",
+        help="train the world model on ones instead of the true IC transmission "
+        "probability: the online/bandit information state, and the ablation for "
+        "the IC heads otherwise seeing w. Needs --head structured (default: False).",
+    )
 
     # Agent stage
+    parser.add_argument(
+        "--rounds",
+        type=int,
+        default=4,
+        help="adaptive IM: batches the budget is committed in, each chosen after "
+        "seeing the previous one's diffusion. Read only by `adaptive` arms "
+        "(default: 4).",
+    )
+    parser.add_argument(
+        "--per-round-budget",
+        type=int,
+        default=None,
+        help="adaptive IM: fix seeds per round b and derive r = ceil(k/b), "
+        "instead of fixing r with --rounds. This is Han et al.'s b-sweep; "
+        "--rounds is their k-sweep (default: None).",
+    )
+    parser.add_argument(
+        "--round-gap",
+        type=int,
+        default=1,
+        help="adaptive IM: timesteps of diffusion between consecutive rounds "
+        "(default: 1).",
+    )
+    parser.add_argument(
+        "--feedback-model",
+        type=str,
+        default=full_adoption,
+        choices=list(valid_feedback_models),
+        help="adaptive IM: what the policy observes at a round boundary; myopic "
+        "hides state.infected and leaves only the current wave (default: "
+        "full_adoption).",
+    )
+    parser.add_argument(
+        "--edit-rate",
+        type=float,
+        default=0.0,
+        help="dynamic/streaming IM: exogenous edge edits per timestep as a "
+        "fraction of |E|, applied to EVERY arm so the comparison stays fair. "
+        "0 = static graph (default: 0.0).",
+    )
+    parser.add_argument(
+        "--campaigns",
+        type=int,
+        default=1,
+        help="multi-round IM: separate campaigns of k seeds each, scored on the "
+        "union of what they activate. Composes with any evaluator. 1 = a single "
+        "campaign (default: 1).",
+    )
     parser.add_argument(
         "--baselines",
         type=str,
         nargs="*",
-        default=list(default_baselines),
+        default=None,
         choices=(
             list(algorithm_names)
+            + list(adaptive_algorithm_names)
             + [f"external:{name}" for name in external_baselines]
             + ["all", "all-classical", "all-external"]
         ),
@@ -1138,11 +1263,13 @@ if __name__ == "__main__":
         "--arms",
         type=str,
         nargs="*",
-        default=list(default_arms),
+        default=None,
         help="conditions 2-6: 'routing', or '<method>_<mode>[@<evaluator>]' with "
         f"evaluator in {valid_evaluators}; 'native' = the real simulator at "
-        f"--native-mc-runs episodes per candidate. Extra 'baseline:<algorithm>' "
-        f"entries are allowed too (default: {' '.join(default_arms)}).",
+        f"--native-mc-runs episodes per candidate. 'adaptive_<mode>@<evaluator>' "
+        f"is the multi-round policy for adaptive IM. Extra 'baseline:<algorithm>' "
+        f"entries are allowed too (default: the task registry's arms, else "
+        f"{' '.join(default_arms)}).",
     )
     parser.add_argument(
         "--native-mc-runs",
@@ -1306,6 +1433,9 @@ if __name__ == "__main__":
         sbm_blocks=args.sbm_blocks,
         sbm_p_in=args.sbm_p_in,
         sbm_p_out=args.sbm_p_out,
+        plc_m=args.plc_m,
+        plc_p=args.plc_p,
+        kron_variant=args.kron_variant,
         gen_models=tuple(args.gen_models),
         gen_algorithms=tuple(args.gen_algorithms),
         gen_action_ops=tuple(args.gen_action_ops),
@@ -1336,9 +1466,10 @@ if __name__ == "__main__":
         pos_weight=args.pos_weight,
         patience=args.patience,
         plan_demo=not args.no_plan_demo,
+        hide_edge_weights=args.hide_edge_weights,
         plan_graphs=args.plan_graphs,
-        baselines=tuple(args.baselines),
-        arms=tuple(args.arms),
+        baselines=None if args.baselines is None else tuple(args.baselines),
+        arms=None if args.arms is None else tuple(args.arms),
         budget_pcts=tuple(args.budget_pcts),
         budgets=tuple(args.budgets) if args.budgets else None,
         evaluator=args.evaluator,
@@ -1352,6 +1483,12 @@ if __name__ == "__main__":
         mc_runs=args.mc_runs,
         n_samples=args.n_samples,
         allowed_ops=tuple(args.allowed_ops),
+        rounds=args.rounds,
+        per_round_budget=args.per_round_budget,
+        round_gap=args.round_gap,
+        feedback_model=args.feedback_model,
+        edit_rate=args.edit_rate,
+        campaigns=args.campaigns,
         allow_mc_algorithms=args.allow_mc_algorithms,
         strategy_timeout=args.strategy_timeout,
         llm_price_in=args.llm_price_in,

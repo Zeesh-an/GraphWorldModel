@@ -21,6 +21,7 @@ from data.wm_actions import (
 )
 from data.wm_graphs import (
     GraphBundle,
+    kronecker_seeds,
     make_real_bundle,
     make_synthetic_bundle,
     real_directed,
@@ -34,7 +35,15 @@ from data.wm_simulator import (
     valid_remove_semantics,
 )
 
-synthetic_families = ("er", "ba", "ws", "sbm", "karate")
+synthetic_families = (
+    "er",
+    "ba",
+    "ws",
+    "sbm",
+    "powerlaw_cluster",
+    "kronecker",
+    "karate",
+)
 seed_upper_bound = 2**31 - 1
 results_root = Path("results")
 default_task = "influence_maximization"
@@ -189,6 +198,10 @@ class GenConfig:
     sbm_blocks: int = 4
     sbm_p_in: float = 0.15
     sbm_p_out: float = 0.01
+    # powerlaw_cluster (RL4IM) and kronecker (ConTinEst); see data/wm_graphs.py
+    plc_m: int = 2
+    plc_p: float = 0.05
+    kron_variant: str = "core_periphery"
 
 
 def _iter_bundles(config: GenConfig) -> Iterator[GraphBundle]:
@@ -205,6 +218,9 @@ def _iter_bundles(config: GenConfig) -> Iterator[GraphBundle]:
                 sbm_blocks=config.sbm_blocks,
                 sbm_p_in=config.sbm_p_in,
                 sbm_p_out=config.sbm_p_out,
+                plc_m=config.plc_m,
+                plc_p=config.plc_p,
+                kron_variant=config.kron_variant,
                 seed=config.seed,
                 prob_model=config.prob_model,
                 uniform_p=config.uniform_p,
@@ -512,6 +528,27 @@ def parse_args() -> GenConfig:
         help="SBM cross-block edge probability (default: 0.01).",
     )
     parser.add_argument(
+        "--plc-m",
+        type=int,
+        default=2,
+        help="powerlaw_cluster: edges added per new node; average degree is ~2m, "
+        "and RL4IM quotes 3 (default: 2).",
+    )
+    parser.add_argument(
+        "--plc-p",
+        type=float,
+        default=0.05,
+        help="powerlaw_cluster: probability an attachment closes a triangle "
+        "(RL4IM: 0.05) (default: 0.05).",
+    )
+    parser.add_argument(
+        "--kron-variant",
+        type=str,
+        default="core_periphery",
+        choices=sorted(kronecker_seeds),
+        help="kronecker seed matrix, from ConTinEst (default: core_periphery).",
+    )
+    parser.add_argument(
         "--models",
         type=str,
         nargs="+",
@@ -694,6 +731,9 @@ def parse_args() -> GenConfig:
         sbm_blocks=args.sbm_blocks,
         sbm_p_in=args.sbm_p_in,
         sbm_p_out=args.sbm_p_out,
+        plc_m=args.plc_m,
+        plc_p=args.plc_p,
+        kron_variant=args.kron_variant,
         models=args.models,
         prob_model=args.prob_model,
         uniform_p=args.uniform_p,

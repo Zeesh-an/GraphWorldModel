@@ -1,29 +1,19 @@
 """Method 1: one-shot super-algorithm with reward-driven skill refinement."""
 
-import time
-from functools import partial
 from pathlib import Path
 from tqdm import tqdm
 
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
-from coding_agent.credit import (
-    counterfactual_credit,
-    format_credit_report,
-    planned_action,
-)
-from coding_agent.executor import (
-    StrategyError,
-    build_strategy,
-    call_strategy,
-)
+from coding_agent.credit import counterfactual_credit, format_credit_report
+from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
+    evaluate_strategy,
     paired_delta,
     reference_diff,
     summarize,
-    validate_plan,
 )
 from coding_agent.prompts import (
     build_feedback_prompt,
@@ -163,24 +153,11 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
 
                 # The generated algorithm's own computation — with free-mode
                 # composition scripts this internal planning dominates wall-clock
-                plan_start = time.perf_counter()
                 tqdm.write(f"[one_shot] iter {iteration}: executing plan_horizon()...")
-                plan = call_strategy(
-                    strategy.plan_horizon, graph, task.budget, task.horizon
+
+                trajectory, plan_seconds = evaluate_strategy(
+                    strategy, environment, task, graph
                 )
-                plan_seconds = time.perf_counter() - plan_start
-                tqdm.write(
-                    f"[one_shot] iter {iteration}: plan built in "
-                    f"{plan_seconds:.1f}s; rolling out..."
-                )
-
-                validate_plan(plan, task, graph)
-
-                # Bind the plan once into an ActionFn to avoid a late-binding closure bug
-                action_fn = partial(planned_action, plan)
-
-                # Roll the plan out and get the trajectory's reward, which is this iteration's score
-                trajectory = environment.rollout(action_fn, task.horizon, task.budget)
             except StrategyError as error:
                 last_error = str(error)
                 repairs += 1
@@ -272,8 +249,12 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             report = None
 
             if self.credit:
+                # The bags that actually ran, not the plan object: identical for
+                # a static plan, and the only thing that exists for an adaptive
+                # policy. Replaying them as a fixed plan is the approximation
+                # credit.py already documents for state-dependent strategies
                 base_reward, entries = counterfactual_credit(
-                    environment, plan, task.horizon, task.budget
+                    environment, trajectory.actions, task.horizon, task.budget
                 )
                 report = format_credit_report(base_reward, entries)
 

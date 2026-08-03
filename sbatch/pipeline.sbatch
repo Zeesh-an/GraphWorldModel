@@ -435,10 +435,19 @@ RUN="${RUN:-default}"
 # Append _<jobid> to the results directory, the same way logs get _%j
 RUN_JOBID="${RUN_JOBID:-1}"
 
+# Adaptive / online IM knobs; empty means "not this branch"
+ROUNDS="${ROUNDS:-}"
+PER_ROUND_BUDGET="${PER_ROUND_BUDGET:-}"
+ROUND_GAP="${ROUND_GAP:-}"
+FEEDBACK_MODEL="${FEEDBACK_MODEL:-}"
+EDIT_RATE="${EDIT_RATE:-}"
+CAMPAIGNS="${CAMPAIGNS:-}"
+HIDE_EDGE_WEIGHTS="${HIDE_EDGE_WEIGHTS:-0}"
+
 # Dataset class drives the settings that genuinely cannot share a default:
 # graph population, seed selectors, encoder width, and memory.
 case "$DATASET" in
-  er|ba|ws|sbm|karate)
+  er|ba|ws|sbm|powerlaw_cluster|kronecker|karate)
     class_graphs=40 ; class_nodes=100 ; class_rollouts=20
     class_selectors="random degree pagerank betweenness"
     class_hidden=64 ; class_mem=16G ; class_time=24:00:00
@@ -510,12 +519,18 @@ PLAN_GRAPHS="${PLAN_GRAPHS:-5}"
 NO_PLAN_DEMO="${NO_PLAN_DEMO:-0}"
 
 # Agent stage
-BASELINES="${BASELINES:-high_degree degree_discount pagerank_seeds celf_pp imm random_seeds}"
+# Unset means "let pipeline.tasks decide": influence_maximization gets the
+# static IM classics, adaptive_online_im gets AdaptGreedy/EPIC and the per-round
+# heuristics. Hardcoding a default here would shadow that and silently run
+# static baselines on an adaptive task. "none" still means no baselines at all.
+BASELINES="${BASELINES:-}"
 BASELINE_TIMEOUT="${BASELINE_TIMEOUT:-3600}"
 # Mirrors pipeline.conditions.default_arms. evolve, not one_shot: both refine a
 # program against the same feedback for the same LLM calls, but evolve edits the
 # population best each generation while one_shot edits the latest attempt.
-ARMS="${ARMS:-routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model}"
+# Same: unset lets the task registry choose, which for adaptive_online_im pairs
+# every adaptive arm with its matched non-adaptive control
+ARMS="${ARMS:-}"
 NATIVE_MC_RUNS="${NATIVE_MC_RUNS:-1}"
 BUDGET_PCTS="${BUDGET_PCTS:-1 5 10 20}"
 BUDGETS="${BUDGETS:-}"
@@ -577,8 +592,12 @@ flags=(
 
 # `none` means the empty list: argparse's nargs="*" takes zero values when the
 # next token is another flag, which is exactly how you ask for no baselines
-[ "$BASELINES" = "none" ]   && flags+=(--baselines)   || flags+=(--baselines $BASELINES)
-[ "$ARMS" = "none" ]        && flags+=(--arms)        || flags+=(--arms $ARMS)
+# Three states each: unset (omit the flag, registry decides), "none" (bare flag,
+# empty list), or an explicit list
+if [ "$BASELINES" = "none" ]; then flags+=(--baselines)
+elif [ -n "$BASELINES" ]; then flags+=(--baselines $BASELINES); fi
+if [ "$ARMS" = "none" ]; then flags+=(--arms)
+elif [ -n "$ARMS" ]; then flags+=(--arms $ARMS); fi
 [ "$SKIP_STAGES" = "none" ] || flags+=(--skip-stages $SKIP_STAGES)
 
 # BUDGETS is absolute k and wins outright; otherwise budgets are percentages
@@ -598,6 +617,15 @@ fi
 [ -n "$LLM_PRICE_OUT" ] && flags+=(--llm-price-out "$LLM_PRICE_OUT")
 [ "$FORCE" = "1" ]        && flags+=(--force)
 [ "$NO_PLAN_DEMO" = "1" ] && flags+=(--no-plan-demo)
+# Adaptive IM (research/adaptive_online_im.md). Read only by `adaptive` arms and
+# by the branches below, so leaving them unset is exactly the static IM setting.
+[ -n "$ROUNDS" ]            && flags+=(--rounds "$ROUNDS")
+[ -n "$PER_ROUND_BUDGET" ]  && flags+=(--per-round-budget "$PER_ROUND_BUDGET")
+[ -n "$ROUND_GAP" ]         && flags+=(--round-gap "$ROUND_GAP")
+[ -n "$FEEDBACK_MODEL" ]    && flags+=(--feedback-model "$FEEDBACK_MODEL")
+[ -n "$EDIT_RATE" ]         && flags+=(--edit-rate "$EDIT_RATE")
+[ -n "$CAMPAIGNS" ]         && flags+=(--campaigns "$CAMPAIGNS")
+[ "$HIDE_EDGE_WEIGHTS" = "1" ] && flags+=(--hide-edge-weights)
 
 # ---------------------------------------------------------------------------
 # SUBMIT — outside a job, queue ourselves with the allocation these flags need

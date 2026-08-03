@@ -1,4 +1,5 @@
-from coding_agent.types import GraphInfo, TaskSpec
+from coding_agent.rounds import round_batches, round_schedule
+from coding_agent.types import GraphInfo, TaskSpec, myopic
 from data.wm_simulator import blocked, spent
 from coding_agent.executor import (
     allowed_imports,
@@ -7,6 +8,7 @@ from coding_agent.executor import (
 )
 from coding_agent.tools.graph_profile import build_graph_profile
 from coding_agent.tools.library_api import (
+    build_adaptive_reference,
     build_algorithm_menu,
     build_algorithm_sources,
     build_api_reference,
@@ -34,7 +36,9 @@ AVAILABLE NAMES (already in your script's namespace — do NOT import these):
     add_node, remove_node, add_edge, remove_edge, set_edge_weight.
 - `State` : has .infected (list[int]) and .frontier (list[int]).
 - `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node), .degree(node), .edge_index, .ic_probs.
-- `algorithms` and `primitives` modules (API below).
+- `algorithms`, `adaptive_algorithms` and `primitives` modules (API below).
+  `adaptive_algorithms` members are per-ROUND policies and are only callable
+  from act() on an adaptive task; the reference below lists them when so.
 
 ACTION RULES:
 - A seed is ActionOp("add_node", node). Emit at most `budget` add_node actions in total.
@@ -168,6 +172,18 @@ Put every seed in element 0 and leave the rest of the plan empty. All of your
 effort belongs in WHICH nodes you pick, not when.
 """
 
+# The adaptive counterpart. seed_timing_note ("put every seed at t=0") is exactly
+# wrong here: the schedule is fixed by the harness and the late rounds are the
+# whole point, so the model needs the opposite instruction.
+adaptive_timing_note = """\
+
+USING THE HORIZON: you do NOT choose when your seeds land. The round schedule
+does, and it is fixed. A late round is not a wasted one: it has strictly less
+time left to spread, and in exchange you get to see where the cascade actually
+went. That trade is the entire task. Judge each round by what is still
+susceptible and still reachable, not by what looked best at t=0.
+"""
+
 # System prompts dict-keyed by method name (one_shot, per_step, windowed)
 system_prompts = {
     "one_shot": common_rules
@@ -216,7 +232,83 @@ class MyStrategy(Strategy):
         return [ActionOp("add_node", node) for node in seeds]
 ```
 """,
+    "adaptive": common_rules
+    + """\
+
+METHOD: ADAPTIVE MULTI-ROUND POLICY.
+Implement `act(self, state, graph, timestep) -> list[ActionOp]`.
+
+Your budget is NOT spent all at once. It is split into rounds, and you are called
+once per round with the state the PREVIOUS round's diffusion actually produced.
+Between rounds the cascade runs on its own and you emit nothing. The round
+schedule (how many rounds, how many seeds each, at which timesteps) is stated in
+the task block below: read it, it is the shape of your problem.
+
+WHAT WINS HERE, AND WHAT DOES NOT:
+- Picking a good static seed set and dealing it out in equal slices is the
+  NON-ADAPTIVE strategy wearing a costume. It is the arm you are being compared
+  against, and theory says it is hard to beat on spread alone.
+- The one thing you have that it does not is the realized state. Spend each round
+  on what the cascade did NOT reach: a node whose neighbourhood the previous
+  round already covered is now worth far less than it looked at t=0.
+- Over-committing a round is REJECTED. Each call may return at most that round's
+  own batch size.
+- Seeding an already-active node wastes the slot. Under full_adoption feedback it
+  is REJECTED outright, because you were handed the infected set and could have
+  filtered it. Under myopic feedback you were not handed it, so the seed is
+  silently DROPPED and the slot is spent for nothing, which is the price of the
+  weaker observation. Either way, filter what you can see.
+
+REPLY SHAPE (adapt the logic, keep the structure; the schedule is in the task):
+```python
+class MyStrategy(Strategy):
+    def act(self, state, graph, timestep):
+        batch = 2                       # this round's seed count, from the task block
+        active = set(state.infected) | set(state.frontier)
+        # Discount candidates whose neighbourhood the cascade already owns
+        scored = []
+        for node in range(graph.num_nodes):
+            if node in active:
+                continue
+            fresh = sum(1 for other in graph.out_neighbors(node) if other not in active)
+            scored.append((fresh, node))
+        scored.sort(reverse=True)
+        return [ActionOp("add_node", node) for _, node in scored[:batch]]
+```
+""",
 }
+
+
+def build_round_block(task: TaskSpec) -> str:
+    """The round schedule, spelled out per call, or nothing for a static task."""
+    if not task.adaptive:
+        return ""
+
+    batches = round_batches(task.budget, task.rounds, task.per_round_budget)
+    schedule = round_schedule(batches, task.round_gap, task.horizon)
+    observes = (
+        "state.frontier ONLY; state.infected is BLANKED for you, so you can see "
+        "the wave that just activated but not the accumulated total"
+        if task.feedback_model == myopic
+        else "the full realized state: both state.infected and state.frontier"
+    )
+    lines = [
+        "",
+        f"ROUND SCHEDULE ({len(batches)} rounds, feedback = {task.feedback_model}). "
+        f"act() is called at exactly these timesteps and nowhere else:",
+    ]
+    lines += [
+        f"  t={timestep:<3} return at most {schedule[timestep]} add_node op(s)"
+        for timestep in sorted(schedule)
+    ]
+    lines += [
+        f"  totals {sum(batches)} seeds = the budget above; between rounds the "
+        f"cascade runs with no input from you",
+        f"  at each call you observe {observes}",
+        "",
+    ]
+
+    return "\n".join(lines)
 
 
 def build_user_prompt(
@@ -241,8 +333,14 @@ def build_user_prompt(
         blocked = () if allow_mc_algorithms else mc_blocked_algorithms
         # Signatures alone do not teach the idiom — the model reproduces the
         # library's shape much more reliably once it has read a few of them
+        # The adaptive policies are the published baselines for this task, so an
+        # adaptive prompt that hides them asks the model to reinvent AdaptGreedy
+        adaptive_reference = (
+            f"\n\n{build_adaptive_reference()}" if task.adaptive else ""
+        )
         reference = (
-            f"LIBRARY API:\n{build_api_reference(exclude=blocked)}\n\n"
+            f"LIBRARY API:\n{build_api_reference(exclude=blocked)}"
+            f"{adaptive_reference}\n\n"
             f"{build_algorithm_sources()}"
         )
         final_line = f"Write the Strategy now (method = {method})."
@@ -253,7 +351,7 @@ diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, max seeds total)
 horizon = {task.horizon} (timesteps)
 allowed_ops = {", ".join(task.allowed_ops)}   (any other op is REJECTED)
-
+{build_round_block(task)}
 {build_graph_profile(graph)}
 
 {reference}
@@ -305,11 +403,13 @@ def build_system_prompt(
     remove_note = remove_semantics_notes[spent]
 
     if task is not None:
-        horizon_note = (
-            temporal_scheduling_note
-            if any(op in task.allowed_ops for op in edge_ops)
-            else seed_timing_note
-        )
+        if task.adaptive:
+            horizon_note = adaptive_timing_note
+        elif any(op in task.allowed_ops for op in edge_ops):
+            horizon_note = temporal_scheduling_note
+        else:
+            horizon_note = seed_timing_note
+
         remove_note = remove_semantics_notes[task.remove_semantics]
 
     # Only worth stating when the strategy may actually emit the op
@@ -328,7 +428,7 @@ def build_system_prompt(
     # evolve generates plan_horizon strategies under the same contract as one_shot
     base = system_prompts["one_shot" if method == "evolve" else method]
 
-    if method in ("one_shot", "evolve"):
+    if method in ("one_shot", "evolve", "adaptive"):
         return base + remove_note + horizon_note
 
     return base + remove_note

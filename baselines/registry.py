@@ -1151,20 +1151,149 @@ external_baselines: dict[str, ExternalBaseline] = {
         kind=classical,
         title="OIM — Online Influence Maximization",
         venue="KDD 2015",
-        repo="https://dl.acm.org/doi/10.1145/2783258.2783271",
-        paper="https://dl.acm.org/doi/10.1145/2783258.2783271",
-        entry="n/a",
-        status="blocked",
-        blocker=(
-            "No public code release found (Lei, Maniu, Mo, Cheng & Senellart, "
-            "KDD 2015). Also a different problem setting: OIM assumes repeated "
-            "campaigns with feedback that updates edge weights between rounds, "
-            "whereas our task is single-shot seeding, so even with code the "
-            "comparison would need care."
-        ),
+        repo="https://github.com/smaniu/oim",
+        paper="https://arxiv.org/abs/1506.01188",
+        entry="C++ (make)",
+        task="adaptive_online_im",
+        status="needs_setup",
+        requirements=None,
+        build=["make"],
         notes=(
-            "Appears in DeepIM's IC table (and is out-of-memory on Weibo there); "
-            "numbers transcribed in research/influence_maximization.md §5.1."
+            "CORRECTED 2026-08-01. This entry previously said 'no public code "
+            "release found' and sat under influence_maximization; both were "
+            "wrong. Code IS published by a co-author at github.com/smaniu/oim "
+            "(research/adaptive_online_im.md §3.2), and the method is an "
+            "online/bandit IM algorithm, so it belongs to this task. NOT WIRED: "
+            "OIM's own protocol is a SEQUENCE of campaigns reporting the UNION "
+            "of activated nodes across trials, which §8.2 trap 2 shows is not "
+            "comparable to a single-campaign spread: the number grows "
+            "monotonically in the trial count. Driving it as a condition-7 arm "
+            "needs the repeated-campaign loop this task does not have (see the "
+            "regret entry in §11). DeepIM sidestepped this by re-running OIM "
+            "under its own single-campaign protocol; those numbers are "
+            "transcribed in research/influence_maximization.md §5.1."
+        ),
+    ),
+    # Adaptive / online IM (research/adaptive_online_im.md §3.1, §3.2, §4.2).
+    #
+    # None of the five below is WIRED, and that is deliberate rather than
+    # unfinished. An adapter has to know a repo's input format, its CLI, and
+    # where it writes its seeds; every wired entry above was written after
+    # cloning and running the thing. Writing one from a README would be the
+    # guesswork the `lense` note already calls out. Each entry therefore records
+    # the URL, the entry point, and what specifically remains, which is the
+    # difference between "not done" and "not known".
+    "adaptiveim": ExternalBaseline(
+        name="adaptiveim",
+        kind=classical,
+        title="AdaptGreedy / EPIC: scalable adaptive IM",
+        venue="PVLDB 11, 2018",
+        repo="https://github.com/kkhuang81/AdaptiveIM",
+        paper="http://www.vldb.org/pvldb/vol11/p1029-han.pdf",
+        entry="C++ (make)",
+        task="adaptive_online_im",
+        status="needs_setup",
+        requirements=None,
+        build=["make"],
+        notes=(
+            "THE reference implementation for this task, by the authors. Our "
+            "library's `adapt_greedy` and `adapt_epic` are Python "
+            "reimplementations of AdaptGreedy and its RIS instantiation, good "
+            "enough as condition-1 arms, but this is the original and the one "
+            "whose figures §5.2 describes. Its two sweeps are the b-setting "
+            "(k=500 fixed, b in {1,2,5,10,20,50,500}) and the k-setting (r=50 "
+            "fixed), which map onto our --per-round-budget and --rounds "
+            "respectively. TO WIRE: clone, make, read its graph format and the "
+            "flag that sets b, and confirm where the per-round seed sets are "
+            "written. Note that the paper reports AdaptIM-1 running out of "
+            "memory at b<5 on LiveJournal and Orkut, so expect the same."
+        ),
+    ),
+    "mrim": ExternalBaseline(
+        name="mrim",
+        kind=classical,
+        title="MRIM: Multi-Round Influence Maximization",
+        venue="KDD 2018",
+        repo="https://github.com/lichao-sun/Multi-Round-Influence-Maximization",
+        paper="https://arxiv.org/abs/1802.04189",
+        entry="see repo",
+        task="adaptive_online_im",
+        status="needs_setup",
+        notes=(
+            "r separate campaigns of k seeds each, non-adaptive and adaptive "
+            "variants, both with approximation guarantees. Distinct from "
+            "adaptive IM in our sense: MRIM's rounds are separate DIFFUSIONS "
+            "whose union is scored, whereas ours is one diffusion observed in "
+            "stages (§1.5). Comparing the two needs the multi-round state "
+            "bookkeeping §2.4e describes (reset `frontier` between campaigns, "
+            "keep `infected` as the union), which is not built. §11 also records "
+            "that this paper's dataset and result tables were never extracted, "
+            "so there is no published number to check an adapter against yet."
+        ),
+    ),
+    "rl4im": ExternalBaseline(
+        name="rl4im",
+        kind=learned,
+        title="RL4IM: contingency-aware IM as a multi-round MDP",
+        venue="UAI 2021",
+        repo="https://github.com/wmd3i/RL4IM-Contingency",
+        paper="https://arxiv.org/abs/2106.07039",
+        entry="see repo",
+        task="adaptive_online_im",
+        status="needs_setup",
+        notes=(
+            "The closest published thing to our setting and the ONLY genuinely "
+            "multi-round RL baseline in the literature (§4.1: DISCO, PIANO, "
+            "GCOMB and ToupleGDD are all RL over seed-set CONSTRUCTION, with no "
+            "cascade between actions, so they belong to static IM). Our claim "
+            "against it is model-based vs model-free: RL4IM learns a policy "
+            "Q(s,a), we learn a transition function and plan against it. "
+            "Protocol from §5.5: powerlaw-cluster graphs (now loadable as "
+            "--dataset powerlaw_cluster), |V|=200, T=2 rounds, B=4 per round, "
+            "IC p=0.1, 100 sims per number. Two mismatches to resolve before "
+            "wiring: its `willingness` q=0.6 (a seed may DECLINE, which our "
+            "action space has no notion of) and the fact that all its results "
+            "are figure-only, so there is no table to validate against."
+        ),
+    ),
+    "oim_lt": ExternalBaseline(
+        name="oim_lt",
+        kind=classical,
+        title="Online IM under the Linear Threshold model",
+        venue="NeurIPS 2020",
+        repo="https://github.com/Ritchiegit/Online_Influence_Maximization_under_Linear_Threshold_Model",
+        paper="https://arxiv.org/abs/2011.06378",
+        entry="see repo",
+        task="adaptive_online_im",
+        status="needs_setup",
+        notes=(
+            "The LT counterpart of IMLinUCB, and the official implementation. "
+            "Same blocker as `oim`: bandit IM is a repeated-campaign regret "
+            "setting, not single-campaign spread, so it needs the loop §11 "
+            "records as missing. Worth registering now because it is the only "
+            "online-IM code we found that targets LT at all, and our LT arms "
+            "otherwise have no published online baseline."
+        ),
+    ),
+    "timlinucb": ExternalBaseline(
+        name="timlinucb",
+        kind=classical,
+        title="IMLinUCB / TIMLinUCB: linear-generalization bandit IM",
+        venue="NeurIPS 2017",
+        repo="https://github.com/olety/TIMLinUCB",
+        paper="https://arxiv.org/abs/1605.06593",
+        entry="see repo",
+        task="adaptive_online_im",
+        status="needs_setup",
+        notes=(
+            "⚠️ THIRD-PARTY, not the authors'. Wen et al. released no code; this "
+            "is a temporal port found by the review (§3.2), so any number it "
+            "produces is attributable to this repo and not to the paper, so say so "
+            "if it is ever reported. Same repeated-campaign blocker as the other "
+            "bandit entries. Scale note from §5.4: the strongest theory result in "
+            "bandit IM was validated on a 327-node Facebook subgraph, and §6.2 "
+            "records that the exact subgraph is unpublished, so its own figure "
+            "cannot be reproduced regardless."
         ),
     ),
 }

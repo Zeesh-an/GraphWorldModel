@@ -51,6 +51,9 @@ class TrainConfig:
     head: str = "linear"
     # Must match the dataset's; cross-checked against metadata.json below
     remove_semantics: str = spent
+    # Feed ones instead of p(u->v) to the encoder and the head: the online/bandit
+    # information state, and the ablation for "our IC heads see the true w"
+    hide_edge_weights: bool = False
     hidden_dim: int = 64
     n_layers: int = 3
     n_heads: int = 4
@@ -137,9 +140,29 @@ def check_remove_semantics(config: TrainConfig) -> None:
         )
 
 
+def check_hide_edge_weights(config: TrainConfig) -> None:
+    """
+    Both anchored heads read w directly, so masking it is not an ablation of them
+    but a corruption of them: structured_residual anchors q on logit(w), which at
+    w=1 pins every edge at q~1 and saturates the rollout, and structured_oracle
+    IS q = w. Only the plain structured head (and linear) learn q from scratch.
+    """
+    if not config.hide_edge_weights:
+        return
+
+    if config.head in ("structured_residual", "structured_oracle"):
+        raise ValueError(
+            f"--hide-edge-weights is incompatible with --head {config.head}: that "
+            f"head reads the true transmission probability directly, so masking it "
+            f"to ones does not hide information, it feeds a wrong anchor. Use "
+            f"--head structured for the w-hidden (bandit information state) run."
+        )
+
+
 def train_world_model(config: TrainConfig) -> dict:
     config = resolve_paths(config)
     check_remove_semantics(config)
+    check_hide_edge_weights(config)
 
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
@@ -152,7 +175,10 @@ def train_world_model(config: TrainConfig) -> dict:
     test_dataset = TransitionDataset(config.data_dir, diffusion_model, "test")
 
     collate_fn = partial(
-        collate_transitions, diffusion_model=diffusion_model, device=device
+        collate_transitions,
+        diffusion_model=diffusion_model,
+        device=device,
+        hide_edge_weights=config.hide_edge_weights,
     )
 
     train_dataloader = DataLoader(
@@ -236,7 +262,11 @@ def train_world_model(config: TrainConfig) -> dict:
             batch_bar.set_postfix(loss=f"{loss_value:.6f}")
 
         val_metrics = evaluate_one_step(
-            model, validation_dataset, diffusion_model, device
+            model,
+            validation_dataset,
+            diffusion_model,
+            device,
+            hide_edge_weights=config.hide_edge_weights,
         )
         history.append(
             {
@@ -277,7 +307,13 @@ def train_world_model(config: TrainConfig) -> dict:
         "train_seconds": train_seconds,
         "best_val_delta_f1": best_delta_f1,
         "history": history,
-        "test": evaluate_one_step(model, test_dataset, diffusion_model, device),
+        "test": evaluate_one_step(
+            model,
+            test_dataset,
+            diffusion_model,
+            device,
+            hide_edge_weights=config.hide_edge_weights,
+        ),
     }
     results["rollout"] = rollout_ensemble(
         model,
@@ -288,6 +324,7 @@ def train_world_model(config: TrainConfig) -> dict:
         "test",
         seed=config.seed,
         remove_semantics=config.remove_semantics,
+        hide_edge_weights=config.hide_edge_weights,
     )
 
     if config.plan_demo:
@@ -298,6 +335,7 @@ def train_world_model(config: TrainConfig) -> dict:
             device,
             n_graphs=config.plan_graphs,
             seed=config.seed,
+            hide_edge_weights=config.hide_edge_weights,
         )
 
     os.makedirs(Path(config.results).parent, exist_ok=True)
@@ -346,6 +384,14 @@ if __name__ == "__main__":
         choices=list(valid_remove_semantics),
         help="what remove_node means; must match the dataset's, which is checked "
         "against its metadata.json (default: spent).",
+    )
+    parser.add_argument(
+        "--hide-edge-weights",
+        action="store_true",
+        help="feed ones instead of the true IC transmission probability to the "
+        "encoder and head: the online/bandit information state, and the ablation "
+        "for the IC heads otherwise seeing w. Requires --head structured or "
+        "linear (default: False).",
     )
     parser.add_argument(
         "--hidden-dim",

@@ -134,9 +134,51 @@ The agent designs the algorithm **once**; the timeline is split into `--windows`
 
 Every generation after the first is an **edit of a parent** from a population of all past candidates, never a fresh program. Each iteration: pick the population best as parent, attach up to 2 high-reward alternatives as inspiration, apply a **variation operator** — `refine` (small targeted change: tune a weight, adjust one term) or `restructure` (redesign the core idea, same contract) — and evaluate the result into the population. Operator choice is stagnation-driven: `stagnation_patience` (2) non-improving iterations force a `restructure`, which then opens a fresh refinement window. `--outer-iters` is the total generation count (10+ recommended). Failed scripts feed the error into the next generation prompt, like one_shot's repair turn.
 
+### Method 5, `adaptive`: the same population search over a per-round policy
+
+For **adaptive influence maximization** (`--task adaptive_online_im`). Structurally identical to `evolve` (same population, same refine/restructure operators, same checkpoints), differing in exactly one thing: what the generated program is, and therefore how it is evaluated. `methods/base.py::evaluate_strategy` is the single fork.
+
+|                | `evolve`                                              | `adaptive`                                                        |
+| -------------- | ----------------------------------------------------- | ------------------------------------------------------------------ |
+| the program is | `plan_horizon(graph, budget, horizon)`, decided up front | `act(state, graph, timestep)`, called once per round               |
+| the budget is  | `k` seeds, all placed in the plan                     | `k` seeds split into `r` batches summing to `k`                    |
+| what it sees   | the graph                                             | the graph **and** the state the previous batch's diffusion produced |
+
+- **`--rounds r`** splits `k` into `r` near-equal batches (Han et al.'s k-sweep). **`--per-round-budget b`** instead fixes `b` and derives `r = ⌈k/b⌉` (their b-sweep). Batches always sum to exactly `k`, and the cap is enforced per round, so no cross-call counter is needed, which matters because `MonteCarloEnvironment` loops (episode, timestep) while `WorldModelEnvironment` loops (timestep, sample), and any accumulated state would mean different things under the two.
+- **`--round-gap g`** puts `g` timesteps of diffusion between rounds. A schedule whose last batch would land past `--horizon` is **rejected**, not clipped: silently dropping a batch would spend less than `k` and report it as `k`.
+- **`--feedback-model {full_adoption,myopic}`** decides what `act()` reads. `myopic` blanks `state.infected`, leaving only the wave activated since the last step. That has a consequence worth knowing: a myopic policy cannot tell that a candidate is already active, so it cannot filter one out. Erroring would make the arm unrunnable, and letting the op through would be worse (`add_node` writes NDlib status `1` over status `2`, re-arming a spent IC spreader), so the seed is **dropped** and the slot is spent for nothing. Under `full_adoption` the same proposal raises, because the policy was handed the set it failed to filter. Blind re-seeding costing budget *is* the price of the weaker observation.
+- **The adaptivity gap needs both arms.** `spread(adaptive) / spread(non-adaptive)` at matched `k` is only meaningful with a control, so the task registry's `default_arms` pair every `adaptive_<mode>@E` with `evolve_<mode>@E` for all four evaluators, and `pipeline/conditions.py::adaptivity_gaps` divides them on the shared ground-truth replay. Do not expect a gap above 1: theory caps the myopic gap at 4 and proves non-adaptive greedy is no worse across all graphs. **The claim is cost**: `evaluator_seconds` for both sides sits in the same table.
+
+Results carry `rounds`, `round_batches`, `round_gap`, `feedback_model` and `round_spreads` (spread after each round), because the adaptive-IM literature splits three ways on the budget convention and a spread number is not comparable without `(k, b, r)` together.
+
+### Baselines for `adaptive` (condition 1)
+
+`--baselines` normally names a member of `tools/algorithms.py`, every one of which returns a static seed set. Those are the *control* side of the adaptivity gap, not adaptive baselines. `tools/adaptive_algorithms.py` holds the per-round policies, signature `(state, graph, batch, dynamics) -> seeds`:
+
+| name | what it is |
+| --- | --- |
+| `adapt_greedy` | **AdaptGreedy** (Golovin & Krause 2011; Han et al. PVLDB 2018): greedy marginal gain re-estimated each round against the realized state |
+| `adapt_epic` | **EPIC** (Han et al. 2018): AdaptGreedy with RIS per batch; RR sets the active set already covers are dropped first |
+| `adapt_degree_discount` | DegreeDiscount over susceptibles, discounted by what the cascade already reached |
+| `adapt_degree`, `adapt_pagerank`, `adapt_random` | the per-round heuristic floor |
+| `static_split` | one static ranking dealt a batch per round: the same-machinery control, so the timing penalty is separated from the adaptivity benefit |
+
+`parse_arm` marks these `method="adaptive"` from the name alone, so `--baselines adapt_greedy` runs down the round path and lands in the adaptivity-gap table on the adaptive side. They are also in the executor namespace and in an adaptive prompt's API reference, so a generated policy can call or extend one instead of reinventing AdaptGreedy.
+
+**Budget the greedy one.** `adapt_greedy` costs `batch x candidates x mc_runs` simulations per round. Measured on an 80-node graph at `k=8, r=3`: 70.5 evaluator-seconds against `adapt_epic`'s 0.3. That is the published reason EPIC exists, and the axis the world model is meant to flatten.
+
+### Streaming graphs and multi-round campaigns
+
+Two more §1 branches of the adaptive-IM literature, both of which apply to **every** arm rather than only the adaptive ones. An arm whose graph moved compared against one whose graph did not, or a union compared against a single campaign, measures the setting instead of the method.
+
+- **`--edit-rate f`** (dynamic/streaming): a deterministic schedule of exogenous edge insertions and deletions, `f · |E|` of each per timestep. `coding_agent/stream.py`. The edits ride in the action bag, so neither environment changed: the MC env hands the bag to `Simulator.advance` and the WM env routes it through `apply_edge_ops`. They are appended *after* the policy's bag is validated, because they are exogenous and `--allowed-ops add_node` would otherwise reject them. An **adaptive** policy is handed `stream.graph_at(t)`, the graph as it now stands; a **static** plan was decided at `t=0` and cannot react. That gap is the point, not a bug. The schedule is a pure function of `(graph, seed, timestep)` because the two environments iterate in opposite orders and anything stateful would give them different histories.
+- **`--campaigns r`** (multi-round): `r` separate diffusions of `budget` seeds, scored on the union. `MultiRoundEnvironment` wraps any evaluator, so it composes with all four. `infected` carries the union into the next campaign and `frontier` stays that campaign's own wave. The union is `P(v never activated) = ∏_i (1 − p_i(v))` over the per-campaign marginals: **exact** for a fixed schedule, not an approximation. `--compare`'s referee is wrapped too, or it would score a single campaign against the arm's union.
+
+**`spread_curve`** lands in every result regardless: the ensemble-mean `E|infected|` after each timestep, padded to `horizon + 2` by holding the final value. That padding is exact rather than smoothing, because a rollout only breaks when the frontier **and** the bag are empty, which is a fixed point of monotone IC/LT. It is what makes `σ(S, T)` readable at any `T`; `infected_counts` is the representative sample and stops when its cascade died.
+
 ### `--strategy-mode`: what the agent is allowed to write
 
-Orthogonal to the method choice (supported for `one_shot` and `evolve`):
+Orthogonal to the method choice (supported for `one_shot`, `evolve` and `adaptive`):
 
 - **`free`** (default): the agent writes a whole `Strategy` program with the full library callable. Observed failure mode: portfolio composition — the agent runs many library algorithms and picks the winner, editing nothing.
 - **`scored`**: the agent may only fill in the internals of an algorithm. A fixed harness (`ScoredStrategy.plan_horizon`, `types.py`) greedily picks the argmax of `score(node, selected, graph)` until budget is spent, then calls `schedule(seeds, graph, horizon)` (default: all at t=0). The executor rejects any override of `plan_horizon`; the exec namespace contains **no `algorithms` module** and no simulation primitives (`mc_simulate_spread`, `compute_marginal_gain`, `build_simulator` are hidden — otherwise the agent re-derives CELF instead of inventing structural scoring logic). The library appears in the prompt as an _ideas menu_ only — any borrowed idea must be written out inside `score()`, where it can be mutated. Canned/`--baseline` scripts always run in free mode regardless of the flag.

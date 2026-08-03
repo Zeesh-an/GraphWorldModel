@@ -15,6 +15,30 @@ from data.wm_simulator import ActionOp, State, spent, valid_action_ops
 # ActionFn is a function mapping (current state, timestep) -> action bag for that timestep
 ActionFn = Callable[[State, int], list[ActionOp]]
 
+# Which realized activations an adaptive policy observes between rounds
+full_adoption = "full_adoption"
+myopic = "myopic"
+valid_feedback_models = (full_adoption, myopic)
+
+
+def pad_counts(counts: list[float], horizon: int) -> list[float]:
+    """
+    Extend a per-timestep count vector to horizon + 2 by holding its last value.
+
+    A rollout breaks early only when the frontier AND the action bag are both
+    empty, which is a fixed point of monotone IC/LT: no frontier means no new
+    infections and no bag means no injections, so every later step would report
+    the same count. Holding it is therefore exact, and it is what makes
+    sigma(S, T) readable at any T <= horizon instead of only at termination.
+
+    Index t is the count AFTER the step at timestep t - 1, so index 0 is the
+    empty initial state and a full run has horizon + 2 entries.
+    """
+    if not counts:
+        return [0.0] * (horizon + 2)
+
+    return counts + [counts[-1]] * (horizon + 2 - len(counts))
+
 
 @dataclass
 class GraphInfo:
@@ -96,6 +120,44 @@ class TaskSpec:
     # What remove_node does; the system prompt states the matching rule, and
     # stating the wrong one has the agent plan against dynamics it will not get
     remove_semantics: str = spent
+    # Adaptive IM: seeds are committed in `rounds` batches summing to `budget`,
+    # each chosen AFTER observing the diffusion the previous batch produced.
+    # None = non-adaptive, one plan decided up front (static IM). The two differ
+    # only here, which is what makes the adaptivity gap a clean A/B.
+    rounds: int | None = None
+    # Han et al. run two sweeps: fix r and vary k, or fix b and vary k. Setting
+    # this switches to the second; r is then derived as ceil(k / b).
+    per_round_budget: int | None = None
+    # Timesteps of diffusion between consecutive rounds. 1 = seed again on the
+    # very next step; larger lets each batch's cascade run further first.
+    round_gap: int = 1
+    # What the policy may READ at a round boundary (research/adaptive_online_im.md
+    # §1.1). full_adoption = the whole realized state; myopic = the current wave
+    # only. The theory literature's central axis, and free from our channel layout.
+    feedback_model: str = full_adoption
+    # Dynamic / streaming IM (§1.4): exogenous edge edits per timestep, as a
+    # fraction of |E|. 0 = the static graph every other setting assumes.
+    edit_rate: float = 0.0
+    # Multi-round IM (§1.5): r SEPARATE campaigns of k seeds each, scored on the
+    # union of what they activate. 1 = a single campaign, i.e. every other task.
+    campaigns: int = 1
+    # Drives the edit stream's schedule. Carried on the task rather than read
+    # from the environment so the same seed produces the same graph history for
+    # every arm, which is what makes a cross-arm comparison under a stream mean
+    # anything at all.
+    seed: int = 0
+
+    @property
+    def adaptive(self) -> bool:
+        return self.rounds is not None or self.per_round_budget is not None
+
+    @property
+    def streaming(self) -> bool:
+        return self.edit_rate > 0.0
+
+    @property
+    def multi_round(self) -> bool:
+        return self.campaigns > 1
 
 
 @dataclass
@@ -109,6 +171,14 @@ class Trajectory:
     cost: dict = field(default_factory=dict)
     # Per-node P(infected at end) across the ensemble (feedback, not serialized)
     final_marginals: list[float] | None = None
+    # E|infected| after each timestep, ENSEMBLE-MEAN and padded to horizon + 2 so
+    # index t is always the same t across arms and runs. `infected_counts` is the
+    # representative sample and stops when its cascade died, which makes
+    # sigma(S, T) unreadable at any T past that point; this is the readable one.
+    # Padding by holding the last value is exact rather than an approximation:
+    # the rollout only breaks when the frontier AND the action bag are both
+    # empty, which is a fixed point of monotone IC/LT.
+    spread_curve: list[float] | None = None
 
 
 class Strategy(Protocol):

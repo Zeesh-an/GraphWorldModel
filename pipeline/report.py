@@ -4,7 +4,12 @@ import json
 import re
 from pathlib import Path
 
-from pipeline.conditions import condition_names, ground_truth_reward, is_ground_truth
+from pipeline.conditions import (
+    adaptivity_gaps,
+    condition_names,
+    ground_truth_reward,
+    is_ground_truth,
+)
 from pipeline.layout import Layout
 
 # The agent writes its own `##` headings; demoting them one level keeps the
@@ -25,8 +30,14 @@ reported_config_keys = (
     "mc_runs",
     "native_mc_runs",
     "allowed_ops",
+    "rounds",
+    "round_gap",
+    "feedback_model",
+    "edit_rate",
+    "campaigns",
     "wm_model",
     "head",
+    "hide_edge_weights",
     "seed",
 )
 
@@ -181,6 +192,60 @@ def _results_table(agent_results: list[dict]) -> list[str]:
     return lines + [header, divider] + rows + [""]
 
 
+def _adaptivity_section(agent_results: list[dict]) -> list[str]:
+    """
+    The adaptivity gap, and the cost each side paid to get there.
+
+    Empty for a non-adaptive sweep. The two calibrations in the header are not
+    hedging: theory caps the myopic gap at 4 and proves non-adaptive greedy is no
+    worse than adaptive greedy over all graphs, so a gap near 1 is the predicted
+    outcome and the claim being made here is about cost.
+    """
+    paired = adaptivity_gaps(agent_results)
+    if not paired:
+        return []
+
+    lines = [
+        "## Adaptivity gap",
+        "",
+        "`gap = spread(adaptive policy) / spread(matched non-adaptive arm)` at "
+        "the same budget and the same evaluator, both read on the ground-truth "
+        "MC replay. Rounds commit `k` in batches, each chosen after observing "
+        "what the previous batch activated. The control is the STRONGEST static "
+        "arm at that budget and evaluator, which is the closest available "
+        "estimate of the `max` the gap is defined against.",
+        "",
+        "> **Read this before reading the numbers.** Peng & Chen bound the myopic "
+        "adaptivity gap in `[e/(e−1), 4]` and prove non-adaptive greedy is no "
+        "worse than adaptive greedy across all graphs "
+        "([`research/adaptive_online_im.md`](../../../../research/adaptive_online_im.md) "
+        "§5.1). A gap near `1.00` is the expected result, not a failed run, and a "
+        "large gap is an instance effect rather than a general one. The claim "
+        "this task supports is the **cost** columns: the MC arm re-estimates "
+        "every candidate once per round, and a forward pass does not.",
+        "",
+        "| budget k | evaluator | rounds | batches | feedback | adaptive arm | "
+        "spread | control arm | spread | gap | adaptive eval s | control eval s |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+
+    for entry in paired:
+        gap = entry["gap"]
+        lines.append(
+            f"| {entry['budget']} | `{entry['evaluator']}` | {entry['rounds']} "
+            f"| `{entry['round_batches']}` | `{entry['feedback_model']}` "
+            f"| `{entry['adaptive_arm']}` "
+            f"| {_format_number(entry['adaptive_spread'])} "
+            f"| `{entry['control_arm']}` "
+            f"| {_format_number(entry['control_spread'])} "
+            f"| {'n/a' if gap is None else f'{gap:.3f}'} "
+            f"| {_format_number(entry['adaptive_evaluator_seconds'], 1)} "
+            f"| {_format_number(entry['control_evaluator_seconds'], 1)} |"
+        )
+
+    return lines + [""]
+
+
 def _winner_section(agent_results: list[dict]) -> list[str]:
     """Best arm at the largest budget, with the program it produced."""
     if not agent_results:
@@ -315,6 +380,7 @@ def write_report(
     lines += _graph_section(agent_results, metadata)
     lines += _taxonomy_section(agent_results)
     lines += _results_table(agent_results)
+    lines += _adaptivity_section(agent_results)
     lines += _winner_section(agent_results)
     lines += _world_model_section(wm_results)
     lines += _figures_section(layout.plots_dir, layout.root)

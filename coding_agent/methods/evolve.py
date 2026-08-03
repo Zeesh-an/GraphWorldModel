@@ -4,22 +4,19 @@ parent from the population (refine or restructure), never a fresh program.
 Stagnation switches the operator from refine to restructure.
 """
 
-import time
-from functools import partial
 from pathlib import Path
 from tqdm import tqdm
 
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
-from coding_agent.credit import planned_action
-from coding_agent.executor import StrategyError, build_strategy, call_strategy
+from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
+    evaluate_strategy,
     paired_delta,
     reference_diff,
     summarize,
-    validate_plan,
 )
 from coding_agent.prompts import (
     build_evolve_prompt,
@@ -38,6 +35,7 @@ class EvolveSearch(OuterLoopMethod):
         strategy_mode: str = "scored",
         stagnation_patience: int = 2,
         inspiration_count: int = 2,
+        label: str = "evolve",
         allow_mc_algorithms: bool = False,
         use_anchor: bool = True,
         checkpoint_path: Path | None = None,
@@ -45,6 +43,9 @@ class EvolveSearch(OuterLoopMethod):
     ) -> None:
         self.outer_iters = outer_iters
         self.strategy_mode = strategy_mode
+        # "evolve" or "adaptive": picks the system prompt (plan_horizon vs act per
+        # round) and labels the logs. The search itself is the same either way.
+        self.label = label
         self.allow_mc_algorithms = allow_mc_algorithms
         # Canned arms never read a prompt, so the anchor rollouts would be pure
         # cost — five real episodes under an MC evaluator, informing nothing
@@ -61,7 +62,7 @@ class EvolveSearch(OuterLoopMethod):
     def optimize(
         self, agent: CodingAgent, environment: object, task: TaskSpec, graph: GraphInfo
     ) -> tuple[Strategy, Trajectory]:
-        system = build_system_prompt("evolve", self.strategy_mode, task)
+        system = build_system_prompt(self.label, self.strategy_mode, task)
         self.effective_budget = task.budget
 
         resumed = checkpoint.load(self.checkpoint_path, self.checkpoint_fingerprint)
@@ -80,10 +81,10 @@ class EvolveSearch(OuterLoopMethod):
             anchor, anchor_trajectory, anchor_name = baseline_anchor(
                 environment, task, graph
             )
-            tqdm.write(f"[evolve] {anchor}")
+            tqdm.write(f"[{self.label}] {anchor}")
 
         base_user = build_user_prompt(
-            "evolve", task, graph, self.strategy_mode, self.allow_mc_algorithms
+            self.label, task, graph, self.strategy_mode, self.allow_mc_algorithms
         ) + (f"\n\n{anchor}" if anchor else "")
 
         # The thread lets the model see the generations it already produced;
@@ -119,7 +120,7 @@ class EvolveSearch(OuterLoopMethod):
 
             best_text = "none yet" if best is None else f"{best[1].reward:.2f}"
             tqdm.write(
-                f"[evolve] resumed from {self.checkpoint_path}: generation "
+                f"[{self.label}] resumed from {self.checkpoint_path}: generation "
                 f"{start_iteration + 1}/{self.outer_iters}, population "
                 f"{len(population)}, best {best_text}"
             )
@@ -128,7 +129,7 @@ class EvolveSearch(OuterLoopMethod):
             range(start_iteration, self.outer_iters),
             initial=start_iteration,
             total=self.outer_iters,
-            desc="evolve search",
+            desc=f"{self.label} search",
         )
         for iteration in progress_bar:
             if not population:
@@ -168,7 +169,7 @@ class EvolveSearch(OuterLoopMethod):
                 )
 
             tqdm.write(
-                f"[evolve] iter {iteration + 1}/{self.outer_iters}: "
+                f"[{self.label}] iter {iteration + 1}/{self.outer_iters}: "
                 f"operator={operator}, population={len(population)}"
             )
 
@@ -179,23 +180,11 @@ class EvolveSearch(OuterLoopMethod):
                     self.allow_mc_algorithms,
                 )
 
-                plan_start = time.perf_counter()
-                tqdm.write(
-                    f"[evolve] iter {iteration + 1}: executing plan_horizon()..."
-                )
-                plan = call_strategy(
-                    strategy.plan_horizon, graph, task.budget, task.horizon
-                )
-                plan_seconds = time.perf_counter() - plan_start
-                tqdm.write(
-                    f"[evolve] iter {iteration + 1}: plan built in "
-                    f"{plan_seconds:.1f}s; rolling out..."
-                )
+                entry_point = "act() per round" if task.adaptive else "plan_horizon()"
+                tqdm.write(f"[{self.label}] iter {iteration + 1}: {entry_point}...")
 
-                validate_plan(plan, task, graph)
-
-                trajectory = environment.rollout(
-                    partial(planned_action, plan), task.horizon, task.budget
+                trajectory, plan_seconds = evaluate_strategy(
+                    strategy, environment, task, graph
                 )
             except StrategyError as error:
                 last_error = str(error)
@@ -209,7 +198,7 @@ class EvolveSearch(OuterLoopMethod):
                     }
                 )
                 tqdm.write(
-                    f"[evolve] iter {iteration + 1}: script failed — "
+                    f"[{self.label}] iter {iteration + 1}: script failed: "
                     f"{last_error.splitlines()[0]}"
                 )
                 self._checkpoint(
@@ -270,7 +259,7 @@ class EvolveSearch(OuterLoopMethod):
                 }
             )
             tqdm.write(
-                f"[evolve] iter {iteration + 1}: reward={trajectory.reward:.2f} "
+                f"[{self.label}] iter {iteration + 1}: reward={trajectory.reward:.2f} "
                 f"(best={best[1].reward:.2f}, stagnation={stagnation})"
             )
             progress_bar.set_postfix(

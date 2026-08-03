@@ -18,7 +18,7 @@ from world_model.wm_data import (
     in_channels,
 )
 from world_model.wm_model import WorldModel
-from coding_agent.types import ActionFn, GraphInfo, State, Trajectory
+from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
 from data.wm_simulator import blocked, spent
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
@@ -208,6 +208,9 @@ class WorldModelEnvironment:
         frontier = [set() for _ in range(num_samples)]
 
         active = [True] * num_samples
+        # One count vector per sample, so sigma(S, T) is the ensemble mean at T
+        # rather than whatever the representative sample happened to do
+        sample_curves = [[0.0] for _ in range(num_samples)]
 
         representative_states = [State([], [])]
         representative_actions = []
@@ -307,6 +310,9 @@ class WorldModelEnvironment:
                 if timestep > 0 and not frontier[sample] and not bags[sample]:
                     active[sample] = False
 
+            for sample in range(num_samples):
+                sample_curves[sample].append(float(len(infected[sample])))
+
             if record_representative:
                 representative_actions.append(bags[0])
                 representative_states.append(
@@ -356,4 +362,9 @@ class WorldModelEnvironment:
                 "rollout_seconds": elapsed,
             },
             final_marginals=(final_infected_freq / num_samples).round(3).tolist(),
+            spread_curve=np.mean(
+                [pad_counts(curve, horizon) for curve in sample_curves], axis=0
+            )
+            .round(4)
+            .tolist(),
         )

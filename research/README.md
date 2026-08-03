@@ -2,7 +2,7 @@
 
 One markdown file per graph task, all in the same format. Each is self-contained: task definition, fit with our methodology, every baseline method with paper and code URLs, every dataset those baselines evaluate on with node/edge counts and source URLs, transcribed result tables, evaluation protocols, and an honest list of what the review could **not** establish.
 
-**9,450 lines · 13 tasks · ~450 methods · ~400 datasets · 1,060 unique URLs**, compiled 2026-07-28/29.
+**9,600 lines · 13 tasks · ~450 methods · ~400 datasets · 1,060 unique URLs**, compiled 2026-07-28/29.
 
 These files are **literature references**, not design documents. What we built lives in `../CLAUDE.md` and the per-package READMEs; what the field published lives here.
 
@@ -25,7 +25,7 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | [`epidemic_control.md`](epidemic_control.md)               | ✅ direct               | 690   | partial — different dataset family (contact networks)                   |
 | [`influence_estimation.md`](influence_estimation.md)       | ✅ **already computed** | 553   | ⭐ GLIE + SIEA — `ca_grqc`, `nethept`, `netphy`, `youtube` match        |
 | [`cascade_reconstruction.md`](cascade_reconstruction.md)   | ✅ direct               | 763   | DIPT 2025 — Cora-ML and Power Grid                                      |
-| [`adaptive_online_im.md`](adaptive_online_im.md)           | ✅ direct               | 556   | only DeepIM's re-run OIM row; the rest are figures                      |
+| [`adaptive_online_im.md`](adaptive_online_im.md)           | ✅ **implemented**      | 572   | only DeepIM's re-run OIM row; the rest are figures                      |
 | [`network_inference.md`](network_inference.md)             | ⚠️ moderate             | 782   | no — Kronecker synthetics, not our graphs                               |
 | [`cascade_prediction.md`](cascade_prediction.md)           | ⚠️ moderate             | 567   | no — real cascade corpora only                                          |
 | [`cascading_failure.md`](cascading_failure.md)             | ⚠️ moderate             | 728   | Jhun et al. Table I, via Motter–Lai on our `power_grid`                 |
@@ -44,7 +44,7 @@ Things that emerged from more than one file, or that change what we should do.
 
 2. **NDlib ships no competitive/multi-cascade model.** Verified by enumerating `available_statuses` across every model — `Blocked: -1` is a static non-adopter set, and `CompositeModel` can only express one global tie-break. Influence blocking needs a competitive step written on top of `data/wm_simulator.py`.
 
-3. **Adaptive IM cannot be sold on spread.** The adaptivity gap is bounded (myopic ∈ [e/(e−1), 4]; full-adoption ≤ ⌈n^{1/3}⌉) and non-adaptive greedy is provably no worse than adaptive greedy on all graphs. The claim has to be **cost** — the MC arm scales with rounds, a forward pass does not.
+3. **Adaptive IM cannot be sold on spread. ✅ IMPLEMENTED on that basis.** The adaptivity gap is bounded (myopic ∈ [e/(e−1), 4]; full-adoption ≤ ⌈n^{1/3}⌉) and non-adaptive greedy is provably no worse than adaptive greedy on all graphs. The claim has to be **cost**: the MC arm scales with rounds, a forward pass does not. Built accordingly: every `adaptive_*@E` arm is paired with `evolve_*@E` at matched `k`, the gap is computed and printed with that calibration stated above the table, and `evaluator_seconds` carries the actual claim.
 
 4. **Our rollout evaluation is blind to per-step drift.** From `temporal_forecasting.md` §9: DCRNN shows rollout degradation is a separate axis from one-step accuracy. We early-stop on one-step `delta_f1` and report aggregate `ens_count_bias`; neither sees a model that is sharp at `t+1` and drifting by `t+5`. Scheduled sampling is the field's standard fix and needs **zero extra simulator calls**, unlike the DAgger attempt that failed here.
 

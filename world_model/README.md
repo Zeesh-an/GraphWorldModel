@@ -132,6 +132,14 @@ LT thresholds are hidden and re-drawn per episode, so the head predicts the acti
 
 The `f_v > 0` gate gives the same self-terminating bound as IC. One-step metrics are looser than IC by design (the best a state-only model can do is the threshold marginal `P(activate | f_v)`), but the rollout is faithful.
 
+### `--hide-edge-weights`: the w-hidden (bandit) ablation
+
+Feeds the encoder and the head **ones** in place of the true `p(u→v)`, at the one choke point every path goes through (`build_graph_input`), so training, one-step eval, the ensemble rollout, planning regret, and the coding agent's world-model environment all see the same masked graph. The **simulator is untouched**: this masks the model's view of the world, not the world.
+
+Two reasons it exists, and they are the same reason from two directions. It is the **online/bandit information state** (the graph is known, the transmission probabilities are not), which is what makes `research/adaptive_online_im.md` §2.4b's branch (b) reachable. And it is the honest answer to the wrinkle that our IC heads otherwise consume the true `w` as an input feature, so the "recovers unknown dynamics from data" claim currently rests on LT rather than IC.
+
+**Requires `--head structured` (or `linear`).** `structured_residual` anchors `q` on `logit(w)`, which at `w = 1` pins every edge near `q = 1` and saturates the rollout; `structured_oracle` *is* `q = w`. Masking either is not an ablation of them, it is a corruption of them, so both are refused with that message.
+
 ### `structured_residual` (IC only, `--head structured_residual`)
 
 `ICTransmissionHead(residual=True)`: `q = sigmoid(logit(w) + MLP([h_u, h_v, w]))`. The MLP learns a residual correction on the true IC transmission prob, so zero correction reproduces the oracle exactly. Use when the training data lacks edge-weight diversity (e.g. node-op-only action sets): the plain `structured` head's `w → q` mapping is then unanchored and drifts optimistic in free-running rollouts (count_bias ≈ +2) despite equal one-step metrics.

@@ -7,7 +7,12 @@ import os
 from pathlib import Path
 import matplotlib
 
-from pipeline.conditions import condition_names, ground_truth_reward, is_ground_truth
+from pipeline.conditions import (
+    adaptivity_gaps,
+    condition_names,
+    ground_truth_reward,
+    is_ground_truth,
+)
 
 # Headless: SLURM nodes have no display
 matplotlib.use("Agg")
@@ -292,6 +297,97 @@ def plot_sample_efficiency(
     axes.set_xlabel("real-environment episodes consumed (log; left edge = none)")
     axes.set_ylabel(_reward_label(at_largest))
     axes.set_title(f"{title_prefix}: quality vs real-experience cost at k={largest}")
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=7)
+
+    return _save(figure, out_path)
+
+
+def plot_adaptivity_gap(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Gap and cost, side by side: the two halves of the adaptive-IM claim.
+
+    Left: the spread ratio against budget, with 1.0 drawn in. Right: what each
+    side spent inside its evaluator to produce that ratio. The right panel is the
+    one the argument rests on; the left is there so a gap near 1 is visible as
+    the predicted outcome rather than read as a null result.
+    """
+    paired = adaptivity_gaps(results)
+    if not paired:
+        return None
+
+    figure, (gap_axes, cost_axes) = plt.subplots(1, 2, figsize=(11.0, 4.5))
+    evaluators = sorted({entry["evaluator"] for entry in paired})
+
+    for index, evaluator in enumerate(evaluators):
+        rows = [entry for entry in paired if entry["evaluator"] == evaluator]
+        budgets = [entry["budget"] for entry in rows]
+        style = _arm_style(index)
+
+        gap_axes.plot(
+            budgets, [entry["gap"] for entry in rows], label=evaluator, **style
+        )
+        # Seconds inside the evaluator, adaptive over control: >1 means the
+        # rounds cost this evaluator more, which is exactly what MC should show
+        # and the world model should not
+        cost_axes.plot(
+            budgets,
+            [
+                (entry["adaptive_evaluator_seconds"] or 0.0)
+                / (entry["control_evaluator_seconds"] or float("inf"))
+                for entry in rows
+            ],
+            label=evaluator,
+            **style,
+        )
+
+    gap_axes.axhline(1.0, color="#8C8C8C", linestyle="--", linewidth=1.0)
+    gap_axes.set_xlabel("budget k")
+    gap_axes.set_ylabel("adaptive spread / non-adaptive spread")
+    gap_axes.set_title("adaptivity gap (theory caps myopic at 4)")
+
+    cost_axes.axhline(1.0, color="#8C8C8C", linestyle="--", linewidth=1.0)
+    cost_axes.set_xlabel("budget k")
+    cost_axes.set_ylabel("adaptive evaluator seconds / non-adaptive")
+    cost_axes.set_title("what the rounds cost each evaluator")
+
+    for axes in (gap_axes, cost_axes):
+        axes.grid(alpha=0.3)
+        axes.legend(fontsize=8)
+
+    figure.suptitle(f"{title_prefix}: adaptivity")
+
+    return _save(figure, out_path)
+
+
+def plot_round_spreads(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """Realized spread after each round: where the budget actually paid off."""
+    adaptive = [result for result in results if result.get("round_spreads")]
+    if not adaptive:
+        return None
+
+    largest = max(result["budget"] for result in adaptive)
+    at_largest = [result for result in adaptive if result["budget"] == largest]
+
+    figure, axes = plt.subplots(figsize=figure_size)
+
+    for index, run in enumerate(at_largest):
+        spreads = run["round_spreads"]
+        axes.plot(
+            range(1, len(spreads) + 1),
+            spreads,
+            label=run["arm"],
+            color=condition_colors.get(run.get("condition", 99), "#4C72B0"),
+            **_arm_style(index),
+        )
+
+    axes.set_xlabel("round")
+    axes.set_ylabel("infected after this round")
+    axes.set_title(f"{title_prefix}: per-round spread at k={largest}")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=7)
 
@@ -606,6 +702,13 @@ def build_plots(
         plot_runtime(agent_results, plots_dir / "runtime.png", title_prefix),
         plot_convergence(agent_results, plots_dir / "convergence.png", title_prefix),
         plot_cascade(agent_results, plots_dir / "cascade.png", title_prefix),
+        # Both return None on a non-adaptive sweep, so no guard is needed here
+        plot_adaptivity_gap(
+            agent_results, plots_dir / "adaptivity_gap.png", title_prefix
+        ),
+        plot_round_spreads(
+            agent_results, plots_dir / "round_spreads.png", title_prefix
+        ),
     ]
 
     if wm_results is not None:

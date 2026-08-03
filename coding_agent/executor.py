@@ -14,7 +14,7 @@ from functools import partial
 from types import SimpleNamespace
 from typing import Callable
 
-from coding_agent.tools import algorithms, primitives
+from coding_agent.tools import adaptive_algorithms, algorithms, primitives
 from coding_agent.types import ActionOp, GraphInfo, ScoredStrategy, State, Strategy
 from data.wm_simulator import valid_action_ops
 
@@ -217,6 +217,12 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         "GraphInfo": GraphInfo,
         "Strategy": Strategy,
         "algorithms": SimpleNamespace(**callable_algorithms),
+        # Per-round policies for adaptive IM. Present under every task: a
+        # non-adaptive arm simply never has a round to call one from, and hiding
+        # them per task would mean the namespace no longer matches the prompt.
+        "adaptive_algorithms": SimpleNamespace(
+            **adaptive_algorithms.adaptive_algorithms
+        ),
         "primitives": primitives,
         "__builtins__": __builtins__,
     }
