@@ -102,6 +102,23 @@ summary_columns = (
     "anc_sigma",
     "rho_at_threshold",
     "degree_rank_spearman",
+    # Influence blocking: the two-cascade columns. `blocking_prevented` is the
+    # headline this literature publishes in — every other task's tables report a
+    # spread, and this one reports a DIFFERENCE from the unopposed cascade.
+    "blocking",
+    "blocking_lever",
+    "blocking_tie_break",
+    "blocking_competitive_model",
+    "blocking_attacker",
+    "blocking_negative_seeds",
+    "blocking_detection_delay",
+    "blocking_unopposed",
+    "blocking_prevented",
+    "blocking_prevented_pct",
+    "blocking_prevented_pct_of_nodes",
+    "blocking_budget_ratio",
+    "blocking_spent",
+    "blocking_n_spent",
     # Source localization: the inverse task's own metric set. Empty for every arm
     # that intervenes, so one table still holds all four runnable tasks.
     # `sl_f1` is the held-out score and duplicates `spread_ground_truth` on
@@ -253,6 +270,30 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "anc_sigma": structural.get("anc_sigma"),
         "rho_at_threshold": structural.get("rho_at_threshold"),
         "degree_rank_spearman": structural.get("degree_rank_spearman"),
+        # Influence blocking. The `mc_*` prevented columns are preferred over the
+        # arm's own because prevented influence is a DIFFERENCE, and a difference of
+        # two evaluators' numbers is not a quantity — the shared referee measures
+        # both terms or neither.
+        "blocking": result.get("blocking"),
+        "blocking_lever": result.get("lever"),
+        "blocking_tie_break": result.get("tie_break"),
+        "blocking_competitive_model": result.get("competitive_model"),
+        "blocking_attacker": result.get("attacker"),
+        "blocking_negative_seeds": result.get("n_negative_seeds"),
+        "blocking_detection_delay": result.get("detection_delay"),
+        "blocking_unopposed": result.get(
+            "mc_unopposed_spread", result.get("unopposed_spread")
+        ),
+        "blocking_prevented": result.get(
+            "mc_prevented_influence", result.get("prevented_influence")
+        ),
+        "blocking_prevented_pct": result.get(
+            "mc_prevented_pct_of_unopposed", result.get("prevented_pct_of_unopposed")
+        ),
+        "blocking_prevented_pct_of_nodes": result.get("prevented_pct_of_nodes"),
+        "blocking_budget_ratio": result.get("budget_ratio"),
+        "blocking_spent": result.get("spent"),
+        "blocking_n_spent": result.get("n_spent"),
         # Source localization. Empty for every seeding or containment arm; the
         # metrics are exact (F1 against a known source set carries no evaluator
         # noise), so there is no fidelity column here and none is expected.

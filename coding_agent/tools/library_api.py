@@ -9,6 +9,7 @@ from typing import Callable
 from coding_agent.tools import (
     adaptive_algorithms,
     algorithms,
+    blocking_algorithms,
     dismantling_algorithms,
     localization_algorithms,
     primitives,
@@ -18,6 +19,29 @@ algorithm_names = list(algorithms.algorithms.keys())
 adaptive_names = list(adaptive_algorithms.adaptive_algorithms.keys())
 dismantling_names = list(dismantling_algorithms.dismantling_algorithms.keys())
 localization_names = list(localization_algorithms.localization_algorithms.keys())
+blocking_names = list(blocking_algorithms.all_blocking_algorithms.keys())
+
+# Which library members a given lever can actually spend its budget on. Showing an
+# edge selector to a counter-seeding arm is not merely noise: its output is arcs, so
+# a program that composed one would emit an op the executor rejects, and the search
+# would spend an iteration on a repair turn for a menu we handed it.
+blocking_lever_of_op = {
+    "add_node": "counter_seed",
+    "remove_node": "node_block",
+    "remove_edge": "edge_block",
+    "set_edge_weight": "weight_block",
+}
+
+
+def blocking_names_for(budget_op: str) -> list[str]:
+    """Library members whose output the given lever can emit."""
+    lever = blocking_lever_of_op.get(budget_op, "counter_seed")
+
+    return [
+        name
+        for name in blocking_names
+        if blocking_algorithms.emittable(name, lever)
+    ]
 
 # Three implementations shown in full, one per idiom the library uses: neighbour
 # discounting, per-community budget allocation, and RIS-then-refine. Signatures
@@ -136,6 +160,55 @@ def build_dismantling_reference(exclude: tuple = ()) -> str:
         "REMOVE, of length `budget`. These are the published baselines you are being\n"
         "compared against: call one, beat one, or take its idea and improve on it.\n"
         "`adaptive_degree` is the one that actually has to be beaten:\n" + "\n".join(lines)
+        + blocked_note
+    )
+
+
+def build_blocking_menu(budget_op: str = "add_node") -> str:
+    """Return one `- name: summary` line per blocking algorithm for this lever."""
+    lines = []
+    for name in blocking_names_for(budget_op):
+        doc_lines = (
+            blocking_algorithms.all_blocking_algorithms[name].__doc__ or ""
+        ).strip().splitlines()
+        lines.append(f"- {name}: {doc_lines[0] if doc_lines else ''}")
+
+    return "\n".join(lines)
+
+
+def build_blocking_reference(budget_op: str = "add_node", exclude: tuple = ()) -> str:
+    """The blocking surface for ONE lever, shown only to an influence-blocking prompt."""
+    names = blocking_names_for(budget_op)
+    lines = [
+        _signature_line(blocking_algorithms.all_blocking_algorithms[name])
+        for name in names
+        if name not in exclude
+    ]
+    returns = (
+        "a list of `(u, v)` ARCS"
+        if budget_op in ("remove_edge", "set_edge_weight")
+        else "a list of node ids"
+    )
+    blocked_note = (
+        "\n  NOT AVAILABLE (calling one raises): "
+        + ", ".join(name for name in names if name in exclude)
+        + " — it simulates the whole competitive cascade for every candidate node,\n"
+        "  which bypasses the metered evaluator."
+        if any(name in exclude for name in names)
+        else ""
+    )
+
+    return (
+        "BLOCKING ALGORITHMS  (from coding_agent.tools.blocking_algorithms, imported\n"
+        "as `blocking_algorithms`). Each takes `negative_seeds=` — the rumour's own\n"
+        f"seed set, which is also `self.outbreak` — and returns {returns} of length\n"
+        "`budget`. These are the published baselines you are being compared against:\n"
+        "call one, beat one, or take its idea and improve on it. `proximity` is the\n"
+        "one that actually has to be beaten — it is 'seed the rumour's own\n"
+        "out-neighbours' and it outscores every learned method except StratLearner on\n"
+        "two of that paper's three graphs, while `degree_blocking` is on the list\n"
+        "because the published finding is that plain degree FAILS at this task:\n"
+        + "\n".join(lines)
         + blocked_note
     )
 

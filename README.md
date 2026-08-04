@@ -145,7 +145,7 @@ The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what 
 
 The table above is the IM core; `CLAUDE.md` lists every loader, including the twelve network-dismantling benchmarks `critical_node_detection` uses. `dolphins` and `deezer` were added for `source_localization`: Dolphins (62 / 159, in IVGD, GraphSL and the 2026 GNN benchmark) is the only graph that literature uses which no other task needed, and `deezer` is IVGD's scalability column — **the HUNGARY subgraph**, not the union, which is a version distinction its own paper does not make and the SNAP release does not force (see the loader docstring).
 
-**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one. [`research/critical_node_detection.md`](research/critical_node_detection.md) §6 and [`research/source_localization.md`](research/source_localization.md) §6 are the counterparts for the other two literatures, each with its own set of name collisions.
+**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one. [`research/critical_node_detection.md`](research/critical_node_detection.md) §6, [`research/source_localization.md`](research/source_localization.md) §6 and [`research/influence_blocking.md`](research/influence_blocking.md) §6 are the counterparts for the other three literatures, each with its own set of name collisions — blocking contributes thirteen loaders and two of the sharpest collisions in the repo, `epinions1` (75,879, SNAP's soc-Epinions1) against `epinions` (131,828, the signed graph) and three different Gnutella snapshots published under one name.
 
 ---
 
@@ -288,19 +288,32 @@ python -m pipeline.run --dataset jazz --run gcnii_ablation \
 python -c "from pipeline.tasks import runnable_task_names; print(runnable_task_names())"
 ```
 
-**Four run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, and `source_localization`. The other nine are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
+**Five run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, and `influence_blocking`. The other eight are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
 
 ```
-$ python -m pipeline.run --dataset ba --task influence_blocking
-ValueError: task 'influence_blocking' is planned, not runnable by this pipeline.
-NDlib ships no competitive model ... See research/influence_blocking.md for the
-full analysis. Runnable today: ['adaptive_online_im', 'critical_node_detection',
+$ python -m pipeline.run --dataset ba --task epidemic_control
+ValueError: task 'epidemic_control' is planned, not runnable by this pipeline.
+NDlib already ships SIR/SIS/SEIR, so the simulator is ~60 lines - but
+ICTransmissionHead composes `y_inf = infected + (1-infected) * p_new`, which is
+monotone by construction and cannot represent recovery or re-infection. See
+research/epidemic_control.md for the full analysis. Runnable today:
+['adaptive_online_im', 'critical_node_detection', 'influence_blocking',
 'influence_maximization', 'source_localization']
 ```
 
 The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, the budget sweep, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it — it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
 
-The three runnable **problem families** are further apart than a sign flip. A `maximize` task seeds a cascade, a `minimize` task fights one it did not start, and a **`recover`** task emits no action at all: `source_localization` hands the agent a graph and an observed diffusion state and asks which seed set produced it. That changes the CONTRACT, not just the objective — the generated program implements `localize(graph, observation, budget)` instead of `plan_horizon`, it is scored on F1 against the true sources, and the world model stops being the thing optimized against and becomes a subroutine the program calls through `self.predict_marginals(seeds)`. The four bindings of that one name ARE conditions 3–6. See [`research/source_localization.md`](research/source_localization.md) §2.3 for why the inversion and not the likelihood is the contribution, and `coding_agent/check_source_localization.py` for the runnable contract.
+The runnable **problem families** are further apart than a sign flip. A `maximize` task seeds a cascade, a `minimize` task fights one it did not start, and a **`recover`** task emits no action at all: `source_localization` hands the agent a graph and an observed diffusion state and asks which seed set produced it. That changes the CONTRACT, not just the objective — the generated program implements `localize(graph, observation, budget)` instead of `plan_horizon`, it is scored on F1 against the true sources, and the world model stops being the thing optimized against and becomes a subroutine the program calls through `self.predict_marginals(seeds)`. The four bindings of that one name ARE conditions 3–6. See [`research/source_localization.md`](research/source_localization.md) §2.3 for why the inversion and not the likelihood is the contribution, and `coding_agent/check_source_localization.py` for the runnable contract.
+
+`influence_blocking` splits the `minimize` family in two. It is the only **two-cascade** task: a rumour is committed at `t=0` and is already spreading, and the budget buys an answer to it — which may itself be a cascade. Its literature is organized by *what the blocker is allowed to do*, and those four levers are our four ops, so `--blocking-lever` picks between counter-seeding (`add_node`, the founding sub-literature), node blocking (`remove_node`, SandIMIN and Xie), link blocking (`remove_edge`, Kimura) and weight reduction (`set_edge_weight`, which is literally DiffIM's continuous relaxation). This is the task the five-op action space was built for, and the one that makes the last three load-bearing rather than idle.
+
+```bash
+python -m pipeline.run --dataset email_eu_core --task influence_blocking --compare
+python -m pipeline.run --dataset email_eu_core --task influence_blocking \
+    --blocking-lever edge_block --tie-break negative --detection-delay 2 --compare
+```
+
+Three things it does differently, each because the literature does. **The budget is absolute `k`**, not a percentage of `N` — percentage budgets speak to no blocking paper at all, while `k ∈ {10..50}` is the shared convention of every comparable table. **The metric is prevented influence**, `σ(S_N, ∅) − σ(S_N | blockers)`, which counts only nodes the rumour *would* have infected: protecting nodes it never reaches scores zero. And **the tie-break is a reported hyperparameter**, not an implementation detail — which cascade wins a node both reach on the same step changes the numbers materially, and most papers never state theirs. Expect a heuristic to win: `proximity` beats every learned method except StratLearner on two of that paper's three graphs, SandIMIN's own trivial heuristic beats both of its principled methods in 6 of 30 cells, and plain degree — the strong baseline in IM — *fails outright* here. All three are in the default pool for those reasons. See [`research/influence_blocking.md`](research/influence_blocking.md) §1.1 and §9.1, and `coding_agent/check_influence_blocking.py` for the runnable contract.
 
 Adding one is a registry entry plus whatever its `blocker` names — usually a head in `wm_model.py` and a simulator branch in `wm_simulator.py`. The stages, feature builder, encoders, collate, plots, and report are task-agnostic.
 

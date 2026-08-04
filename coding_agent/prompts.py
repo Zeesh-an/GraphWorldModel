@@ -6,6 +6,7 @@ from data.wm_simulator import blocked, spent
 from coding_agent.executor import (
     allowed_imports,
     mc_blocked_algorithms,
+    mc_blocked_blocking,
     mc_blocked_dismantling,
     mc_blocked_localization,
     scored_blocked_primitives,
@@ -16,6 +17,8 @@ from coding_agent.tools.library_api import (
     build_algorithm_menu,
     build_algorithm_sources,
     build_api_reference,
+    build_blocking_menu,
+    build_blocking_reference,
     build_dismantling_menu,
     build_dismantling_reference,
     build_localization_menu,
@@ -66,6 +69,98 @@ WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
   cascade) rank nodes DIFFERENTLY, sometimes in opposite orders. You are scored on
   the cascade.
 """
+
+
+blocking_briefs = {
+    "counter_seed": """\
+You are designing an Influence Blocking algorithm as an executable Python script.
+
+YOUR GOAL: MINIMIZE how far a RUMOUR spreads. LOWER IS BETTER, and every score you
+are shown reads that way.
+
+There are TWO cascades on this graph. The rumour was seeded first, at fixed source
+nodes you did not choose and cannot change (listed below), and it is ALREADY
+spreading at t=0. Your budget buys POSITIVE seeds: nodes you activate with a
+counter-cascade that spreads by the same rules and competes for the same nodes. A
+node taken by one cascade is closed to the other forever.
+
+WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
+- ARRIVING FIRST IS THE ENTIRE GAME. A node you reach after the rumour does is worth
+  nothing — it is already lost. Read the tie-break rule stated below: it decides who
+  wins a node you both reach on the SAME step, and it is the difference between a
+  seed being worth something and worth nothing.
+- Your score counts only nodes the rumour WOULD have infected. Protecting a node it
+  was never going to reach scores exactly zero, however central that node is.
+- HIGH DEGREE IS A TRAP HERE, and this is the opposite of influence maximization.
+  The published finding is blunt: the degree heuristic "cannot be used for influence
+  blocking maximization at all". A hub far from the rumour is useless.
+- PROXIMITY is the strong cheap baseline: seed the rumour's own out-neighbours and
+  you intercept it before it gets moving. It is also unstable across graphs, which
+  is where a better algorithm has room to win.
+""",
+    "node_block": """\
+You are designing an Influence Minimization algorithm as an executable Python script.
+
+YOUR GOAL: MINIMIZE how far a RUMOUR spreads. LOWER IS BETTER, and every score you
+are shown reads that way.
+
+The rumour was seeded first, at fixed source nodes you did not choose and cannot
+change (listed below), and it is ALREADY spreading at t=0. Your budget buys
+DELETIONS: each `remove_node` takes that node out of the graph along with all its
+edges, so the rumour can never pass through it.
+
+WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
+- Your score counts only nodes the rumour WOULD have infected. Deleting a node it
+  was never going to reach scores exactly zero.
+- The nodes that matter are the ones the rumour has to pass THROUGH — cut points on
+  its routes out of the sources, not the highest-degree nodes in the graph.
+- The published trivial heuristic here is "rank the sources' out-neighbours by
+  degree", and it beats two principled VLDB algorithms in a fifth of their own
+  table's cells. Assume you have to beat it.
+""",
+    "edge_block": """\
+You are designing a Link Blocking algorithm as an executable Python script.
+
+YOUR GOAL: MINIMIZE how far a RUMOUR spreads. LOWER IS BETTER, and every score you
+are shown reads that way.
+
+The rumour was seeded first, at fixed source nodes you did not choose and cannot
+change (listed below), and it is ALREADY spreading at t=0. Your budget buys EDGE
+CUTS: each `remove_edge` deletes one arc `u -> v`, so the rumour can no longer
+traverse it. Nodes stay in the graph; only the route goes.
+
+WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
+- An arc is worth cutting in proportion to how much traffic it CARRIES: how likely
+  the rumour is to reach its tail, times how much of the graph only hangs off its
+  head. An arc into a node with another way in buys almost nothing.
+- Your score counts only nodes the rumour WOULD have infected, so an arc outside its
+  reachable region scores exactly zero.
+- High-probability arcs are not automatically the right ones. A p = 0.9 arc into a
+  well-connected node is redundant; a p = 0.2 arc that is the only way into a whole
+  region is not.
+""",
+    "weight_block": """\
+You are designing a Link-Weight Reduction algorithm as an executable Python script.
+
+YOUR GOAL: MINIMIZE how far a RUMOUR spreads. LOWER IS BETTER, and every score you
+are shown reads that way.
+
+The rumour was seeded first, at fixed source nodes you did not choose and cannot
+change (listed below), and it is ALREADY spreading at t=0. Your budget buys WEIGHT
+REDUCTIONS: `ActionOp("set_edge_weight", u, v, w)` sets the arc's transmission
+probability to `w`. You may only LOWER an arc — a weight above its current
+probability is REJECTED — and `w = 0.0` is the same thing as cutting it.
+
+WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
+- Choosing `w = 0.0` on the right arcs is a strictly stronger move than any
+  intermediate value, so spend your effort on WHICH arcs, not on how far to turn
+  each one down. Intermediate values only matter if you have a reason to prefer
+  damping many arcs over cutting few.
+- An arc is worth reducing in proportion to how much traffic it carries: how likely
+  the rumour reaches its tail, times how much only hangs off its head.
+- Your score counts only nodes the rumour WOULD have infected.
+""",
+}
 
 
 localization_brief = """\
@@ -163,35 +258,83 @@ WHAT YOU IMPLEMENT:
 """
 
 
+blocking_budget_rules = {
+    "counter_seed": """\
+- A blocker is ActionOp("add_node", node), which seeds YOUR cascade — never the
+  rumour's. Emit at most `budget` add_node actions in total.
+- Seeding the same node twice is REJECTED: it spends two units of budget on one node.
+- Seeding a node the rumour already owns does nothing; it is already committed.""",
+    "node_block": """\
+- A blocker is ActionOp("remove_node", node). Emit at most `budget` remove_node
+  actions in total. You do NOT need to emit the incident remove_edge ops — the
+  harness expands each removal into a full node deletion for you.
+- Removing the same node twice is REJECTED: it spends two units of budget on one node.
+- Emitting add_node is REJECTED under this lever. You are not seeding anything.""",
+    "edge_block": """\
+- A blocker is ActionOp("remove_edge", u, v), one directed arc. Emit at most
+  `budget` remove_edge actions in total.
+- Cutting the same arc twice is REJECTED. Cutting two different arcs out of the same
+  node is FINE — the budget is counted per arc, not per node.
+- Emitting add_node or remove_node is REJECTED under this lever.""",
+    "weight_block": """\
+- A blocker is ActionOp("set_edge_weight", u, v, w), which sets arc u -> v to
+  transmission probability w. Emit at most `budget` of them.
+- w must be between 0.0 and the arc's CURRENT probability. Raising an arc is
+  REJECTED: you are blocking, not boosting.
+- Reweighting the same arc twice is REJECTED. Two different arcs out of one node is
+  FINE — the budget is per arc.
+- Emitting add_node or remove_node is REJECTED under this lever.""",
+}
+
+
+def _blocking_rules(task: TaskSpec) -> tuple[str, str, str]:
+    """(brief, budget rules, library line) for one blocking lever."""
+    from coding_agent.blocking import lever_of
+
+    lever = lever_of(task)
+    library_line = (
+        "- `blocking_algorithms`, `algorithms`, `dismantling_algorithms` and\n"
+        "  `primitives` modules (API below). `blocking_algorithms` members are the\n"
+        "  published baselines for THIS task and take `negative_seeds=` — they are\n"
+        "  what you are being compared against."
+    )
+
+    return blocking_briefs[lever], blocking_budget_rules[lever], library_line
+
+
 def _common_rules(task: TaskSpec | None) -> str:
     """The preamble, with the problem family and the budgeted op filled in."""
     if task is not None and task.recovers:
         return _localization_rules(task)
 
+    blocks = task is not None and task.blocks
     contains = task is not None and task.contains
-    brief = containment_brief if contains else seeding_brief
 
-    if contains:
+    if blocks:
+        brief, budget_rules, library_line = _blocking_rules(task)
+    elif contains:
+        brief = containment_brief
         budget_rules = """\
 - A blocker is ActionOp("remove_node", node). Emit at most `budget` remove_node
   actions in total. You do NOT need to emit the incident remove_edge ops — the
   harness expands each removal into a full node deletion for you.
 - Removing the same node twice is REJECTED: it spends two units of budget on one node.
 - Emitting add_node is REJECTED. You are not seeding this cascade."""
+        library_line = (
+            "- `algorithms`, `adaptive_algorithms`, `dismantling_algorithms` and\n"
+            "  `primitives` modules (API below). `dismantling_algorithms` members\n"
+            "  return node-REMOVAL sets and are the published baselines for this task."
+        )
     else:
+        brief = seeding_brief
         budget_rules = """\
 - A seed is ActionOp("add_node", node). Emit at most `budget` add_node actions in total.
 - Seeding the same node twice is REJECTED: it spends two units of budget on one node."""
-
-    library_line = (
-        "- `algorithms`, `adaptive_algorithms`, `dismantling_algorithms` and\n"
-        "  `primitives` modules (API below). `dismantling_algorithms` members\n"
-        "  return node-REMOVAL sets and are the published baselines for this task."
-        if contains
-        else "- `algorithms`, `adaptive_algorithms` and `primitives` modules (API below).\n"
-        "  `adaptive_algorithms` members are per-ROUND policies and are only callable\n"
-        "  from act() on an adaptive task; the reference below lists them when so."
-    )
+        library_line = (
+            "- `algorithms`, `adaptive_algorithms` and `primitives` modules (API below).\n"
+            "  `adaptive_algorithms` members are per-ROUND policies and are only callable\n"
+            "  from act() on an adaptive task; the reference below lists them when so."
+        )
 
     return f"""\
 {brief}
@@ -208,7 +351,8 @@ Importing anything else is rejected.
 AVAILABLE NAMES (already in your script's namespace — do NOT import these):
 - `ActionOp(op, target, destination=None, weight=None)` : a graph action. Ops:
     add_node, remove_node, add_edge, remove_edge, set_edge_weight.
-- `State` : has .infected (list[int]) and .frontier (list[int]).
+- `State` : has .infected / .frontier (the RUMOUR under a two-cascade task) and
+    .pos_infected / .pos_frontier (your own counter-cascade, empty otherwise).
 - `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node), .degree(node), .edge_index, .ic_probs.
 {library_line}
 
@@ -412,6 +556,223 @@ class ReachableHDA(Strategy):
 it is the tuple of source node ids, and it is also printed in the task block.
 Beat both. Combining their ideas, or replacing them, are both fair game.
 """
+
+# The influence-blocking counterpart, one per lever family. The IM exemplars emit
+# add_node without a rumour to answer and the containment ones assume deletion is the
+# only move, so both would teach the wrong shape. `self.outbreak` is S_N here.
+blocking_exemplars = {
+    "counter_seed": """\
+EXAMPLES — two strategies at the level you should START from, not finish at.
+
+Example 1, race-to-the-node scoring (rank a candidate by how much of the graph it
+reaches BEFORE the rumour does, which is the only thing that scores):
+```python
+import heapq
+
+class RaceAhead(Strategy):
+    def _arrival(self, graph, sources):
+        # Best-probability path from `sources`, as (probability, hops) per node.
+        # Hops is what decides who wins a node; probability is how much it is worth.
+        best = [0.0] * graph.num_nodes
+        hops = [float("inf")] * graph.num_nodes
+        weight = {}
+        for e in range(graph.edge_index.shape[1]):
+            weight[(int(graph.edge_index[0, e]), int(graph.edge_index[1, e]))] = float(
+                graph.ic_probs[e]
+            )
+
+        heap = []
+        for node in sources:
+            best[node], hops[node] = 1.0, 0
+            heapq.heappush(heap, (0.0, 0, int(node)))
+
+        while heap:
+            cost, hop, node = heapq.heappop(heap)
+            for other in graph.out_neighbors(node):
+                probability = best[node] * weight.get((node, other), 0.0)
+                if probability > best[other] and probability > 1e-4:
+                    best[other], hops[other] = probability, hop + 1
+                    heapq.heappush(heap, (-probability, hop + 1, other))
+
+        return best, hops
+
+    def plan_horizon(self, graph, budget, horizon):
+        rumour_reach, rumour_hops = self._arrival(graph, self.outbreak)
+        # Only nodes the rumour actually threatens can be saved
+        candidates = [v for v in range(graph.num_nodes)
+                      if rumour_reach[v] > 0 and v not in self.outbreak]
+
+        seeds = []
+        for _ in range(budget):
+            best_node, best_gain = -1, 0.0
+            for node in candidates:
+                if node in seeds:
+                    continue
+                reach, hops = self._arrival(graph, seeds + [node])
+                gain = sum(
+                    rumour_reach[v] * reach[v]
+                    for v in candidates
+                    if hops[v] <= rumour_hops[v]      # arriving LATE saves nobody
+                )
+                if gain > best_gain:
+                    best_node, best_gain = node, gain
+            if best_node < 0:
+                break
+            seeds.append(best_node)
+
+        return [[ActionOp("add_node", int(v)) for v in seeds]] + [
+            [] for _ in range(horizon)
+        ]
+```
+
+Example 2, the published proximity baseline, narrowed (seed the rumour's own
+out-neighbours, but spend the budget on the ones with the most onward reach):
+```python
+class ProximityReach(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        sources = set(self.outbreak)
+        ring = sorted({v for s in sources for v in graph.out_neighbors(s)} - sources)
+        # Onward reach, discounted for neighbours an earlier pick already covers
+        chosen, covered = [], set()
+        while len(chosen) < budget and ring:
+            best_node, best_score = None, -1.0
+            for node in ring:
+                if node in chosen:
+                    continue
+                fresh = sum(1 for o in graph.out_neighbors(node) if o not in covered)
+                if fresh > best_score:
+                    best_node, best_score = node, fresh
+            if best_node is None:
+                break
+            chosen.append(best_node)
+            covered.update(graph.out_neighbors(best_node))
+
+        return [[ActionOp("add_node", int(v)) for v in chosen]] + [
+            [] for _ in range(horizon)
+        ]
+```
+`self.outbreak` is set on your Strategy instance before plan_horizon is called; it
+is the tuple of RUMOUR source ids, and it is also printed in the task block.
+Beat both. Combining their ideas, or replacing them, are both fair game.
+""",
+    "node_block": """\
+EXAMPLES — two strategies at the level you should START from, not finish at.
+
+Example 1, cut-point scoring by sampled reachability (delete the nodes the rumour has
+no way around):
+```python
+import numpy as np
+
+class CutPoints(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        rng = np.random.default_rng(0)
+        credit = np.zeros(graph.num_nodes)
+
+        for _ in range(50):
+            # One live-edge realization of the rumour's cascade
+            live = {v: [] for v in range(graph.num_nodes)}
+            keep = rng.random(graph.edge_index.shape[1]) < graph.ic_probs
+            for e in np.flatnonzero(keep):
+                live[int(graph.edge_index[0, e])].append(int(graph.edge_index[1, e]))
+
+            seen, order, queue = set(self.outbreak), [], list(self.outbreak)
+            while queue:
+                node = queue.pop(0)
+                for other in live[node]:
+                    if other not in seen:
+                        seen.add(other)
+                        order.append(other)
+                        queue.append(other)
+
+            # A node that was reached through exactly one live in-arc is a
+            # bottleneck on this realization
+            arrivals = {}
+            for node in seen:
+                for other in live[node]:
+                    arrivals[other] = arrivals.get(other, 0) + 1
+            for node in order:
+                if arrivals.get(node, 0) == 1:
+                    credit[node] += 1.0
+
+        for node in self.outbreak:
+            credit[node] = -1.0
+
+        picks = [int(v) for v in np.argsort(-credit)[:budget]]
+        return [[ActionOp("remove_node", v) for v in picks]] + [
+            [] for _ in range(horizon)
+        ]
+```
+
+Example 2, the published trivial heuristic you have to beat (the rumour's
+out-neighbours, by degree):
+```python
+class NeighbourDegree(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        sources = set(self.outbreak)
+        ring = sorted({v for s in sources for v in graph.out_neighbors(s)} - sources)
+        ring.sort(key=graph.degree, reverse=True)
+        return [[ActionOp("remove_node", int(v)) for v in ring[:budget]]] + [
+            [] for _ in range(horizon)
+        ]
+```
+Beat both. Combining their ideas, or replacing them, are both fair game.
+""",
+}
+blocking_exemplars["edge_block"] = """\
+EXAMPLES — one strategy at the level you should START from, not finish at.
+
+Cut the arcs that carry the most traffic out of the rumour (reach probability of the
+tail, times how much only hangs off the head):
+```python
+import numpy as np
+
+class CarriedTraffic(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        # Damped reach from the rumour: "will it ever get to this tail at all"
+        exposure = np.zeros(graph.num_nodes)
+        wave = {int(v): 1.0 for v in self.outbreak}
+        for _ in range(4):
+            nxt = {}
+            for node, mass in wave.items():
+                exposure[node] += mass
+                for other in graph.out_neighbors(node):
+                    nxt[other] = nxt.get(other, 0.0) + mass * 0.5
+            wave = nxt
+
+        scored = []
+        for e in range(graph.edge_index.shape[1]):
+            u = int(graph.edge_index[0, e])
+            v = int(graph.edge_index[1, e])
+            # An arc into a node with other ways in is redundant
+            alternatives = max(1, len(graph.in_neighbors(v)))
+            scored.append(
+                (exposure[u] * float(graph.ic_probs[e]) / alternatives, u, v)
+            )
+
+        scored.sort(reverse=True)
+        return [[ActionOp("remove_edge", u, v) for _, u, v in scored[:budget]]] + [
+            [] for _ in range(horizon)
+        ]
+```
+Beat it.
+"""
+blocking_exemplars["weight_block"] = blocking_exemplars["edge_block"].replace(
+    'ActionOp("remove_edge", u, v)', 'ActionOp("set_edge_weight", u, v, 0.0)'
+).replace("class CarriedTraffic", "class CarriedTrafficDamping")
+
+# The blocking timing note. `containment_timing_note` is close but not right: a
+# counter-seed placed late has strictly fewer steps to RACE with, which is a stronger
+# statement than "the node may already be infected".
+blocking_timing_note = """\
+
+USING THE HORIZON: put every action in element 0 and leave the rest of the plan
+empty. The rumour was seeded at t=0 and is already moving; every step you wait is a
+step of head start you hand it, and under either tie-break a cascade that arrives
+second saves nobody. If the task block below states a DETECTION DELAY, the harness
+drops anything you emit before that step — that is the experiment, not a bug, and it
+is what makes the first-mover advantage measurable.
+"""
+
 
 # The inverse-task counterpart. Neither of the other two exemplar sets works here:
 # both emit action bags from plan_horizon, and this task calls localize and
@@ -726,11 +1087,36 @@ def build_outbreak_block(task: TaskSpec) -> str:
         if len(sources) > max_listed_outbreak
         else ""
     )
+    label = "RUMOUR SEEDS S_N" if task.blocks else "OUTBREAK SOURCES"
+    delay = (
+        f"You are DETECTED LATE: anything you emit before t={task.detection_delay} "
+        f"is dropped by the harness.\n"
+        if task.blocks and task.detection_delay
+        else ""
+    )
+    # §8.4 is emphatic that the tie-break is a reported hyperparameter rather than an
+    # implementation detail, and it is the single fact that decides whether a
+    # same-step arrival is worth anything — so it goes in the task block, not a
+    # footnote
+    rule = (
+        {
+            "negative": "the RUMOUR wins — you must arrive STRICTLY EARLIER to save "
+            "a node (this is the competitive-LT convention)",
+            "positive": "YOU win — arriving at the same step as the rumour is enough "
+            "to save a node (this is Budak's convention)",
+            "fixed": "a fixed per-node priority decides, and you cannot see it — "
+            "treat a same-step arrival as worth roughly half a node",
+        }.get(task.tie_break, task.tie_break)
+        if task.blocks
+        else ""
+    )
+    tie = f"TIE-BREAK: if you and the rumour reach a node on the SAME step, {rule}.\n" if rule else ""
 
     return (
-        f"\nOUTBREAK SOURCES ({len(sources)} nodes, fixed, NOT yours to choose; also\n"
+        f"\n{label} ({len(sources)} nodes, fixed, NOT yours to choose; also\n"
         f"available inside your Strategy as `self.outbreak`): {listed}{overflow}\n"
         f"The cascade starts here at t=0 and spreads for {task.horizon} timesteps.\n"
+        f"{tie}{delay}"
     )
 
 
@@ -793,6 +1179,19 @@ def build_observation_block(task: TaskSpec) -> str:
     return "\n".join(lines)
 
 
+def _budget_unit(task: TaskSpec) -> str:
+    """What one unit of budget buys, in words, for the task block."""
+    if task.blocks:
+        return {
+            "add_node": "max counter-seeds total",
+            "remove_node": "max node deletions total",
+            "remove_edge": "max arc cuts total",
+            "set_edge_weight": "max arc reweights total",
+        }[task.budget_op]
+
+    return "max removals total" if task.contains else "max seeds total"
+
+
 def build_user_prompt(
     method: str,
     task: TaskSpec,
@@ -805,6 +1204,8 @@ def build_user_prompt(
         # out inside score()/schedule()/source_score(), where they can be mutated
         if task.recovers:
             menu = build_localization_menu()
+        elif task.blocks:
+            menu = build_blocking_menu(task.budget_op)
         elif task.contains:
             menu = build_dismantling_menu()
         else:
@@ -831,6 +1232,21 @@ def build_user_prompt(
             + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as "
             "`primitives`)\n"
             + build_primitives_reference(exclude=scored_blocked_primitives)
+        )
+        final_line = f"Write the Strategy now (method = {method})."
+    elif task.blocks:
+        # A blocking task's library is the BLOCKING pool: the IM algorithms return
+        # seed sets to maximize with and the dismantlers know nothing about a second
+        # cascade, so neither answers the question this task asks. The generic
+        # primitives ride along because a blocker still needs centralities and RIS.
+        reference = (
+            build_blocking_reference(
+                task.budget_op,
+                exclude=() if allow_mc_algorithms else mc_blocked_blocking,
+            )
+            + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as "
+            "`primitives`)\n"
+            + build_primitives_reference()
         )
         final_line = f"Write the Strategy now (method = {method})."
     else:
@@ -867,9 +1283,11 @@ def build_user_prompt(
         )
         ops_line = "allowed_ops = none — this task emits no actions\n"
     else:
-        budget_unit = "max removals total" if task.contains else "max seeds total"
+        budget_unit = _budget_unit(task)
         objective_line = (
-            "MINIMIZE the final infected count (lower is better)"
+            "MINIMIZE how far the RUMOUR spreads (lower is better)"
+            if task.blocks
+            else "MINIMIZE the final infected count (lower is better)"
             if task.contains
             else task.objective
         )
@@ -962,18 +1380,35 @@ def _scored_system(task: TaskSpec | None) -> str:
     if task is not None and task.recovers:
         return _scored_localization_system(task)
 
+    blocks = task is not None and task.blocks
     contains = task is not None and task.contains
-    problem = (
-        "a Critical Node Detection algorithm" if contains else "an Influence Maximization algorithm"
-    )
-    picks = "removes" if contains else "seeds"
-    goal = (
-        "Higher score = removed sooner. You are MINIMIZING the final infected "
-        "count, so a high score should mean 'cutting this node hurts the cascade "
-        "most'"
-        if contains
-        else "Higher score = picked sooner"
-    )
+
+    if blocks:
+        problem = "an Influence Blocking algorithm"
+        picks = {
+            "add_node": "counter-seeds",
+            "remove_node": "deletions",
+            "remove_edge": "arc cuts",
+            "set_edge_weight": "arc reweights",
+        }[task.budget_op]
+        goal = (
+            "Higher score = spent on sooner. You are MINIMIZING how far the RUMOUR "
+            "spreads, and the rumour's own seeds are on `self.outbreak`, so a high "
+            "score should mean 'this is where the rumour is going and I can get "
+            "there first'"
+        )
+    elif contains:
+        problem = "a Critical Node Detection algorithm"
+        picks = "removes"
+        goal = (
+            "Higher score = removed sooner. You are MINIMIZING the final infected "
+            "count, so a high score should mean 'cutting this node hurts the cascade "
+            "most'"
+        )
+    else:
+        problem = "an Influence Maximization algorithm"
+        picks = "seeds"
+        goal = "Higher score = picked sooner"
     example = (
         """\
 ```python
@@ -1025,11 +1460,15 @@ def build_system_prompt(
     contains = task is not None and task.contains
     recovers = task is not None and task.recovers
 
+    blocks = task is not None and task.blocks
+
     if task is not None:
         if recovers:
             horizon_note = localization_timing_note
         elif task.adaptive:
             horizon_note = adaptive_timing_note
+        elif blocks:
+            horizon_note = blocking_timing_note
         elif contains:
             horizon_note = containment_timing_note
         elif any(op in task.allowed_ops for op in edge_ops):
@@ -1072,7 +1511,14 @@ def build_system_prompt(
     if resolved == "localize":
         base += localization_exemplars
     elif resolved == "one_shot":
-        base += containment_exemplars if contains else one_shot_exemplars
+        if blocks:
+            from coding_agent.blocking import lever_of
+
+            base += blocking_exemplars[lever_of(task)]
+        elif contains:
+            base += containment_exemplars
+        else:
+            base += one_shot_exemplars
 
     if resolved == "localize" or method in ("one_shot", "evolve", "adaptive"):
         return base + remove_note + horizon_note
@@ -1164,9 +1610,23 @@ Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
 no explanation."""
 
 
+blocking_routing_system = """\
+You are an algorithm-selection router for Influence Blocking.
+You will be given a task, a graph description, the rumour's own seed nodes, and a
+menu of classical influence-blocking algorithms. Each returns the intervention this
+task's lever buys — counter-seeds, node deletions, or arcs. Pick the single one most
+likely to MINIMIZE how far the rumour spreads on this graph.
+
+Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+no explanation."""
+
+
 def build_routing_system(task: TaskSpec | None = None) -> str:
     if task is not None and task.recovers:
         return localization_routing_system
+
+    if task is not None and task.blocks:
+        return blocking_routing_system
 
     return (
         containment_routing_system
@@ -1181,13 +1641,20 @@ def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
         objective_line = "MAXIMIZE F1 against the true source set (higher is better)"
         menu = build_localization_menu()
     else:
-        budget_unit = "max removals total" if task.contains else "max seeds total"
+        budget_unit = _budget_unit(task)
         objective_line = (
-            "MINIMIZE the final infected count (lower is better)"
+            "MINIMIZE how far the RUMOUR spreads (lower is better)"
+            if task.blocks
+            else "MINIMIZE the final infected count (lower is better)"
             if task.contains
             else task.objective
         )
-        menu = build_dismantling_menu() if task.contains else build_algorithm_menu()
+        if task.blocks:
+            menu = build_blocking_menu(task.budget_op)
+        elif task.contains:
+            menu = build_dismantling_menu()
+        else:
+            menu = build_algorithm_menu()
 
     return f"""\
 TASK: {task.task} — {objective_line}

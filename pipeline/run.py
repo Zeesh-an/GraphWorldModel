@@ -61,6 +61,7 @@ from baselines.registry import (
 )
 from baselines.run_baseline import (
     BaselineError,
+    edge_script,
     localize_script,
     round_seed_script,
     run_external_baseline,
@@ -74,11 +75,22 @@ from data.generate_wm_data import (
     run_generation,
     synthetic_families,
 )
+from data.wm_actions import blocking_selectors, spine_algorithms
+from data.wm_competitive import (
+    auto_dominance,
+    shared_positive_prob,
+    tie_break_choices,
+)
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithm_names
+from coding_agent.tools.blocking_algorithms import (
+    blocking_algorithm_names,
+    default_blocking_baselines,
+)
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithm_names
 from coding_agent.tools.localization_algorithms import localization_algorithm_names
 from coding_agent.tools.library_api import algorithm_names
-from coding_agent.containment import outbreak_selectors
+from coding_agent.blocking import counter_seed, resolve_lever, valid_levers
+from coding_agent.containment import outbreak_selectors, select_outbreak
 from coding_agent.localization import (
     episode_budget,
     load_instances,
@@ -210,6 +222,15 @@ class PipelineConfig:
     # --seed, so all arms in one sweep face the same one.
     outbreak_pct: float | None = None
     outbreak_selector: str = "random"
+    # Influence blocking. `outbreak_pct` / `outbreak_selector` above double as |S_N|
+    # and the attacker model, so only the two-cascade specifics live here. All are
+    # inert unless the task registry marks the task competitive.
+    blocking_lever: str = counter_seed
+    tie_break: str = auto_dominance
+    positive_prob: str = shared_positive_prob
+    detection_delay: int = 0
+    negative_selectors: tuple = ("random", "degree", "pagerank")
+    blocker_selectors: tuple = blocking_selectors
     # Source localization; every field is inert unless the task inverts, so one
     # sweep configuration serves all four runnable tasks
     sl_select_split: str = "train"
@@ -246,7 +267,7 @@ class PipelineConfig:
     _graph: object = field(default=None, repr=False)
 
 
-def expand_baselines(names: tuple, task: str) -> list[str]:
+def expand_baselines(names: tuple, task: str, lever: str = counter_seed) -> list[str]:
     """
     Resolve --baselines into arm specs.
 
@@ -258,9 +279,14 @@ def expand_baselines(names: tuple, task: str) -> list[str]:
     `all-classical` expands to the TASK's own pool, not the static IM classics: a
     dismantler and a source localizer are different KINDS of algorithm, and
     expanding the IM list under `--task source_localization` would run seed-set
-    selectors against an inverse task and fail at the contract check.
+    selectors against an inverse task and fail at the contract check. On a
+    competitive task it narrows further still, to the LEVER's own pool.
     """
-    classical = get_task(task).default_baselines or default_baselines
+    classical = (
+        default_blocking_baselines[lever]
+        if get_task(task).competitive
+        else get_task(task).default_baselines or default_baselines
+    )
     specs = []
 
     for name in names:
@@ -314,9 +340,19 @@ def resolve_arms(config: PipelineConfig) -> tuple:
 
 
 def resolve_baselines(config: PipelineConfig) -> tuple:
-    """--baselines, else the task's own pool, else the static IM classics."""
+    """
+    --baselines, else the task's own pool, else the static IM classics.
+
+    A competitive task resolves per LEVER rather than per task, because a lever can
+    only emit what its own members return: `proximity` hands back node ids and
+    `kimura_link_blocking` hands back arcs, so one pool across all four levers would
+    fail at the first baseline of any lever but the default.
+    """
     if config.baselines is not None:
         return tuple(config.baselines)
+
+    if get_task(config.task).competitive:
+        return default_blocking_baselines[config.blocking_lever]
 
     return get_task(config.task).default_baselines or default_baselines
 
@@ -339,7 +375,9 @@ def resolve_gen_action_ops(config: PipelineConfig) -> tuple:
 
 def build_arms(config: PipelineConfig) -> list[Arm]:
     """Classical pool + external published baselines + the named conditions."""
-    specs = expand_baselines(resolve_baselines(config), config.task)
+    specs = expand_baselines(
+        resolve_baselines(config), config.task, config.blocking_lever
+    )
     specs += list(resolve_arms(config))
 
     arms = [parse_arm(spec, default_evaluator=config.evaluator) for spec in specs]
@@ -363,9 +401,21 @@ def resolve_budget_pcts(config: PipelineConfig) -> tuple:
 
 
 def budget_points(config: PipelineConfig) -> list[tuple[str, float | None, int]]:
-    """(label, budget_pct, budget) for each point of the sweep; pct wins if both are set."""
+    """
+    (label, budget_pct, budget) for each point of the sweep.
+
+    Precedence: `--budgets`, then the task's own ABSOLUTE sweep, then `--budget-pcts`,
+    then the task's percentage sweep, then the 1/5/10/20 ladder. The absolute rung
+    exists for influence blocking specifically: percent-of-N budgets are used by
+    nobody in that literature, while k in {10..50} is the shared convention of every
+    comparable table (research/influence_blocking.md §8.2).
+    """
     if config.budgets is not None:
         return [(budget_label(None, k), None, int(k)) for k in config.budgets]
+
+    task_budgets = get_task(config.task).default_budgets
+    if task_budgets is not None and config.budget_pcts is None:
+        return [(budget_label(None, k), None, int(k)) for k in task_budgets]
 
     return [(budget_label(pct, 0), float(pct), 0) for pct in resolve_budget_pcts(config)]
 
@@ -475,6 +525,19 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         seed=config.seed,
         mc_marginals=config.mc_marginals,
         out_dir=str(layout.data_dir),
+        # Two-cascade generation, from the registry rather than a flag so a blocking
+        # dataset cannot be generated single-cascade by forgetting one. The three
+        # dynamics parameters land in metadata.json and train_wm reads them back.
+        competitive=get_task(config.task).competitive,
+        tie_break=config.tie_break,
+        positive_prob=config.positive_prob,
+        negative_pct=(
+            get_task(config.task).outbreak_pct
+            if config.outbreak_pct is None
+            else config.outbreak_pct
+        ),
+        negative_selectors=tuple(config.negative_selectors),
+        blocker_selectors=tuple(config.blocker_selectors),
     )
 
     return run_generation(generation_config)
@@ -581,8 +644,16 @@ def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
     if "sources" in external_seeds:
         return localize_script(external_seeds["sources"])
 
-    budget_op = get_task(config.task).budget_op
+    task = get_task(config.task)
+    budget_op = (
+        resolve_lever(config.blocking_lever)[0] if task.competitive else task.budget_op
+    )
     batches = external_seeds.get("batches")
+
+    # An EDGE repo hands back a flat list of arc endpoints (see
+    # registry._diffim_parse), which only the edge levers can emit
+    if budget_op in ("remove_edge", "set_edge_weight"):
+        return edge_script(external_seeds["seeds"], budget_op)
 
     if batches:
         return round_seed_script(
@@ -590,6 +661,29 @@ def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
         )
 
     return seed_script(external_seeds["seeds"], budget_op)
+
+
+def _negative_seeds(config: PipelineConfig, graph: GraphInfo) -> tuple:
+    """
+    S_N for this sweep, derived exactly as `run_experiment` derives it.
+
+    A pure function of (graph, size, selector, seed), so the external repo answers
+    the SAME rumour our own arms do rather than one that merely looks like it.
+    """
+    pct = (
+        get_task(config.task).outbreak_pct
+        if config.outbreak_pct is None
+        else config.outbreak_pct
+    )
+
+    return tuple(
+        select_outbreak(
+            graph,
+            max(1, round(graph.num_nodes * pct / 100)),
+            config.outbreak_selector,
+            config.seed,
+        )
+    )
 
 
 def _external_instances(config: PipelineConfig, layout: Layout, budget: int) -> list:
@@ -711,6 +805,15 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     else None
                 )
 
+                # A blocking repo has to be told which rumour it is answering: two of
+                # the three would otherwise draw their own from a fixed seed and
+                # answer a different one than every arm it is being compared against
+                external_negative = (
+                    _negative_seeds(config, graph)
+                    if get_task(config.task).competitive
+                    else None
+                )
+
                 try:
                     external_seeds = run_external_baseline(
                         arm.external,
@@ -721,6 +824,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                         timeout=config.baseline_timeout,
                         batches=external_batches,
                         instances=external_instances,
+                        negative_seeds=external_negative,
                     )
                 except BaselineError as error:
                     tqdm.write(f"[agent] {label}/{arm.name}: SKIPPED — {error}")
@@ -750,6 +854,12 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 # passed always so one code path serves both families
                 outbreak_pct=config.outbreak_pct,
                 outbreak_selector=config.outbreak_selector,
+                # Inert unless the task registry marks the task competitive; passed
+                # always so one code path serves the blocking family too
+                blocking_lever=config.blocking_lever,
+                tie_break=config.tie_break,
+                positive_prob=config.positive_prob,
+                detection_delay=config.detection_delay,
                 # Inert unless the task inverts. `native_arm` cannot be recovered
                 # downstream — resolve_evaluator has already rewritten a native
                 # arm to monte_carlo with one episode — and it decides whether
@@ -1467,6 +1577,64 @@ if __name__ == "__main__":
         "outbreak makes blocking the same ranking problem (default: random).",
     )
     parser.add_argument(
+        "--blocking-lever",
+        type=str,
+        default=counter_seed,
+        choices=list(valid_levers),
+        help="influence blocking: which of the four published interventions the "
+        "budget buys. counter_seed = seed a competing cascade (Budak, CLDAG, RPS, "
+        "NIE); node_block = delete nodes (SandIMIN, Xie); edge_block = cut arcs "
+        "(Kimura); weight_block = reduce arc probabilities (DiffIM's continuous "
+        f"relaxation) (default: {counter_seed}).",
+    )
+    parser.add_argument(
+        "--tie-break",
+        type=str,
+        default=auto_dominance,
+        choices=list(tie_break_choices),
+        help="influence blocking: which cascade wins a node both reach on the same "
+        "step. Crosses generation, training and evaluation, so it is one value; auto "
+        "resolves to each dynamics' own founding paper, positive under IC (Budak) "
+        f"and negative under LT (He) (default: {auto_dominance}).",
+    )
+    parser.add_argument(
+        "--positive-prob",
+        type=str,
+        default=shared_positive_prob,
+        help="influence blocking: the blocker's per-edge transmission probability. "
+        "'shared' is COICM (one probability per edge, information-independent); a "
+        "float is MCICM, and 1.0 is Budak's high-effectiveness property, the case "
+        f"his Theorem 4.2 proves submodular (default: {shared_positive_prob}).",
+    )
+    parser.add_argument(
+        "--detection-delay",
+        type=int,
+        default=0,
+        help="influence blocking: Budak's r — the rumour is detected r steps late "
+        "and anything the blocker emits before then is dropped. The axis that makes "
+        "the first-mover advantage measurable (default: 0).",
+    )
+    parser.add_argument(
+        "--negative-selectors",
+        type=str,
+        nargs="+",
+        default=["random", "degree", "pagerank"],
+        choices=list(spine_algorithms),
+        help="influence blocking, data stage: how each episode's S_N is chosen — the "
+        "attacker model, a second experimental axis IM does not have "
+        "(default: random degree pagerank).",
+    )
+    parser.add_argument(
+        "--blocker-selectors",
+        type=str,
+        nargs="+",
+        default=list(blocking_selectors),
+        choices=list(blocking_selectors),
+        help="influence blocking, data stage: how each episode's t=0 blocker set is "
+        "chosen. `none` leaves the rumour unopposed and is the reference every "
+        f"prevented-influence number divides by (default: {' '.join(blocking_selectors)}).",
+    )
+    parser.add_argument(
         "--baselines",
         type=str,
         nargs="*",
@@ -1474,6 +1642,7 @@ if __name__ == "__main__":
         choices=(
             list(algorithm_names)
             + list(adaptive_algorithm_names)
+            + list(blocking_algorithm_names)
             + list(dismantling_algorithm_names)
             + list(localization_algorithm_names)
             + [f"external:{name}" for name in external_baselines]
@@ -1481,10 +1650,10 @@ if __name__ == "__main__":
         ),
         metavar="NAME",
         help="baselines to run: a static IM algorithm, a per-round adaptive "
-        "policy, a network dismantler, a source localizer (all condition 1), "
-        "'external:<name>' for a published repo (condition 7), or the aliases "
-        "'all' / 'all-classical' / 'all-external'. 'all' includes only external "
-        "baselines already installed. Unset = the task registry's own pool "
+        "policy, an influence blocker, a network dismantler, a source localizer "
+        "(all condition 1), 'external:<name>' for a published repo (condition 7), or "
+        "the aliases 'all' / 'all-classical' / 'all-external'. 'all' includes only "
+        "external baselines already installed. Unset = the task registry's own pool "
         f"(default for influence_maximization: {' '.join(default_baselines)}).",
     )
     parser.add_argument(
@@ -1832,6 +2001,12 @@ if __name__ == "__main__":
         campaigns=args.campaigns,
         outbreak_pct=args.outbreak_pct,
         outbreak_selector=args.outbreak_selector,
+        blocking_lever=args.blocking_lever,
+        tie_break=args.tie_break,
+        positive_prob=args.positive_prob,
+        detection_delay=args.detection_delay,
+        negative_selectors=tuple(args.negative_selectors),
+        blocker_selectors=tuple(args.blocker_selectors),
         sl_select_split=args.sl_select_split,
         sl_eval_split=args.sl_eval_split,
         sl_instances=args.sl_instances,

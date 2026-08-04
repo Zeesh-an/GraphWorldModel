@@ -219,6 +219,36 @@ How these become model inputs is documented in [`world_model/README.md`](../worl
 
 ---
 
+## `--competitive`: two cascades (influence blocking)
+
+`--competitive` swaps the NDlib `Simulator` for [`data/wm_competitive.py`](wm_competitive.py)`::CompetitiveSimulator` and generates **two-cascade** episodes. Through `pipeline.run --task influence_blocking` the flag is supplied by the registry, so nothing has to be passed by hand.
+
+What changes:
+
+- **A rumour `S_N` is committed at `t=0` by `reset()`, not by an action.** `--negative-pct` sizes it (1% of `N` by default) and `--negative-selectors` chooses it — the spine selectors again, because the published attacker models are exactly `random`, `degree`, `pagerank` and IMM. `s_0` is therefore **not empty**, unlike every other task: the rumour moved first, which is the premise.
+- **`add_node` seeds the POSITIVE cascade.** The blocker only ever helps itself; there is no action that seeds the rumour. `--blocker-selectors` picks each episode's `t=0` blocker set, and `none` is on that list on purpose — those episodes are the unopposed `σ(S_N, ∅)` reference every prevented-influence number divides by.
+- **Four soft targets per step instead of two.** `next_marginal_pos_infected` / `next_marginal_pos_frontier` join the existing pair, and every record carries the episode's `negative_seeds`.
+- **`State` gains `pos_infected` / `pos_frontier`.** They are omitted from the JSONL when empty, so a single-cascade dataset is byte-identical to what it was.
+
+Two dynamics parameters are recorded in `metadata.json` under `competitive`, because both move the published numbers and most papers state neither:
+
+| Flag | Meaning |
+| ---- | ------- |
+| `--tie-break` | which cascade wins a node both reach on the **same step**: `negative` / `positive` / `fixed` dominance. `auto` (default) resolves per dynamics to that dynamics' own founding paper — positive under IC (Budak), negative under LT (He et al.'s CLT) |
+| `--positive-prob` | `shared` (default) is **COICM**, one probability per edge independent of information type; a float is **MCICM**, and `1.0` is Budak's high-effectiveness property |
+
+`train_wm.py` reads all three (`competitive`, `tie_break`, `positive_prob`) back out of `metadata.json` rather than taking them as flags: a head whose tie-break disagrees with the simulator that produced its targets is fit against a transition that never happened, and nothing in the loss curve would say so.
+
+```bash
+python -m data.generate_wm_data --task influence_blocking --dataset email_eu_core \
+    --competitive --remove-semantics blocked --negative-pct 1.0 \
+    --negative-selectors random degree pagerank \
+    --blocker-selectors none random proximity degree \
+    --action-ops add_node remove_node remove_edge set_edge_weight --models IC
+```
+
+---
+
 ## Diffusion dynamics
 
 | Model  | Determinism                    | Per-step rule                                                                                                                                                                                                                      |

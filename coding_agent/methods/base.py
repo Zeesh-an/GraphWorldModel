@@ -7,9 +7,22 @@ from functools import partial
 from typing import Protocol
 
 from coding_agent.agent import CodingAgent
+from coding_agent.blocking import (
+    blocker_set,
+    blocking_plan,
+    build_negative_cascade,
+    edge_weight_caps,
+    lever_of,
+    proximity_ring,
+)
 from coding_agent.containment import build_outbreak, removal_plan, removal_set
 from coding_agent.credit import planned_action
-from coding_agent.executor import StrategyError, call_strategy, validate_actions
+from coding_agent.executor import (
+    StrategyError,
+    budget_key,
+    call_strategy,
+    validate_actions,
+)
 from coding_agent.localization import (
     LocalizeAnchor,
     bind_predict_marginals,
@@ -20,6 +33,7 @@ from coding_agent.rounds import adaptive_action_fn, round_batches, round_schedul
 from coding_agent.stream import build_stream
 from coding_agent.tools import algorithms, primitives
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
+from coding_agent.tools.blocking_algorithms import all_blocking_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
 from coding_agent.tools.localization_algorithms import (
     localization_algorithms,
@@ -95,6 +109,27 @@ localization_anchor_algorithms = (
     "infected_degree",
     "random_sources",
 )
+
+# The leaderboard for an INFLUENCE BLOCKING task, per lever. `proximity` heads the
+# counter-seeding list because it is the row that actually has to be beaten
+# (research/influence_blocking.md §5.4, §5.6), and `degree_blocking` is on it for the
+# opposite reason: CLDAG reports the degree heuristic fails outright here, so an arm
+# that only beats degree has demonstrated nothing. `greedy_prevention` and
+# `cmia_o` are deliberately absent — the first re-simulates the whole competitive
+# cascade per candidate and would dominate startup, the second runs a Dijkstra per
+# candidate per pick. Run either as its own --baselines arm when you want its number.
+blocking_anchor_algorithms = {
+    "counter_seed": ("proximity", "reverse_blocking", "rps", "degree_blocking", "random_blocking"),
+    "node_block": ("imin_lhga", "imin_lsbm", "advanced_greedy", "degree_blocking", "random_blocking"),
+    "edge_block": ("kimura_link_blocking", "out_edge_blocking", "random_edge_blocking"),
+    "weight_block": ("kimura_link_blocking", "out_edge_blocking", "random_edge_blocking"),
+}
+
+# The floor every blocker has to beat, and the reference every prevented-influence
+# number divides by: the rumour with nobody stopping it. Reported as an anchor row
+# rather than computed on a private simulator, so it is measured by the same
+# evaluator as the arm it is calibrating.
+no_blocking = "no_blocking"
 
 # Residual-gain feedback is built from reverse-reachable sets, so it is IC-only.
 # theta is small relative to what IMM would ask for: this ranks candidates for a
@@ -321,6 +356,79 @@ def _containment_lines(
     return lines
 
 
+def _blocking_lines(
+    trajectory: Trajectory, graph: GraphInfo, task: TaskSpec
+) -> list[str]:
+    """
+    What the blocker set did, in the terms this literature reasons in.
+
+    `summarize`'s seed-centric diagnostics all describe where a cascade SHOULD go
+    next, and `_containment_lines`' removal-distance framing assumes the only lever
+    is deletion. Neither answers the question a blocker asks, which is whether its
+    counter-cascade got anywhere BEFORE the rumour did — the tie-break makes arriving
+    second worth exactly nothing.
+    """
+    lever = lever_of(task)
+    spent = blocker_set(trajectory.actions, lever)
+    sources = list(task.outbreak)
+    lines = []
+
+    if sources:
+        listed = ", ".join(
+            f"{node}(d={graph.degree(node)})" for node in sources[:max_listed_nodes]
+        )
+        lines.append(
+            f"RUMOUR SEEDS S_N (fixed, not yours to choose; {len(sources)} nodes, "
+            f"already committed at t=0): {listed}"
+        )
+
+    if spent:
+        listed = ", ".join(str(entry) for entry in spent[:max_listed_seeds])
+        overflow = (
+            f", … and {len(spent) - max_listed_seeds} more"
+            if len(spent) > max_listed_seeds
+            else ""
+        )
+        lines.append(
+            f"your {lever} picks ({len(spent)} of budget {task.budget}, in order): "
+            f"{listed}{overflow}"
+        )
+
+    if lever == "counter_seed" and spent and sources:
+        # The diagnostic that decides a counter-seeding result: a blocker the rumour
+        # reaches first is worth nothing under either tie-break, and hop distance
+        # from S_N is the cheapest honest proxy for who arrives first
+        ring = proximity_ring(graph, sources, hops=3)
+        position = {node: index for index, node in enumerate(ring)}
+        hop_one = set(proximity_ring(graph, sources, hops=1))
+        inside = [node for node in spent if node in position]
+        lines.append(
+            f"reachability of your seeds from the rumour: {len(inside)}/{len(spent)} "
+            f"sit within 3 hops of S_N ({sum(1 for node in spent if node in hop_one)} "
+            f"of them adjacent to a source). A seed the rumour never reaches saves "
+            f"nobody, and one it reaches FIRST saves nobody either — prevented "
+            f"influence counts only nodes that would otherwise have been infected."
+        )
+
+    if trajectory.final_marginals is not None:
+        infected = [
+            node
+            for node, frequency in enumerate(trajectory.final_marginals)
+            if frequency >= reached_threshold
+        ]
+        infected.sort(key=graph.degree, reverse=True)
+        listed = ", ".join(
+            f"{node}(d={graph.degree(node)}, P={trajectory.final_marginals[node]:.2f})"
+            for node in infected[:max_listed_nodes]
+        )
+        lines.append(
+            f"nodes the RUMOUR still reaches (P>={reached_threshold:.0%}): "
+            f"{len(infected)}/{graph.num_nodes} — top by degree: {listed}"
+        )
+
+    return lines
+
+
 def summarize(
     trajectory: Trajectory, graph: GraphInfo | None = None, task: TaskSpec | None = None
 ) -> str:
@@ -334,7 +442,9 @@ def summarize(
     reward_se = trajectory.cost.get("reward_se", 0.0)
     frontier_counts = [len(state.frontier) for state in trajectory.states[1:]]
     label = (
-        "final_infected (LOWER IS BETTER)"
+        "final_rumour_size (LOWER IS BETTER)"
+        if task is not None and task.blocks
+        else "final_infected (LOWER IS BETTER)"
         if task is not None and task.contains
         else "final_spread"
     )
@@ -346,6 +456,14 @@ def summarize(
     ]
     lines.append(f"frontier_counts={frontier_counts}")
 
+    if task is not None and task.blocks:
+        # The counter-cascade's own trajectory, which the negative-only counts above
+        # cannot show: a blocker whose positive wave never grows spent its budget on
+        # nodes with nowhere to spread
+        positive = [len(state.pos_infected) for state in trajectory.states[1:]]
+        if any(positive):
+            lines.append(f"your_counter_cascade_counts={positive}")
+
     if frontier_counts and frontier_counts[-1] == 0:
         death_step = len(frontier_counts) - 1 - frontier_counts[::-1].index(0)
         lines.append(
@@ -354,6 +472,9 @@ def summarize(
 
     if graph is None:
         return "\n".join(lines)
+
+    if task is not None and task.blocks:
+        return "\n".join(lines + _blocking_lines(trajectory, graph, task))
 
     if task is not None and task.contains:
         return "\n".join(lines + _containment_lines(trajectory, graph, task))
@@ -470,7 +591,17 @@ def validate_plan(plan: list, task: TaskSpec, graph: GraphInfo) -> None:
     """Validate every bag and the whole-plan budgeted total against the task budget."""
     total_units = 0
     targeted = set()
-    noun = "seeds" if task.budget_op == "add_node" else "removes"
+    noun = {
+        "add_node": "seeds",
+        "remove_node": "removes",
+        "remove_edge": "cuts",
+        "set_edge_weight": "reweights",
+    }.get(task.budget_op, "spends")
+    # Only the weight-reduction lever needs the cap, and building it costs one pass
+    # over edge_index, so it is computed where it is used rather than carried around
+    caps = (
+        edge_weight_caps(graph) if task.budget_op == "set_edge_weight" else None
+    )
 
     for timestep, bag in enumerate(plan):
         validate_actions(
@@ -479,23 +610,29 @@ def validate_plan(plan: list, task: TaskSpec, graph: GraphInfo) -> None:
             task.budget,
             task.allowed_ops,
             task.budget_op,
-            task.outbreak,
+            # A blocking task's `outbreak` is S_N, and its sources are not protected
+            # the way a containment task's are: the rumour is ALREADY spreading from
+            # them, so cutting one is a legitimate (if usually late) move rather than
+            # a way to end the cascade before it starts
+            () if task.blocks else task.outbreak,
+            edge_weight_caps=caps,
         )
 
         for action in bag:
             if action.op != task.budget_op:
                 continue
 
-            # Re-targeting at a later timestep spends a second unit of budget on a
-            # node the plan already acted on
-            if int(action.target) in targeted:
+            # Re-targeting at a later timestep spends a second unit of budget on
+            # something the plan already acted on
+            key = budget_key(action)
+            if key in targeted:
                 raise StrategyError(
-                    f"plan {noun} node {action.target} again at t={timestep}; it is "
-                    f"already targeted earlier in the plan and the repeat spends "
-                    f"budget without changing anything."
+                    f"plan {noun} {key} again at t={timestep}; it is already "
+                    f"targeted earlier in the plan and the repeat spends budget "
+                    f"without changing anything."
                 )
 
-            targeted.add(int(action.target))
+            targeted.add(key)
             total_units += 1
 
     if total_units > task.budget:
@@ -551,11 +688,24 @@ def wrap_exogenous(
     rejected under `--allowed-ops remove_node`, the deletion bag's `remove_edge`
     ops are the mechanics of one removal rather than a second intervention, and
     the stream's edits are exogenous by definition.
-    """
-    outbreak = build_outbreak(graph, task)
 
-    if outbreak is not None:
-        action_fn = outbreak.wrap(action_fn)
+    A COMPETITIVE task takes the blocking wrapper instead of the containment one, and
+    the difference is not cosmetic: the containment wrapper seeds the outbreak as
+    `add_node` ops, and under two cascades `add_node` means the POSITIVE one — so
+    reusing it would have every arm start the rumour's own counter-cascade for it.
+    The rumour is committed by the simulator's `reset` there (§2.1), and the wrapper's
+    remaining jobs are the detection delay and the removal expansion.
+    """
+    if task.blocks:
+        negative = build_negative_cascade(graph, task)
+
+        if negative is not None:
+            action_fn = negative.wrap(action_fn)
+    else:
+        outbreak = build_outbreak(graph, task)
+
+        if outbreak is not None:
+            action_fn = outbreak.wrap(action_fn)
 
     if stream is not None:
         action_fn = stream.wrap(action_fn)
@@ -617,6 +767,43 @@ def evaluate_strategy(
     trajectory = environment.rollout(action_fn, task.horizon, task.budget)
 
     return trajectory, plan_seconds
+
+
+class _BlockingAnchor:
+    """
+    Wraps a library blocker as the plan_horizon()-shaped object evaluate_strategy wants.
+
+    Separate from `_PlanAnchor` because the blocking library is the only one whose
+    members return two different SHAPES — node ids on three levers and `(u, v)` arcs
+    on the fourth — and `blocking_plan` is what reconciles them. `None` as the
+    selector is the unopposed reference: an empty plan, so the rumour runs with
+    nobody stopping it, which is the number every prevented-influence column divides
+    by and the floor every arm has to beat.
+    """
+
+    def __init__(self, selector, task: TaskSpec, graph: GraphInfo) -> None:
+        self.selector = selector
+        self.task = task
+        self.graph = graph
+        self.source_script = ""
+
+    def plan_horizon(
+        self, graph: GraphInfo, budget: int, horizon: int
+    ) -> list[list[ActionOp]]:
+        if self.selector is None:
+            return [[] for _ in range(horizon + 1)]
+
+        picks = self.selector(
+            graph,
+            budget,
+            self.task.diffusion_model,
+            negative_seeds=self.task.outbreak,
+            horizon=horizon,
+        )
+
+        return blocking_plan(
+            picks, graph, budget, lever_of(self.task), horizon, self.task.outbreak
+        )
 
 
 class _PlanAnchor:
@@ -733,6 +920,47 @@ def baseline_anchor(
             f"RE {trajectory.cost['metrics']['recall']:.4f}  "
             f"AUC {trajectory.cost['metrics']['auc']:.4f})"
             for name, trajectory in scored
+        ]
+
+        return "\n".join(lines), best_trajectory, best_name
+
+    if task.blocks:
+        # An influence-blocking task's floor is the BLOCKING library, and the row
+        # that matters is `no_blocking` — sigma(S_N, empty), the rumour with nobody
+        # stopping it. Every other row is only interesting as a difference from it,
+        # which is what "prevented influence" means (§8.1).
+        lever = lever_of(task)
+        scored = [
+            (no_blocking, evaluate_strategy(
+                _BlockingAnchor(None, task, graph), environment, task, graph
+            )[0])
+        ]
+
+        for name in blocking_anchor_algorithms[lever]:
+            anchor = _BlockingAnchor(all_blocking_algorithms[name], task, graph)
+            trajectory, _ = evaluate_strategy(anchor, environment, task, graph)
+            scored.append((name, trajectory))
+
+        unopposed = scored[0][1].reward
+        ranked = rank_by(scored, lambda entry: entry[1].reward, task.sense)
+        best_name, best_trajectory = ranked[0]
+
+        lines = [
+            f"REFERENCE SCORES: classical influence-blocking baselines for the "
+            f"{lever} lever, run on THIS graph against THIS rumour, under THIS "
+            f"evaluator, at the same budget and horizon. The column is the rumour's "
+            f"final size, so LOWER IS BETTER; `prevented` is how much of the "
+            f"unopposed cascade each one stopped, which is the quantity every paper "
+            f"in this literature reports. `no_blocking` is the rumour with nobody "
+            f"stopping it — beating it by a lot is the bar, and the degree heuristic "
+            f"is on this list because the published finding is that it FAILS here:",
+        ]
+        lines += [
+            f"  {name:<24} {trajectory.reward:9.2f} "
+            f"(±{trajectory.cost.get('reward_se', 0.0):.2f} SE, "
+            f"prevented {unopposed - trajectory.reward:+.2f} = "
+            f"{100.0 * (unopposed - trajectory.reward) / max(unopposed, 1e-9):.1f}%)"
+            for name, trajectory in ranked
         ]
 
         return "\n".join(lines), best_trajectory, best_name

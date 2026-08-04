@@ -18,6 +18,7 @@ from typing import Callable
 from coding_agent.tools import (
     adaptive_algorithms,
     algorithms,
+    blocking_algorithms,
     dismantling_algorithms,
     localization_algorithms,
     primitives,
@@ -133,6 +134,21 @@ if _unknown_blocked:
         f"not in localization_algorithms; fix the list or the rename"
     )
 
+# ...and on the influence-blocking side. `greedy_prevention` simulates the whole
+# COMPETITIVE cascade once per candidate per pick, which is the most expensive thing
+# in this repo and, like `celf`, runs on a private simulator that
+# MonteCarloEnvironment.episodes_used never sees.
+mc_blocked_blocking = blocking_algorithms.mc_blocking_algorithms
+
+_unknown_blocked = set(mc_blocked_blocking) - set(
+    blocking_algorithms.all_blocking_algorithms
+)
+if _unknown_blocked:
+    raise ValueError(
+        f"mc_blocking_algorithms names {sorted(_unknown_blocked)}, which are not "
+        f"in blocking_algorithms; fix the list or the rename"
+    )
+
 
 class StrategyError(RuntimeError):
     """A generated script failed to parse, execute, or expose a valid Strategy."""
@@ -232,6 +248,17 @@ def _blocked_dismantler(name: str, *_args, **_kwargs) -> None:
     )
 
 
+def _blocked_blocker(name: str, *_args, **_kwargs) -> None:
+    raise StrategyError(
+        f"blocking_algorithms.{name} is not available: it simulates the whole "
+        f"competitive cascade once per candidate per pick, which bypasses the "
+        f"metered evaluator and dominates wall clock. Blocked: "
+        f"{', '.join(mc_blocked_blocking)}. Use a structural or RIS-based blocker "
+        f"(proximity, rps, reverse_blocking, cmia_o, imin_lhga) or write your own "
+        f"selection logic."
+    )
+
+
 def _blocked_localizer(name: str, *_args, **_kwargs) -> None:
     raise StrategyError(
         f"localization_algorithms.{name} is not available: it re-simulates every "
@@ -313,6 +340,21 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
                 for name, function in dismantling_algorithms.dismantling_algorithms.items()
             }
         ),
+        # Counter-seed / node / edge blockers for influence blocking, on the same
+        # terms: present under every task, and the MC-heavy member blocked unless
+        # --allow-mc-algorithms. `blocking_levers` rides along because a generated
+        # script that composes one of these has to know which op it may emit.
+        "blocking_algorithms": SimpleNamespace(
+            **{
+                name: (
+                    function
+                    if allow_mc_algorithms or name not in mc_blocked_blocking
+                    else partial(_blocked_blocker, name)
+                )
+                for name, function in blocking_algorithms.all_blocking_algorithms.items()
+            },
+            blocking_levers=blocking_algorithms.blocking_levers,
+        ),
         # SOURCE-SET inference for source localization, on the same terms again.
         # These are the published methods a localize() program is being compared
         # against, so hiding them would ask the model to reinvent LPSI.
@@ -337,6 +379,10 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         # Imported here rather than at module scope: containment imports the tools
         # package, which imports this module.
         "containment": importlib.import_module("coding_agent.containment"),
+        # ...and the blocking helpers, on the same terms. `blocking_plan` is what
+        # turns a library selector's output — node ids from three levers, arcs from
+        # the fourth — into the one plan shape the executor validates.
+        "blocking": importlib.import_module("coding_agent.blocking"),
         "__builtins__": __builtins__,
     }
 
@@ -459,6 +505,22 @@ def call_strategy(method: Callable, *args) -> object:
         ) from error
 
 
+def budget_key(action) -> object:
+    """
+    What "the same unit of budget" means for one action.
+
+    A node op is identified by its target; an EDGE op by the whole arc, because two
+    arcs out of the same `u` are two different interventions. Keying edge ops on
+    `target` alone — which is what a node-shaped check does — would reject a legal
+    plan that cuts two of a hub's out-edges as a duplicate, and that is exactly the
+    plan an edge-blocking lever is supposed to produce.
+    """
+    if action.destination is None:
+        return int(action.target)
+
+    return (int(action.target), int(action.destination))
+
+
 def validate_actions(
     bag: list,
     num_nodes: int,
@@ -466,6 +528,7 @@ def validate_actions(
     allowed_ops: tuple = valid_action_ops,
     budget_op: str = "add_node",
     protected: tuple = (),
+    edge_weight_caps: dict | None = None,
 ) -> None:
     """
     Raise StrategyError if an action bag references invalid nodes, uses a
@@ -485,11 +548,21 @@ def validate_actions(
     dismantler by luck. The published immunization protocol vaccinates first and
     then infects a NON-immunized node, so this rule is that protocol rather than a
     house restriction.
+
+    `edge_weight_caps` is `{(u, v): p}` on the weight-reduction lever of influence
+    blocking. DiffIM's relaxation is `p~ = p * r~` with `r~ in [0, 1]`, so a blocker
+    may only LOWER an edge — raising one would be an unbudgeted boost to its own
+    counter-cascade wearing a blocking action's name.
     """
     spent_units = 0
     targeted = set()
     guarded = {int(node) for node in protected}
-    noun = "seeds" if budget_op == "add_node" else "removes"
+    noun = {
+        "add_node": "seeds",
+        "remove_node": "removes",
+        "remove_edge": "cuts",
+        "set_edge_weight": "reweights",
+    }.get(budget_op, "spends")
 
     for action in bag:
         if action.op not in allowed_ops:
@@ -524,19 +597,54 @@ def validate_actions(
                 f"the budget on the routes out of them instead."
             )
 
+        if action.op in ("add_edge", "remove_edge", "set_edge_weight"):
+            if action.destination is None:
+                raise StrategyError(
+                    f"action op '{action.op}' needs a destination: emit "
+                    f"ActionOp('{action.op}', u, v) for the arc u -> v."
+                )
+
+            if not (0 <= int(action.destination) < num_nodes):
+                raise StrategyError(
+                    f"action targets node {action.destination} out of range "
+                    f"[0,{num_nodes})."
+                )
+
+        if action.op == "set_edge_weight" and edge_weight_caps is not None:
+            arc = (int(action.target), int(action.destination))
+            cap = edge_weight_caps.get(arc)
+
+            if cap is None:
+                raise StrategyError(
+                    f"set_edge_weight targets arc {arc}, which does not exist in the "
+                    f"graph. Reweighting a missing arc buys nothing and spends a unit "
+                    f"of budget; pick from the arcs in graph.edge_index."
+                )
+
+            weight = 0.0 if action.weight is None else float(action.weight)
+            if weight > cap + 1e-9:
+                raise StrategyError(
+                    f"set_edge_weight raises arc {arc} from {cap:.6f} to "
+                    f"{weight:.6f}. A blocker may only REDUCE an edge — the "
+                    f"published relaxation is p~(u,v) = p(u,v) * r with r in [0, 1] — "
+                    f"so a weight above the arc's own probability would be an "
+                    f"unbudgeted boost rather than a block."
+                )
+
         if action.op == budget_op:
             spent_units += 1
 
-            # Targeting a node twice spends two of k on one node and would
-            # otherwise pass silently as a budget the strategy never used
-            if int(action.target) in targeted:
+            # Targeting the same unit twice spends two of k on one intervention and
+            # would otherwise pass silently as a budget the strategy never used
+            key = budget_key(action)
+            if key in targeted:
                 raise StrategyError(
-                    f"action bag {noun} node {action.target} more than once; a "
-                    f"duplicate {budget_op} spends budget without changing the "
-                    f"graph. Deduplicate the set before returning it."
+                    f"action bag {noun} {key} more than once; a duplicate "
+                    f"{budget_op} spends budget without changing the graph. "
+                    f"Deduplicate the set before returning it."
                 )
 
-            targeted.add(int(action.target))
+            targeted.add(key)
 
     if spent_units > budget:
         raise StrategyError(

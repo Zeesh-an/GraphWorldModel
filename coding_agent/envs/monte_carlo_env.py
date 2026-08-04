@@ -8,7 +8,8 @@ import time
 import numpy as np
 
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
-from coding_agent.tools.primitives import build_simulator
+from coding_agent.tools.primitives import build_competitive_simulator, build_simulator
+from data.wm_competitive import CompetitiveConfig
 from data.wm_simulator import spent
 
 seed_upper_bound = 1 << 30
@@ -22,11 +23,19 @@ class MonteCarloEnvironment:
         mc_runs: int = 30,
         base_seed: int = 0,
         remove_semantics: str = spent,
+        negative_seeds: tuple = (),
+        competitive_config: CompetitiveConfig | None = None,
     ) -> None:
         self.graph = graph
         self.diffusion_model = diffusion_model
         self.mc_runs = mc_runs
         self.remove_semantics = remove_semantics
+        # Influence blocking: run the TWO-cascade simulator with S_N committed at
+        # t=0 by reset(), and score the negative cascade. `reward` stays
+        # `len(state.infected)` because State maps the negative cascade onto those
+        # fields, so nothing downstream has to know which simulator ran.
+        self.negative_seeds = tuple(int(node) for node in negative_seeds)
+        self.competitive_config = competitive_config
         # Seed every rollout uses unless one is named explicitly. Shared across
         # candidates on purpose: common random numbers make the DIFFERENCE
         # between two strategies far better resolved than either absolute score.
@@ -58,19 +67,33 @@ class MonteCarloEnvironment:
         self.episodes_used += self.mc_runs
 
         for run in range(self.mc_runs):
-            # For each monte carlo run, build a fresh NDlib simulator with a child seed
-            simulator = build_simulator(
-                self.graph,
-                self.diffusion_model,
-                seed=int(rng.integers(seed_upper_bound)),
-                remove_semantics=self.remove_semantics,
-            )
+            # For each monte carlo run, build a fresh simulator with a child seed
+            child_seed = int(rng.integers(seed_upper_bound))
 
-            # Start from an empty state
-            state = State(infected=[], frontier=[])
+            if self.competitive_config is not None:
+                simulator = build_competitive_simulator(
+                    self.graph,
+                    self.diffusion_model,
+                    self.negative_seeds,
+                    seed=child_seed,
+                    config=self.competitive_config,
+                )
+                # NOT empty: the rumour moved first and is already committed, which
+                # is the premise of the whole task (§5.4, "first mover has a clear
+                # advantage")
+                state = simulator.current_state()
+            else:
+                simulator = build_simulator(
+                    self.graph,
+                    self.diffusion_model,
+                    seed=child_seed,
+                    remove_semantics=self.remove_semantics,
+                )
+                state = State(infected=[], frontier=[])
+
             states = [state]
             actions = []
-            counts = [0.0]
+            counts = [float(len(state.infected))]
 
             for timestep in range(horizon + 1):
                 # Each timestep, get the action bag and apply the action affect (T_exo) and one diffusion step (T_endo)
@@ -81,8 +104,11 @@ class MonteCarloEnvironment:
                 actions.append(bag)
                 counts.append(float(len(state.infected)))
 
-                # Terminate early once the cascade is dead (empty frontier) and the strategy is idle (empty bag)
-                if timestep > 0 and not state.frontier and not bag:
+                # Terminate early once the cascade is dead (empty frontier) and the
+                # strategy is idle. Under competition BOTH cascades have to be dead:
+                # a live counter-cascade is still changing which nodes are protected.
+                alive = state.frontier or state.pos_frontier
+                if timestep > 0 and not alive and not bag:
                     break
 
             final_counts.append(float(len(state.infected)))

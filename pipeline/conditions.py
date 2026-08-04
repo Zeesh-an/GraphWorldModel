@@ -29,6 +29,7 @@ candidate, so the agent pays real experience for every noisy number it gets back
 from dataclasses import dataclass
 
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
+from coding_agent.tools.blocking_algorithms import all_blocking_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
 from coding_agent.tools.localization_algorithms import localization_algorithms
 from coding_agent.types import improves
@@ -91,12 +92,15 @@ default_baselines = (
     "random_seeds",
 )
 
-# A `baseline:<name>` arm resolves against four pools, and which one it lands in
+# A `baseline:<name>` arm resolves against five pools, and which one it lands in
 # decides how it is driven: a static seed set, a per-round policy (method
-# "adaptive"), a node-removal set, or a source-set inference. Collisions would
-# make that silent, so they are caught here rather than at the first budget.
+# "adaptive"), a node-removal set, a two-cascade blocker, or a source-set inference.
+# Collisions would make that silent, so they are caught here rather than at the first
+# budget — `greedy_blocking` (a dismantler) and `greedy_prevention` (a blocker) are
+# exactly the near-miss this guard exists for.
 _pools = {
     "adaptive": set(adaptive_algorithms),
+    "blocking": set(all_blocking_algorithms),
     "dismantling": set(dismantling_algorithms),
     "localization": set(localization_algorithms),
 }

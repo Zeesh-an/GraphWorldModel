@@ -4,8 +4,26 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from data.wm_competitive import (
+    fixed_dominance,
+    negative_dominance,
+    positive_dominance,
+    resolve_tie_break,
+)
 from data.wm_simulator import blocked, spent, valid_remove_semantics
-from world_model.wm_data import GraphInput, ch_add, ch_frontier, ch_infected, ch_remove
+from world_model.wm_data import (
+    GraphInput,
+    ch_add,
+    ch_comp_add,
+    ch_comp_remove,
+    ch_frontier,
+    ch_infected,
+    ch_neg_frontier,
+    ch_neg_infected,
+    ch_pos_frontier,
+    ch_pos_infected,
+    ch_remove,
+)
 from world_model.model.gcn import GCNEncoder
 from world_model.model.graphsage import GraphSAGEEncoder
 from world_model.model.gat import GATEncoder
@@ -232,6 +250,363 @@ class LTThresholdHead(nn.Module):
         return torch.log(probs) - torch.log1p(-probs)  # -> logits
 
 
+class _EdgeTransmission(nn.Module):
+    """
+    One campaign's per-edge propensity `q(u -> v)`, shared by both competitive heads.
+
+    Exactly `ICTransmissionHead`'s edge model, factored out because a competitive
+    head needs TWO of them off one shared encoding (§2.2). `oracle` pins q to the
+    true probability, `residual` anchors it there and learns only a correction, and
+    `positive_prob` overrides the anchor for the limiting campaign under MCICM —
+    where `p_L` is a constant the edge weight does not carry.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        oracle: bool = False,
+        residual: bool = False,
+        positive_prob: float | None = None,
+    ) -> None:
+        super().__init__()
+        self.oracle = oracle
+        self.residual = residual
+        self.positive_prob = positive_prob
+
+        if not oracle:
+            self.edge_mlp = nn.Sequential(
+                nn.Linear(2 * hidden_dim + 1, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, 1),
+            )
+
+            for module in self.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.xavier_uniform_(module.weight)
+
+                    if module.bias is not None:
+                        nn.init.zeros_(module.bias)
+
+    def forward(
+        self,
+        hidden: torch.Tensor,
+        sources: torch.Tensor,
+        destinations: torch.Tensor,
+        edge_weight: torch.Tensor,
+    ) -> torch.Tensor:
+        base = (
+            edge_weight
+            if self.positive_prob is None
+            else torch.full_like(edge_weight, float(self.positive_prob))
+        )  # shape: (E,)
+
+        if self.oracle:
+            return base.clamp(0.0, 1.0)
+
+        features = torch.cat(
+            [hidden[sources], hidden[destinations], edge_weight.unsqueeze(dim=-1)],
+            dim=-1,
+        )  # shape: (E, 2H + 1)
+        logits = self.edge_mlp(features).squeeze(dim=-1)  # shape: (E,)
+
+        if self.residual:
+            anchor = base.clamp(prob_epsilon, 1.0 - prob_epsilon)
+            logits = logits + torch.log(anchor) - torch.log1p(-anchor)
+
+        return torch.sigmoid(logits)
+
+
+def _arrival_probability(
+    transmission: torch.Tensor,
+    frontier: torch.Tensor,
+    sources: torch.Tensor,
+    destinations: torch.Tensor,
+    num_nodes: int,
+) -> torch.Tensor:
+    """`1 - prod_{u->v} (1 - q_uv * frontier_u)` — the IC infection form, per node."""
+    gated = (transmission * frontier[sources]).clamp(0.0, 1.0 - prob_epsilon)
+    log_survival = torch.log1p(-gated)  # shape: (E,)
+    survival = torch.zeros(num_nodes, device=transmission.device).scatter_add_(
+        0, destinations, log_survival
+    )  # shape: (N,)
+
+    return 1.0 - torch.exp(survival)
+
+
+def _resolve_tie(
+    p_negative: torch.Tensor,
+    p_positive: torch.Tensor,
+    tie_break: str,
+    priority: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """
+    §2.2's tie-break table, in closed form and differentiable in both inputs.
+
+    All three rules preserve the property that made the single-cascade head work: a
+    susceptible node with no active in-neighbour in EITHER cascade has
+    `p_negative = p_positive = 0`, so both outputs are 0 and the rollout is
+    structurally self-terminating rather than saturating.
+    """
+    both = p_negative * p_positive
+
+    if tie_break == negative_dominance:
+        return p_negative, p_positive - both
+
+    if tie_break == positive_dominance:
+        return p_negative - both, p_positive
+
+    if tie_break == fixed_dominance:
+        # gamma_v is drawn per node per EPISODE and never stored, exactly like the LT
+        # threshold — so the head can only learn E[gamma_v], and this is where fixed
+        # dominance pays its own partial-observability tax
+        gamma = priority if priority is not None else 0.5
+        return (
+            p_negative - both + gamma * both,
+            p_positive - both + (1.0 - gamma) * both,
+        )
+
+    raise ValueError(f"unknown tie_break {tie_break!r}")
+
+
+class CompetitiveICHead(nn.Module):
+    """
+    Structured two-cascade IC head: run the IC product form TWICE off the shared
+    encoding, then compose with an explicit tie-break (§2.2).
+
+        q^N_uv    = sigmoid(MLP_N([h_u, h_v, w_uv]))
+        q^P_uv    = sigmoid(MLP_P([h_u, h_v, w_uv]))
+        p^N_new(v) = 1 - prod (1 - q^N_uv * negative_frontier_u)
+        p^P_new(v) = 1 - prod (1 - q^P_uv * positive_frontier_u)
+        (P(v -> negative), P(v -> positive)) = tie_break(p^N_new, p^P_new)
+
+    Warning: §2.2 warns that this factorization "silently assumes MCICM, not COICM",
+    because COICM shares one coin per edge between the campaigns. That objection
+    applies to the live-edge characterisation and NOT to the stepwise transition this
+    head predicts: a node activates in at most one campaign, so each arc is ever
+    attempted by exactly one of them, and the two arrival probabilities at a
+    susceptible `v` are products over DISJOINT in-edge sets. The factorization is
+    therefore exact under both models — see data/wm_competitive.py for the full
+    argument, which is also why `positive_prob` (COICM vs MCICM) is the only thing
+    that separates them here.
+
+    Returns logits (N, 4) = [negative infected, negative frontier, positive infected,
+    positive frontier], so columns 0-1 are the cascade being minimized.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        tie_break: str = positive_dominance,
+        oracle: bool = False,
+        residual: bool = False,
+        positive_prob: float | None = None,
+        remove_semantics: str = blocked,
+    ) -> None:
+        super().__init__()
+        self.tie_break = tie_break
+        self.remove_semantics = remove_semantics
+        self.negative = _EdgeTransmission(hidden_dim, oracle, residual)
+        self.positive = _EdgeTransmission(
+            hidden_dim, oracle, residual, positive_prob=positive_prob
+        )
+
+        if tie_break == fixed_dominance:
+            self.gamma = nn.Linear(hidden_dim, 1)
+            nn.init.xavier_uniform_(self.gamma.weight)
+            nn.init.zeros_(self.gamma.bias)
+        else:
+            self.gamma = None
+
+    def forward(
+        self, hidden: torch.Tensor, X: torch.Tensor, graph: GraphInput
+    ) -> torch.Tensor:
+        num_nodes = hidden.shape[0]
+        negative_infected, negative_frontier, positive_infected, positive_frontier = (
+            competitive_exogenous(X, self.remove_semantics)
+        )
+
+        # A susceptible node is one NEITHER cascade owns; both heads write only here
+        susceptible = (1.0 - negative_infected) * (1.0 - positive_infected)
+
+        edge_index, edge_weight = graph.edge_index, graph.edge_weight
+
+        if edge_index.numel() == 0:
+            p_negative = torch.zeros(num_nodes, device=hidden.device)
+            p_positive = torch.zeros(num_nodes, device=hidden.device)
+        else:
+            sources, destinations = edge_index[0], edge_index[1]
+            p_negative = _arrival_probability(
+                self.negative(hidden, sources, destinations, edge_weight),
+                negative_frontier,
+                sources,
+                destinations,
+                num_nodes,
+            )
+            p_positive = _arrival_probability(
+                self.positive(hidden, sources, destinations, edge_weight),
+                positive_frontier,
+                sources,
+                destinations,
+                num_nodes,
+            )
+
+        priority = (
+            torch.sigmoid(self.gamma(hidden).squeeze(dim=-1))
+            if self.gamma is not None
+            else None
+        )
+        p_new_negative, p_new_positive = _resolve_tie(
+            p_negative, p_positive, self.tie_break, priority
+        )
+
+        return competitive_logits(
+            negative_infected,
+            positive_infected,
+            susceptible * p_new_negative,
+            susceptible * p_new_positive,
+        )
+
+
+class CompetitiveLTHead(nn.Module):
+    """
+    Structured CLT head: the LT threshold form per cascade, then the same tie-break.
+
+    He et al.'s competitive linear threshold gives every node TWO hidden thresholds
+    (SDM'12 §3), so this head pays the single-cascade LT partial-observability tax
+    twice — which is exactly why research/influence_blocking.md §2.2 predicts IC
+    carries this task and LT is the weaker demonstration. It is implemented anyway
+    because the registry declares both dynamics and a `--diffusion-model LT` run
+    otherwise has no head at all.
+
+        f^N_v, f^P_v = each cascade's active in-neighbour weight fraction
+        p^N_new(v)  = [f^N_v > 0] * sigmoid(tau * (f^N_v - theta^N_v))
+        p^P_new(v)  = [f^P_v > 0] * sigmoid(tau * (f^P_v - theta^P_v))
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        tie_break: str = negative_dominance,
+        remove_semantics: str = blocked,
+    ) -> None:
+        super().__init__()
+        self.tie_break = tie_break
+        self.remove_semantics = remove_semantics
+        self.theta_negative = nn.Linear(hidden_dim, 1)
+        self.theta_positive = nn.Linear(hidden_dim, 1)
+        self.log_tau = nn.Parameter(torch.zeros(1))
+
+        for module in (self.theta_negative, self.theta_positive):
+            nn.init.xavier_uniform_(module.weight)
+            nn.init.zeros_(module.bias)
+
+        if tie_break == fixed_dominance:
+            self.gamma = nn.Linear(hidden_dim, 1)
+            nn.init.xavier_uniform_(self.gamma.weight)
+            nn.init.zeros_(self.gamma.bias)
+        else:
+            self.gamma = None
+
+    def forward(
+        self, hidden: torch.Tensor, X: torch.Tensor, graph: GraphInput
+    ) -> torch.Tensor:
+        num_nodes = hidden.shape[0]
+        negative_infected, _, positive_infected, _ = competitive_exogenous(
+            X, self.remove_semantics
+        )
+        susceptible = (1.0 - negative_infected) * (1.0 - positive_infected)
+
+        edge_index, edge_weight = graph.edge_index, graph.edge_weight
+
+        if edge_index.numel() == 0:
+            zeros = torch.zeros(num_nodes, device=hidden.device)
+            negative_fraction = positive_fraction = zeros
+        else:
+            sources, destinations = edge_index[0], edge_index[1]
+            total = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+                0, destinations, edge_weight
+            )
+            negative_weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+                0, destinations, negative_infected[sources] * edge_weight
+            )
+            positive_weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+                0, destinations, positive_infected[sources] * edge_weight
+            )
+            safe_total = total.clamp(min=prob_epsilon)
+            negative_fraction = negative_weight / safe_total
+            positive_fraction = positive_weight / safe_total
+
+        tau = F.softplus(self.log_tau)
+        p_negative = (negative_fraction > 0).to(negative_fraction.dtype) * torch.sigmoid(
+            tau * (negative_fraction - torch.sigmoid(self.theta_negative(hidden).squeeze(dim=-1)))
+        )
+        p_positive = (positive_fraction > 0).to(positive_fraction.dtype) * torch.sigmoid(
+            tau * (positive_fraction - torch.sigmoid(self.theta_positive(hidden).squeeze(dim=-1)))
+        )
+
+        priority = (
+            torch.sigmoid(self.gamma(hidden).squeeze(dim=-1))
+            if self.gamma is not None
+            else None
+        )
+        p_new_negative, p_new_positive = _resolve_tie(
+            p_negative, p_positive, self.tie_break, priority
+        )
+
+        return competitive_logits(
+            negative_infected,
+            positive_infected,
+            susceptible * p_new_negative,
+            susceptible * p_new_positive,
+        )
+
+
+def competitive_exogenous(
+    X: torch.Tensor, remove_semantics: str
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    T_exo for a two-cascade state: apply the action bag, return both (infected, frontier).
+
+    `add_node` seeds the POSITIVE cascade and only where the negative one has not
+    already committed the node — re-seeding a rumour-owned node is a no-op in the
+    simulator, and a head that let it flip would be fit against a transition that
+    never happens. `remove_node` under `blocked` deletes the node from both cascades;
+    its incident edges are gone from `edge_index` because the deletion bag carries
+    them, which is what also stops it transmitting.
+    """
+    removed = X[:, ch_comp_remove]
+    keep = 1.0 - removed
+
+    negative_infected = X[:, ch_neg_infected] * keep
+    negative_frontier = X[:, ch_neg_frontier] * keep
+
+    seeded = X[:, ch_comp_add] * (1.0 - X[:, ch_neg_infected])
+    positive_infected = torch.clamp(X[:, ch_pos_infected] + seeded, max=1.0) * keep
+    positive_frontier = torch.clamp(X[:, ch_pos_frontier] + seeded, max=1.0) * keep
+
+    return negative_infected, negative_frontier, positive_infected, positive_frontier
+
+
+def competitive_logits(
+    negative_infected: torch.Tensor,
+    positive_infected: torch.Tensor,
+    newly_negative: torch.Tensor,
+    newly_positive: torch.Tensor,
+) -> torch.Tensor:
+    """Compose the four monotone outputs and convert to logits. Shape: (N, 4)."""
+    probs = torch.stack(
+        [
+            negative_infected + newly_negative,
+            newly_negative,
+            positive_infected + newly_positive,
+            newly_positive,
+        ],
+        dim=1,
+    ).clamp(prob_epsilon, 1.0 - prob_epsilon)  # shape: (N, 4)
+
+    return torch.log(probs) - torch.log1p(-probs)
+
+
 class WorldModel(nn.Module):
     def __init__(
         self,
@@ -243,6 +618,9 @@ class WorldModel(nn.Module):
         head_type: str = "linear",
         diffusion_model: str = "IC",
         remove_semantics: str = spent,
+        competitive: bool = False,
+        tie_break: str = "auto",
+        positive_prob: float | None = None,
         **backbone_kwargs: object,
     ) -> None:
         super().__init__()
@@ -260,6 +638,8 @@ class WorldModel(nn.Module):
 
         self.head_type = head_type
         self.remove_semantics = remove_semantics
+        self.competitive = competitive
+        self.tie_break = resolve_tie_break(tie_break, diffusion_model)
 
         # Encoder produces (N, hidden_dim) node embeddings
         self.encoder = backbones[backbone](
@@ -270,7 +650,42 @@ class WorldModel(nn.Module):
             **backbone_kwargs,
         )
 
-        if head_type == "structured":
+        # A competitive task has its own head per dynamics and no `linear` variant:
+        # an unstructured (N, 4) head has nothing holding the two cascades apart, so
+        # its free-running rollout saturates BOTH and the blocked-influence number
+        # comes out of two runaway cascades cancelling
+        if competitive:
+            if head_type == "linear":
+                raise ValueError(
+                    "a competitive task has no `linear` head: nothing then keeps the "
+                    "two cascades disjoint or self-terminating, and blocked "
+                    "influence is a DIFFERENCE of two saturating rollouts. Use "
+                    "--head structured (or structured_residual under IC)."
+                )
+
+            if diffusion_model == "LT":
+                if head_type != "structured":
+                    raise ValueError(
+                        f"--head {head_type} is IC-only; CLT carries no per-edge "
+                        f"transmission probability to anchor on. Use "
+                        f"--head structured with --diffusion-model LT."
+                    )
+
+                self.head = CompetitiveLTHead(
+                    hidden_dim,
+                    tie_break=self.tie_break,
+                    remove_semantics=remove_semantics,
+                )
+            else:
+                self.head = CompetitiveICHead(
+                    hidden_dim,
+                    tie_break=self.tie_break,
+                    oracle=head_type == "structured_oracle",
+                    residual=head_type == "structured_residual",
+                    positive_prob=positive_prob,
+                    remove_semantics=remove_semantics,
+                )
+        elif head_type == "structured":
             # Structured head matched to the dynamics: IC transmission or LT threshold
             self.head = (
                 LTThresholdHead(hidden_dim)
@@ -308,7 +723,9 @@ class WorldModel(nn.Module):
         # X: (N, in_channels) node features; graph: GraphInput
         hidden = self.encoder(X, graph)
 
-        if self.head_type == "linear":
+        if self.head_type == "linear" and not self.competitive:
             return self.head(hidden)  # (N, 2) logits
 
-        return self.head(hidden, X, graph)  # (N, 2) logits (structured)
+        # (N, 2) single-cascade, (N, 4) competitive; columns 0-1 are the same
+        # quantity under both, which is what keeps every downstream reader working
+        return self.head(hidden, X, graph)

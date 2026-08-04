@@ -14,10 +14,19 @@ import numpy as np
 from tqdm import tqdm
 
 from data.wm_actions import (
+    blocking_selectors,
     counterfactual_actions,
     sample_injection,
+    select_blockers,
     select_seeds,
     spine_algorithms,
+)
+from data.wm_competitive import (
+    CompetitiveConfig,
+    CompetitiveSimulator,
+    auto_dominance,
+    shared_positive_prob,
+    tie_break_choices,
 )
 from data.wm_graphs import (
     GraphBundle,
@@ -67,6 +76,9 @@ def build_record(
     reward: float,
     next_marginal_infected: dict[int, float] | None = None,
     next_marginal_frontier: dict[int, float] | None = None,
+    next_marginal_pos_infected: dict[int, float] | None = None,
+    next_marginal_pos_frontier: dict[int, float] | None = None,
+    negative_seeds: list[int] | None = None,
 ) -> dict:
     """Build one transition record for the JSONL storage."""
     record = {
@@ -92,6 +104,25 @@ def build_record(
             str(node): round(probability, 6)
             for node, probability in (next_marginal_frontier or {}).items()
         }
+
+    # The positive cascade's two soft targets. Present only on a competitive
+    # episode, so a single-cascade JSONL is byte-identical to what it was and the
+    # 4-target loader can detect its own data by the presence of these keys.
+    if next_marginal_pos_infected is not None:
+        record["next_marginal_pos_infected"] = {
+            str(node): round(probability, 6)
+            for node, probability in next_marginal_pos_infected.items()
+        }
+        record["next_marginal_pos_frontier"] = {
+            str(node): round(probability, 6)
+            for node, probability in (next_marginal_pos_frontier or {}).items()
+        }
+
+    # S_N is a property of the EPISODE rather than of any action (§2.1), so it is
+    # stamped on every record instead of being recoverable from the t=0 bag the way
+    # a seeding task's seed set is
+    if negative_seeds is not None:
+        record["negative_seeds"] = [int(node) for node in negative_seeds]
 
     return record
 
@@ -192,6 +223,20 @@ class GenConfig:
     # What remove_node means in this dataset; see data/wm_simulator.py. Recorded
     # in metadata.json so a checkpoint can never be trained on the wrong reading.
     remove_semantics: str = spent
+    # Two-cascade (influence blocking) generation. `competitive` swaps the NDlib
+    # Simulator for data.wm_competitive.CompetitiveSimulator and doubles the state
+    # and the targets; the three below are the dynamics parameters
+    # research/influence_blocking.md §8.4 and §5.1 say must be recorded rather than
+    # left implicit, and they are written into metadata.json for exactly that reason.
+    competitive: bool = False
+    tie_break: str = auto_dominance
+    positive_prob: str = shared_positive_prob
+    # |S_N| as a percentage of N. §5.4 is the reason this defaults small: at
+    # |S_N| = 1000 on NetHEPT even 1000 blockers remove only 17% of the negative
+    # spread, so a large rumour lands every method in a regime where nothing works.
+    negative_pct: float = 1.0
+    negative_selectors: tuple = ("random", "degree", "pagerank")
+    blocker_selectors: tuple = blocking_selectors
     ba_m: int = 3
     ws_k: int = 6
     ws_p: float = 0.1
@@ -378,6 +423,163 @@ def _episode_transitions(
             break
 
 
+def _competitive_episode_transitions(
+    bundle: GraphBundle,
+    model: str,
+    algorithm: str,
+    budget: int,
+    rollout: int,
+    config: GenConfig,
+    base_rng: np.random.Generator,
+    writer: TransitionWriter,
+    split: str,
+) -> None:
+    """
+    One two-cascade episode: commit `S_N`, let a blocker answer it, record 4 targets.
+
+    `algorithm` is a PAIR here — "<negative selector>+<blocker selector>" — because
+    a blocking transition is only labelled by both. The attacker model is the second
+    experimental axis this literature has and IM does not
+    (research/influence_blocking.md §8.3), and the blocker selector is what supplies
+    action diversity, including the `none` arm whose episodes are the unopposed
+    sigma(S_N, empty) reference every prevented-influence number divides by.
+    """
+    negative_algorithm, _, blocker_algorithm = algorithm.partition("+")
+    episode_id = (
+        f"{bundle.graph_id}|{model}|{algorithm}|k{budget}|r{rollout}"
+    )
+
+    selection_rng = np.random.default_rng(base_rng.integers(0, seed_upper_bound))
+    injection_rng = np.random.default_rng(base_rng.integers(0, seed_upper_bound))
+    simulator_seed = int(base_rng.integers(0, seed_upper_bound))
+
+    num_nodes = bundle.nx_graph.number_of_nodes()
+    num_negative = max(1, round(num_nodes * config.negative_pct / 100))
+    negative_seeds = select_seeds(
+        bundle,
+        num_seeds=num_negative,
+        algorithm=negative_algorithm,
+        model=model,
+        rng=selection_rng,
+    )
+    blockers = select_blockers(
+        bundle, negative_seeds, budget, blocker_algorithm, selection_rng
+    )
+
+    simulator = CompetitiveSimulator(
+        bundle.nx_graph,
+        ic_prob_map=bundle.ic_prob_map,
+        seed=simulator_seed,
+        config=CompetitiveConfig(
+            tie_break=config.tie_break,
+            positive_prob=config.positive_prob,
+            remove_semantics=config.remove_semantics,
+        ),
+    )
+    simulator.reset(model, negative_seeds)
+
+    # S_N is already committed at t=0 — the rumour moved first, which is the whole
+    # premise (§5.4: "first mover has a clear advantage") — so s_0 is NOT empty here
+    s_t = simulator.current_state()
+    blocker_bag = [ActionOp("add_node", node) for node in blockers]
+
+    for t in range(config.horizon + 1):
+        action = (
+            blocker_bag
+            if t == 0
+            else sample_injection(
+                s_t,
+                graph=simulator.graph,
+                rng=injection_rng,
+                p_inject=config.inject_p,
+                action_ops=config.action_ops,
+                weight_range=(config.weight_lo, config.weight_hi),
+                remove_semantics=config.remove_semantics,
+            )
+        )
+
+        if t > 0 and config.cf_prob > 0 and injection_rng.random() < config.cf_prob:
+            snapshot = simulator.snapshot()
+            cf_bags = counterfactual_actions(
+                s_t,
+                graph=simulator.graph,
+                main_bag=action,
+                count=config.cf_branches,
+                rng=injection_rng,
+                action_ops=config.action_ops,
+                remove_semantics=config.remove_semantics,
+            )
+            for branch_index, cf_bag in enumerate(cf_bags):
+                simulator.restore(snapshot)
+                s_cf, *cf_marginals = simulator.advance_marginal(
+                    cf_bag, config.mc_marginals
+                )
+                writer.write(
+                    build_record(
+                        graph_id=bundle.graph_id,
+                        diffusion_model=model,
+                        episode_id=episode_id,
+                        algorithm=algorithm,
+                        branch=f"cf_{branch_index}",
+                        t=t,
+                        state=s_t,
+                        action=cf_bag,
+                        next_state=s_cf,
+                        # LOWER is better here, so the reward is the negative
+                        # cascade's growth and a good action drives it to zero
+                        reward=float(len(s_cf.infected) - len(s_t.infected)),
+                        next_marginal_infected=cf_marginals[0],
+                        next_marginal_frontier=cf_marginals[1],
+                        next_marginal_pos_infected=cf_marginals[2],
+                        next_marginal_pos_frontier=cf_marginals[3],
+                        negative_seeds=negative_seeds,
+                    ),
+                    model=model,
+                    split=split,
+                )
+            # restore() puts the edge table back as well as the status, so unlike the
+            # NDlib path there is no revert_edges companion to call here
+            simulator.restore(snapshot)
+
+        s_next, *marginals = simulator.advance_marginal(action, config.mc_marginals)
+        writer.write(
+            build_record(
+                graph_id=bundle.graph_id,
+                diffusion_model=model,
+                episode_id=episode_id,
+                algorithm=algorithm,
+                branch="main",
+                t=t,
+                state=s_t,
+                action=action,
+                next_state=s_next,
+                reward=float(len(s_next.infected) - len(s_t.infected)),
+                next_marginal_infected=marginals[0],
+                next_marginal_frontier=marginals[1],
+                next_marginal_pos_infected=marginals[2],
+                next_marginal_pos_frontier=marginals[3],
+                negative_seeds=negative_seeds,
+            ),
+            model=model,
+            split=split,
+        )
+
+        s_t = s_next
+        # Both cascades have to be dead: a live positive frontier with a dead
+        # negative one is still changing which nodes are protected next step
+        if t > 0 and not s_t.frontier and not s_t.pos_frontier and not action:
+            break
+
+
+def _competitive_algorithms(config: GenConfig) -> list[str]:
+    """The `<attacker>+<blocker>` pairs one competitive sweep rolls out."""
+    return [
+        f"{negative}+{blocker}"
+        for negative in config.negative_selectors
+        for blocker in config.blocker_selectors
+    ]
+
+
 def run_generation(config: GenConfig) -> dict[str, object]:
     generation_start = time.perf_counter()
     out_dir = Path(config.out_dir)
@@ -386,9 +588,20 @@ def run_generation(config: GenConfig) -> dict[str, object]:
     base_rng = np.random.default_rng(config.seed)
 
     graph_count = 1 if config.dataset in real_directed else config.num_graphs
-    total_episodes = (
-        graph_count * len(config.models) * len(config.algorithms) * config.rollouts
+    # A competitive sweep's "algorithm" is an (attacker, blocker) PAIR, so the two
+    # selector lists cross rather than the spine list being used at all
+    algorithms = (
+        _competitive_algorithms(config) if config.competitive else config.algorithms
     )
+    total_episodes = graph_count * len(config.models) * len(algorithms) * config.rollouts
+
+    if config.competitive:
+        print(
+            f"[gen] competitive: tie_break={config.tie_break} "
+            f"positive_prob={config.positive_prob} "
+            f"|S_N|={config.negative_pct}% of N, "
+            f"{len(algorithms)} (attacker+blocker) pairs"
+        )
 
     graphs_meta = []
     n_episodes = 0
@@ -414,12 +627,17 @@ def run_generation(config: GenConfig) -> dict[str, object]:
             )
 
             for model in config.models:
-                for algorithm in config.algorithms:
+                for algorithm in algorithms:
                     for rollout in range(config.rollouts):
                         split = _assign_split(base_rng, config.split)
                         budget = _resolve_budget(config, num_nodes, base_rng)
                         episode_budgets.append(budget)
-                        _episode_transitions(
+                        episode = (
+                            _competitive_episode_transitions
+                            if config.competitive
+                            else _episode_transitions
+                        )
+                        episode(
                             bundle,
                             model,
                             algorithm,
@@ -462,6 +680,20 @@ def run_generation(config: GenConfig) -> dict[str, object]:
         "generation_seconds": round(generation_seconds, 1),
         "graphs": graphs_meta,
     }
+
+    # The competitive dynamics parameters, RESOLVED. `auto` is not a value anything
+    # downstream can act on, and §8.4's whole point is that the tie-break is a
+    # reported hyperparameter rather than an implementation detail — so what was
+    # actually simulated is written per dynamics, not what was typed.
+    if config.competitive:
+        competitive = CompetitiveConfig(
+            tie_break=config.tie_break,
+            positive_prob=config.positive_prob,
+            remove_semantics=config.remove_semantics,
+        )
+        metadata["competitive"] = {
+            model: competitive.resolved(model) for model in config.models
+        } | {"negative_pct": config.negative_pct}
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, default=str))
     print(f"[done] {n_episodes} episodes in {generation_seconds:.1f}s -> {out_dir}")
 
@@ -645,6 +877,59 @@ def parse_args() -> GenConfig:
         "cannot transmit or be infected (containment) (default: spent).",
     )
     parser.add_argument(
+        "--competitive",
+        action="store_true",
+        help="generate TWO-cascade (influence blocking) episodes: a negative seed "
+        "set is committed at t=0 and a blocker answers it, with four soft targets "
+        "per step instead of two (default: False).",
+    )
+    parser.add_argument(
+        "--tie-break",
+        type=str,
+        default=auto_dominance,
+        choices=list(tie_break_choices),
+        help="competitive only: which cascade wins a node both reach in the same "
+        "step. auto = each dynamics' own founding paper, i.e. positive dominance "
+        f"under IC (Budak) and negative under LT (He) (default: {auto_dominance}).",
+    )
+    parser.add_argument(
+        "--positive-prob",
+        type=str,
+        default=shared_positive_prob,
+        help="competitive only: the limiting campaign's per-edge transmission "
+        "probability. 'shared' is COICM (one probability per edge, independent of "
+        "information type); a float is MCICM, and 1.0 is Budak's high-effectiveness "
+        f"property, the case his Theorem 4.2 proves submodular (default: {shared_positive_prob}).",
+    )
+    parser.add_argument(
+        "--negative-pct",
+        type=float,
+        default=1.0,
+        help="competitive only: |S_N| as a percentage of N. Kept small on purpose: "
+        "at |S_N| = 1000 on NetHEPT even 1000 blockers remove only 17 percent of the "
+        "negative spread, so a large rumour puts every method in a regime where "
+        "nothing works (default: 1.0).",
+    )
+    parser.add_argument(
+        "--negative-selectors",
+        type=str,
+        nargs="+",
+        default=["random", "degree", "pagerank"],
+        choices=list(spine_algorithms),
+        help="competitive only: how S_N is chosen — the attacker model, which is a "
+        "second experimental axis IM does not have (default: random degree pagerank).",
+    )
+    parser.add_argument(
+        "--blocker-selectors",
+        type=str,
+        nargs="+",
+        default=list(blocking_selectors),
+        choices=list(blocking_selectors),
+        help="competitive only: how each episode's t=0 blocker set is chosen. "
+        "`none` leaves the rumour unopposed and is the sigma(S_N, empty) reference "
+        f"(default: {' '.join(blocking_selectors)}).",
+    )
+    parser.add_argument(
         "--weight-lo",
         type=float,
         default=0.0,
@@ -763,6 +1048,12 @@ def parse_args() -> GenConfig:
         seed=args.seed,
         mc_marginals=args.mc_marginals,
         out_dir=args.out_dir,
+        competitive=args.competitive,
+        tie_break=args.tie_break,
+        positive_prob=args.positive_prob,
+        negative_pct=args.negative_pct,
+        negative_selectors=tuple(args.negative_selectors),
+        blocker_selectors=tuple(args.blocker_selectors),
     )
 
 

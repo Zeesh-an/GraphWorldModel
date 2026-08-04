@@ -117,6 +117,11 @@ class ExternalBaseline:
     # replays the result per round instead of as one t=0 plan, which is the
     # difference between an adaptive arm and a static one wearing its name.
     rounds_aware: bool = False
+    # True when the repo's intervention is an ARC rather than a node, so its
+    # parser hands back a flat list of endpoints (two ids per unit of budget).
+    # `run_external_baseline` needs to know, or the budget check counts endpoints
+    # and rejects a legal k-arc answer as 2k seeds.
+    returns_edges: bool = False
     status: str = "needs_setup"
     blocker: str | None = None
     python: str = "3.10"
@@ -1848,6 +1853,361 @@ def _localization_parse(work_dir: Path, stdout: str, instances: list) -> dict:
     return json.loads((work_dir / "predictions.json").read_text())["sources"]
 
 
+# Influence blocking ---------------------------------------------------------
+#
+# S_N is not derivable from (graph, budget), so it crosses the process boundary the
+# same way the round schedule does: written into work_dir as JSON by
+# run_baseline.run_external_baseline rather than widened into every adapter's
+# signature. A blocking adapter reads it; nothing else looks.
+negative_seeds_filename = "negative_seeds.json"
+
+# SandIMIN's approximation parameters, from its own Readme's example invocation
+sandimin_epsilon = 0.2
+sandimin_gamma = 0.1
+sandimin_beta = 0.1
+
+# Xie's stdin protocol: influence model 0 = IC, 1 = LT; propagation model 0 = TR
+# (trivalency {0.1, 0.01, 0.001}), 1 = WC (1/in-degree). We run WC because it is what
+# our own --prob-model weighted generates, so the repo recomputes the SAME
+# probabilities we simulate under rather than a different edge model.
+joc_weighted_cascade = 1
+
+# DiffIM's own defaults, read from its constants.ipynb
+diffim_latent_dim = [128, 128, 128, 128, 128, 128]
+diffim_train_samples = 200
+diffim_algorithm = "DiffIM+"
+
+
+def read_negative_seeds(work_dir: Path) -> list[int]:
+    """S_N for this run, written beside the export by the pipeline."""
+    path = Path(work_dir) / negative_seeds_filename
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no {negative_seeds_filename} in {work_dir}: this baseline solves "
+            f"influence blocking and needs the rumour's own seed set, which "
+            f"run_external_baseline writes when the task is competitive"
+        )
+
+    return [int(node) for node in json.loads(path.read_text())]
+
+
+def _sandimin_export(
+    graph, work_dir: Path, budget: int, diffusion_model: str
+) -> dict:
+    """
+    SandIMIN's three input files, written directly rather than through its `el2bin`.
+
+    `graph_ic.inf` is a packed binary of `(int u, int v, double p)` per arc — read
+    from `graph.h::readGraph`, which mmaps the file and steps by
+    `2 * sizeof(int) + sizeof(double)` and asserts every id is `< n`. Writing it here
+    skips the shipped `el2bin` binary entirely, which matters: that is a prebuilt
+    x86 executable with no source in the repo, so on any other architecture it is a
+    file that cannot run.
+    """
+    negative_seeds = read_negative_seeds(work_dir)
+    pairs = [
+        (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge]))
+        for edge in range(graph.edge_index.shape[1])
+    ]
+
+    (work_dir / "attribute.txt").write_text(
+        f"n={graph.num_nodes}\nm={len(pairs)}\n"
+    )
+
+    with open(work_dir / "graph_ic.inf", "wb") as handle:
+        for edge, (source, target) in enumerate(pairs):
+            handle.write(
+                struct.pack("iid", source, target, float(graph.ic_probs[edge]))
+            )
+
+    (work_dir / f"rumorSet_{len(negative_seeds)}.txt").write_text(
+        "\n".join(str(node) for node in negative_seeds) + "\n"
+    )
+
+    return {"rumor_num": len(negative_seeds)}
+
+
+def _sandimin_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    directory = external_baselines["sandimin"].directory
+    # `arg.res` opens `results/res_...` relative to cwd and fails silently if the
+    # directory is absent; the blocker set we actually read is written into work_dir
+    os.makedirs(directory / "results", exist_ok=True)
+
+    return [
+        str((directory / "IMIN").resolve()),
+        "-dataset", str(Path(work_dir).resolve()),
+        "-k", str(budget),
+        "-rumorNum", str(extras["rumor_num"]),
+        "-algo", os.environ.get("SANDIMIN_ALGO", "SandIMIN"),
+        "-epsilon", str(sandimin_epsilon),
+        "-gamma", str(sandimin_gamma),
+        "-beta", str(sandimin_beta),
+    ]
+
+
+def _sandimin_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
+    output = Path(work_dir) / "gwm_blockers.txt"
+
+    if not output.exists():
+        raise FileNotFoundError(
+            f"no gwm_blockers.txt in {work_dir}; the patched OutputSeedSetToFile did "
+            f"not run. Tail of stdout:\n{stdout[-800:]}"
+        )
+
+    return [int(line) for line in output.read_text().split() if line.lstrip("-").isdigit()]
+
+
+def _joc_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
+    """
+    Xie's graph file plus the stdin script its `main()` reads.
+
+    Format from its own README and verified against `data/sample_graph.txt`: first
+    line `n m`, then one `u v` per DIRECTED arc, 0-indexed. The file has to live under
+    the repo's `data/` because `main()` hardcodes `"../data/" + fileName`, and the
+    result lands under `../results/` for the same reason.
+    """
+    negative_seeds = read_negative_seeds(work_dir)
+    directory = external_baselines["imin_joc"].directory
+    name = f"gwm_k{budget}.txt"
+
+    os.makedirs(directory.parent / "data", exist_ok=True)
+    os.makedirs(directory.parent / "results", exist_ok=True)
+
+    pairs = [
+        f"{int(graph.edge_index[0, edge])} {int(graph.edge_index[1, edge])}"
+        for edge in range(graph.edge_index.shape[1])
+    ]
+    (directory.parent / "data" / name).write_text(
+        f"{graph.num_nodes} {len(pairs)}\n" + "\n".join(pairs) + "\n"
+    )
+
+    influence_model = 1 if diffusion_model == "LT" else 0
+    # dataset, influence model, propagation model, |S_N|, budget, then S_N itself —
+    # the last of which only exists because of the patch that replaces the repo's
+    # own random source draw with a read from stdin
+    stdin = "\n".join(
+        [
+            name,
+            str(influence_model),
+            str(joc_weighted_cascade),
+            str(len(negative_seeds)),
+            str(budget),
+        ]
+        + [str(node) for node in negative_seeds]
+    ) + "\n"
+    (work_dir / "stdin.txt").write_text(stdin)
+
+    prefix = "AG" if os.environ.get("JOC_ALGO", "AdvancedGreedy") == "AdvancedGreedy" else "GR"
+    dynamics = "LT" if influence_model else "IC"
+
+    return {
+        "graph_name": name,
+        "stdin": str((work_dir / "stdin.txt").resolve()),
+        "blockers": str(
+            (directory.parent / "results" / f"{prefix}-{dynamics}-WC-{name}.blockers").resolve()
+        ),
+    }
+
+
+def _joc_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    directory = external_baselines["imin_joc"].directory
+    binary = directory / os.environ.get("JOC_ALGO", "AdvancedGreedy")
+    runner = work_dir / "run.sh"
+    # It reads its whole configuration from stdin, so the command is a two-line
+    # shell wrapper rather than an argv — cheaper than a pty and fully deterministic
+    runner.write_text(f'#!/bin/sh\nexec "{binary.resolve()}" < "{extras["stdin"]}"\n')
+    runner.chmod(0o755)
+    (work_dir / "blockers_path.txt").write_text(extras["blockers"])
+
+    return ["/bin/sh", str(runner.resolve())]
+
+
+def _joc_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
+    path = Path((Path(work_dir) / "blockers_path.txt").read_text().strip())
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no {path}; the patched blocker writer did not run. Tail of "
+            f"stdout:\n{stdout[-800:]}"
+        )
+
+    return [int(line) for line in path.read_text().split() if line.lstrip("-").isdigit()]
+
+
+def _diffim_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
+    """
+    DiffIM's graph and instance files, plus a runner that drives its notebooks directly.
+
+    The repo ships ONLY notebooks — no `.py` anywhere — and its own cross-imports go
+    through `import_ipynb`, which needs the algorithms directory to behave like a
+    package it is not. The runner therefore execs the code cells of each notebook
+    into ONE shared namespace in dependency order, which is both simpler and more
+    deterministic than fighting the import machinery, and it runs THEIR code
+    unmodified.
+
+    Formats verified from `utils.ipynb::txt2adj` (`n m`, then `u v p` per arc) and
+    `algorithm_pipeline.ipynb` (a gzipped pickle of `(is_seed, prob)` pairs, and a
+    dataset name whose part before the first `-` is the graph file).
+    """
+    negative_seeds = read_negative_seeds(work_dir)
+    directory = external_baselines["diffim"].directory
+    os.makedirs(directory / "graphs", exist_ok=True)
+    os.makedirs(directory / "datasets", exist_ok=True)
+
+    name = f"gwm_k{budget}"
+    lines = [
+        f"{int(graph.edge_index[0, edge])} {int(graph.edge_index[1, edge])} "
+        f"{float(graph.ic_probs[edge])}"
+        for edge in range(graph.edge_index.shape[1])
+    ]
+    (directory / "graphs" / f"{name}.txt").write_text(
+        f"{graph.num_nodes} {len(lines)}\n" + "\n".join(lines) + "\n"
+    )
+
+    # ABSOLUTE, and passed in rather than built inside the runner: the runner
+    # chdir's into the repo before it does anything, so a relative path there lands
+    # in the clone instead of beside the run. Silent, because the algorithm still
+    # succeeds — the mask just is not where the parser looks.
+    mask = (work_dir / "gwm_mask.txt").resolve()
+    runner = _write_runner(
+        work_dir,
+        _diffim_runner_source(
+            directory,
+            name,
+            negative_seeds,
+            budget,
+            graph.num_nodes,
+            diffusion_model,
+            mask,
+        ),
+    )
+
+    return {"runner": str(runner.resolve()), "mask": str(mask)}
+
+
+def _diffim_runner_source(
+    directory: Path,
+    name: str,
+    negative_seeds: list,
+    budget: int,
+    num_nodes: int,
+    diffusion_model: str,
+    mask: Path,
+) -> str:
+    """The generated runner: exec their notebooks, train if needed, then select arcs."""
+    algorithm = os.environ.get("DIFFIM_ALG", diffim_algorithm)
+    model_name = os.environ.get("DIFFIM_MODEL", "")
+    samples = int(os.environ.get("DIFFIM_TRAIN_SAMPLES", diffim_train_samples))
+
+    return f"""\
+import json, os, sys
+os.chdir({str(directory.resolve())!r})
+sys.path.insert(0, {str(directory.resolve())!r})
+
+import numpy as np
+
+# Their notebooks cross-import through `import_ipynb`, which needs `algorithms/` to
+# be a package it is not. Exec the code cells into ONE namespace instead, in
+# dependency order, skipping only the import lines that namespace already satisfies.
+SKIP = ("import import_ipynb", "from constants import", "from utils import",
+        "from simulation import", "from gnn import", "from dataset import",
+        "from algorithms.", "get_ipython")
+namespace = {{"__name__": "diffim_runner"}}
+
+
+def run_notebook(path):
+    cells = json.load(open(path))["cells"]
+    for cell in cells:
+        if cell["cell_type"] != "code":
+            continue
+        body = "".join(cell["source"])
+        body = "\\n".join(
+            line for line in body.splitlines()
+            if not any(line.strip().startswith(prefix) for prefix in SKIP)
+        )
+        exec(compile(body, path, "exec"), namespace)
+
+
+for notebook in ("constants.ipynb", "gnn.ipynb", "simulation.ipynb", "utils.ipynb",
+                 "dataset.ipynb", "train.ipynb",
+                 "algorithms/centrality.ipynb", "algorithms/greedy.ipynb",
+                 "algorithms/BPM.ipynb", "algorithms/KED.ipynb",
+                 "algorithms/MDS.ipynb", "algorithms/RIS.ipynb",
+                 "algorithms/random.ipynb", "algorithms/DiffIM.ipynb"):
+    run_notebook(notebook)
+
+graph_name = {name!r}
+n, m, adj_list = namespace["txt2adj"](graph_name)
+seed_idx = np.array({list(negative_seeds)!r})
+prob = namespace["simul"]({diffusion_model!r} if {diffusion_model!r} in ("IC", "LT") else "IC",
+                          adj_list, seed_idx)
+
+model_name = {model_name!r}
+algorithm = {algorithm!r}
+
+# DiffIM's own methods need a trained surrogate. The shipped checkpoints were fit on
+# THEIR graphs, so unless one is named explicitly we train on ours with their own
+# generate_dataset + train, which is the faithful thing to run.
+if algorithm.startswith("DiffIM") and not model_name:
+    namespace["generate_dataset"](graph_name + ".txt", {samples}, saving_tag="-train")
+    namespace["generate_dataset"](graph_name + ".txt", max(10, {samples} // 10), saving_tag="-test")
+    model_name = graph_name + ".pt"
+    namespace["train"](graph_name + "-train.pkl.gz", graph_name + "-test.pkl.gz",
+                       saving_name=model_name,
+                       hyper_params={{"gnn_latent_dim": {diffim_latent_dim!r}}},
+                       gpu_num="cpu")
+
+kwargs = dict(model_name=model_name, gnn_latent_dim={diffim_latent_dim!r}, gpu_num="cpu")
+if algorithm in ("DiffIM+",):
+    kwargs.update(namespace["default_hyper_params"])
+
+selector = {{"DiffIM": namespace["DiffIM"], "DiffIM+": namespace["DiffIMp"],
+             "DiffIM++": namespace["DiffIMpp"], "BPM": namespace["BPM"],
+             "RIS": namespace["RIS"], "MDS": namespace["MDS"],
+             "KED": namespace["KED"], "greedy": namespace["greedy_orig"]}}[algorithm]
+
+if algorithm in ("BPM", "KED"):
+    mask, _ = selector(adj_list, seed_idx, {budget})
+else:
+    mask, _ = selector(adj_list, seed_idx, prob, {budget}, **kwargs)
+
+with open({str(mask)!r}, "w") as handle:
+    for entry in mask:
+        handle.write(f"{{int(entry[0])}} {{int(entry[1])}}\\n")
+"""
+
+
+def _diffim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
+    """
+    DiffIM returns ARCS, and the pipeline's seed path only understands node ids.
+
+    Both endpoints are returned as a flat list so `run_external_baseline`'s range
+    check still applies; `_external_script` re-pairs them for the edge lever. Kept
+    here rather than widening the shared parser signature, which seven wired IM
+    adapters would otherwise have to grow a field for.
+    """
+    path = Path(work_dir) / "gwm_mask.txt"
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no gwm_mask.txt in {work_dir}; the runner did not reach its write "
+            f"step. Tail of stdout:\n{stdout[-1500:]}"
+        )
+
+    arcs = [
+        (int(parts[0]), int(parts[1]))
+        for parts in (line.split() for line in path.read_text().splitlines())
+        if len(parts) >= 2
+    ]
+
+    return [node for arc in arcs[:budget] for node in arc]
+
+
 def _cosasi_entry(method: str, title: str, venue: str, notes: str) -> ExternalBaseline:
     """One arm per cosasi estimator, all sharing its single install."""
     return ExternalBaseline(
@@ -2603,6 +2963,249 @@ external_baselines: dict[str, ExternalBaseline] = {
     # run on the LARGEST CONNECTED COMPONENT of the input silently (trap 7), and
     # several ship a REINSERTION pass that makes `X` and `X+R` different methods
     # cited under one name (trap 2).
+    # Influence blocking (research/influence_blocking.md §3.2, §4). Only FOUR repos
+    # exist in this entire literature — §11 records that no public code was found for
+    # NIE, CMIA-H/CMIA-O, CLDAG, the DRL rumour-minimization line, OCIM or JCCIM
+    # after searching GitHub for each — so these are its whole reproducible surface.
+    "sandimin": ExternalBaseline(
+        name="sandimin",
+        kind=classical,
+        title="SandIMIN: efficient influence minimization via node blocking",
+        venue="PVLDB 17(10), 2024",
+        repo="https://github.com/wjh0116/IMIN",
+        paper="https://arxiv.org/abs/2405.12871",
+        entry="C++ (g++ -O3 Sandwich.cpp sfmt/SFMT.c)",
+        task="influence_blocking",
+        status="needs_setup",
+        requirements=None,
+        subdir="SandIMIN_code",
+        build=["g++", "-O3", "-o", "IMIN", "Sandwich.cpp", "sfmt/SFMT.c",
+               "-DSFMT_MEXP=19937"],
+        patches=[
+            # `rdtsc` is x86 inline asm and does not assemble on ARM. It is only ever
+            # read by the RUN_TIME macro, which the code never invokes — every timing
+            # that reaches a result goes through std::chrono — so a portable clock()
+            # is behaviour-preserving rather than an approximation.
+            (
+                "SandIMIN_code/head.h",
+                '    asm volatile("rdtsc" : "=a" (a), "=d" (d));\n'
+                "    return (((uint64)a) | (((uint64)d) << 32));",
+                "    (void)a; (void)d;\n    return (uint64)clock();",
+            ),
+            # The repo computes its blocker set and then throws it away: it writes
+            # only (influence, influence-after, decrease, time) and its own
+            # OutputSeedSetToFile call is commented out. We need the SET, because our
+            # referee scores the set rather than trusting their spread number.
+            (
+                "SandIMIN_code/Sandwich.cpp",
+                'string seedfile = "results/res_" + arg.dataset;',
+                'string seedfile = arg.dataset + "gwm_blockers.txt";',
+            ),
+            (
+                "SandIMIN_code/Sandwich.cpp",
+                "ofstream of(seedfile, ios::app);",
+                "ofstream of(seedfile);",
+            ),
+            (
+                "SandIMIN_code/Sandwich.cpp",
+                "    //OutputSeedSetToFile(g.seedSet, arg);",
+                "    OutputSeedSetToFile(g.seedSet, arg);",
+            ),
+        ],
+        export=_sandimin_export,
+        command=_sandimin_command,
+        parse_seeds=_sandimin_parse,
+        notes=(
+            "The most comparable published table in this literature: its Table 5 "
+            "reports DECREASED SPREAD — literally our prevented-influence metric — "
+            "under IC with weighted-cascade p = 1/in-degree at absolute k = 10..50, "
+            "on EmailCore and YouTube among others, both of which we load. Sandwich "
+            "approximation over a submodular lower bound of the non-submodular IMIN "
+            "objective. `SANDIMIN_ALGO=SandIMIN-` selects the cheaper variant. "
+            "Warning: the shipped `el2bin` is a prebuilt x86 binary with no source, so "
+            "the adapter writes its packed `(int, int, double)` graph_ic.inf "
+            "directly instead — verified against `graph.h::readGraph`, which mmaps "
+            "the file and steps by 2*sizeof(int)+sizeof(double). Read its own §5.3 "
+            "row before reading ours: its trivial LHGA heuristic beats both of its "
+            "principled methods in 6 of that table's 30 cells."
+        ),
+    ),
+    "imin_joc": ExternalBaseline(
+        name="imin_joc",
+        kind=classical,
+        title="AdvancedGreedy / GreedyReplace: influence minimization via blocking strategies",
+        venue="INFORMS Journal on Computing, 2025 (ICDE 2023 line)",
+        repo="https://github.com/INFORMSJoC/2024.0591",
+        paper="https://arxiv.org/abs/2312.17488",
+        entry="C++ (g++ -std=c++11 -O3), configuration read from stdin",
+        task="influence_blocking",
+        status="needs_setup",
+        requirements=None,
+        subdir="src",
+        build=["sh", "-c",
+               "g++ -o AdvancedGreedy AdvancedGreedy.cpp -std=c++11 -O3 && "
+               "g++ -o GreedyReplace GreedyReplace.cpp -std=c++11 -O3"],
+        patches=[
+            # `bits/stdc++.h` is a libstdc++ convenience header that clang/libc++ does
+            # not ship, so the repo does not compile outside GCC at all
+            (
+                "src/AdvancedGreedy.cpp",
+                "#include <bits/stdc++.h>",
+                "#include <algorithm>\n#include <cmath>\n#include <cstring>\n"
+                "#include <ctime>\n#include <fstream>\n#include <iostream>\n"
+                "#include <map>\n#include <queue>\n#include <random>\n"
+                "#include <set>\n#include <string>\n#include <utility>\n"
+                "#include <vector>",
+            ),
+            (
+                "src/GreedyReplace.cpp",
+                "#include <bits/stdc++.h>",
+                "#include <algorithm>\n#include <cmath>\n#include <cstring>\n"
+                "#include <ctime>\n#include <fstream>\n#include <iostream>\n"
+                "#include <map>\n#include <queue>\n#include <random>\n"
+                "#include <set>\n#include <string>\n#include <utility>\n"
+                "#include <vector>",
+            ),
+            # Both binaries draw their own random sources from a fixed seed, so
+            # without this they would answer a DIFFERENT rumour than every other arm
+            # in the sweep and their column would be incomparable
+            (
+                "src/AdvancedGreedy.cpp",
+                "        uniform_int_distribution<int> dist(0, n - 1);\n"
+                "        x = dist(rand_num);\n",
+                "        cin >> x;\n",
+            ),
+            (
+                "src/GreedyReplace.cpp",
+                "        uniform_int_distribution<int> dist(0, n - 1);\n"
+                "        x = dist(rand_num);\n",
+                "        cin >> x;\n",
+            ),
+            # ...and both write only (budget, spread, time), never the blocked set
+            (
+                "src/AdvancedGreedy.cpp",
+                '    out << budget << "\\t" << res << "\\t" << totalTime / CLOCKS_PER_SEC << endl;',
+                '    ofstream blockers((outName + ".blockers").c_str());\n'
+                "    for (int i = 0; i < n; i++)\n"
+                "        if (remove_flag[i] && find(sources.begin(), sources.end(), i) == sources.end())\n"
+                "            blockers << i << endl;\n"
+                "    blockers.close();\n"
+                '    out << budget << "\\t" << res << "\\t" << totalTime / CLOCKS_PER_SEC << endl;',
+            ),
+            (
+                "src/GreedyReplace.cpp",
+                '    out << budget << "\\t" << res << "\\t" << totalTime / CLOCKS_PER_SEC << endl;',
+                '    ofstream blockers((outName + ".blockers").c_str());\n'
+                "    for (int i = 0; i < n; i++)\n"
+                "        if (remove_flag[i] && find(sources.begin(), sources.end(), i) == sources.end())\n"
+                "            blockers << i << endl;\n"
+                "    blockers.close();\n"
+                '    out << budget << "\\t" << res << "\\t" << totalTime / CLOCKS_PER_SEC << endl;',
+            ),
+        ],
+        export=_joc_export,
+        command=_joc_command,
+        parse_seeds=_joc_parse,
+        notes=(
+            "The INFORMS artifact for the ICDE'23 vertex-blocking line, and the "
+            "source of the sharpest single fact in this literature: its Tables V-VI "
+            "put GreedyReplace within 0.12% of the EXACT optimum at b = 4, in a "
+            "third of a second against 22 hours. `JOC_ALGO=GreedyReplace` selects "
+            "the replace variant (the default is AdvancedGreedy). Both recompute "
+            "edge probabilities themselves; we pass propagation model 1 (WC, "
+            "1/in-degree), which is exactly what `--prob-model weighted` generates, "
+            "so the repo simulates the same edge model we do. Both are node-blocking "
+            "methods, so run them with `--blocking-lever node_block`."
+        ),
+    ),
+    "diffim": ExternalBaseline(
+        name="diffim",
+        kind=learned,
+        title="DiffIM: differentiable influence minimization with surrogate modeling",
+        venue="AAAI 2025",
+        repo="https://github.com/junghunl/DiffIM",
+        paper="https://arxiv.org/abs/2502.01031",
+        entry="Jupyter notebooks (PyTorch Geometric)",
+        task="influence_blocking",
+        status="needs_setup",
+        # The repo's own requirements.txt pins torch-scatter==2.1.0+pt112cu113 and
+        # torch-sparse==0.6.16+pt112cu113 — CUDA 11.3 wheels that exist only on the
+        # PyG wheel index, so installing it verbatim fails on any CPU machine.
+        # Verified 2026-08-04. The trimmed set below is what its code actually
+        # imports; modern PyG needs neither scatter nor sparse for GCNConv.
+        requirements=None,
+        # Every third-party name its notebooks import, extracted from the cells
+        # rather than guessed: `optuna` is only used by `train.ipynb`'s
+        # `hparam_tuning`, which we never call — but the runner execs that
+        # notebook's cells to reach `train`, so its top-level import still has to
+        # resolve. Verified by running: without it the runner dies on
+        # ModuleNotFoundError before reaching a single algorithm.
+        pip_packages=(
+            "torch",
+            "torch-geometric",
+            "numpy",
+            "networkx",
+            "scipy",
+            "optuna",
+        ),
+        returns_edges=True,
+        export=_diffim_export,
+        command=_runner_command,
+        parse_seeds=_diffim_parse,
+        notes=(
+            "The closest published analogue to what this project builds: a GNN "
+            "surrogate for influence plus a CONTINUOUS RELAXATION of the edge "
+            "decisions, p~(u,v) = p(u,v) * r~(u,v) with r~ in [0,1], optimized by "
+            "gradient descent — which is literally our `set_edge_weight` op. It is "
+            "the existence proof that differentiable blocking works, and it is NOT "
+            "action-conditioned or rolled forward in time, which is exactly the gap "
+            "we target. An EDGE method: run it with `--blocking-lever edge_block` or "
+            "`weight_block`. `DIFFIM_ALG` selects the member (DiffIM, DiffIM+, "
+            "DiffIM++, and its own BPM / RIS / MDS / KED / greedy baselines); "
+            "`DIFFIM_MODEL` names a shipped checkpoint instead of training on our "
+            "graph, and `DIFFIM_TRAIN_SAMPLES` sizes that training. Warning: the repo "
+            "ships ONLY notebooks and no .py, and its cross-imports need "
+            "`algorithms/` to be a package it is not — the adapter execs the code "
+            "cells into one namespace rather than fighting `import_ipynb`."
+        ),
+    ),
+    "stratlearner": ExternalBaseline(
+        name="stratlearner",
+        kind=learned,
+        title="StratLearner: learning a strategy for misinformation prevention",
+        venue="NeurIPS 2020",
+        repo="https://github.com/cdslabamotong/stratLearner",
+        paper="https://arxiv.org/abs/2009.14337",
+        entry="Python (structured SVM over random-subgraph features)",
+        task="influence_blocking",
+        status="blocked",
+        blocker=(
+            "RUNNING IT ON OUR GRAPHS IS NOT AN ADAPTER, IT IS A RE-DERIVATION. Three "
+            "things it needs are not in the clone and are not computable at our "
+            "sizes, all verified against the code on 2026-08-04. (1) The `data/` "
+            "directory is a separate download from udel.edu (its README says so; the "
+            "URL 301s), and every path in `train.py` is built from it. (2) Each "
+            "feature is a random subgraph PLUS a full pairwise DISTANCE MATRIX — "
+            "`DiffusionGraph.__init__` reads `<i>_distance.txt` per feature — so 800 "
+            "features on our smallest real graph is O(800 x N^2) numbers on disk. "
+            "That is why the paper's own graphs are 512-1024 nodes. (3) Training "
+            "needs 2500 labelled attacker/protector PAIRS whose protector is a "
+            "best-known approximation, i.e. solving the blocking problem near-"
+            "optimally 2500 times is the PREREQUISITE for running the method we "
+            "would be benchmarking. Its published Table 1 is still transcribed in "
+            "research/influence_blocking.md §5.6 and is usable as a reference "
+            "without running it — including the row that matters most to us, plain "
+            "proximity at 0.770/0.776 against a GCN at 0.281/0.091."
+        ),
+        notes=(
+            "Kept registered rather than deleted because §5.6 is one of the two most "
+            "useful tables in this literature for us: a plain GCN scores 0.091-0.657 "
+            "on the SAME task depending only on the graph family, which is the "
+            "sharpest published argument for a structured head over an unstructured "
+            "backbone, and proximity beats every learned method except StratLearner "
+            "on two of its three graphs."
+        ),
+    ),
     "finder": ExternalBaseline(
         name="finder",
         kind=learned,

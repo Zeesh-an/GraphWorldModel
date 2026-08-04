@@ -42,7 +42,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from baselines.registry import external_baselines
+from baselines.registry import external_baselines, negative_seeds_filename
 from coding_agent.types import GraphInfo
 from world_model.wm_data import load_graph_store
 
@@ -142,6 +142,7 @@ def run_external_baseline(
     timeout: int = default_timeout_seconds,
     batches: list[int] | None = None,
     instances: list | None = None,
+    negative_seeds: tuple | None = None,
 ) -> dict:
     """
     Run one external repo and return the seed set it produced.
@@ -157,6 +158,12 @@ def run_external_baseline(
     work_dir as JSON rather than added to the export()/command() signatures,
     which would churn seven already-wired IM adapters for a field none of them
     read. A rounds-aware adapter loads it; everything else ignores the file.
+
+    `negative_seeds` is S_N for an influence-blocking task and crosses the boundary
+    exactly the same way and for the same reason. It is NOT derivable from
+    (graph, budget) — every blocking repo has to be told which rumour it is
+    answering, and two of the three would otherwise draw their own from a fixed
+    seed and silently answer a different one than every other arm in the sweep.
     """
     if name not in external_baselines:
         raise BaselineError(
@@ -195,6 +202,11 @@ def run_external_baseline(
             )
 
         (work_dir / schedule_filename).write_text(json.dumps(batches))
+
+    if negative_seeds:
+        (work_dir / negative_seeds_filename).write_text(
+            json.dumps([int(node) for node in negative_seeds])
+        )
 
     start = time.perf_counter()
 
@@ -279,22 +291,28 @@ def run_external_baseline(
             f"baseline {name!r} returned no valid seeds. Logs in {work_dir}."
         )
 
-    if len(seeds) > budget:
+    # An EDGE repo returns two ids per unit of budget, so the count that has to be
+    # compared against k is arcs, not endpoints. Without this a legal k-arc answer
+    # is rejected as 2k seeds.
+    unit = "arcs" if spec.returns_edges else "seeds"
+    spent = len(seeds) // 2 if spec.returns_edges else len(seeds)
+
+    if spent > budget:
         raise BaselineError(
-            f"baseline {name!r} returned {len(seeds)} seeds, exceeding budget {budget}"
+            f"baseline {name!r} returned {spent} {unit}, exceeding budget {budget}"
         )
 
     # Under-spending the budget is not an error — some methods legitimately
     # stop early — but it is never visible in the spread column, where it just
     # looks like a weak method. Say it out loud and record it.
-    if len(seeds) < budget:
+    if spent < budget:
         print(
-            f"[baseline:{name}] WARNING: returned {len(seeds)} seeds for budget "
-            f"{budget} — it is being scored on {budget - len(seeds)} fewer seeds "
+            f"[baseline:{name}] WARNING: returned {spent} {unit} for budget "
+            f"{budget} — it is being scored on {budget - spent} fewer {unit} "
             f"than every other arm at this budget"
         )
 
-    print(f"[baseline:{name}] {len(seeds)} seeds in {elapsed:.1f}s")
+    print(f"[baseline:{name}] {spent} {unit} in {elapsed:.1f}s")
 
     return {
         "name": name,
@@ -307,7 +325,7 @@ def run_external_baseline(
         # Persisted so an under-spent budget stays visible in the results JSON,
         # not just in a log line that scrolls past
         "budget": budget,
-        "seeds_returned": len(seeds),
+        "seeds_returned": spent,
     }
 
 
@@ -471,6 +489,29 @@ class ExternalLocalizer(Strategy):
             )
 
         return [int(node) for node in found[:budget]]
+"""
+
+
+def edge_script(seeds: list[int], budget_op: str = "remove_edge") -> str:
+    """
+    Wrap an EDGE repo's arc list as a canned Strategy.
+
+    The flat node list is re-paired here rather than in the parser, because
+    `run_external_baseline`'s range check is what catches a repo that was handed a
+    stale graph and it only understands node ids. `set_edge_weight` gets weight 0,
+    which is "blocking as p -> 0" — the r~ = 0 end of DiffIM's own relaxation and
+    the same intervention as cutting the arc.
+    """
+    arcs = list(zip(seeds[::2], seeds[1::2], strict=False))
+    weight = ", 0.0" if budget_op == "set_edge_weight" else ""
+
+    return f"""\
+class ExternalEdgeBaseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        arcs = {arcs!r}[:budget]
+        return [[ActionOp({budget_op!r}, u, v{weight}) for u, v in arcs]] + [
+            [] for _ in range(horizon)
+        ]
 """
 
 

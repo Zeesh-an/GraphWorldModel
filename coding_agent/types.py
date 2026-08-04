@@ -198,6 +198,20 @@ class TaskSpec:
     # is the arm that answers "is a forward model in the search loop worth
     # anything at all". Ignored by every task that does not invert.
     forward_model: bool = True
+    # Influence blocking: TWO cascades. The planner fights a rumour seeded from
+    # `outbreak` (which is S_N here) and its own counter-cascade is the instrument
+    # rather than the score. Set from the task registry's `competitive` flag, and
+    # read by every path that has to pick the two-cascade simulator, the 8-channel
+    # feature builder or the 4-target head.
+    competitive: bool = False
+    # Which cascade wins a node both reach on the same step, RESOLVED (never `auto`).
+    # §8.4 calls this a reported hyperparameter rather than an implementation detail
+    # and most papers never state theirs, so it reaches the prompt, the head and the
+    # simulator from one place. Inert unless `competitive`.
+    tie_break: str = "positive"
+    # Budak's detection delay r (§8.3): the rumour is detected r steps late and the
+    # blocker emits nothing before then. 0 is every published table's setting.
+    detection_delay: int = 0
     # Drives the edit stream's schedule. Carried on the task rather than read
     # from the environment so the same seed produces the same graph history for
     # every arm, which is what makes a cross-arm comparison under a stream mean
@@ -212,6 +226,19 @@ class TaskSpec:
     def contains(self) -> bool:
         """True when the planner is fighting a cascade it did not start."""
         return self.sense == minimize
+
+    @property
+    def blocks(self) -> bool:
+        """
+        True for influence blocking specifically, not for containment in general.
+
+        Both minimize a cascade they did not start, and the difference is what the
+        budget buys: a critical-node arm only ever DELETES, while a blocking arm may
+        also seed a counter-cascade that spreads and competes. That second cascade is
+        what needs a different simulator, a different feature layout and a different
+        head, so it needs a predicate of its own rather than riding on `contains`.
+        """
+        return self.competitive
 
     @property
     def recovers(self) -> bool:

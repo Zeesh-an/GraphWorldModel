@@ -35,6 +35,25 @@ def download_plain(name: str, url: str, filename: str) -> Path:
     return fetch(url, raw_root / name / filename)
 
 
+def download_gzip(name: str, url: str, archive: str) -> Path:
+    """
+    A single gzipped edge list (every SNAP `.txt.gz`), returned already expanded.
+
+    Separate from `download_plain` rather than sniffed inside it: a `.gz` handed to
+    `read_pairs` fails with a UnicodeDecodeError on byte 0x8b, which reads as a
+    corrupt download rather than as a missing decompress step.
+    """
+    directory = raw_root / name
+    inner = directory / archive[: -len(".gz")]
+
+    if inner.exists():
+        return inner
+
+    extract(fetch(url, directory / archive), directory)
+
+    return inner
+
+
 def download_archive(name: str, url: str, archive: str, member: str | None = None) -> Path:
     """
     Download and unpack an archive, returning the edge file inside it.

@@ -16,6 +16,43 @@ from torch.utils.data import Dataset
 in_channels = 6
 ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge = range(6)
 
+# ...and the COMPETITIVE layout (research/influence_blocking.md §2.1): the same
+# (infected, frontier) pair per cascade, then the same four structure/action
+# channels. 6 -> 8, and nothing in the encoders changes — they take (N, in_channels)
+# and are agnostic to what the columns mean, so only this table and the feature
+# builder move.
+#
+# The three action channels keep their current meaning exactly: the blocker only
+# ever seeds POSITIVELY, and S_N is an input to the episode rather than an action,
+# so CH_ADD is the positive seed and there is no negative-action channel at all.
+competitive_in_channels = 8
+(
+    ch_neg_infected,
+    ch_neg_frontier,
+    ch_pos_infected,
+    ch_pos_frontier,
+    ch_comp_degree,
+    ch_comp_add,
+    ch_comp_remove,
+    ch_comp_edge,
+) = range(8)
+
+# Output columns. The FIRST TWO are the negative cascade under both layouts, which
+# is what lets every existing consumer — the reward, the samplers, the eval suite —
+# read `probs[:, 0]` / `probs[:, 1]` and get the quantity being optimized without a
+# single branch. The positive pair is an instrument and never the score.
+out_channels = 2
+competitive_out_channels = 4
+
+
+def channels_for(competitive: bool) -> tuple[int, int]:
+    """(input channels, output channels) for one dataset's layout."""
+    return (
+        (competitive_in_channels, competitive_out_channels)
+        if competitive
+        else (in_channels, out_channels)
+    )
+
 # Numerical floor for the symmetric renormalization (avoids 0^-0.5)
 degree_floor = 1e-12
 
@@ -223,6 +260,76 @@ def build_features(
     return X, y_inf, y_fr
 
 
+def _marginal_vector(marginal: dict | None, num_nodes: int) -> np.ndarray:
+    """Sparse {node: prob} -> a dense (N,) float32 target."""
+    dense = np.zeros(num_nodes, dtype=np.float32)
+
+    for node, probability in (marginal or {}).items():
+        dense[int(node)] = probability
+
+    return dense
+
+
+def build_competitive_features(
+    record: dict,
+    edge_index: np.ndarray,
+    num_nodes: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Return (X (N, 8) float32, Y (N, 4) float32) for one two-cascade transition.
+
+    The competitive twin of `build_features`, and structurally the same function:
+    two state channels per cascade instead of one cascade's, the same degree and
+    action channels, and four soft MC marginals instead of two. Y's columns are
+    [next negative infected, next negative frontier, next positive infected, next
+    positive frontier], so Y[:, :2] is exactly what the single-cascade builder
+    returns for the cascade being minimized.
+    """
+    X = np.zeros((num_nodes, competitive_in_channels), dtype=np.float32)
+
+    state = record["state"]
+    X[np.asarray(state["infected"], dtype=np.int64), ch_neg_infected] = 1.0
+    X[np.asarray(state["frontier"], dtype=np.int64), ch_neg_frontier] = 1.0
+    X[np.asarray(state.get("pos_infected", []), dtype=np.int64), ch_pos_infected] = 1.0
+    X[np.asarray(state.get("pos_frontier", []), dtype=np.int64), ch_pos_frontier] = 1.0
+
+    degrees = np.zeros(num_nodes, dtype=np.float32)
+    if edge_index.size:
+        np.add.at(degrees, edge_index[0], 1.0)
+        np.add.at(degrees, edge_index[1], 1.0)
+
+    X[:, ch_comp_degree] = np.log1p(degrees)
+
+    for action_op in record["action"]:
+        if action_op["op"] == "add_node":
+            X[int(action_op["target"]), ch_comp_add] = 1.0
+        elif action_op["op"] == "remove_node":
+            X[int(action_op["target"]), ch_comp_remove] = 1.0
+        elif action_op["op"] in edge_ops:
+            X[int(action_op["target"]), ch_comp_edge] = 1.0
+            X[int(action_op["destination"]), ch_comp_edge] = 1.0
+
+    if record.get("next_marginal_pos_infected") is None:
+        raise KeyError(
+            "build_competitive_features requires the POSITIVE cascade's soft "
+            "targets (next_marginal_pos_infected / next_marginal_pos_frontier). "
+            "This dataset was generated single-cascade; regenerate with "
+            "data/generate_wm_data.py --competitive."
+        )
+
+    Y = np.stack(
+        [
+            _marginal_vector(record.get("next_marginal_infected"), num_nodes),
+            _marginal_vector(record.get("next_marginal_frontier"), num_nodes),
+            _marginal_vector(record.get("next_marginal_pos_infected"), num_nodes),
+            _marginal_vector(record.get("next_marginal_pos_frontier"), num_nodes),
+        ],
+        axis=1,
+    )  # shape: (N, 4)
+
+    return X, Y
+
+
 def load_graph_store(out_dir: Path) -> dict[str, dict]:
     """Load all graphs from disk and return graph_id -> {edge_index, ic_probs, lt_weights, num_nodes, base_edges, meta}."""
     out_dir = Path(out_dir)
@@ -366,11 +473,37 @@ def load_episode_endpoints(
     return sorted(episodes, key=lambda episode: episode["episode_id"])
 
 
+def dataset_is_competitive(out_dir: Path) -> bool:
+    """
+    Whether this dataset holds TWO-cascade transitions, from its own metadata.
+
+    Read rather than passed so a checkpoint can never be trained on the wrong
+    layout: an 8-channel head fed 6-channel features fails loudly at the first
+    matmul, but a 6-channel head fed a competitive dataset would silently fit the
+    negative cascade alone and report perfectly plausible numbers.
+    """
+    metadata_path = Path(out_dir) / "metadata.json"
+
+    if not metadata_path.exists():
+        return False
+
+    return bool(json.loads(metadata_path.read_text())["config"].get("competitive"))
+
+
 class TransitionDataset(Dataset):
     """One item per transition (main + cf). Resolves A_t per episode."""
 
-    def __init__(self, out_dir: Path, diffusion_model: str, split: str) -> None:
+    def __init__(
+        self,
+        out_dir: Path,
+        diffusion_model: str,
+        split: str,
+        competitive: bool | None = None,
+    ) -> None:
         self.diffusion_model = diffusion_model
+        self.competitive = (
+            dataset_is_competitive(out_dir) if competitive is None else competitive
+        )
 
         # Load the store and the JSONL for one (diffusion_model, split)
         self.store = load_graph_store(out_dir)
@@ -402,12 +535,20 @@ class TransitionDataset(Dataset):
     def __getitem__(self, index: int) -> dict:
         record, edge_index, weights = self.samples[index]
         num_nodes = self.store[record["graph_id"]]["num_nodes"]
-        X, y_inf, y_fr = build_features(record, edge_index, num_nodes)
+
+        if self.competitive:
+            X, targets = build_competitive_features(record, edge_index, num_nodes)
+        else:
+            X, y_inf, y_fr = build_features(record, edge_index, num_nodes)
+            targets = np.stack([y_inf, y_fr], axis=1)  # shape: (N, 2)
 
         return {
             "X": torch.from_numpy(X),
-            "y_inf": torch.from_numpy(y_inf),
-            "y_fr": torch.from_numpy(y_fr),
+            # Columns 0 and 1 are the cascade being scored under BOTH layouts, so
+            # every reader that wants "the next state" slices the same way
+            "y": torch.from_numpy(targets),
+            "y_inf": torch.from_numpy(targets[:, 0].copy()),
+            "y_fr": torch.from_numpy(targets[:, 1].copy()),
             "edge_index": torch.from_numpy(edge_index),
             "edge_weight": torch.from_numpy(weights),
             "num_nodes": num_nodes,
@@ -423,6 +564,7 @@ def collate_transitions(
 ) -> dict:
     """Stack B transitions into one disjoint block-diagonal graph + a GraphInput."""
     x_parts = []
+    y_parts = []
     y_inf_parts = []
     y_fr_parts = []
     edge_index_parts = []
@@ -433,6 +575,7 @@ def collate_transitions(
     for position, item in enumerate(batch):
         num_nodes = item["num_nodes"]
         x_parts.append(item["X"])
+        y_parts.append(item["y"])
         y_inf_parts.append(item["y_inf"])
         y_fr_parts.append(item["y_fr"])
         # Offset node ids into the block-diagonal graph
@@ -443,6 +586,7 @@ def collate_transitions(
         offset += num_nodes
 
     X = torch.cat(x_parts).to(device)
+    y = torch.cat(y_parts).to(device)  # shape: (sum N, 2) or (sum N, 4)
     y_inf = torch.cat(y_inf_parts).to(device)
     y_fr = torch.cat(y_fr_parts).to(device)
 
@@ -467,6 +611,7 @@ def collate_transitions(
 
     return {
         "X": X,
+        "y": y,
         "y_inf": y_inf,
         "y_fr": y_fr,
         "graph": graph_input,

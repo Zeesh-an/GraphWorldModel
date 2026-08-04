@@ -67,9 +67,22 @@ class Task:
     # count it has to recover, so a four-point budget sweep would be four runs of
     # the same experiment.
     default_budget_pcts: tuple | None = None
+    # ...or an ABSOLUTE sweep, which takes precedence over the percentage one. Only
+    # influence blocking sets it, and for a documented reason rather than taste:
+    # research/influence_blocking.md §8.2 records that percent-of-N budgets are used
+    # by NOBODY in that literature, while k in {10..50} is the shared convention of
+    # SandIMIN, both Xie papers and TC-AIBM. A percentage sweep there would produce a
+    # table comparable to no published number at all.
+    default_budgets: tuple | None = None
     # Fraction of N the exogenous outbreak seeds, for a task whose cascade the
     # planner does not start. 0 = the planner seeds it (every maximize task).
     outbreak_pct: float = 0.0
+    # TWO cascades rather than one: the planner answers a rumour with a counter-
+    # cascade of its own, which needs the competitive simulator, an 8-channel state
+    # and a 4-target head. Only influence blocking sets it, and it is what
+    # `TaskSpec.blocks` is built from — the difference from plain containment is that
+    # the budget can buy something that SPREADS, not only something that deletes.
+    competitive: bool = False
     blocker: str | None = None
 
     @property
@@ -144,17 +157,53 @@ tasks = {
     "influence_blocking": Task(
         name="influence_blocking",
         title="Influence Blocking",
-        status=planned,
+        status=implemented,
         objective=minimize,
         dynamics=("IC", "LT"),
-        action_ops=valid_action_ops,
+        # All four of §1.1's levers, and the one task that makes `remove_edge` and
+        # `set_edge_weight` load-bearing rather than implemented-and-idle. Which one
+        # an arm actually spends its budget on is `--blocking-lever`, which sets
+        # `budget_op` and `allowed_ops` together; `add_node` is the default because
+        # counter-seeding is the founding and by far the largest sub-literature.
+        action_ops=("add_node", "remove_node", "remove_edge", "set_edge_weight"),
         remove_semantics=blocked,
+        competitive=True,
         summary="Two competing cascades; place blockers to minimize the negative one.",
-        blocker="NDlib ships no competitive model (`Blocked: -1` is a static "
-        "non-adopter set, and CompositeModel expresses only one global "
-        "tie-break). Needs a CompetitiveSimulator, an 8-channel state, and a "
-        "CompetitiveICHead. Phase 0 (single-cascade node-blocking IMIN) needs "
-        "none of that and is runnable once the objective sign flips.",
+        # The blocker only ever seeds POSITIVELY: S_N is an input to the episode
+        # rather than an action (research/influence_blocking.md §2.1), which is what
+        # lets the three action channels keep the meaning they have everywhere else.
+        default_allowed_ops=("add_node",),
+        budget_op="add_node",
+        # All four levers are generated so ONE checkpoint serves every lever: the
+        # head has to have seen a counter-seed, a deletion, a cut and a reweight to
+        # predict any of them. `add_edge` is absent because no row of §1.1 uses it.
+        default_gen_action_ops=(
+            "add_node",
+            "remove_node",
+            "remove_edge",
+            "set_edge_weight",
+        ),
+        # |S_N|, not the blocker budget. §5.4 is the reason it is 1% and not more:
+        # CLDAG's Table 2 shows that at |S_N| = 1000 on NetHEPT even 1000 blockers
+        # remove 17% of the negative spread, so a big rumour puts every method in a
+        # regime where nothing works and every arm ties at "barely anything".
+        outbreak_pct=1.0,
+        # §8.2, and the one convention this task breaks with every other: percent-of-N
+        # budgets speak to NO blocking paper. SandIMIN, both Xie papers and TC-AIBM
+        # all report absolute k in {10..50} or {10..100}, so that is what we report,
+        # and the informative ratio |S_P| / |S_N| is a reported column rather than the
+        # sweep axis.
+        default_budgets=(10, 20, 30, 40, 50),
+        # Left None DELIBERATELY, unlike every other task's: condition 1's pool here
+        # depends on the LEVER, not the task, because a lever can only emit what its
+        # own members return — `proximity` hands back node ids and
+        # `kimura_link_blocking` hands back arcs. `pipeline.run.resolve_baselines`
+        # therefore reads `blocking_algorithms.default_blocking_baselines[lever]`,
+        # where each list leads with the row that actually has to be beaten
+        # (`proximity`, `imin_lhga`, `kimura_link_blocking`) and carries
+        # `degree_blocking` as the published FAILURE mode rather than as a floor.
+        default_baselines=None,
+        blocker=None,
     ),
     "critical_node_detection": Task(
         name="critical_node_detection",
@@ -470,6 +519,15 @@ for _task in tasks.values():
             f"action ops {_task.gen_action_ops}; a recover task needs "
             f"default_gen_action_ops=() so every episode's observation is caused "
             f"by its t=0 seed set alone"
+        )
+
+    # A competitive task's whole premise is a rumour it did not start, so an empty
+    # S_N would leave the blocker answering nothing and every arm tied at zero
+    if _task.competitive and not _task.outbreak_pct:
+        raise ValueError(
+            f"task {_task.name!r} is competitive but seeds no negative cascade "
+            f"(outbreak_pct=0); a blocker with no rumour to answer scores the same "
+            f"as every other blocker"
         )
 
     # ...and it cannot also fight an exogenous cascade: the sources ARE the unknown

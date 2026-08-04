@@ -252,7 +252,25 @@
 #                   every arm must contain, as a % of N. Unset = registry (1.0)
 #   OUTBREAK_SELECTOR  how its sources are picked: random (default) degree
 #                   pagerank betweenness kshell. Deterministic in SEED, so
-#                   every arm in a sweep faces the same outbreak
+#                   every arm in a sweep faces the same outbreak. On influence
+#                   blocking these two are |S_N| and the ATTACKER MODEL, which
+#                   is that task's second experimental axis
+#   BLOCKING_LEVER  influence blocking: which of the four published
+#                   interventions the budget buys — counter_seed (default),
+#                   node_block, edge_block, weight_block
+#   TIE_BREAK       influence blocking: which cascade wins a node both reach on
+#                   the same step. auto (default) = each dynamics' own founding
+#                   paper. Crosses generation, training AND evaluation, so set
+#                   it once or not at all
+#   POSITIVE_PROB   influence blocking: the blocker's per-edge probability.
+#                   shared (default) = COICM; a float = MCICM, and 1.0 is
+#                   Budak's high-effectiveness property
+#   DETECTION_DELAY influence blocking: Budak's r, the steps the rumour runs
+#                   before the blocker may act (default 0)
+#   NEGATIVE_SELECTORS  influence blocking, data stage: how each episode's S_N
+#                   is chosen (default: random degree pagerank)
+#   BLOCKER_SELECTORS   ...and how its t=0 blocker set is; `none` leaves the
+#                   rumour unopposed and is the prevented-influence reference
 #   SL_SELECT_SPLIT source localization: episodes the outer loop's reward is
 #                   computed on (default: train)
 #   SL_EVAL_SPLIT   ...and the HELD-OUT episodes the winning program is re-run
@@ -479,6 +497,15 @@ HIDE_EDGE_WEIGHTS="${HIDE_EDGE_WEIGHTS:-0}"
 OUTBREAK_PCT="${OUTBREAK_PCT:-}"
 OUTBREAK_SELECTOR="${OUTBREAK_SELECTOR:-}"
 
+# Influence blocking. Empty means the pipeline default; the two selector lists
+# only reach the data stage, the other four cross all three stages.
+BLOCKING_LEVER="${BLOCKING_LEVER:-}"
+TIE_BREAK="${TIE_BREAK:-}"
+POSITIVE_PROB="${POSITIVE_PROB:-}"
+DETECTION_DELAY="${DETECTION_DELAY:-}"
+NEGATIVE_SELECTORS="${NEGATIVE_SELECTORS:-}"
+BLOCKER_SELECTORS="${BLOCKER_SELECTORS:-}"
+
 # Source localization; empty means the pipeline default. The two SPLITS are the
 # load-bearing pair: the outer loop's reward is computed on SL_SELECT_SPLIT and
 # the winning program is re-run unmodified on SL_EVAL_SPLIT, which is the number
@@ -693,6 +720,13 @@ fi
 [ -n "$CAMPAIGNS" ]         && flags+=(--campaigns "$CAMPAIGNS")
 [ -n "$OUTBREAK_PCT" ]      && flags+=(--outbreak-pct "$OUTBREAK_PCT")
 [ -n "$OUTBREAK_SELECTOR" ] && flags+=(--outbreak-selector "$OUTBREAK_SELECTOR")
+
+[ -n "$BLOCKING_LEVER" ]     && flags+=(--blocking-lever "$BLOCKING_LEVER")
+[ -n "$TIE_BREAK" ]          && flags+=(--tie-break "$TIE_BREAK")
+[ -n "$POSITIVE_PROB" ]      && flags+=(--positive-prob "$POSITIVE_PROB")
+[ -n "$DETECTION_DELAY" ]    && flags+=(--detection-delay "$DETECTION_DELAY")
+[ -n "$NEGATIVE_SELECTORS" ] && flags+=(--negative-selectors $NEGATIVE_SELECTORS)
+[ -n "$BLOCKER_SELECTORS" ]  && flags+=(--blocker-selectors $BLOCKER_SELECTORS)
 
 [ -n "$SL_SELECT_SPLIT" ]      && flags+=(--sl-select-split "$SL_SELECT_SPLIT")
 [ -n "$SL_EVAL_SPLIT" ]        && flags+=(--sl-eval-split "$SL_EVAL_SPLIT")

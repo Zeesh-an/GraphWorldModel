@@ -11,6 +11,7 @@ from scipy.stats import wasserstein_distance
 
 from world_model.wm_data import (
     TransitionDataset,
+    build_competitive_features,
     build_features,
     build_graph_input,
     ch_frontier,
@@ -26,7 +27,8 @@ from world_model.wm_metrics import (
     score_predictions,
 )
 
-from data.wm_simulator import ActionOp, Simulator, blocked, spent
+from data.wm_competitive import CompetitiveConfig, CompetitiveSimulator
+from data.wm_simulator import ActionOp, Simulator, State, blocked, spent
 
 seed_upper_bound = 1 << 30
 
@@ -48,6 +50,7 @@ def evaluate_one_step(
     device: torch.device,
     threshold: float = 0.5,
     hide_edge_weights: bool = False,
+    competitive: bool = False,
 ) -> dict[str, float]:
     """
     Teacher-forced one-step evaluation over an entire dataset.
@@ -55,8 +58,19 @@ def evaluate_one_step(
     Aggregates the full metric suite (score_predictions), action-specific metrics
     (Add-Seed Success, Remove-Frontier Success), action sensitivity (how much the
     model output changes under counterfactual actions at the same state), and the persistence baseline.
+
+    Under `competitive` the headline suite is unchanged and still describes columns
+    0-1, which are the NEGATIVE cascade under both layouts — the quantity a blocking
+    task is scored on. What changes is the action metric: an `add_node` there seeds
+    the POSITIVE cascade, so "did the model flip the target to infected" has to read
+    the positive channel or it measures the exact opposite of the intervention. The
+    positive cascade's own suite is reported alongside under `pos_*`.
     """
     model.eval()
+    pos_pred_infected_parts = []
+    pos_target_infected_parts = []
+    pos_current_infected_parts = []
+    block_hits = block_total = 0
     pred_infected_parts = []
     pred_frontier_parts = []
     prob_infected_parts = []
@@ -91,11 +105,26 @@ def evaluate_one_step(
         current_infected_parts.append(item["X"][:, ch_infected].numpy())
         current_frontier_parts.append(item["X"][:, ch_frontier].numpy())
 
+        if competitive:
+            pos_pred_infected_parts.append((probs[:, 2] > threshold).astype(np.float32))
+            pos_target_infected_parts.append(item["y"][:, 2].numpy())
+            # Channel 2 is the positive cascade's own `infected` under the
+            # competitive layout, which is where its persistence baseline reads from
+            pos_current_infected_parts.append(item["X"][:, 2].numpy())
+
         record = item["record"]
         for action_op in record["action"]:
             if action_op["op"] == "add_node":
-                add_total += 1
-                add_hits += int(pred_infected[int(action_op["target"])] == 1)
+                if competitive:
+                    # A blocker's seed makes the target POSITIVELY active, and the
+                    # negative channel is what it must NOT flip
+                    block_total += 1
+                    block_hits += int(
+                        pos_pred_infected_parts[-1][int(action_op["target"])] == 1
+                    )
+                else:
+                    add_total += 1
+                    add_hits += int(pred_infected[int(action_op["target"])] == 1)
             elif action_op["op"] == "remove_node":
                 remove_total += 1
                 remove_hits += int(pred_frontier[int(action_op["target"])] == 0)
@@ -180,6 +209,25 @@ def evaluate_one_step(
     results["persistence"]["brier_frontier"] = brier_score(
         current_frontier, target_frontier
     )
+
+    if competitive:
+        # The counter-cascade's own accuracy, reported separately rather than
+        # averaged in: the two cascades are not interchangeable and a head that
+        # predicts the blocker's spread well while missing the rumour's has failed
+        # at the only thing the task scores
+        pos_current = _cat_arrays(pos_current_infected_parts)
+        pos_target = (_cat_arrays(pos_target_infected_parts) > 0.5).astype(np.float32)
+        results["pos_infected_acc"] = float(
+            (_cat_arrays(pos_pred_infected_parts).astype(bool) == pos_target.astype(bool)).mean()
+        )
+        results["pos_new_infection_f1"] = binary_f1(
+            _cat_arrays(pos_pred_infected_parts).astype(bool) & ~pos_current.astype(bool),
+            pos_target.astype(bool) & ~pos_current.astype(bool),
+        )
+        results["block_seed_success"] = (
+            block_hits / block_total if block_total else float("nan")
+        )
+
     return results
 
 
@@ -486,6 +534,250 @@ def rollout_ensemble(
     }
 
 
+def rebuild_competitive_simulator(
+    store_entry: dict,
+    diffusion_model: str,
+    negative_seeds: list[int],
+    seed: int = 0,
+    config: CompetitiveConfig | None = None,
+) -> CompetitiveSimulator:
+    """A CompetitiveSimulator on a stored graph, seeded with the episode's own S_N."""
+    edge_index = store_entry["edge_index"]
+    ic_probs = store_entry["ic_probs"]
+    num_nodes = store_entry["num_nodes"]
+    directed = bool(store_entry["meta"].get("directed", False))
+
+    graph = nx.DiGraph() if directed else nx.Graph()
+    graph.add_nodes_from(range(num_nodes))
+    graph.add_edges_from(
+        (int(edge_index[0, edge]), int(edge_index[1, edge]))
+        for edge in range(edge_index.shape[1])
+    )
+    ic_prob_map = {
+        (int(edge_index[0, edge]), int(edge_index[1, edge])): float(ic_probs[edge])
+        for edge in range(edge_index.shape[1])
+    }
+
+    simulator = CompetitiveSimulator(
+        graph, ic_prob_map=ic_prob_map, seed=seed, config=config
+    )
+    simulator.reset(diffusion_model, negative_seeds)
+
+    return simulator
+
+
+@torch.inference_mode()
+def competitive_rollout_ensemble(
+    model: nn.Module,
+    out_dir: str,
+    diffusion_model: str,
+    store: dict[str, dict],
+    device: torch.device,
+    split: str = "test",
+    n_samples: int = 20,
+    max_episodes: int = 50,
+    seed: int = 0,
+    hide_edge_weights: bool = False,
+    config: CompetitiveConfig | None = None,
+) -> dict[str, float]:
+    """
+    Two-cascade sampled-ensemble rollout against the true competitive simulator.
+
+    The competitive twin of `rollout_ensemble`, and the metric that decides whether
+    the learned head can be used as a SIMULATOR rather than only a one-step
+    predictor. Two things differ from the single-cascade version and both matter:
+
+      * The bias that counts is `ens_count_bias`, on the NEGATIVE cascade — the
+        quantity a blocker is scored on. A head that over-predicts the positive
+        cascade under-reports the rumour and reports containment it never achieved,
+        so `ens_pos_count_bias` is reported beside it rather than folded in.
+      * Sampling is COUPLED across cascades, exactly as the tie-break is: one draw
+        per node decides which cascade takes it, so a node cannot be sampled into
+        both and the ensemble cannot produce states the simulator never can.
+    """
+    rng = np.random.default_rng(seed)
+    path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
+    records = [
+        json.loads(line) for line in path.read_text().splitlines() if line.strip()
+    ]
+
+    by_episode = defaultdict(list)
+    for record in records:
+        if record["branch"] == "main":
+            by_episode[(record["graph_id"], record["episode_id"])].append(record)
+
+    episode_keys = list(by_episode)
+    if max_episodes and len(episode_keys) > max_episodes:
+        episode_keys = [
+            episode_keys[index]
+            for index in rng.choice(len(episode_keys), size=max_episodes, replace=False)
+        ]
+
+    model.eval()
+    marginal_mae, count_bias, pos_count_bias, count_w1 = [], [], [], []
+    final_model_counts, final_true_counts = [], []
+
+    for graph_id, episode_id in episode_keys:
+        episode_records = sorted(
+            by_episode[(graph_id, episode_id)], key=lambda record: record["t"]
+        )
+        num_nodes = store[graph_id]["num_nodes"]
+        negative_seeds = episode_records[0].get("negative_seeds", [])
+        adjacency_map = reconstruct_episode_adjacency(
+            episode_records, store[graph_id]["base_edges"]
+        )
+        num_steps = len(episode_records)
+
+        true_infected = np.zeros((n_samples, num_steps, num_nodes), dtype=np.float32)
+        for sample in range(n_samples):
+            simulator = rebuild_competitive_simulator(
+                store[graph_id],
+                diffusion_model,
+                negative_seeds,
+                seed=int(rng.integers(seed_upper_bound)),
+                config=config,
+            )
+            for step, record in enumerate(episode_records):
+                state = simulator.advance(_action_bag(record["action"]))
+                true_infected[
+                    sample, step, np.asarray(state.infected, dtype=np.int64)
+                ] = 1.0
+
+        model_infected = np.zeros((n_samples, num_steps, num_nodes), dtype=np.float32)
+        model_positive = np.zeros((n_samples, num_steps, num_nodes), dtype=np.float32)
+
+        for sample in range(n_samples):
+            state = _initial_competitive_state(episode_records[0])
+
+            for step, record in enumerate(episode_records):
+                edge_index, weights = edges_to_arrays(
+                    adjacency_map[(record["t"], "main")]
+                )
+                rolled = dict(record) | {"state": state.to_dict()}
+                X, _ = build_competitive_features(rolled, edge_index, num_nodes)
+                graph_input = build_graph_input(
+                    edge_index,
+                    weights,
+                    num_nodes,
+                    diffusion_model,
+                    device,
+                    hide_edge_weights,
+                )
+                probs = (
+                    torch.sigmoid(model(torch.from_numpy(X).to(device), graph_input))
+                    .cpu()
+                    .numpy()
+                )
+                state = sample_competitive_step(
+                    state, record["action"], probs, rng, num_nodes
+                )
+                model_infected[
+                    sample, step, np.asarray(state.infected, dtype=np.int64)
+                ] = 1.0
+                model_positive[
+                    sample, step, np.asarray(state.pos_infected, dtype=np.int64)
+                ] = 1.0
+
+        marginal_mae.append(
+            float(np.abs(model_infected.mean(axis=0) - true_infected.mean(axis=0)).mean())
+        )
+
+        model_counts = model_infected.sum(axis=2)
+        true_counts = true_infected.sum(axis=2)
+        positive_counts = model_positive.sum(axis=2)
+
+        for step in range(num_steps):
+            count_w1.append(
+                wasserstein_distance(model_counts[:, step], true_counts[:, step])
+            )
+            count_bias.append(
+                float(model_counts[:, step].mean() - true_counts[:, step].mean())
+            )
+            pos_count_bias.append(float(positive_counts[:, step].mean()))
+
+        final_model_counts.append(float(model_counts[:, -1].mean()))
+        final_true_counts.append(float(true_counts[:, -1].mean()))
+
+    return {
+        "ens_marg_mae": float(np.mean(marginal_mae)) if marginal_mae else 0.0,
+        "ens_count_w1": float(np.mean(count_w1)) if count_w1 else 0.0,
+        "ens_count_bias": float(np.mean(count_bias)) if count_bias else 0.0,
+        "ens_pos_count_mean": float(np.mean(pos_count_bias)) if pos_count_bias else 0.0,
+        "ens_final_count_model": (
+            float(np.mean(final_model_counts)) if final_model_counts else 0.0
+        ),
+        "ens_final_count_true": (
+            float(np.mean(final_true_counts)) if final_true_counts else 0.0
+        ),
+        "ens_n_samples": float(n_samples),
+        "ens_n_episodes": float(len(episode_keys)),
+    }
+
+
+def _initial_competitive_state(record: dict) -> State:
+    """The first recorded state of a competitive episode, as a State."""
+    state = record["state"]
+
+    return State(
+        infected=list(state["infected"]),
+        frontier=list(state["frontier"]),
+        pos_infected=list(state.get("pos_infected", [])),
+        pos_frontier=list(state.get("pos_frontier", [])),
+    )
+
+
+def sample_competitive_step(
+    state: State,
+    action: list[dict],
+    probs: np.ndarray,
+    rng: np.random.Generator,
+    num_nodes: int,
+) -> State:
+    """
+    One sampled two-cascade step from the head's four marginals.
+
+    Coupled rather than four independent draws, and for the same reason the
+    single-cascade sampler couples its two channels: independent draws produce states
+    the simulator cannot reach — here a node in BOTH cascades — and those states
+    systematically inflate a free-running rollout. One uniform per node decides
+    whether it activates at all and, if so, which cascade takes it, in proportion to
+    the two frontier marginals the head already resolved through the tie-break.
+    """
+    adds = {
+        int(op["target"]) for op in action if op["op"] == "add_node"
+    }
+    removes = {int(op["target"]) for op in action if op["op"] == "remove_node"}
+
+    negative = set(state.infected) - removes
+    positive = (set(state.pos_infected) | (adds - negative)) - removes
+
+    committed = negative | positive | removes
+    free = np.ones(num_nodes, dtype=bool)
+    free[list(committed)] = False
+
+    p_negative = np.where(free, probs[:, 1], 0.0)
+    p_positive = np.where(free, probs[:, 3], 0.0)
+    total = p_negative + p_positive
+
+    draw = rng.random(num_nodes)
+    activates = draw < np.clip(total, 0.0, 1.0)
+    # ONE uniform does both jobs: `draw < total` decides that the node activates, and
+    # the same draw landing in [0, p_negative) rather than [p_negative, total)
+    # decides which cascade takes it — which splits it in exactly the right
+    # proportion without a second random number or a second source of drift
+    goes_negative = activates & (draw < p_negative)
+
+    new_negative = set(np.flatnonzero(goes_negative).tolist())
+    new_positive = set(np.flatnonzero(activates & ~goes_negative).tolist())
+
+    return State(
+        infected=sorted(negative | new_negative),
+        frontier=sorted(new_negative),
+        pos_infected=sorted(positive | new_positive),
+        pos_frontier=sorted(new_positive),
+    )
+
+
 def rebuild_simulator(
     store_entry: dict, diffusion_model: str, seed: int = 0
 ) -> Simulator:
@@ -608,6 +900,195 @@ def planning_regret(
         "plan_regret_random": float(np.mean(random_regrets)) if random_regrets else 0.0,
         "plan_regret_degree": float(np.mean(degree_regrets)) if degree_regrets else 0.0,
     }
+
+
+@torch.inference_mode()
+def blocking_regret(
+    model: nn.Module,
+    store_entry: dict,
+    diffusion_model: str,
+    device: torch.device,
+    n_states: int = 10,
+    n_candidates: int = 20,
+    mc_runs: int = 8,
+    horizon: int = 6,
+    seed: int = 0,
+    hide_edge_weights: bool = False,
+    config: CompetitiveConfig | None = None,
+) -> dict[str, float]:
+    """
+    One-step blocker choice: does the model pick the counter-seed that saves the most?
+
+    The competitive analogue of `planning_regret`, and it measures PREVENTED
+    influence rather than spread — `sigma(S_N, empty) - sigma(S_N, blocker)`, the
+    quantity every name in research/influence_blocking.md §8.1 refers to. Regret is
+    against the best candidate in the same shortlist, so 0 means the model chose the
+    node the simulator agrees was best.
+
+    Both comparison baselines are here for a reason §5.4 states outright: `degree` is
+    the heuristic that "cannot be used for influence blocking maximization at all",
+    and `proximity` — an out-neighbour of the rumour's own seeds — is the strong
+    cheap one. Beating random is not evidence here; beating proximity is.
+    """
+    rng = np.random.default_rng(seed)
+    num_nodes = store_entry["num_nodes"]
+    edge_index = store_entry["edge_index"]
+    ic_probs = store_entry["ic_probs"]
+
+    graph_input = build_graph_input(
+        edge_index, ic_probs, num_nodes, diffusion_model, device, hide_edge_weights
+    )
+    degrees = np.zeros(num_nodes)
+    np.add.at(degrees, edge_index[0], 1)
+    np.add.at(degrees, edge_index[1], 1)
+
+    out_neighbours = defaultdict(list)
+    for edge in range(edge_index.shape[1]):
+        out_neighbours[int(edge_index[0, edge])].append(int(edge_index[1, edge]))
+
+    model.eval()
+    model_regrets, random_regrets, degree_regrets, proximity_regrets = [], [], [], []
+
+    def true_prevented(negative_seeds: list[int], blocker: int | None) -> float:
+        plan = [[ActionOp("add_node", int(blocker))]] if blocker is not None else [[]]
+        totals = []
+
+        for _ in range(mc_runs):
+            simulator = rebuild_competitive_simulator(
+                store_entry,
+                diffusion_model,
+                negative_seeds,
+                seed=int(rng.integers(seed_upper_bound)),
+                config=config,
+            )
+            state = simulator.current_state()
+            for timestep in range(horizon + 1):
+                state = simulator.advance(plan[timestep] if timestep < len(plan) else [])
+                if timestep > 0 and not state.frontier and not state.pos_frontier:
+                    break
+
+            totals.append(len(state.infected))
+
+        return float(np.mean(totals))
+
+    for _ in range(n_states):
+        size = max(1, num_nodes // 100)
+        negative_seeds = sorted(
+            int(node) for node in rng.choice(num_nodes, size=size, replace=False)
+        )
+        ring = sorted(
+            {
+                node
+                for source in negative_seeds
+                for node in out_neighbours[source]
+                if node not in negative_seeds
+            }
+        )
+        pool = [node for node in range(num_nodes) if node not in negative_seeds]
+
+        if not pool:
+            continue
+
+        candidates = sorted(
+            {int(node) for node in rng.choice(pool, size=min(n_candidates, len(pool)), replace=False)}
+            | set(ring[:5])
+        )
+
+        predicted = []
+        for candidate in candidates:
+            record = {
+                "state": {
+                    "infected": negative_seeds,
+                    "frontier": negative_seeds,
+                    "pos_infected": [],
+                    "pos_frontier": [],
+                },
+                "action": [{"op": "add_node", "target": int(candidate)}],
+                "next_marginal_infected": {},
+                "next_marginal_frontier": {},
+                "next_marginal_pos_infected": {},
+                "next_marginal_pos_frontier": {},
+            }
+            X, _ = build_competitive_features(record, edge_index, num_nodes)
+            probs = (
+                torch.sigmoid(model(torch.from_numpy(X).to(device), graph_input))
+                .cpu()
+                .numpy()
+            )
+            # The model's own estimate of how far the rumour gets next step; the
+            # blocker it should choose is the one that MINIMIZES this
+            predicted.append(probs[:, 0].sum())
+
+        model_choice = candidates[int(np.argmin(predicted))]
+        random_choice = candidates[int(rng.integers(len(candidates)))]
+        degree_choice = candidates[
+            int(np.argmax([degrees[candidate] for candidate in candidates]))
+        ]
+        in_ring = [node for node in candidates if node in set(ring)]
+        proximity_choice = (
+            max(in_ring, key=lambda node: degrees[node]) if in_ring else degree_choice
+        )
+
+        unopposed = true_prevented(negative_seeds, None)
+        prevented = {
+            candidate: unopposed - true_prevented(negative_seeds, candidate)
+            for candidate in candidates
+        }
+        oracle = max(prevented.values())
+
+        model_regrets.append(oracle - prevented[model_choice])
+        random_regrets.append(oracle - prevented[random_choice])
+        degree_regrets.append(oracle - prevented[degree_choice])
+        proximity_regrets.append(oracle - prevented[proximity_choice])
+
+    return {
+        "block_regret_model": float(np.mean(model_regrets)) if model_regrets else 0.0,
+        "block_regret_random": float(np.mean(random_regrets)) if random_regrets else 0.0,
+        "block_regret_degree": float(np.mean(degree_regrets)) if degree_regrets else 0.0,
+        "block_regret_proximity": (
+            float(np.mean(proximity_regrets)) if proximity_regrets else 0.0
+        ),
+    }
+
+
+@torch.inference_mode()
+def blocking_regret_multi(
+    model: nn.Module,
+    store: dict[str, dict],
+    diffusion_model: str,
+    device: torch.device,
+    n_graphs: int = 5,
+    seed: int = 0,
+    hide_edge_weights: bool = False,
+    config: CompetitiveConfig | None = None,
+    **kwargs: object,
+) -> dict[str, float]:
+    """Average blocking regret over the first n_graphs graphs, with a cross-graph std."""
+    graph_ids = list(store)[:n_graphs]
+    if not graph_ids:
+        raise ValueError("blocking_regret_multi: empty graph store")
+
+    per_graph = [
+        blocking_regret(
+            model,
+            store[graph_id],
+            diffusion_model,
+            device,
+            seed=seed + offset,
+            hide_edge_weights=hide_edge_weights,
+            config=config,
+            **kwargs,
+        )
+        for offset, graph_id in enumerate(graph_ids)
+    ]
+
+    results = {"plan_n_graphs": float(len(per_graph))}
+    for key in per_graph[0]:
+        values = np.array([entry[key] for entry in per_graph], dtype=np.float64)
+        results[key] = float(values.mean())
+        results[f"{key}_std"] = float(values.std())
+
+    return results
 
 
 @torch.inference_mode()

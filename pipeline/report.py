@@ -283,7 +283,19 @@ def _results_table(agent_results: list[dict]) -> list[str]:
     if recover:
         return lines + _localization_table(agent_results)
 
-    if sense == minimize:
+    blocking = any(result.get("blocking") for result in agent_results)
+
+    if blocking:
+        lines += [
+            "> **`spread` is the RUMOUR's remaining size and LOWER IS BETTER.** Two "
+            "cascades run on this graph: a rumour seeded first at nodes no arm chose, "
+            "and each arm's own intervention answering it. The column counts only the "
+            "rumour. The prevented-influence table below reports the same numbers as "
+            "a difference from the unopposed cascade, which is the form this "
+            "literature publishes in.",
+            "",
+        ]
+    elif sense == minimize:
         lines += [
             "> **`spread` is the objective and LOWER IS BETTER.** This is a "
             "containment task: an exogenous outbreak is already running, the budget "
@@ -415,6 +427,89 @@ def _adaptivity_section(agent_results: list[dict]) -> list[str]:
         )
 
     return lines + [""]
+
+
+def _blocking_section(agent_results: list[dict]) -> list[str]:
+    """
+    Prevented influence per arm — the column every blocking paper actually reports.
+
+    Empty for every task with one cascade. The results table above reports the
+    rumour's REMAINING size, which is what the search minimizes; this reports the
+    same numbers as a DIFFERENCE from the unopposed cascade, which is the form
+    research/influence_blocking.md §8.1 records under five different names and the
+    only form comparable to a published table.
+    """
+    scored = [result for result in agent_results if result.get("blocking")]
+    if not scored:
+        return []
+
+    largest = max(result["budget"] for result in scored)
+    at_largest = sorted(
+        [result for result in scored if result["budget"] == largest],
+        key=lambda result: -(result.get("mc_prevented_influence") or 0.0),
+    )
+    head = at_largest[0]
+    unopposed = head.get("mc_unopposed_spread") or head.get("unopposed_spread") or 0.0
+
+    lines = [
+        f"## Prevented influence at k={largest}",
+        "",
+        f"`prevented = sigma(S_N, empty) - sigma(S_N | blockers)`, both terms measured "
+        f"on the shared ground-truth referee. The rumour was seeded by "
+        f"`{head.get('attacker', '?')}` at **{head.get('n_negative_seeds', '?')} "
+        f"nodes** and reaches **{unopposed:,.1f}** of them unopposed; the lever is "
+        f"`{head.get('lever', '?')}` ({head.get('lever_papers', '')}); the tie-break "
+        f"is `{head.get('tie_break', '?')}` under "
+        f"`{head.get('competitive_model', '?')}`.",
+        "",
+        "> **Read the budget column as an absolute k, not a percentage.** "
+        "[`research/influence_blocking.md`](../../../../research/influence_blocking.md) "
+        "§8.2 records that percent-of-N budgets are used by **nobody** in this "
+        "literature, while `k` in `{10..50}` is the shared convention of SandIMIN, "
+        "both Xie papers and TC-AIBM. The informative ratio is `|S_P| / |S_N|`, which "
+        "is its own column below — CLDAG's Table 2 shows it takes 20-30x the rumour's "
+        "own seed count to cut it to a 10% residual.",
+        "",
+        "> **A heuristic winning here is the NORMAL outcome, not a failed run.** "
+        "SandIMIN's own Table 5 has its trivial highest-gain heuristic beating both "
+        "of that paper's principled methods in 6 of 30 cells, and StratLearner's "
+        "Table 1 has plain proximity above every learned method except StratLearner "
+        "on two of three graphs. `proximity` and `imin_lhga` are in the default pool "
+        "for exactly that reason; `degree_blocking` is there as the published FAILURE "
+        "mode, since CLDAG reports plain degree cannot be used for this task at all.",
+        "",
+        # The ratio's own pipes have to be escaped or they close the table cell
+        "| arm | rumour size | prevented | % of cascade | % of N | "
+        "\\|S_P\\|/\\|S_N\\| | spent |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
+    ]
+
+    for result in at_largest:
+        prevented = result.get("mc_prevented_influence")
+        percent = result.get("mc_prevented_pct_of_unopposed")
+        ratio = result.get("budget_ratio")
+        lines.append(
+            f"| `{result['arm']}` "
+            f"| {_format_number(ground_truth_reward(result))} "
+            f"| {'—' if prevented is None else f'{prevented:+.2f}'} "
+            f"| {'—' if percent is None else f'{percent:.1f}%'} "
+            f"| {_format_number(result.get('prevented_pct_of_nodes'))} "
+            f"| {'—' if ratio is None else f'{ratio:.2f}'} "
+            f"| {result.get('n_spent', '—')} |"
+        )
+
+    lines += [
+        "",
+        "`prevented` counts only nodes the rumour **would otherwise have infected** "
+        "(Budak's \"saved\" set): a blocker that protects a node the cascade never "
+        "reaches scores exactly zero, however central that node is. An arm whose "
+        "`spent` is below the budget ran out of candidates — the reachable region was "
+        "smaller than `k`, which is common at the high end of the sweep and is the "
+        "honest answer rather than a padded set.",
+        "",
+    ]
+
+    return lines
 
 
 def _structural_section(agent_results: list[dict]) -> list[str]:
@@ -652,6 +747,7 @@ def write_report(
     lines += _taxonomy_section(agent_results)
     lines += _results_table(agent_results)
     lines += _adaptivity_section(agent_results)
+    lines += _blocking_section(agent_results)
     lines += _structural_section(agent_results)
     lines += _winner_section(agent_results)
     lines += _world_model_section(wm_results)

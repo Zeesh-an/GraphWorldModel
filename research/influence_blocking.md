@@ -655,7 +655,20 @@ MC counts: SandIMIN **10⁵** simulations for the final spread estimate; CLDAG *
 
 ### 9.1 Build order
 
-**Phase 0 — node-blocking IMIN. Almost free, and it produces a comparable table.** `remove_node` under single-cascade IC needs **no** two-cascade machinery: the "negative" cascade is just our existing cascade, and the intervention is deleting nodes. §5.3 is then directly reproducible on `email_eu_core` yes, `facebook` yes and `wiki_vote` yes at `k = 10…50` with weighted-cascade probabilities.
+yes **BUILT, ALL PHASES, 2026-08-04.** `influence_blocking` is `implemented` in `pipeline/tasks.py` and runs end to end through the same five stages as every other task. What shipped, against what this section proposed:
+
+| Proposed here | Shipped as | Note |
+| ------------- | ---------- | ---- |
+| `CompetitiveSimulator` alongside `Simulator` | `data/wm_competitive.py` | Its own module rather than inside `wm_simulator.py`; synchronous step, all three tie-breaks, COICM/MCICM via `--positive-prob` |
+| 8 channels, 4 targets | `wm_data.build_competitive_features`, `channels_for()` | Additive: the single-cascade layout is byte-identical, and `dataset_is_competitive()` reads the choice back off the data |
+| `CompetitiveICHead` | `CompetitiveICHead` **and** `CompetitiveLTHead` | §9.1 Phase 2 said defer CLT; it shipped anyway, because the registry declares both dynamics and `--diffusion-model LT` otherwise has no head at all. Expect it to be the weaker demonstration for exactly the reason §2.2 gives |
+| 4 BCE terms | one term per target column | Generalized rather than special-cased, so 2 and 4 are one loop |
+| `blocked_influence` + planning regret | `blocking_metrics`, `wm_eval.blocking_regret` | Regret is measured against **prevented** influence and reports `proximity` as a comparison baseline, not just degree and random |
+| Phase 0 (single-cascade node blocking) | the `node_block` LEVER of the full task | Subsumed rather than built separately: it is the same simulator with `budget_op = remove_node`, so §5.3's table is reproducible without a second code path |
+
+**§2.2's COICM caveat is resolved, not inherited.** That section warns the two-MLP product form "silently assumes MCICM, not COICM". The warning is right about the live-edge characterisation and does not bite on the stepwise transition: a node activates in at most ONE campaign, so each arc is ever attempted by exactly one of them, and the two arrival probabilities at a susceptible `v` are products over disjoint in-edge sets. The factorization is therefore exact under both models, and what actually separates them in a forward simulation is only whether `p_positive == p_negative`. `check_influence_blocking.check_head_matches_simulator` holds the oracle head to within 0.03 of 4,000 simulator draws under both dominance rules, so this is measured rather than argued.
+
+**Phase 0 — node-blocking IMIN. Almost free, and it produces a comparable table.** `remove_node` under single-cascade IC needs **no** two-cascade machinery: the "negative" cascade is just our existing cascade, and the intervention is deleting nodes. §5.3 is then directly reproducible on `email_eu_core` yes, `facebook` yes and `wiki_vote` yes at `k = 10…50` with weighted-cascade probabilities. yes **Shipped as `--blocking-lever node_block`.**
 
 One correctness bug to fix first. yes **Done.** `Simulator.apply_actions` used to implement `remove_node` for IC as `status = 2` (NDlib _Removed_) while `active_nodes()` returned `status in (1, 2)`, so a "removed" node still counted as infected: right for "spent spreader", wrong for "blocked". Fixed as this section proposed, down to the flag name: `--remove-semantics spent|blocked`, with a `blocked: set[int]` on the simulator excluded from `active_nodes()`. Transmission is stopped structurally instead of by a special case in `advance`, because node deletion is emitted as `remove_node(v)` plus a `remove_edge` per incident arc (`wm_actions.delete_node_bag`), which also makes the feature builder and the adjacency replay correct with no changes. `Simulator._enforce_blocked()` backstops a bare `remove_node`. This task's registry entry defaults to `blocked`.
 
@@ -730,6 +743,15 @@ Honest list of what this review could **not** establish.
 
 - **No public code found** for NIE, CMIA-H/CMIA-O, CLDAG, the DRL rumour- minimization paper, OCIM, JCCIM, or the uncertainty-aware competitive IM line — after searching GitHub for each. The three repos in this file (StratLearner, DiffIM, SandIMIN + the INFORMS artifact) are the entire reproducible surface of this literature.
 - **RPS's printed code link is `github.com/stamps`**, which is not a resolvable repository. Recorded as printed, not verified as working.
+
+**Wiring status of the four repos [verified 2026-08-04, by cloning and running each]**
+
+| Repo | Status | What it took |
+| ---- | ------ | ------------ |
+| **SandIMIN** (`wjh0116/IMIN`) | yes wired, runs | 4 patches. Its `rdtsc` inline asm is x86-only (dead code — every real timing is `std::chrono`), and **it throws its own blocker set away**: it prints only `(influence, influence-after, decrease, time)` and its `OutputSeedSetToFile` call is commented out. Its shipped `el2bin` is a prebuilt x86 binary with no source, so the adapter writes the packed `(int, int, double)` `graph_ic.inf` directly, verified against `graph.h::readGraph`'s own mmap stride |
+| **Xie IJoC** (`INFORMSJoC/2024.0591`) | yes wired, runs (both AdvancedGreedy and GreedyReplace) | 6 patches. `bits/stdc++.h` is GCC-only; **both binaries draw their own rumour from `mt19937 rand_num(20220708)`**, so unpatched they would answer a different rumour than every arm they are compared against; and neither writes the blocked set |
+| **DiffIM** (`junghunl/DiffIM`) | yes wired, runs | The repo is **notebooks only** — no `.py` anywhere — and its cross-imports need `algorithms/` to be a package it is not, so the adapter execs the code cells into one namespace. Its own `requirements.txt` pins `torch-scatter==2.1.0+pt112cu113` and `torch-sparse==0.6.16+pt112cu113`, CUDA-11.3 wheels that are not on PyPI, so the spec installs a trimmed set instead — including `optuna`, which only `train.ipynb::hparam_tuning` uses and we never call, but whose top-level import still has to resolve for the runner to reach `train`. It is also the one repo here whose intervention is an ARC, so it carries `returns_edges=True`: without it the budget check counts endpoints and rejects a legal k-arc answer as 2k seeds. `DIFFIM_ALG` selects the member; the paper's own `DiffIM+` trains a surrogate on our graph first, and its `BPM` / `RIS` / `MDS` / `KED` / `greedy` baselines need no model at all |
+| **StratLearner** (`cdslabamotong/stratLearner`) | Warning: `blocked`, verified reason | Running it on our graphs is a re-derivation, not an adapter. Its `data/` is a separate download (README says so; the URL 301s); each feature needs a full pairwise **distance matrix** (`DiffusionGraph.__init__` reads `<i>_distance.txt` per feature), i.e. `O(F·N²)` numbers on disk, which is why its own graphs are 512-1024 nodes; and training needs **2,500 labelled attacker/protector pairs whose protector is a best-known approximation** — solving the blocking problem near-optimally 2,500 times is the prerequisite for running the method being benchmarked. Its Table 1 (§5.6) stays usable as a reference without running it |
 
 **Theory not chased down**
 

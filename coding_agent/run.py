@@ -65,6 +65,13 @@ from coding_agent.agent import (
     empty_usage,
     merge_usage,
 )
+from coding_agent.blocking import (
+    blocking_metrics,
+    counter_seed,
+    resolve_lever,
+    unopposed_reference,
+    valid_levers,
+)
 from coding_agent.containment import (
     outbreak_selectors,
     removal_set,
@@ -100,14 +107,30 @@ from coding_agent.rounds import (
     round_spreads,
 )
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
+from coding_agent.tools.blocking_algorithms import (
+    all_blocking_algorithms,
+    blocking_levers,
+    blocking_shape,
+    emittable,
+    lever_shape,
+)
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
 from coding_agent.tools.library_api import (
     algorithm_names,
+    blocking_names,
     dismantling_names,
     localization_names,
 )
 from coding_agent.tools.localization_algorithms import localization_algorithms
 from coding_agent.types import GraphInfo, TaskSpec, full_adoption, valid_feedback_models
+from data.wm_competitive import (
+    CompetitiveConfig,
+    auto_dominance,
+    competitive_model_name,
+    resolve_tie_break,
+    shared_positive_prob,
+    tie_break_choices,
+)
 from data.wm_simulator import spent, valid_action_ops, valid_remove_semantics
 from pipeline.conditions import parse_arm
 from pipeline.layout import budget_label, checkpoint_suffix
@@ -171,6 +194,15 @@ class ExperimentConfig:
     # the outbreak, not the method.
     outbreak_pct: float | None = None
     outbreak_selector: str = "random"
+    # Influence blocking. `outbreak_pct` / `outbreak_selector` above double as |S_N|
+    # and the ATTACKER MODEL — §8.3's second experimental axis, which IM does not
+    # have — so nothing new is needed for those. What is new is the lever (which of
+    # §1.1's four interventions the budget buys), the tie-break, `p_L`, and Budak's
+    # detection delay. All four are inert unless the task is competitive.
+    blocking_lever: str = counter_seed
+    tie_break: str = auto_dominance
+    positive_prob: str = shared_positive_prob
+    detection_delay: int = 0
     # Source localization. The two SPLITS are the load-bearing pair
     # (research/source_localization.md §8.5.1): the outer loop's reward is computed
     # on `sl_select_split` and the winning program is then re-scored, unmodified,
@@ -374,7 +406,25 @@ def _load_graph(config: ExperimentConfig) -> tuple[GraphInfo, str]:
     return GraphInfo.from_store_entry(store[graph_id]), graph_id
 
 
-def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
+def _competitive_config(config: ExperimentConfig) -> CompetitiveConfig:
+    """The two-cascade dynamics this run simulates, with `auto` already resolved."""
+    return CompetitiveConfig(
+        tie_break=config.tie_break,
+        positive_prob=(
+            shared_positive_prob
+            if config.positive_prob == shared_positive_prob
+            else float(config.positive_prob)
+        ),
+        remove_semantics=config.remove_semantics,
+    )
+
+
+def _build_environment(
+    config: ExperimentConfig,
+    graph: GraphInfo,
+    negative_seeds: tuple = (),
+    competitive: bool = False,
+) -> object:
     # --seed is the base seed for every rollout in this run. Shared across
     # candidates on purpose (common random numbers), and recorded per rollout in
     # Trajectory.cost["seed"] so any single number can be replayed exactly.
@@ -385,6 +435,8 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
             mc_runs=config.mc_runs,
             base_seed=config.seed,
             remove_semantics=config.remove_semantics,
+            negative_seeds=negative_seeds,
+            competitive_config=_competitive_config(config) if competitive else None,
         )
 
     if config.evaluator == world_model:
@@ -399,7 +451,20 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
             device=config.device,
             n_samples=config.n_samples,
             base_seed=config.seed,
+            negative_seeds=negative_seeds,
         )
+
+        # A single-cascade checkpoint cannot be rolled out against a two-cascade
+        # task: its head has no positive channel at all, so it would predict the
+        # rumour as if the blocker's counter-cascade did not exist and every arm
+        # would score the unopposed spread
+        if competitive and not environment.competitive:
+            raise ValueError(
+                f"checkpoint {config.wm_results_json} was trained on SINGLE-cascade "
+                f"transitions but this run is a two-cascade blocking task. Regenerate "
+                f"with `data/generate_wm_data.py --competitive` and retrain, or point "
+                f"--wm-results-json at a competitive checkpoint."
+            )
 
         # Everything else in the run (the prompt, the --compare referee) follows
         # config.remove_semantics, so a disagreement would have the arm plan under
@@ -417,6 +482,8 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
 
     if config.evaluator == oracle:
         # Ground-truth dynamics ceiling: no checkpoint, no --wm-results-json
+        competitive_config = _competitive_config(config)
+
         return WorldModelEnvironment.oracle(
             graph,
             config.diffusion_model,
@@ -424,6 +491,10 @@ def _build_environment(config: ExperimentConfig, graph: GraphInfo) -> object:
             n_samples=config.n_samples,
             base_seed=config.seed,
             remove_semantics=config.remove_semantics,
+            negative_seeds=negative_seeds,
+            competitive=competitive,
+            tie_break=resolve_tie_break(config.tie_break, config.diffusion_model),
+            positive_prob=competitive_config.positive_prob,
         )
 
     raise ValueError(f"unknown evaluator {config.evaluator!r}")
@@ -479,25 +550,14 @@ def run_experiment(
     # limit on generated code, not a property of the task or the search
     executor.strategy_timeout_seconds = config.strategy_timeout
 
-    environment = _build_environment(config, graph)
-
-    if config.campaigns > 1:
-        # Wraps any evaluator: multi-round is a scoring change (r separate
-        # diffusions, union objective), not a dynamics change, so it composes
-        # with monte_carlo / oracle / world_model without touching any of them
-        environment = MultiRoundEnvironment(
-            environment, campaigns=config.campaigns, base_seed=config.seed
-        )
-
-    print(f"[run] {config.evaluator} environment ready")
-
-    # rounds=None for every non-adaptive method, which is what TaskSpec.adaptive
-    # reads: the round machinery is inert unless this arm asked for it
-    adaptive = config.method == "adaptive"
     registry = get_task(config.task)
 
-    # The exogenous outbreak, resolved BEFORE the arm runs and derived only from
-    # (graph, size, selector, seed), so every arm in the sweep fights the same one
+    # The exogenous cascade, resolved BEFORE the environment so both the simulator and
+    # the arm face the same one, and derived only from (graph, size, selector, seed).
+    # For influence blocking this IS S_N, and `--outbreak-selector` is §8.3's
+    # attacker model rather than an outbreak rule — the same machinery, because the
+    # published attacker models (degree, PageRank, random, IMM) are exactly the
+    # selectors that machinery already has.
     outbreak_pct = (
         registry.outbreak_pct if config.outbreak_pct is None else config.outbreak_pct
     )
@@ -513,6 +573,24 @@ def run_experiment(
         if outbreak_pct
         else ()
     )
+
+    environment = _build_environment(
+        config, graph, negative_seeds=outbreak, competitive=registry.competitive
+    )
+
+    if config.campaigns > 1:
+        # Wraps any evaluator: multi-round is a scoring change (r separate
+        # diffusions, union objective), not a dynamics change, so it composes
+        # with monte_carlo / oracle / world_model without touching any of them
+        environment = MultiRoundEnvironment(
+            environment, campaigns=config.campaigns, base_seed=config.seed
+        )
+
+    print(f"[run] {config.evaluator} environment ready")
+
+    # rounds=None for every non-adaptive method, which is what TaskSpec.adaptive
+    # reads: the round machinery is inert unless this arm asked for it
+    adaptive = config.method == "adaptive"
 
     # The labelled (G, y, x) episodes an inverse task is scored on. Two disjoint
     # pools, and the split between them is what makes the amortization claim
@@ -560,13 +638,22 @@ def run_experiment(
             f"{config.sl_budget_mode})"
         )
 
+    # A blocking arm's lever decides BOTH what one unit of budget buys and which ops
+    # it may emit, and they are set together so an arm can never be budgeted for one
+    # and permitted another. Every other task keeps the registry's own pair.
+    budget_op, lever_ops = (
+        resolve_lever(config.blocking_lever)
+        if registry.competitive
+        else (registry.budget_op, tuple(config.allowed_ops))
+    )
+
     task = TaskSpec(
         task=config.task,
         objective=registry.summary,
         diffusion_model=config.diffusion_model,
         budget=config.budget,
         horizon=config.horizon,
-        allowed_ops=tuple(config.allowed_ops),
+        allowed_ops=lever_ops,
         remove_semantics=config.remove_semantics,
         # `recover` reaches the prompt, the contract check and the summary through
         # this one field, so a task that inverts cannot be driven as one that
@@ -581,8 +668,13 @@ def run_experiment(
         # of budget buys are properties of the TASK, and a run that disagreed with
         # its own registry entry would optimize one thing and be reported as another
         sense=registry.objective if registry.objective in (maximize, "minimize") else maximize,
-        budget_op=registry.budget_op,
+        budget_op=budget_op,
         outbreak=outbreak,
+        # Two-cascade fields; inert for every task that is not competitive, so one
+        # code path serves all five runnable tasks
+        competitive=registry.competitive,
+        tie_break=resolve_tie_break(config.tie_break, config.diffusion_model),
+        detection_delay=config.detection_delay,
         rounds=config.rounds if adaptive else None,
         per_round_budget=config.per_round_budget if adaptive else None,
         round_gap=config.round_gap,
@@ -594,7 +686,16 @@ def run_experiment(
         seed=config.seed,
     )
 
-    if outbreak:
+    if outbreak and registry.competitive:
+        print(
+            f"[run] rumour S_N: {len(outbreak)} seed(s) ({outbreak_pct:g}% of N, "
+            f"attacker={config.outbreak_selector}, seed={config.seed}) | "
+            f"lever={config.blocking_lever} (budget buys {budget_op}) | "
+            f"{competitive_model_name(config.positive_prob)}, "
+            f"tie_break={task.tie_break}, detection_delay={config.detection_delay} "
+            f"— MINIMIZING the rumour's final size"
+        )
+    elif outbreak:
         print(
             f"[run] outbreak: {len(outbreak)} source(s) "
             f"({outbreak_pct:g}% of N, selector={config.outbreak_selector}, "
@@ -631,6 +732,13 @@ def run_experiment(
         # pool would return a seed set the executor then rejects
         if task.recovers:
             menu = localization_names
+        elif task.blocks:
+            # Only the members whose OUTPUT this lever can emit: routing into the
+            # edge selectors from a counter-seeding arm would return arcs the
+            # executor then rejects
+            from coding_agent.tools.library_api import blocking_names_for
+
+            menu = blocking_names_for(task.budget_op)
         elif task.contains:
             menu = dismantling_names
         else:
@@ -672,14 +780,15 @@ def run_experiment(
         if config.baseline not in (
             algorithm_names
             + list(adaptive_algorithms)
+            + blocking_names
             + dismantling_names
             + localization_names
         ):
             raise ValueError(
                 f"unknown baseline {config.baseline!r}; choose a static algorithm "
                 f"from {algorithm_names}, an adaptive policy from "
-                f"{sorted(adaptive_algorithms)}, a dismantler from "
-                f"{dismantling_names}, or a source localizer from "
+                f"{sorted(adaptive_algorithms)}, a blocker from {blocking_names}, a "
+                f"dismantler from {dismantling_names}, or a source localizer from "
                 f"{localization_names}"
             )
 
@@ -744,6 +853,38 @@ class LocalizationBaseline(Strategy):
     def source_scores(self, graph, observation):
         return localization_scorers.{config.baseline}(
             graph, observation, diffusion_model="{config.diffusion_model}"
+        )
+"""
+        elif config.baseline in all_blocking_algorithms:
+            # A published blocker is handed the RUMOUR's own seeds and returns the
+            # intervention this lever buys — node ids on three levers, `(u, v)` arcs
+            # on the fourth. `blocking.blocking_plan` reconciles the two shapes into
+            # one plan, which is what keeps a library algorithm runnable without
+            # rewriting it to know what a plan is.
+            if not emittable(config.baseline, config.blocking_lever):
+                raise ValueError(
+                    f"baseline {config.baseline!r} returns "
+                    f"{blocking_shape(config.baseline)}s and this arm's lever "
+                    f"({config.blocking_lever!r}) spends its budget on "
+                    f"{lever_shape[config.blocking_lever]}s, so its output is not "
+                    f"something this arm may emit. It is a "
+                    f"{blocking_levers[config.baseline]} method — run it with "
+                    f"--blocking-lever {blocking_levers[config.baseline]}, or pick a "
+                    f"{config.blocking_lever} member."
+                )
+
+            canned_script = f"""\
+class BlockingBaseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        picks = blocking_algorithms.{config.baseline}(
+            graph,
+            budget,
+            "{config.diffusion_model}",
+            negative_seeds={tuple(outbreak)!r},
+            horizon=horizon,
+        )
+        return blocking.blocking_plan(
+            picks, graph, budget, "{config.blocking_lever}", horizon
         )
 """
         elif config.baseline in dismantling_algorithms:
@@ -1030,7 +1171,32 @@ class Baseline(Strategy):
         result["per_instance"] = reported.cost.get("per_instance")
         result["summary"] = summarize(reported, graph, task)
 
-    if task.contains:
+    if task.blocks:
+        # §8.1's block. The reward is the rumour's remaining size (lower is better);
+        # PREVENTED influence is that subtracted from the unopposed reference, which
+        # is the quantity all five published names refer to. The reference is
+        # measured on THIS arm's evaluator, on purpose: a ratio of two different
+        # rulers means nothing, and --compare re-measures both on the shared referee.
+        print("[run] unopposed reference sigma(S_N, empty) on this evaluator...")
+        unopposed = unopposed_reference(
+            environment, task, config.horizon, config.budget
+        )
+        result["blocking"] = True
+        result["competitive_model"] = competitive_model_name(config.positive_prob)
+        result["tie_break"] = task.tie_break
+        result["attacker"] = config.outbreak_selector
+        result |= blocking_metrics(
+            trajectory.reward, unopposed, task, graph, trajectory.actions
+        )
+        print(
+            f"[run] blocking: rumour {trajectory.reward:.2f} vs unopposed "
+            f"{unopposed:.2f} — prevented "
+            f"{result['prevented_influence']:+.2f} "
+            f"({result['prevented_pct_of_unopposed']:.1f}% of the cascade, "
+            f"lever={result['lever']}, |S_P|/|S_N|={result['budget_ratio']})"
+        )
+
+    if task.contains and not task.blocks:
         result["containment"] = True
         result["outbreak"] = list(outbreak)
         result["outbreak_pct"] = outbreak_pct
@@ -1145,6 +1311,13 @@ class Baseline(Strategy):
             mc_runs=referee_runs,
             base_seed=config.seed,
             remove_semantics=config.remove_semantics,
+            # The referee has to run the SAME dynamics the arm was scored on, or the
+            # shared ground-truth column would compare a two-cascade result against a
+            # one-cascade replay and read as a huge fidelity error
+            negative_seeds=outbreak,
+            competitive_config=(
+                _competitive_config(config) if task.blocks else None
+            ),
         )
 
         if config.campaigns > 1:
@@ -1177,6 +1350,27 @@ class Baseline(Strategy):
             f"±{mc_trajectory.cost['reward_se']:.2f} "
             f"(wm_minus_mc={result['wm_minus_mc']:+.2f})"
         )
+
+        if task.blocks:
+            # The prevented-influence column every blocking table reports, on the
+            # SHARED referee. Both terms are re-measured here rather than reusing the
+            # arm's own reference, because prevented influence is a DIFFERENCE and a
+            # difference of two evaluators' numbers is not a quantity.
+            mc_unopposed = unopposed_reference(
+                mc_environment, task, config.horizon, config.budget
+            )
+            result["mc_unopposed_spread"] = mc_unopposed
+            result["mc_prevented_influence"] = mc_unopposed - mc_trajectory.reward
+            result["mc_prevented_pct_of_unopposed"] = (
+                100.0 * (mc_unopposed - mc_trajectory.reward) / mc_unopposed
+                if mc_unopposed
+                else 0.0
+            )
+            print(
+                f"[run] ground-truth prevented influence: "
+                f"{result['mc_prevented_influence']:+.2f} of {mc_unopposed:.2f} "
+                f"({result['mc_prevented_pct_of_unopposed']:.1f}%)"
+            )
         # Fidelity re-evaluation only means something for a model-based evaluator:
         # it measures how far the MODEL is from truth. For a monte_carlo evaluator
         # the "model" is the simulator itself, so there is nothing to measure.
@@ -1316,13 +1510,14 @@ if __name__ == "__main__":
         choices=(
             algorithm_names
             + list(adaptive_algorithms)
+            + blocking_names
             + dismantling_names
             + localization_names
         ),
         metavar="NAME",
         help="evaluate this classical library algorithm instead of an LLM strategy: "
-        "a static IM algorithm, a per-round adaptive policy, a network dismantler, "
-        "or a source localizer (default: None).",
+        "a static IM algorithm, a per-round adaptive policy, an influence blocker, a "
+        "network dismantler, or a source localizer (default: None).",
     )
     parser.add_argument(
         "--routing",
@@ -1402,6 +1597,43 @@ if __name__ == "__main__":
         default="random",
         choices=list(outbreak_selectors),
         help="how the outbreak's source nodes are chosen; deterministic in --seed so every arm faces the same one. `random` is the honest default: a targeted outbreak makes blocking the same ranking problem (default: random).",
+    )
+    # Influence blocking
+    parser.add_argument(
+        "--blocking-lever",
+        type=str,
+        default=counter_seed,
+        choices=list(valid_levers),
+        help="influence blocking: which of the four published interventions the "
+        "budget buys. counter_seed = seed a competing cascade (the founding and "
+        "largest sub-literature); node_block = delete nodes (the IMIN line); "
+        "edge_block = cut arcs (Kimura); weight_block = reduce arc probabilities "
+        f"(DiffIM's continuous relaxation) (default: {counter_seed}).",
+    )
+    parser.add_argument(
+        "--tie-break",
+        type=str,
+        default=auto_dominance,
+        choices=list(tie_break_choices),
+        help="influence blocking: which cascade wins a node both reach on the same "
+        "step. auto = each dynamics' own founding paper (positive under IC, negative "
+        f"under LT). Must match the checkpoint's (default: {auto_dominance}).",
+    )
+    parser.add_argument(
+        "--positive-prob",
+        type=str,
+        default=shared_positive_prob,
+        help="influence blocking: the blocker's per-edge transmission probability. "
+        "'shared' is COICM; a float is MCICM, and 1.0 is Budak's high-effectiveness "
+        f"property (default: {shared_positive_prob}).",
+    )
+    parser.add_argument(
+        "--detection-delay",
+        type=int,
+        default=0,
+        help="influence blocking: Budak's r — the rumour is detected r steps late "
+        "and anything the blocker emits before then is dropped. This is the axis "
+        "that makes the first-mover advantage measurable (default: 0).",
     )
     # Source localization
     parser.add_argument(
@@ -1670,6 +1902,10 @@ if __name__ == "__main__":
         campaigns=args.campaigns,
         outbreak_pct=args.outbreak_pct,
         outbreak_selector=args.outbreak_selector,
+        blocking_lever=args.blocking_lever,
+        tie_break=args.tie_break,
+        positive_prob=args.positive_prob,
+        detection_delay=args.detection_delay,
         sl_select_split=args.sl_select_split,
         sl_eval_split=args.sl_eval_split,
         sl_instances=args.sl_instances,

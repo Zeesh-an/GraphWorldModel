@@ -19,6 +19,16 @@ spine_algorithms = (
     "local_search",
 )
 
+# How an episode's t=0 BLOCKER set is chosen when generating competitive
+# (influence-blocking) data. Not the same list as the spine selectors, and the
+# difference is the single most useful design fact in
+# research/influence_blocking.md §5.4: the degree heuristic "cannot be used for
+# influence blocking maximization at all", while PROXIMITY (out-neighbours of the
+# negative seeds) is the strong cheap baseline. `degree` is kept so the data
+# contains the failure mode too, and `none` so some episodes carry an unopposed
+# rumour — the sigma(S_N, empty) reference every prevented-influence number needs.
+blocking_selectors = ("none", "random", "proximity", "degree", "pagerank")
+
 seed_upper_bound = 2**31 - 1
 
 
@@ -182,6 +192,75 @@ def select_seeds(
     raise ValueError(f"Unknown algorithm {algorithm}; choose from {spine_algorithms}")
 
 
+def select_blockers(
+    bundle: GraphBundle,
+    negative_seeds: list[int],
+    num_blockers: int,
+    algorithm: str,
+    rng: np.random.Generator,
+) -> list[int]:
+    """
+    The positive seed set an episode commits at t=0, given the rumour's own seeds.
+
+    Every rule here excludes `negative_seeds` themselves: a node the rumour already
+    owns is committed, so seeding it positively is a no-op the simulator drops and a
+    unit of budget the episode never spent.
+    """
+    graph = bundle.nx_graph
+    excluded = {int(node) for node in negative_seeds}
+    candidates = [node for node in range(graph.number_of_nodes()) if node not in excluded]
+
+    if algorithm == "none" or num_blockers <= 0 or not candidates:
+        return []
+
+    if algorithm == "random":
+        chosen = rng.choice(len(candidates), size=min(num_blockers, len(candidates)), replace=False)
+        return sorted(int(candidates[int(index)]) for index in chosen)
+
+    if algorithm == "proximity":
+        # §5.4: pick the out-neighbours of the negative seeds — the nodes the rumour
+        # reaches FIRST — ranked by degree, topped up by hop 2 and then by degree
+        degrees = _out_degree(graph)
+        ring = []
+        for node in sorted(excluded):
+            if node not in graph:
+                continue
+
+            ring += [int(other) for other in graph.successors(node)] if graph.is_directed() else [
+                int(other) for other in graph.neighbors(node)
+            ]
+
+        ordered = sorted(
+            dict.fromkeys(node for node in ring if node not in excluded),
+            key=lambda node: degrees.get(node, 0),
+            reverse=True,
+        )
+        chosen = ordered[:num_blockers]
+
+        if len(chosen) < num_blockers:
+            picked = set(chosen) | excluded
+            for node in sorted(degrees, key=lambda node: degrees[node], reverse=True):
+                if len(chosen) >= num_blockers:
+                    break
+                if node not in picked:
+                    chosen.append(int(node))
+
+        return sorted(chosen)
+
+    if algorithm in ("degree", "pagerank"):
+        scores = (
+            _out_degree(graph)
+            if algorithm == "degree"
+            else {int(node): value for node, value in nx.pagerank(graph).items()}
+        )
+        ranked = sorted(candidates, key=lambda node: scores.get(node, 0.0), reverse=True)
+        return sorted(int(node) for node in ranked[:num_blockers])
+
+    raise ValueError(
+        f"unknown blocking selector {algorithm!r}; choose from {blocking_selectors}"
+    )
+
+
 def _random_edge(
     graph: nx.Graph | nx.DiGraph, rng: np.random.Generator
 ) -> tuple | None:
@@ -254,7 +333,10 @@ def _build_action(
     remove_semantics: str = spent,
 ) -> list[ActionOp]:
     """One injected action of type op with a randomly chosen valid target."""
-    infected = set(state.infected)
+    # Under a competitive task a node the POSITIVE cascade already owns is committed
+    # too, so it is no more seedable than a negatively-infected one. Empty for every
+    # single-cascade task, which leaves those pools exactly as they were.
+    infected = set(state.infected) | set(state.pos_infected)
 
     if op == "add_node":
         # Build an action that randomly adds a susceptible node
@@ -355,7 +437,7 @@ def counterfactual_actions(
     exactly what `action_sensitivity` measures — it read 0.0.
     """
     num_nodes = graph.number_of_nodes()
-    infected = set(state.infected)
+    infected = set(state.infected) | set(state.pos_infected)
     susceptible = [node for node in range(num_nodes) if node not in infected]
     active = list(state.frontier) if state.frontier else list(state.infected)
 

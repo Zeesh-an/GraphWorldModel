@@ -26,10 +26,19 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
+from data.wm_competitive import auto_dominance
 from data.wm_simulator import spent, valid_remove_semantics
-from world_model.wm_data import TransitionDataset, collate_transitions, in_channels
+from world_model.wm_data import (
+    TransitionDataset,
+    channels_for,
+    collate_transitions,
+    dataset_is_competitive,
+)
 from world_model.wm_model import WorldModel, backbones
+from data.wm_competitive import CompetitiveConfig, shared_positive_prob
 from world_model.wm_eval import (
+    blocking_regret_multi,
+    competitive_rollout_ensemble,
     evaluate_one_step,
     planning_regret_multi,
     rollout_ensemble,
@@ -51,6 +60,16 @@ class TrainConfig:
     head: str = "linear"
     # Must match the dataset's; cross-checked against metadata.json below
     remove_semantics: str = spent
+    # Two-cascade (influence blocking) training: 8 input channels, 4 targets, and a
+    # competitive head. None = read from the dataset's own metadata, which is what
+    # keeps a 6-channel head from being fit on a competitive dataset and quietly
+    # reporting the negative cascade alone. The two dynamics parameters below are
+    # likewise defaulted FROM the data, because a head whose tie-break disagrees with
+    # the simulator that made the targets is fit against a transition that never
+    # happened (research/influence_blocking.md §8.4).
+    competitive: bool | None = None
+    tie_break: str = auto_dominance
+    positive_prob: float | None = None
     # Feed ones instead of p(u->v) to the encoder and the head: the online/bandit
     # information state, and the ablation for "our IC heads see the true w"
     hide_edge_weights: bool = False
@@ -81,25 +100,36 @@ def _clamp_pos_weight(value: float) -> float:
 
 def compute_pos_weight(
     dataset: TransitionDataset, device: torch.device
-) -> tuple[torch.Tensor, torch.Tensor]:
-    # Diffusion changes are sparse (few infected/frontier nodes per step), so a plain BCE would collapse to predict all zeros
-    positive_infected = total = positive_frontier = 0
+) -> list[torch.Tensor]:
+    """
+    One positive-class weight per target column — 2 single-cascade, 4 competitive.
+
+    Diffusion changes are sparse (few infected/frontier nodes per step), so a plain
+    BCE would collapse to predicting all zeros. Blocking makes that WORSE rather than
+    better: §5.3 shows blocking 50 YouTube nodes prevents 0.29% of the spread, so the
+    positive class in the columns that matter is rarer than it is under IM, which is
+    why the calibration columns are worth re-checking rather than assuming they carry
+    over from the seeding tasks.
+    """
+    columns = dataset[0]["y"].shape[1]
+    positives = [0.0] * columns
+    total = 0
 
     for index in range(len(dataset)):
-        item = dataset[index]
+        targets = dataset[index]["y"]
+        total += targets.shape[0]
 
-        total += item["y_inf"].numel()
-        positive_infected += item["y_inf"].sum().item()
-        positive_frontier += item["y_fr"].sum().item()
+        for column in range(columns):
+            positives[column] += targets[:, column].sum().item()
 
-    weight_infected = (total - positive_infected) / max(positive_infected, 1.0)
-    weight_frontier = (total - positive_frontier) / max(positive_frontier, 1.0)
-
-    # Passed into BCEWithLogitsLoss, it up-weights the rare positive class so the model is pushed to actually predict the new infections
-    return (
-        torch.tensor([_clamp_pos_weight(weight_infected)], device=device),
-        torch.tensor([_clamp_pos_weight(weight_frontier)], device=device),
-    )
+    # Passed into BCEWithLogitsLoss, it up-weights the rare positive class so the
+    # model is pushed to actually predict the new infections
+    return [
+        torch.tensor(
+            [_clamp_pos_weight((total - positive) / max(positive, 1.0))], device=device
+        )
+        for positive in positives
+    ]
 
 
 def resolve_paths(config: TrainConfig) -> TrainConfig:
@@ -140,6 +170,55 @@ def check_remove_semantics(config: TrainConfig) -> None:
         )
 
 
+def resolve_competitive(config: TrainConfig) -> TrainConfig:
+    """
+    Fill `competitive` / `tie_break` / `positive_prob` from the dataset that made the targets.
+
+    Defaulted from the data rather than from a flag for the same reason
+    `check_remove_semantics` refuses a mismatch: a competitive head whose tie-break
+    or `p_L` disagrees with the simulator is fit against a transition that never
+    happened, and nothing about the loss curve would say so.
+    """
+    metadata_path = Path(config.data_dir) / "metadata.json"
+    dataset_competitive = dataset_is_competitive(config.data_dir)
+
+    if config.competitive is None:
+        config.competitive = dataset_competitive
+    elif config.competitive != dataset_competitive:
+        raise ValueError(
+            f"--competitive {config.competitive} does not match the dataset at "
+            f"{config.data_dir}, which is competitive={dataset_competitive}. A "
+            f"competitive dataset carries 8 channels and 4 targets; regenerate with "
+            f"data/generate_wm_data.py --competitive or drop the flag."
+        )
+
+    if not config.competitive or not metadata_path.exists():
+        return config
+
+    competitive = json.loads(metadata_path.read_text()).get("competitive", {})
+    resolved = competitive.get(config.diffusion_model)
+
+    if resolved is None:
+        raise ValueError(
+            f"the dataset at {config.data_dir} carries no competitive metadata for "
+            f"--diffusion-model {config.diffusion_model}; it was generated for "
+            f"{sorted(key for key in competitive if key != 'negative_pct')}"
+        )
+
+    config.tie_break = resolved["tie_break"]
+    config.positive_prob = (
+        None
+        if resolved["positive_prob"] == "shared"
+        else float(resolved["positive_prob"])
+    )
+    print(
+        f"[train] competitive: {resolved['competitive_model']}, "
+        f"tie_break={config.tie_break}, positive_prob={resolved['positive_prob']}"
+    )
+
+    return config
+
+
 def check_hide_edge_weights(config: TrainConfig) -> None:
     """
     Both anchored heads read w directly, so masking it is not an ablation of them
@@ -162,6 +241,7 @@ def check_hide_edge_weights(config: TrainConfig) -> None:
 def train_world_model(config: TrainConfig) -> dict:
     config = resolve_paths(config)
     check_remove_semantics(config)
+    config = resolve_competitive(config)
     check_hide_edge_weights(config)
 
     torch.manual_seed(config.seed)
@@ -170,9 +250,15 @@ def train_world_model(config: TrainConfig) -> dict:
     device = torch.device(config.device)
     diffusion_model = config.diffusion_model
 
-    train_dataset = TransitionDataset(config.data_dir, diffusion_model, "train")
-    validation_dataset = TransitionDataset(config.data_dir, diffusion_model, "val")
-    test_dataset = TransitionDataset(config.data_dir, diffusion_model, "test")
+    train_dataset = TransitionDataset(
+        config.data_dir, diffusion_model, "train", competitive=config.competitive
+    )
+    validation_dataset = TransitionDataset(
+        config.data_dir, diffusion_model, "val", competitive=config.competitive
+    )
+    test_dataset = TransitionDataset(
+        config.data_dir, diffusion_model, "test", competitive=config.competitive
+    )
 
     collate_fn = partial(
         collate_transitions,
@@ -195,15 +281,19 @@ def train_world_model(config: TrainConfig) -> dict:
         "lamda": config.gcnii_lamda,
     }
 
+    model_in_channels, model_out_channels = channels_for(config.competitive)
     model = WorldModel(
         config.model,
-        in_channels=in_channels,
+        in_channels=model_in_channels,
         hidden_dim=config.hidden_dim,
         n_layers=config.n_layers,
         dropout=config.dropout,
         head_type=config.head,
         diffusion_model=diffusion_model,
         remove_semantics=config.remove_semantics,
+        competitive=config.competitive,
+        tie_break=config.tie_break,
+        positive_prob=config.positive_prob,
         **backbone_kwargs,
     ).to(device)
 
@@ -211,15 +301,13 @@ def train_world_model(config: TrainConfig) -> dict:
         params=model.parameters(), lr=config.lr, weight_decay=config.weight_decay
     )
 
-    if config.pos_weight == "auto":
-        pos_weight_infected, pos_weight_frontier = compute_pos_weight(
-            train_dataset, device
-        )
-    else:
-        pos_weight_infected = pos_weight_frontier = None
-
-    infected_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight_infected)
-    frontier_loss = nn.BCEWithLogitsLoss(pos_weight=pos_weight_frontier)
+    weights = (
+        compute_pos_weight(train_dataset, device)
+        if config.pos_weight == "auto"
+        else [None] * model_out_channels
+    )
+    # One BCE term per target column: 2 single-cascade, 4 competitive (§2.5)
+    losses = [nn.BCEWithLogitsLoss(pos_weight=weight) for weight in weights]
 
     os.makedirs(config.ckpt_dir, exist_ok=True)
     checkpoint_path = (
@@ -249,8 +337,9 @@ def train_world_model(config: TrainConfig) -> dict:
             optimizer.zero_grad()
 
             logits = model(batch["X"], batch["graph"])
-            loss = infected_loss(logits[:, 0], batch["y_inf"]) + frontier_loss(
-                logits[:, 1], batch["y_fr"]
+            loss = sum(
+                term(logits[:, column], batch["y"][:, column])
+                for column, term in enumerate(losses)
             )
 
             loss.backward()
@@ -267,6 +356,7 @@ def train_world_model(config: TrainConfig) -> dict:
             diffusion_model,
             device,
             hide_edge_weights=config.hide_edge_weights,
+            competitive=config.competitive,
         )
         history.append(
             {
@@ -313,22 +403,56 @@ def train_world_model(config: TrainConfig) -> dict:
             diffusion_model,
             device,
             hide_edge_weights=config.hide_edge_weights,
+            competitive=config.competitive,
         ),
     }
-    results["rollout"] = rollout_ensemble(
-        model,
-        config.data_dir,
-        diffusion_model,
-        train_dataset.store,
-        device,
-        "test",
-        seed=config.seed,
-        remove_semantics=config.remove_semantics,
-        hide_edge_weights=config.hide_edge_weights,
+
+    # Both halves fork on the same flag, and both forks measure the SAME quantity —
+    # the negative cascade — so the two tasks' rollout and planning numbers sit in
+    # one report column without being silently different things
+    competitive_config = (
+        CompetitiveConfig(
+            tie_break=config.tie_break,
+            positive_prob=(
+                shared_positive_prob
+                if config.positive_prob is None
+                else config.positive_prob
+            ),
+            remove_semantics=config.remove_semantics,
+        )
+        if config.competitive
+        else None
     )
 
+    if config.competitive:
+        results["rollout"] = competitive_rollout_ensemble(
+            model,
+            config.data_dir,
+            diffusion_model,
+            train_dataset.store,
+            device,
+            "test",
+            seed=config.seed,
+            hide_edge_weights=config.hide_edge_weights,
+            config=competitive_config,
+        )
+    else:
+        results["rollout"] = rollout_ensemble(
+            model,
+            config.data_dir,
+            diffusion_model,
+            train_dataset.store,
+            device,
+            "test",
+            seed=config.seed,
+            remove_semantics=config.remove_semantics,
+            hide_edge_weights=config.hide_edge_weights,
+        )
+
     if config.plan_demo:
-        results["planning"] = planning_regret_multi(
+        planner = blocking_regret_multi if config.competitive else planning_regret_multi
+        extra = {"config": competitive_config} if config.competitive else {}
+        results["planning"] = planner(
             model,
             train_dataset.store,
             diffusion_model,
@@ -336,6 +460,7 @@ def train_world_model(config: TrainConfig) -> dict:
             n_graphs=config.plan_graphs,
             seed=config.seed,
             hide_edge_weights=config.hide_edge_weights,
+            **extra,
         )
 
     os.makedirs(Path(config.results).parent, exist_ok=True)

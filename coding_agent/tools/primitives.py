@@ -12,6 +12,7 @@ import networkx as nx
 import numpy as np
 
 from coding_agent.types import GraphInfo
+from data.wm_competitive import CompetitiveConfig, CompetitiveSimulator, run_competitive
 from data.wm_simulator import ActionOp, Simulator, blocked, spent
 
 seed_upper_bound = 1 << 30
@@ -27,6 +28,20 @@ def build_simulator(
     remove_semantics: str = spent,
 ) -> Simulator:
     """Construct an NDlib Simulator from a GraphInfo."""
+    nx_graph, ic_prob_map = _nx_from_graph_info(graph)
+    simulator = Simulator(
+        nx_graph,
+        ic_prob_map=ic_prob_map,
+        seed=seed,
+        remove_semantics=remove_semantics,
+    )
+    simulator.reset(diffusion_model)
+
+    return simulator
+
+
+def _nx_from_graph_info(graph: GraphInfo) -> tuple:
+    """(networkx graph, {(u, v): p}) — the pair both simulators are constructed from."""
     nx_graph = nx.DiGraph() if graph.directed else nx.Graph()
     nx_graph.add_nodes_from(range(graph.num_nodes))
     ic_prob_map = {}
@@ -37,15 +52,70 @@ def build_simulator(
         nx_graph.add_edge(source, target)
         ic_prob_map[(source, target)] = float(graph.ic_probs[edge])
 
-    simulator = Simulator(
-        nx_graph,
-        ic_prob_map=ic_prob_map,
-        seed=seed,
-        remove_semantics=remove_semantics,
+    return nx_graph, ic_prob_map
+
+
+def build_competitive_simulator(
+    graph: GraphInfo,
+    diffusion_model: str,
+    negative_seeds,
+    seed: int = 0,
+    config: CompetitiveConfig | None = None,
+) -> CompetitiveSimulator:
+    """Construct a two-cascade simulator from a GraphInfo, with S_N already committed."""
+    nx_graph, ic_prob_map = _nx_from_graph_info(graph)
+    simulator = CompetitiveSimulator(
+        nx_graph, ic_prob_map=ic_prob_map, seed=seed, config=config
     )
-    simulator.reset(diffusion_model)
+    simulator.reset(diffusion_model, [int(node) for node in negative_seeds])
 
     return simulator
+
+
+def mc_simulate_blocking(
+    graph: GraphInfo,
+    negative_seeds: list[int],
+    blockers: list[int],
+    diffusion_model: str,
+    lever: str = "counter_seed",
+    mc_runs: int = 20,
+    horizon: int = 20,
+    seed: int = 0,
+    config: CompetitiveConfig | None = None,
+) -> float:
+    """
+    Mean final NEGATIVE spread when `blockers` answers `negative_seeds`. LOWER is better.
+
+    The blocking counterpart of `mc_simulate_spread`, and the honest classical cost of
+    scoring one blocker set — Budak's Greedy and TC-AIBM's Greedy-B both pay exactly
+    this per candidate per pick, which is why the library members built on it are
+    blocked from generated scripts (they bypass the metered evaluator).
+
+    `lever` decides what a "blocker" is: a node to counter-seed, a node to delete, or
+    an `(u, v)` arc to cut or zero. All four run through the same simulator, which is
+    the point of §7 — no published work scores them under one metric.
+    """
+    from coding_agent.blocking import blocking_plan
+
+    nx_graph, ic_prob_map = _nx_from_graph_info(graph)
+    rng = np.random.default_rng(seed)
+    plan = blocking_plan(blockers, graph, len(blockers) or 1, lever, horizon)
+    totals = []
+
+    for _ in range(mc_runs):
+        state = run_competitive(
+            nx_graph,
+            ic_prob_map,
+            diffusion_model,
+            [int(node) for node in negative_seeds],
+            plan,
+            horizon,
+            seed=int(rng.integers(seed_upper_bound)),
+            config=config,
+        )
+        totals.append(len(state.infected))
+
+    return float(np.mean(totals))
 
 
 # Scoring / ranking

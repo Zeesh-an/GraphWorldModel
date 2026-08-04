@@ -814,6 +814,105 @@ def plot_structural_vs_spread(
     return _save(figure, out_path)
 
 
+def plot_prevented_influence(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Prevented influence per arm across the budget sweep — this literature's own figure.
+
+    None for every sweep that is not two-cascade. The y-axis is
+    `sigma(S_N, empty) - sigma(S_N | blockers)` on the SHARED referee, which is the
+    quantity all five published names in research/influence_blocking.md §8.1 refer to,
+    and it is what makes our table readable next to SandIMIN's Table 5 (which reports
+    exactly this, as "decreased spread"). The dashed line is the whole cascade: an arm
+    touching it stopped the rumour outright.
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("blocking") and result.get("mc_prevented_influence") is not None
+    ]
+    if not scored:
+        return None
+
+    figure, axes = plt.subplots(figsize=figure_size)
+
+    for index, arm in enumerate(_sorted_arms(scored)):
+        runs = sorted(_by_arm(scored, arm), key=lambda result: result["budget"])
+        axes.plot(
+            [result["budget"] for result in runs],
+            [result["mc_prevented_influence"] for result in runs],
+            color=condition_colors.get(_condition_of(scored, arm)),
+            label=arm,
+            **_arm_style(index),
+        )
+
+    unopposed = max(result.get("mc_unopposed_spread", 0.0) for result in scored)
+    if unopposed:
+        axes.axhline(
+            unopposed,
+            color="#888888",
+            linestyle="--",
+            linewidth=1.0,
+            label=f"whole cascade ({unopposed:.0f} nodes)",
+        )
+
+    lever = scored[0].get("lever", "?")
+    negative = scored[0].get("n_negative_seeds", "?")
+    axes.set_xlabel("blocker budget k (absolute — this literature's own convention)")
+    axes.set_ylabel("prevented influence (nodes) — HIGHER IS BETTER")
+    axes.set_title(
+        f"{title_prefix}: prevented influence, lever={lever}, |S_N|={negative}"
+    )
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+
+    return _save(figure, out_path)
+
+
+def plot_blocking_ratio(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Prevented fraction against the `|S_P| / |S_N|` ratio — CLDAG's Table 2 as a figure.
+
+    §8.2: the informative budget axis here is the ratio to the ATTACKER's budget, not
+    the fraction of the graph. CLDAG's own reading of this curve is the design fact
+    the whole task is configured around — it takes 20-30x the rumour's seeds to cut it
+    to 10%, and "first mover has a clear advantage".
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("blocking")
+        and result.get("budget_ratio")
+        and result.get("mc_prevented_pct_of_unopposed") is not None
+    ]
+    if not scored:
+        return None
+
+    figure, axes = plt.subplots(figsize=figure_size)
+
+    for index, arm in enumerate(_sorted_arms(scored)):
+        runs = sorted(_by_arm(scored, arm), key=lambda result: result["budget_ratio"])
+        axes.plot(
+            [result["budget_ratio"] for result in runs],
+            [result["mc_prevented_pct_of_unopposed"] for result in runs],
+            color=condition_colors.get(_condition_of(scored, arm)),
+            label=arm,
+            **_arm_style(index),
+        )
+
+    axes.set_xlabel("|S_P| / |S_N| — blockers per rumour seed")
+    axes.set_ylabel("% of the cascade prevented — HIGHER IS BETTER")
+    axes.set_title(f"{title_prefix}: prevented fraction vs the attacker's budget")
+    axes.set_ylim(0, 100)
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+
+    return _save(figure, out_path)
+
+
 localization_metric_keys = ("precision", "recall", "f1", "auc")
 
 
@@ -1082,6 +1181,13 @@ def build_plots(
         ),
         plot_structural_vs_spread(
             agent_results, plots_dir / "structural_vs_spread.png", title_prefix
+        ),
+        # Both return None on a sweep with only one cascade
+        plot_prevented_influence(
+            agent_results, plots_dir / "prevented_influence.png", title_prefix
+        ),
+        plot_blocking_ratio(
+            agent_results, plots_dir / "blocking_ratio.png", title_prefix
         ),
         # All three return None on a sweep that recovers nothing, same as the
         # adaptive and dismantling pairs above

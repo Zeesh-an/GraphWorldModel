@@ -9,7 +9,7 @@ diffusion iteration, returning s_{t + 1} = T_endo(T_exo(s_t, a_t)).
 default) or `blocked` (the containment reading). See the constants below.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import networkx as nx
 import numpy as np
@@ -63,21 +63,50 @@ class ActionOp:
 
 @dataclass
 class State:
-    """Diffusion state s_t = (infected, frontier) as sorted node-id lists"""
+    """
+    Diffusion state s_t as sorted node-id lists.
+
+    Single-cascade tasks use `infected` / `frontier` and nothing else. A COMPETITIVE
+    task (influence blocking) carries a second cascade in `pos_infected` /
+    `pos_frontier`, and the mapping is deliberate rather than symmetric:
+
+      * `infected` / `frontier` are always the **negative** cascade — the rumour, the
+        thing being minimized. Every existing reader (the reward, `spread_curve`,
+        `summarize`, `credit`, the plots) therefore measures the objective without
+        a single change.
+      * `pos_infected` / `pos_frontier` are the blocker's counter-cascade, which is
+        an INSTRUMENT and never the score.
+
+    The positive keys are omitted from `to_dict` when both are empty, so a
+    single-cascade JSONL is byte-identical to what it was before competition existed.
+    """
 
     infected: list[int]
     frontier: list[int]
+    pos_infected: list[int] = field(default_factory=list)
+    pos_frontier: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         infected = sorted(int(node) for node in self.infected)
         frontier = sorted(int(node) for node in self.frontier)
-
-        return {
+        state = {
             "infected": infected,
             "frontier": frontier,
             "infected_count": len(infected),
             "frontier_count": len(frontier),
         }
+
+        if self.pos_infected or self.pos_frontier:
+            positive = sorted(int(node) for node in self.pos_infected)
+            positive_frontier = sorted(int(node) for node in self.pos_frontier)
+            state |= {
+                "pos_infected": positive,
+                "pos_frontier": positive_frontier,
+                "pos_infected_count": len(positive),
+                "pos_frontier_count": len(positive_frontier),
+            }
+
+        return state
 
 
 class Simulator:

@@ -57,6 +57,32 @@ real_directed = {
     # published F1 row at all, so it is a cost target rather than a comparison.
     "dolphins": False,
     "deezer": False,
+    # Influence-blocking benchmarks (research/influence_blocking.md §6.2). Every one
+    # is loaded with its own file's directedness rather than symmetrized, because
+    # unlike the dismantling literature this one is largely DIRECTED and its
+    # published probabilities are 1/in-degree — which is only defined on arcs.
+    #
+    # Warning: two of these collide by name with graphs we already load, and both
+    # collisions are recorded in §6.3 rather than resolved by renaming theirs:
+    # `epinions1` is SNAP's soc-Epinions1 (75,879) while `epinions` is the SIGNED
+    # soc-sign-epinions (131,828), and `p2p_gnutella08` is the 08 snapshot NIE and
+    # NAMM use while `p2p_gnutella` is Gnutella31's giant component (62,561).
+    "p2p_gnutella08": True,
+    "p2p_gnutella24": True,
+    "cit_hepth": True,
+    "cit_hepph": True,
+    "email_enron": False,
+    "slashdot": True,
+    "epinions1": True,
+    "gowalla": False,
+    "email_euall": True,
+    "web_stanford": True,
+    "dblp": False,
+    # The last two exceed what the NDlib rollout path can simulate in reasonable
+    # time; they are scalability targets on the same footing as `twitter` and
+    # `youtube`, and each loader's docstring says so
+    "higgs_twitter": True,
+    "pokec": True,
 }
 
 

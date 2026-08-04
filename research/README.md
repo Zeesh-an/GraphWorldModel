@@ -19,7 +19,7 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | File                                                       | Fit                     | Lines | Comparable published table on a graph we load?                          |
 | ---------------------------------------------------------- | ----------------------- | ----- | ----------------------------------------------------------------------- |
 | [`influence_maximization.md`](influence_maximization.md)   | yes **implemented**      | 809   | (key) DeepIM Tables 2/3 — Jazz, Cora-ML, Power Grid byte-identical         |
-| [`influence_blocking.md`](influence_blocking.md)           | yes direct               | 743   | (key) SandIMIN PVLDB'24 Table 5 — email-Eu-core, YouTube, our exact metric |
+| [`influence_blocking.md`](influence_blocking.md)           | yes **implemented**      | 782   | (key) SandIMIN PVLDB'24 Table 5 — email-Eu-core, YouTube, our exact metric |
 | [`source_localization.md`](source_localization.md)         | yes **implemented**      | 964   | (key) SL-VAE KDD'22 Tables 1–4 — 5 of its 7 graphs are ours                |
 | [`critical_node_detection.md`](critical_node_detection.md) | yes **implemented**      | 1,001 | (key) CoreHD/BPD Table I — "Grid" is our `power_grid` byte-for-byte        |
 | [`epidemic_control.md`](epidemic_control.md)               | yes direct               | 690   | partial — different dataset family (contact networks)                   |

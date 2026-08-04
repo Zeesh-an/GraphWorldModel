@@ -12,13 +12,16 @@ import torch.nn as nn
 from world_model.wm_data import (
     GraphInput,
     apply_edge_ops,
+    build_competitive_features,
     build_features,
     build_graph_input,
+    channels_for,
     edges_to_arrays,
-    in_channels,
 )
+from world_model.wm_eval import sample_competitive_step
 from world_model.wm_model import WorldModel
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
+from data.wm_competitive import auto_dominance, shared_positive_prob
 from data.wm_simulator import blocked, spent
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
@@ -39,6 +42,8 @@ class WorldModelEnvironment:
         n_samples: int = 20,
         base_seed: int = 0,
         remove_semantics: str = spent,
+        negative_seeds: tuple = (),
+        competitive: bool = False,
     ) -> None:
         self.model = model.to(device).eval()
         self.graph = graph
@@ -46,6 +51,11 @@ class WorldModelEnvironment:
         self.device = torch.device(device)
         self.n_samples = n_samples
         self.remove_semantics = remove_semantics
+        # Influence blocking: 8-channel features, a 4-column head, and a starting
+        # state in which S_N is already committed. `reward` is still the negative
+        # cascade's final size because State maps it onto `infected`.
+        self.competitive = competitive
+        self.negative_seeds = tuple(int(node) for node in negative_seeds)
         # Seed every rollout uses unless one is named explicitly; shared across
         # candidates so the DIFFERENCE between two strategies is well resolved
         self.base_seed = base_seed
@@ -74,6 +84,7 @@ class WorldModelEnvironment:
         device: str = "cpu",
         n_samples: int = 20,
         base_seed: int = 0,
+        negative_seeds: tuple = (),
     ) -> "WorldModelEnvironment":
         """Rebuild a WorldModel from a train_wm.py results JSON config and load its checkpoint."""
 
@@ -82,6 +93,8 @@ class WorldModelEnvironment:
         # Absent in checkpoints trained before --remove-semantics existed, all of
         # which were spent
         remove_semantics = config.get("remove_semantics", spent)
+        # ...and absent in every checkpoint trained before influence blocking existed
+        competitive = bool(config.get("competitive", False))
         backbone_kwargs = {
             "n_heads": config["n_heads"],
             "ffn_dim": config["ffn_dim"],
@@ -92,13 +105,16 @@ class WorldModelEnvironment:
         # Reconstruct the exact WorldModel architecture from the config
         model = WorldModel(
             config["model"],
-            in_channels=in_channels,
+            in_channels=channels_for(competitive)[0],
             hidden_dim=config["hidden_dim"],
             n_layers=config["n_layers"],
             dropout=config["dropout"],
             head_type=config.get("head", "linear"),
             diffusion_model=config["diffusion_model"],
             remove_semantics=remove_semantics,
+            competitive=competitive,
+            tie_break=config.get("tie_break", auto_dominance),
+            positive_prob=config.get("positive_prob"),
             **backbone_kwargs,
         )
 
@@ -126,6 +142,8 @@ class WorldModelEnvironment:
             n_samples=n_samples,
             base_seed=base_seed,
             remove_semantics=remove_semantics,
+            negative_seeds=negative_seeds,
+            competitive=competitive,
         )
 
     @classmethod
@@ -137,6 +155,10 @@ class WorldModelEnvironment:
         n_samples: int = 20,
         base_seed: int = 0,
         remove_semantics: str = spent,
+        negative_seeds: tuple = (),
+        competitive: bool = False,
+        tie_break: str = auto_dominance,
+        positive_prob: str | float = shared_positive_prob,
     ) -> "WorldModelEnvironment":
         """Ground-truth dynamics baseline: same rollout machinery, q = true edge weight."""
         if diffusion_model != "IC":
@@ -148,13 +170,21 @@ class WorldModelEnvironment:
 
         model = WorldModel(
             "gcn",
-            in_channels=in_channels,
+            in_channels=channels_for(competitive)[0],
             hidden_dim=oracle_hidden_dim,
             n_layers=oracle_n_layers,
             dropout=0.0,
             head_type="structured_oracle",
             diffusion_model=diffusion_model,
             remove_semantics=remove_semantics,
+            competitive=competitive,
+            tie_break=tie_break,
+            # The oracle head pins q to the TRUE probability, so under MCICM it has
+            # to be told the limiting campaign's constant — the edge weight does not
+            # carry it, and pinning both campaigns to p would silently simulate COICM
+            positive_prob=(
+                None if positive_prob == shared_positive_prob else float(positive_prob)
+            ),
         )
 
         return cls(
@@ -165,6 +195,8 @@ class WorldModelEnvironment:
             n_samples=n_samples,
             base_seed=base_seed,
             remove_semantics=remove_semantics,
+            negative_seeds=negative_seeds,
+            competitive=competitive,
         )
 
     def _block_graph_input(self, sample_arrays: list[tuple]) -> GraphInput:
@@ -203,18 +235,23 @@ class WorldModelEnvironment:
         sample_arrays = [base_arrays] * num_samples
         block_input = self._block_graph_input(sample_arrays)
 
-        # Per-sample infected/frontier sets
-        infected = [set() for _ in range(num_samples)]
-        frontier = [set() for _ in range(num_samples)]
+        # Per-sample state. Under competition every sample starts with S_N already
+        # committed and spreading, which is the premise of the task rather than an
+        # initial condition to choose.
+        seeds = set(self.negative_seeds) if self.competitive else set()
+        infected = [set(seeds) for _ in range(num_samples)]
+        frontier = [set(seeds) for _ in range(num_samples)]
+        pos_infected = [set() for _ in range(num_samples)]
+        pos_frontier = [set() for _ in range(num_samples)]
 
         active = [True] * num_samples
         # One count vector per sample, so sigma(S, T) is the ensemble mean at T
         # rather than whatever the representative sample happened to do
-        sample_curves = [[0.0] for _ in range(num_samples)]
+        sample_curves = [[float(len(seeds))] for _ in range(num_samples)]
 
-        representative_states = [State([], [])]
+        representative_states = [State(sorted(seeds), sorted(seeds))]
         representative_actions = []
-        representative_counts = [0.0]
+        representative_counts = [float(len(seeds))]
 
         for timestep in range(horizon + 1):
             record_representative = active[0]
@@ -225,7 +262,12 @@ class WorldModelEnvironment:
                 if not active[sample]:
                     continue
 
-                state = State(sorted(infected[sample]), sorted(frontier[sample]))
+                state = State(
+                    sorted(infected[sample]),
+                    sorted(frontier[sample]),
+                    sorted(pos_infected[sample]),
+                    sorted(pos_frontier[sample]),
+                )
                 bags[sample] = action_fn(state, timestep)
                 bag_dicts[sample] = [action.to_dict() for action in bags[sample]]
 
@@ -248,25 +290,37 @@ class WorldModelEnvironment:
                     "state": {
                         "infected": sorted(infected[sample]),
                         "frontier": sorted(frontier[sample]),
+                        "pos_infected": sorted(pos_infected[sample]),
+                        "pos_frontier": sorted(pos_frontier[sample]),
                     },
                     "action": bag_dicts[sample],
                     "next_state": {"infected": [], "frontier": []},
                     "next_marginal_infected": {},
                     "next_marginal_frontier": {},
+                    "next_marginal_pos_infected": {},
+                    "next_marginal_pos_frontier": {},
                 }
-                X, _, _ = build_features(record, sample_arrays[sample][0], num_nodes)
+
+                if self.competitive:
+                    X, _ = build_competitive_features(
+                        record, sample_arrays[sample][0], num_nodes
+                    )
+                else:
+                    X, _, _ = build_features(record, sample_arrays[sample][0], num_nodes)
+
                 x_parts.append(X)
 
             features = torch.from_numpy(np.concatenate(x_parts, axis=0))
 
             # One forward pass of the model given the block graph
             # Get probabilities with the sigmoid activation function
+            columns = 4 if self.competitive else 2
             probabilities = (
                 torch.sigmoid(self.model(features.to(self.device), block_input))
                 .cpu()
                 .numpy()
-                .reshape(num_samples, num_nodes, 2)
-            )  # shape: (n_samples, N, 2)
+                .reshape(num_samples, num_nodes, columns)
+            )  # shape: (n_samples, N, 2 or 4)
             self.forward_passes += 1
 
             # Coupled sampling: draw the new infections once from the frontier
@@ -278,6 +332,37 @@ class WorldModelEnvironment:
 
             for sample in range(num_samples):
                 if not active[sample]:
+                    continue
+
+                if self.competitive:
+                    # One draw per node decides both whether it activates and which
+                    # cascade takes it, so a node can never land in both — the same
+                    # coupling the tie-break enforces in the simulator
+                    state = sample_competitive_step(
+                        State(
+                            sorted(infected[sample]),
+                            sorted(frontier[sample]),
+                            sorted(pos_infected[sample]),
+                            sorted(pos_frontier[sample]),
+                        ),
+                        bag_dicts[sample],
+                        probabilities[sample],
+                        rng,
+                        num_nodes,
+                    )
+                    infected[sample] = set(state.infected)
+                    frontier[sample] = set(state.frontier)
+                    pos_infected[sample] = set(state.pos_infected)
+                    pos_frontier[sample] = set(state.pos_frontier)
+
+                    if (
+                        timestep > 0
+                        and not frontier[sample]
+                        and not pos_frontier[sample]
+                        and not bags[sample]
+                    ):
+                        active[sample] = False
+
                     continue
 
                 adds = {
@@ -316,7 +401,12 @@ class WorldModelEnvironment:
             if record_representative:
                 representative_actions.append(bags[0])
                 representative_states.append(
-                    State(sorted(infected[0]), sorted(frontier[0]))
+                    State(
+                        sorted(infected[0]),
+                        sorted(frontier[0]),
+                        sorted(pos_infected[0]),
+                        sorted(pos_frontier[0]),
+                    )
                 )
                 representative_counts.append(float(len(infected[0])))
 
