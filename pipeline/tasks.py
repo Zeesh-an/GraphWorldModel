@@ -61,6 +61,12 @@ class Task:
     # The op one unit of budget buys. `add_node` for a seeding task, `remove_node`
     # for a containment one; the executor counts it and the prompt states it.
     budget_op: str = "add_node"
+    # Budget sweep this task defaults to, as percentages of N. None = the
+    # pipeline's 1/5/10/20 ladder. A task overrides it when its k is a property of
+    # the INSTANCE rather than a choice: source localization is handed the source
+    # count it has to recover, so a four-point budget sweep would be four runs of
+    # the same experiment.
+    default_budget_pcts: tuple | None = None
     # Fraction of N the exogenous outbreak seeds, for a task whose cascade the
     # planner does not start. 0 = the planner seeds it (every maximize task).
     outbreak_pct: float = 0.0
@@ -74,13 +80,21 @@ class Task:
     def runnable(self) -> bool:
         return self.status == implemented
 
+    # `is None` rather than `or`: an EMPTY override is meaningful. Source
+    # localization generates diffusion-only episodes on purpose (no injected
+    # actions at all, so the transition degenerates to f(G, s_t) -> s_{t+1}), and
+    # `or` would read that empty tuple as "unset" and inject node ops anyway.
     @property
     def allowed_ops(self) -> tuple:
-        return self.default_allowed_ops or self.action_ops
+        return self.action_ops if self.default_allowed_ops is None else self.default_allowed_ops
 
     @property
     def gen_action_ops(self) -> tuple:
-        return self.default_gen_action_ops or self.action_ops
+        return (
+            self.action_ops
+            if self.default_gen_action_ops is None
+            else self.default_gen_action_ops
+        )
 
     @property
     def contains(self) -> bool:
@@ -92,6 +106,20 @@ class Task:
         rather than seeds, and every "is this better" comparison flips sign.
         """
         return self.objective == minimize
+
+    @property
+    def recovers(self) -> bool:
+        """
+        True when the program INVERTS the transition instead of steering it.
+
+        The structural difference is bigger than the containment one: there is no
+        rollout, no action bag and no intervention at all. The program is handed a
+        graph and an observed diffusion state and returns the seed set that
+        produced it, scored on F1 against ground truth. The world model stops being
+        the thing being optimized against and becomes a subroutine the generated
+        program calls (research/source_localization.md §2.5).
+        """
+        return self.objective == recover
 
 
 tasks = {
@@ -202,11 +230,68 @@ tasks = {
     "source_localization": Task(
         name="source_localization",
         title="Source Localization",
-        status=planned,
+        status=implemented,
         objective=recover,
         dynamics=("IC", "LT"),
-        action_ops=(),
-        summary="Recover the seed set s_0 from an observed final state s_T.",
+        # The recovered source set IS an `add_node` bag: the environment converts
+        # x_hat into exactly the seed commit the generator writes at t=0 for any
+        # re-simulation it needs (research/source_localization.md §2.4.1). Nothing
+        # is ever emitted as an intervention — a localize() program returns node
+        # ids — but naming the op keeps `predict_marginals` and the --compare
+        # referee speaking the same action vocabulary as every other task.
+        action_ops=("add_node",),
+        summary="Recover the seed set s_0 from an observed diffusion state s_T.",
+        # k is a property of the INSTANCE here, not a choice: the localizer is told
+        # how many sources to name. A four-point budget sweep would be four runs of
+        # one experiment, so the default is SL-VAE's single 10%-of-N convention.
+        # Pass --budget-pcts 5 10 20 with --sl-budget sweep for §8.5.1's
+        # source-fraction axis.
+        default_budget_pcts=(10.0,),
+        # Diffusion-only episodes: no injected actions at any t > 0, so the
+        # transition degenerates to f(G, s_t) -> s_{t+1} and every episode's whole
+        # observable history is caused by its t=0 seed commit alone. That is what
+        # makes the (x, y) label pair well defined — an episode with a mid-cascade
+        # injection has an observation its seed set did not produce (§2.1).
+        default_gen_action_ops=(),
+        # §2.6 arm 1, one representative per family of §3, ordered by how dangerous
+        # each is. `lpsi` heads the list because it is the row that actually has to
+        # be beaten: SIDSL's Table 1 puts a 2017 label-propagation method with no
+        # learning at F1 0.544 on Digg against SL-VAE's 0.479 and DDMSL's 0.517
+        # [verified, §5.5], and LPSI sits INSIDE the agent's expressible space, so
+        # "the search rediscovers LPSI" is the realistic floor (§2.9 risk 1).
+        # `rumor_centrality` is single-source and scores near zero under a
+        # multi-source protocol by construction (§8.2) — it is here because it
+        # founded the field and because a --budgets 1 run makes it admissible.
+        # `resim_greedy` is deliberately absent for the same reason `celf` and
+        # `greedy_blocking` are: it re-simulates every candidate on its own private
+        # simulator, which would dominate startup for a table that exists to set a
+        # bar. Run it as its own --baselines arm when you want its number.
+        default_baselines=(
+            "lpsi",
+            "netsleuth",
+            "ojc",
+            "jordan_center",
+            "dmp_localize",
+            "dynamic_age",
+            "effective_distance",
+            "infected_degree",
+            "rumor_centrality",
+            "random_sources",
+        ),
+        # The six-condition ladder plus arm A (§2.6): §2.2's framing, in which the
+        # world model is FROZEN and a relaxed source vector is gradient-descended
+        # against it. That is SL-VAE with our likelihood plugged in, which the seed
+        # paper has already declared a no-op component swap — so it is the CONTROL
+        # program search is measured against, not the method. 6 vs A is the
+        # methodological claim this task exists to make.
+        default_arms=(
+            "routing",
+            "evolve_free@native",
+            "evolve_free@monte_carlo",
+            "evolve_free@oracle",
+            "evolve_free@world_model",
+            "gradient_free@world_model",
+        ),
         blocker=None,
     ),
     "influence_estimation": Task(
@@ -374,6 +459,24 @@ for _task in tasks.values():
         raise ValueError(
             f"task {_task.name!r} minimizes spread but uses remove_semantics="
             f"{_task.remove_semantics!r}; a containment task needs {blocked!r}"
+        )
+
+    # An inverse task labels each episode with its t=0 seed commit, so an episode
+    # carrying a mid-cascade injection has an observation its seed set did not
+    # produce and its (x, y) pair is a lie (research/source_localization.md §2.1)
+    if _task.runnable and _task.recovers and _task.gen_action_ops:
+        raise ValueError(
+            f"task {_task.name!r} inverts the transition but generates with "
+            f"action ops {_task.gen_action_ops}; a recover task needs "
+            f"default_gen_action_ops=() so every episode's observation is caused "
+            f"by its t=0 seed set alone"
+        )
+
+    # ...and it cannot also fight an exogenous cascade: the sources ARE the unknown
+    if _task.recovers and _task.outbreak_pct:
+        raise ValueError(
+            f"task {_task.name!r} inverts the transition but declares an outbreak; "
+            f"the source set is what it is solving for, not something handed to it"
         )
 
 

@@ -233,7 +233,11 @@ class EvolveSearch(OuterLoopMethod):
             )
             last_delta = (
                 paired_delta(
-                    trajectory, best[1], "the population best", task.sense
+                    trajectory,
+                    best[1],
+                    "the population best",
+                    task.sense,
+                    unit="F1" if task.recovers else "nodes",
                 )
                 if best is not None
                 else None

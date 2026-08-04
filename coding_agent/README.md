@@ -103,6 +103,8 @@ The single coupling point between methods and environments is the **`ActionFn` c
 
 The methods are two extremes plus a middle point on a cost/adaptivity spectrum. They differ **only** in who produces the `t > 0` actions and how often the LLM is invoked; the environment contract is identical.
 
+Two later additions sit outside that spectrum. `adaptive` (method 5) is the same population search over a per-round policy. `gradient` (method 6) is not a search at all: it is source localization's arm A, a fixed numerical procedure with no LLM anywhere, and it is here so the ablation lands in the same results table as everything else rather than in a side file.
+
 ### Method 1 — `one_shot`: one super-algorithm emits the whole horizon
 
 The agent designs a single algorithm whose `plan_horizon(graph, budget, horizon)` returns the entire plan `R_{t₀…T}` up front. The environment rolls the whole plan; the final reward (plus a trajectory summary, plus optional per-action credit, plus the full traceback if the script failed) is appended to the next prompt, and the agent **revises the algorithm** — up to `--outer-iters` times, keeping the best-by-reward candidate.
@@ -150,6 +152,18 @@ For **adaptive influence maximization** (`--task adaptive_online_im`). Structura
 - **The adaptivity gap needs both arms.** `spread(adaptive) / spread(non-adaptive)` at matched `k` is only meaningful with a control, so the task registry's `default_arms` pair every `adaptive_<mode>@E` with `evolve_<mode>@E` for all four evaluators, and `pipeline/conditions.py::adaptivity_gaps` divides them on the shared ground-truth replay. Do not expect a gap above 1: theory caps the myopic gap at 4 and proves non-adaptive greedy is no worse across all graphs. **The claim is cost**: `evaluator_seconds` for both sides sits in the same table.
 
 Results carry `rounds`, `round_batches`, `round_gap`, `feedback_model` and `round_spreads` (spread after each round), because the adaptive-IM literature splits three ways on the budget convention and a spread number is not comparable without `(k, b, r)` together.
+
+### Method 6, `gradient`: per-instance descent on a frozen world model (no LLM)
+
+Source localization's **arm A** (`gradient_free@world_model`, condition 8), and the only `OuterLoopMethod` here with no agent in it: freeze `f_θ`, relax the source set to `x̃ ∈ [0,1]^{|V|}`, and run Adam on `‖y − f_θ(x̃, G)‖² + λ(Σx̃ − k)² − log p(x̃)`, then take the top `k`. `world_model/wm_sl.py` holds the machinery, `methods/gradient.py` the driver.
+
+**It is a control, and it is deliberately built well.** That objective is SL-VAE's own procedure with our likelihood plugged in — and SL-VAE reports no significant difference across GAT, MONSTOR and DeepIS as the forward model, i.e. it already published the result that the swap is a no-op. So the interesting comparison is not "does it work" but **6 vs A**: what program *search* buys over per-instance descent on the same likelihood. Strawmanning it would answer nothing, which is why `--sl-prior vae` (the full method) is the default and `--sl-prior none` reproduces `SL-VAE (a)`, matching that paper's own ablation.
+
+Three implementation notes:
+
+- The prior is fit on the **selection** split's source sets. Withholding it strawmans the control; fitting it on the held-out split leaks the answer. Both flip the sign of the headline claim.
+- It needs GRADIENTS through the forward model, so `gradient_free@monte_carlo` raises rather than silently substituting a sampler. "Arm A under a sampling oracle" is a method nobody has.
+- It costs nothing structural because the structured heads are already continuous in the action channel: `ICTransmissionHead` composes `p_new` from continuous inputs, so `wm_sl.soft_rollout` is a plain unroll of the same recursion `WorldModelEnvironment.rollout` runs (with the per-step Bernoulli replaced by the marginal, which is a mean-field approximation and is named as one), and autograd reaches `CH_ADD` with no custom backward code. It also gets a genuine continuous ranking out of the converged `x̃`, so its AUC is the real one rather than a rank-derived stand-in.
 
 ### Baselines for `adaptive` (condition 1)
 
@@ -206,6 +220,43 @@ The one task family where the outer loop MINIMIZES. Everything else is shared �
 **Min-Sum is deliberately absent.** It was implemented from the published equations and measured to be wrong — erratic in its own parameters, and worse than the greedy `decycling` it should improve on. `abraunst/decycler` is the registered external route. The measurements are in [`research/critical_node_detection.md`](../research/critical_node_detection.md) §11 so the next attempt does not start from zero.
 
 **Expect the ranking to disagree with the structural columns.** On the smoke SBM, `articulation_removal` was the best dismantler by giant-component drop and the *worst* by contained spread. That is [`research/critical_node_detection.md`](../research/critical_node_detection.md) §5.8 reproducing itself, not a bug.
+
+### Inversion: `source_localization` (a different contract, not a different sign)
+
+The one task family where the outer loop writes an **inference algorithm** instead of choosing an intervention, and the only place in this package where nothing is emitted at all. Given a graph and an OBSERVED diffusion state `y`, recover the seed set `x` that produced it, scored on F1 against the truth. Six things differ:
+
+1. **The contract is `localize`, not `plan_horizon`.** `def localize(self, graph, observation, budget) -> list[int]`, plus an optional `source_scores(graph, observation) -> np.ndarray`. `methods.base.evaluate_strategy` dispatches on `TaskSpec.recovers` and calls `localization.evaluate_localizer`, which runs the program once per labelled episode instead of rolling anything out. The contract is chosen by the TASK, not the method — `evolve` is still a population search, and what the population contains is a localizer.
+2. **The forward oracle is one name with four bindings.** `self.predict_marginals(seeds)` returns `P(infected at the end)` per node, and it resolves to: a raiser under `@native` (no forward model, by design), NDlib under `@monte_carlo`, the analytic IC form under `@oracle`, and `f_θ` under `@world_model`. That is what makes conditions 3–6 an ablation on ONE variable — the program is byte-identical across them. Bound in `attach_context` alongside `self.outbreak`, and every call routes through `environment.rollout`, so it lands in `evaluator_calls` / `evaluator_seconds` / `real_env_episodes` rather than escaping the meter.
+3. **The reward is F1 against ground truth, never re-simulation error.** Diffusion is many-to-one, so distinct seed sets reproduce the same `y` and a program that reliably recovers the WRONG member of an equivalence class scores just as well under re-simulation error. Labels select the program and are never handed to it, which is what makes the selected artifact deployable on real cascades. Re-simulation error is still computed — inside a program as its own ranking signal, and by `--compare` as a reported column.
+4. **The reward is EXACT.** F1 against a known source set carries no evaluator noise, so `mc_reward` is filled from the held-out score rather than from a referee replay, and there is no fidelity column because there is nothing to be unfaithful about.
+5. **Two disjoint episode pools.** The search optimizes on `--sl-select-split` and the winner is re-run unmodified on `--sl-eval-split`; the second is what every table reports and `generalization_gap` is the difference. Selecting and reporting on the same episodes cannot distinguish an algorithm from a memorized set of cascades. `--sl-transfer-from <another run's results JSON>` runs a program selected on a different GRAPH, which is the headline comparison and one no per-instance method can enter.
+6. **`k` is a property of the instance.** The localizer is told how many sources to name, so `--sl-budget-mode episode` makes `PR = RE = F1` by construction and the task's budget sweep is a single point. `--sl-budget-mode sweep` forces the pipeline's `k` and filters the pool to that source fraction; an empty band raises rather than silently widening.
+
+`coding_agent/check_source_localization.py` asserts all six on graphs where the answer is known by hand, plus the metric definitions, the label extraction and the differentiability of arm A. Run it after touching any of them.
+
+### Baselines for `source_localization` (condition 1)
+
+`tools/localization_algorithms.py`, signature `(graph, observation, budget, **kw) -> list[int]`, returning a **source** set. Each name also has a paired scorer in `localization_scorers` returning a per-node vector: F1 scores the SET, AUC scores the RANKING, and for the sequential members those are deliberately not top-k of one another.
+
+| name | what it is |
+| --- | --- |
+| `lpsi` | **LPSI** (Wang et al. AAAI 2017): label the infected `+1` and the uninfected `−1`, propagate to convergence, take the LOCAL MAXIMA. **The row that has to be beaten** — SIDSL's Table 1 puts it at F1 0.544 on Digg against SL-VAE's 0.479 and DDMSL's 0.517, with no learning in it at all |
+| `netsleuth` | **NETSLEUTH** (Prakash et al. ICDM 2012): eigenvector of the infected subgraph's submatrix Laplacian, seeds picked by deflation |
+| `ojc` | **OJC** (Zhu et al. AAAI 2017): cover the observed infected nodes with balls, then take the Jordan centre of the cover. Built for partial observation, so its candidates include unobserved neighbours |
+| `jordan_center` | the eccentricity minimizer of the infected subgraph (Zhu & Ying, ToN 2016) — one centre per infected COMPONENT, since components cannot share a source |
+| `rumor_centrality` | **Shah & Zaman (2010)**, the paper that founded the field: count spreading orders, in logs, over a BFS tree per component. SINGLE-source — see the note below |
+| `dynamic_age` | Fioriti & Chinnici (2012): drop in the infected subgraph's leading eigenvalue when `v` is removed |
+| `effective_distance` | Brockmann & Helbing (Science 2013): in `d(u→v) = 1 − log p(u→v)` a contagion becomes a circular wave, so the origin is where every infected node sits at a similar effective distance |
+| `dmp_localize` | **DMP** (Lokhov et al. 2014): deterministic mean-field forward per hypothesis, greedy MAP over the observation's likelihood. Sequential, because a second source is only worth adding where the first one's cascade fails to explain `y` |
+| `infected_degree`, `infected_betweenness`, `infected_closeness`, `infected_eigenvector` | the **Comin–Costa** suite restricted to the infected subgraph — the cheap-heuristic floor everything is compared against |
+| `random_sources` | the floor |
+| `resim_greedy` | greedy minimization of `‖y − f(x̂)‖²`. The forward-model-using classical baseline |
+
+`resim_greedy` is in `mc_localization_algorithms` and blocked from generated scripts unless `--allow-mc-algorithms`, exactly as `celf` and `greedy_blocking` are: called without a `predict` argument it falls back to a PRIVATE NDlib estimator whose episodes never reach `MonteCarloEnvironment.episodes_used`. Nothing is lost by blocking it — a generated program has `self.predict_marginals`, which is the metered binding.
+
+**Know what LPSI actually promises**, because assuming more is how a wrong implementation passes a test. It names local maxima of a converged label field, which is a *centre*-of-the-infected-region estimator: on a path `0–1–2` with all three infected it names node 1, even though the cascade started at an end. That is not a bug and it is not fixable inside LPSI — it is §1's ill-posedness showing up on a seven-node graph, and it is why §2.9 risk 3 says the achievable ceiling is uncharacterized. What LPSI does guarantee is that it never names a node the observation says was uninfected, and both properties are asserted in the self-check.
+
+**`rumor_centrality` and `jordan_center` are single-source estimators** evaluated under a multi-source protocol, so they score near zero at `k = 10%` of `N` **by construction** — a property of the protocol, not of the method (§8.2: the two literatures never mix their numbers). They are registered because they founded the field and because a `--budgets 1` run makes them admissible.
 
 ### Streaming graphs and multi-round campaigns
 

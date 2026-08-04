@@ -55,6 +55,7 @@ from tqdm import tqdm
 
 from baselines.registry import (
     available_baselines,
+    baselines_for_task,
     external_baselines,
     runnable_baselines,
 )
@@ -69,8 +70,14 @@ from data.generate_wm_data import (
 )
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithm_names
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithm_names
+from coding_agent.tools.localization_algorithms import localization_algorithm_names
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.containment import outbreak_selectors
+from coding_agent.localization import (
+    episode_budget,
+    valid_budget_modes,
+    valid_observations,
+)
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
 from data.wm_graphs import kronecker_seeds
 from data.wm_simulator import valid_action_ops, valid_remove_semantics
@@ -80,6 +87,7 @@ from pipeline.conditions import (
     ground_truth_reward,
     default_arms,
     default_baselines,
+    native,
     needs_world_model,
     parse_arm,
     resolve_evaluator,
@@ -164,7 +172,10 @@ class PipelineConfig:
     baselines: tuple | None = None
     # None = the task registry's arms, falling back to the six-condition ladder
     arms: tuple | None = None
-    budget_pcts: tuple | None = (1.0, 5.0, 10.0, 20.0)
+    # None = the task registry's own sweep, falling back to the 1/5/10/20 ladder.
+    # Resolved through `resolve_budget_pcts` rather than defaulted here, so a task
+    # whose k is a property of the instance can say so once.
+    budget_pcts: tuple | None = None
     budgets: tuple | None = None
     evaluator: str = "oracle"
     native_mc_runs: int = native_mc_runs_default
@@ -191,6 +202,21 @@ class PipelineConfig:
     # --seed, so all arms in one sweep face the same one.
     outbreak_pct: float | None = None
     outbreak_selector: str = "random"
+    # Source localization; every field is inert unless the task inverts, so one
+    # sweep configuration serves all four runnable tasks
+    sl_select_split: str = "train"
+    sl_eval_split: str = "test"
+    sl_instances: int = 20
+    sl_observation: str = "marginal"
+    sl_budget_mode: str = episode_budget
+    sl_source_tolerance: float = 0.5
+    sl_prior: str = "vae"
+    sl_steps: int = 200
+    sl_lr: float = 0.1
+    sl_cardinality_weight: float = 0.05
+    sl_prior_weight: float = 1.0
+    sl_prior_epochs: int = 300
+    sl_transfer_from: str | None = None
     allow_mc_algorithms: bool = False
     strategy_timeout: float = executor.strategy_timeout_seconds
     # USD per 1M tokens for the cost line; None -> tokens counted, cost null
@@ -220,19 +246,25 @@ def expand_baselines(names: tuple, task: str) -> list[str]:
     published repo (condition 7), and the aliases `all`, `all-classical`,
     `all-external`. `all` deliberately expands external baselines to only those
     actually installed, so a fresh checkout does not fail on missing repos.
+
+    `all-classical` expands to the TASK's own pool, not the static IM classics: a
+    dismantler and a source localizer are different KINDS of algorithm, and
+    expanding the IM list under `--task source_localization` would run seed-set
+    selectors against an inverse task and fail at the contract check.
     """
+    classical = get_task(task).default_baselines or default_baselines
     specs = []
 
     for name in names:
         if name == "all-classical":
-            specs += [f"baseline:{algorithm}" for algorithm in default_baselines]
+            specs += [f"baseline:{algorithm}" for algorithm in classical]
         elif name == "all-external":
             specs += [
                 f"external:{baseline}"
                 for baseline in available_baselines(task=task)
             ]
         elif name == "all":
-            specs += [f"baseline:{algorithm}" for algorithm in default_baselines]
+            specs += [f"baseline:{algorithm}" for algorithm in classical]
             installed = runnable_baselines(task=task)
             specs += [f"external:{baseline}" for baseline in installed]
 
@@ -243,6 +275,21 @@ def expand_baselines(names: tuple, task: str) -> list[str]:
                     f"baselines {skipped} (run: python -m baselines.setup_baselines --all)"
                 )
         elif name.startswith("external:"):
+            # The `all` aliases already filter on the task field; an explicit
+            # name skipped it entirely, so `--baselines external:moeim` under
+            # --task adaptive_online_im would quietly drop a static IM method
+            # into an adaptive table. The field exists to stop precisely that.
+            baseline = name.split(":", 1)[1]
+            spec = external_baselines.get(baseline)
+
+            if spec is not None and spec.task != task:
+                raise ValueError(
+                    f"external baseline {baseline!r} solves {spec.task!r}, not "
+                    f"{task!r}. Running it here would put a {spec.task} method in "
+                    f"a {task} table. Registered for this task: "
+                    f"{sorted(baselines_for_task(task))}"
+                )
+
             specs.append(name)
         else:
             specs.append(f"baseline:{name}")
@@ -299,12 +346,20 @@ def build_arms(config: PipelineConfig) -> list[Arm]:
     return arms
 
 
+def resolve_budget_pcts(config: PipelineConfig) -> tuple:
+    """--budget-pcts, else the task's own sweep, else the 1/5/10/20 ladder."""
+    if config.budget_pcts is not None:
+        return tuple(config.budget_pcts)
+
+    return get_task(config.task).default_budget_pcts or (1.0, 5.0, 10.0, 20.0)
+
+
 def budget_points(config: PipelineConfig) -> list[tuple[str, float | None, int]]:
     """(label, budget_pct, budget) for each point of the sweep; pct wins if both are set."""
     if config.budgets is not None:
         return [(budget_label(None, k), None, int(k)) for k in config.budgets]
 
-    return [(budget_label(pct, 0), float(pct), 0) for pct in config.budget_pcts]
+    return [(budget_label(pct, 0), float(pct), 0) for pct in resolve_budget_pcts(config)]
 
 
 def active_stages(config: PipelineConfig) -> list[str]:
@@ -520,8 +575,16 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
         )
 
     # Rewards from different evaluators are not comparable, so a multi-condition
-    # sweep is only readable once every arm has been replayed on the same referee
-    if not config.compare and len({arm.evaluator for arm in arms}) > 1:
+    # sweep is only readable once every arm has been replayed on the same referee.
+    # An INVERSE task is the exception and the warning would be wrong there: its
+    # reward is F1 against a source set we know, so it carries no evaluator noise
+    # and is already comparable across conditions. --compare still buys the
+    # re-simulated error column, it just is not load-bearing for the table.
+    if (
+        not config.compare
+        and not get_task(config.task).recovers
+        and len({arm.evaluator for arm in arms}) > 1
+    ):
         print(
             "[agent] WARNING: arms span multiple evaluators without --compare, so "
             "their rewards are measured by different judges and cannot be compared. "
@@ -607,12 +670,37 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 # passed always so one code path serves both families
                 outbreak_pct=config.outbreak_pct,
                 outbreak_selector=config.outbreak_selector,
+                # Inert unless the task inverts. `native_arm` cannot be recovered
+                # downstream — resolve_evaluator has already rewritten a native
+                # arm to monte_carlo with one episode — and it decides whether
+                # `predict_marginals` exists at all, which IS condition 3.
+                sl_select_split=config.sl_select_split,
+                sl_eval_split=config.sl_eval_split,
+                sl_instances=config.sl_instances,
+                sl_observation=config.sl_observation,
+                sl_budget_mode=config.sl_budget_mode,
+                sl_source_tolerance=config.sl_source_tolerance,
+                sl_prior=config.sl_prior,
+                sl_steps=config.sl_steps,
+                sl_lr=config.sl_lr,
+                sl_cardinality_weight=config.sl_cardinality_weight,
+                sl_prior_weight=config.sl_prior_weight,
+                sl_prior_epochs=config.sl_prior_epochs,
+                sl_transfer_from=config.sl_transfer_from,
+                native_arm=arm.evaluator == native,
                 budget=budget or 5,
                 budget_pct=budget_pct,
                 horizon=config.horizon,
                 windows=config.windows,
-                # Conditions 1 and 2 have no refinement loop: one pass is the arm
-                outer_iters=1 if not arm.is_agent else config.outer_iters,
+                # Conditions 1 and 2 have no refinement loop: one pass is the arm.
+                # Nor does a transfer arm — the program is fixed and came from
+                # another run, so refining it here would defeat the experiment
+                # (and would re-run the same canned script --outer-iters times).
+                outer_iters=(
+                    1
+                    if not arm.is_agent or config.sl_transfer_from is not None
+                    else config.outer_iters
+                ),
                 mc_runs=mc_runs,
                 referee_mc_runs=config.mc_runs,
                 n_samples=config.n_samples,
@@ -639,7 +727,11 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             result = run_experiment(
                 experiment,
                 canned_script=(
-                    seed_script(external_seeds["seeds"]) if external_seeds else None
+                    seed_script(
+                        external_seeds["seeds"], get_task(config.task).budget_op
+                    )
+                    if external_seeds
+                    else None
                 ),
             )
             result["arm"] = arm.name
@@ -686,12 +778,18 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     )
                 )
             )
+            score = ground_truth_reward(result)
+            score_text = (
+                f"held-out F1 {score:.4f}"
+                if result.get("localization")
+                else (
+                    f"spread {score:.2f} "
+                    f"({100.0 * score / result['graph']['num_nodes']:.1f}% of N)"
+                )
+            )
             tqdm.write(
                 f"[agent] {label}/{arm.name}: done in "
-                f"{time.perf_counter() - arm_start:.1f}s -> "
-                f"spread {ground_truth_reward(result):.2f} "
-                f"({100.0 * ground_truth_reward(result) / result['graph']['num_nodes']:.1f}% of N)"
-                f"{token_text}"
+                f"{time.perf_counter() - arm_start:.1f}s -> {score_text}{token_text}"
             )
             progress_bar.update(1)
 
@@ -1294,16 +1392,17 @@ if __name__ == "__main__":
             list(algorithm_names)
             + list(adaptive_algorithm_names)
             + list(dismantling_algorithm_names)
+            + list(localization_algorithm_names)
             + [f"external:{name}" for name in external_baselines]
             + ["all", "all-classical", "all-external"]
         ),
         metavar="NAME",
         help="baselines to run: a static IM algorithm, a per-round adaptive "
-        "policy, a network dismantler (all condition 1), 'external:<name>' for a "
-        "published repo (condition 7), or the aliases 'all' / 'all-classical' / "
-        "'all-external'. 'all' includes only external baselines already installed. "
-        "Unset = the task registry's own pool (default for "
-        f"influence_maximization: {' '.join(default_baselines)}).",
+        "policy, a network dismantler, a source localizer (all condition 1), "
+        "'external:<name>' for a published repo (condition 7), or the aliases "
+        "'all' / 'all-classical' / 'all-external'. 'all' includes only external "
+        "baselines already installed. Unset = the task registry's own pool "
+        f"(default for influence_maximization: {' '.join(default_baselines)}).",
     )
     parser.add_argument(
         "--baseline-timeout",
@@ -1334,8 +1433,111 @@ if __name__ == "__main__":
         "--budget-pcts",
         type=float,
         nargs="+",
-        default=[1.0, 5.0, 10.0, 20.0],
-        help="seed budgets as percent of nodes, one run per value (default: 1 5 10 20).",
+        default=None,
+        help="seed budgets as percent of nodes, one run per value. Unset = the "
+        "task registry's own sweep, which is a single 10-percent point for source "
+        "localization because k there is a property of the instance rather than a "
+        "choice (default: 1 5 10 20).",
+    )
+    parser.add_argument(
+        "--sl-select-split",
+        type=str,
+        default="train",
+        choices=["train", "val", "test"],
+        help="source localization: episodes the outer loop's reward is computed on "
+        "(default: train).",
+    )
+    parser.add_argument(
+        "--sl-eval-split",
+        type=str,
+        default="test",
+        choices=["train", "val", "test"],
+        help="source localization: HELD-OUT episodes the winning program is re-run "
+        "on unmodified, and the number every table reports. Selecting and reporting "
+        "on the same episodes proves nothing about amortization (default: test).",
+    )
+    parser.add_argument(
+        "--sl-instances",
+        type=int,
+        default=20,
+        help="source localization: labelled episodes per split. Every candidate "
+        "program pays this many executions (default: 20).",
+    )
+    parser.add_argument(
+        "--sl-observation",
+        type=str,
+        default="marginal",
+        choices=list(valid_observations),
+        help="source localization: which y the program sees. marginal is the "
+        "MC-averaged P(infected) and is strictly MORE informative than the "
+        "published protocol's; binary is a single realized draw and is the column "
+        "comparable to the published tables (default: marginal).",
+    )
+    parser.add_argument(
+        "--sl-budget-mode",
+        type=str,
+        default=episode_budget,
+        choices=list(valid_budget_modes),
+        help="source localization: where k comes from. episode = the instance's own "
+        "source count (the published given-k convention); sweep = the pipeline's k, "
+        "with the pool filtered to that source fraction, which is how the "
+        f"source-fraction axis is run (default: {episode_budget}).",
+    )
+    parser.add_argument(
+        "--sl-source-tolerance",
+        type=float,
+        default=0.5,
+        help="source localization: relative band around k that --sl-budget-mode "
+        "sweep keeps an episode in (default: 0.5).",
+    )
+    parser.add_argument(
+        "--sl-prior",
+        type=str,
+        default="vae",
+        choices=["none", "vae"],
+        help="arm A only (gradient_*): none reproduces SL-VAE (a) — frozen forward "
+        "model plus descent, no prior; vae reproduces the full method, which is "
+        "worth +0.19 F1 on Jazz in SL-VAE's own ablation (default: vae).",
+    )
+    parser.add_argument(
+        "--sl-steps",
+        type=int,
+        default=200,
+        help="arm A only: Adam steps per instance (default: 200).",
+    )
+    parser.add_argument(
+        "--sl-lr",
+        type=float,
+        default=0.1,
+        help="arm A only: Adam learning rate on the source logits (default: 0.1).",
+    )
+    parser.add_argument(
+        "--sl-cardinality-weight",
+        type=float,
+        default=0.05,
+        help="arm A only: weight on (sum(x~) - k)^2, the given-k constraint "
+        "(default: 0.05).",
+    )
+    parser.add_argument(
+        "--sl-prior-weight",
+        type=float,
+        default=1.0,
+        help="arm A only: weight on -log p(x~) (default: 1.0).",
+    )
+    parser.add_argument(
+        "--sl-prior-epochs",
+        type=int,
+        default=300,
+        help="arm A only: epochs fitting the source VAE (default: 300).",
+    )
+    parser.add_argument(
+        "--sl-transfer-from",
+        type=str,
+        default=None,
+        help="source localization: run the winning program named by ANOTHER run's "
+        "results JSON, unmodified, on this dataset. This is the graph axis of the "
+        "amortization claim, and a comparison no per-instance method can enter — "
+        "SL-VAE has no artifact to transfer (default: None).",
     )
     parser.add_argument(
         "--budgets",
@@ -1524,7 +1726,7 @@ if __name__ == "__main__":
         plan_graphs=args.plan_graphs,
         baselines=None if args.baselines is None else tuple(args.baselines),
         arms=None if args.arms is None else tuple(args.arms),
-        budget_pcts=tuple(args.budget_pcts),
+        budget_pcts=None if args.budget_pcts is None else tuple(args.budget_pcts),
         budgets=tuple(args.budgets) if args.budgets else None,
         evaluator=args.evaluator,
         native_mc_runs=args.native_mc_runs,
@@ -1547,6 +1749,19 @@ if __name__ == "__main__":
         campaigns=args.campaigns,
         outbreak_pct=args.outbreak_pct,
         outbreak_selector=args.outbreak_selector,
+        sl_select_split=args.sl_select_split,
+        sl_eval_split=args.sl_eval_split,
+        sl_instances=args.sl_instances,
+        sl_observation=args.sl_observation,
+        sl_budget_mode=args.sl_budget_mode,
+        sl_source_tolerance=args.sl_source_tolerance,
+        sl_prior=args.sl_prior,
+        sl_steps=args.sl_steps,
+        sl_lr=args.sl_lr,
+        sl_cardinality_weight=args.sl_cardinality_weight,
+        sl_prior_weight=args.sl_prior_weight,
+        sl_prior_epochs=args.sl_prior_epochs,
+        sl_transfer_from=args.sl_transfer_from,
         allow_mc_algorithms=args.allow_mc_algorithms,
         strategy_timeout=args.strategy_timeout,
         llm_price_in=args.llm_price_in,

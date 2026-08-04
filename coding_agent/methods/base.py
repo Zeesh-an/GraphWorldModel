@@ -10,11 +10,21 @@ from coding_agent.agent import CodingAgent
 from coding_agent.containment import build_outbreak, removal_plan, removal_set
 from coding_agent.credit import planned_action
 from coding_agent.executor import StrategyError, call_strategy, validate_actions
+from coding_agent.localization import (
+    LocalizeAnchor,
+    bind_predict_marginals,
+    evaluate_localizer,
+    summarize_localization,
+)
 from coding_agent.rounds import adaptive_action_fn, round_batches, round_schedule
 from coding_agent.stream import build_stream
 from coding_agent.tools import algorithms, primitives
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.localization_algorithms import (
+    localization_algorithms,
+    localization_scorers,
+)
 from coding_agent.types import (
     ActionOp,
     GraphInfo,
@@ -68,6 +78,22 @@ dismantling_anchor_algorithms = (
     "collective_influence_removal",
     "netshield",
     "random_removal",
+)
+
+# The leaderboard for an INVERSE task. `lpsi` heads it because it is the row that
+# actually has to be beaten (research/source_localization.md §2.9 risk 1): a 2017
+# label-propagation method with no learning beats both SL-VAE and DDMSL on Digg,
+# and it sits inside the agent's own expressible space. `resim_greedy` is
+# deliberately absent for the same reason `greedy_blocking` and `adapt_greedy`
+# are — it re-simulates every candidate on a private simulator and would dominate
+# startup for a table that exists to set a bar, not to be the result.
+localization_anchor_algorithms = (
+    "lpsi",
+    "netsleuth",
+    "jordan_center",
+    "dmp_localize",
+    "infected_degree",
+    "random_sources",
 )
 
 # Residual-gain feedback is built from reverse-reachable sets, so it is IC-only.
@@ -298,6 +324,13 @@ def _containment_lines(
 def summarize(
     trajectory: Trajectory, graph: GraphInfo | None = None, task: TaskSpec | None = None
 ) -> str:
+    # An inverse task rolled out no cascade, so every diagnostic below — frontier
+    # counts, residual gain, community reach — describes something that did not
+    # happen. Its own summary answers the question that was actually asked: which
+    # sources were recovered, which were missed, and what the misses have in common.
+    if task is not None and task.recovers and graph is not None:
+        return summarize_localization(trajectory, graph, task)
+
     reward_se = trajectory.cost.get("reward_se", 0.0)
     frontier_counts = [len(state.frontier) for state in trajectory.states[1:]]
     label = (
@@ -391,6 +424,7 @@ def paired_delta(
     incumbent: Trajectory,
     incumbent_label: str = "your best so far",
     sense: str = "maximize",
+    unit: str = "nodes",
 ) -> str:
     """
     Signed change against the incumbent, with the noise band that decides it.
@@ -421,11 +455,14 @@ def paired_delta(
         verdict = "a real regression — undo what caused it"
 
     direction = "fewer is better" if sense == "minimize" else "more is better"
+    # F1 lives in [0, 1] and a 0.02 move is large there, so a fixed 2-decimal
+    # format would print every real change as +0.00
+    digits = 4 if unit == "F1" else 2
 
     return (
-        f"CHANGE vs {incumbent_label} ({incumbent.reward:.2f}): {delta:+.2f} nodes "
-        f"({direction}). The 2-sigma noise band on this comparison is ±{band:.2f}, "
-        f"so this is {verdict}."
+        f"CHANGE vs {incumbent_label} ({incumbent.reward:.{digits}f}): "
+        f"{delta:+.{digits}f} {unit} ({direction}). The 2-sigma noise band on this "
+        f"comparison is ±{band:.{digits}f}, so this is {verdict}."
     )
 
 
@@ -467,20 +504,34 @@ def validate_plan(plan: list, task: TaskSpec, graph: GraphInfo) -> None:
         )
 
 
-def attach_context(strategy: Strategy, task: TaskSpec) -> Strategy:
+def attach_context(
+    strategy: Strategy, task: TaskSpec, environment: object | None = None
+) -> Strategy:
     """
     Hand the strategy what it needs from the task that its signature cannot carry.
 
     Attributes rather than a signature change because `plan_horizon(graph, budget,
-    horizon)` and `act(state, graph, timestep)` are the contract every existing
-    method, exemplar and checkpoint is written against. `outbreak` is empty for a
-    seeding task, so a generated script may read it unconditionally; `budget_op`
-    is what the SCORED harness emits, which is `add_node` for seeding and
-    `remove_node` for containment — hardcoding it made every scored-mode
-    containment arm fail validation before it was ever scored.
+    horizon)`, `act(state, graph, timestep)` and `localize(graph, observation,
+    budget)` are the contract every existing method, exemplar and checkpoint is
+    written against. `outbreak` is empty for a seeding task, so a generated script
+    may read it unconditionally; `budget_op` is what the SCORED harness emits,
+    which is `add_node` for seeding and `remove_node` for containment — hardcoding
+    it made every scored-mode containment arm fail validation before it was ever
+    scored.
+
+    `predict_marginals` is the one new primitive of source localization
+    (research/source_localization.md §2.4.3) and the reason `environment` is a
+    parameter at all: the four experimental conditions are four BINDINGS of this
+    single name, so the generated program is byte-identical across arms 3-6 and
+    only its oracle changes. Bound here rather than injected into the executor's
+    namespace so it lands on the same `self.` surface as `self.outbreak`, and so a
+    canned baseline gets it without the executor knowing which arm it is.
     """
     strategy.outbreak = tuple(int(node) for node in task.outbreak)
     strategy.budget_op = task.budget_op
+
+    if environment is not None:
+        strategy.predict_marginals = bind_predict_marginals(environment, task)
 
     return strategy
 
@@ -518,14 +569,34 @@ def evaluate_strategy(
     """
     Score one generated program, and return how long building its plan took.
 
-    The single point where adaptive and non-adaptive diverge. Non-adaptive calls
-    plan_horizon() once up front and replays the result; adaptive calls act() at
-    each round boundary against the state the previous round produced. Everything
-    else about the search (the population, the feedback, the checkpoints) is
-    identical, which is what makes the adaptivity gap an A/B on one variable.
+    The single point where the three problem families diverge. An INVERSE task
+    never rolls out at all: it calls localize() once per labelled episode and
+    scores the recovered sets against the truth. A non-adaptive intervention task
+    calls plan_horizon() once up front and replays the result; an adaptive one
+    calls act() at each round boundary against the state the previous round
+    produced. Everything else about the search (the population, the feedback, the
+    checkpoints) is identical, which is what makes each contrast an A/B on one
+    variable.
     """
     start = time.perf_counter()
-    attach_context(strategy, task)
+    attach_context(strategy, task, environment)
+
+    if task.recovers:
+        if not task.instances:
+            raise StrategyError(
+                "no labelled episodes were loaded for this inverse task; the data "
+                "stage must have run for this (dataset, dynamics, split)"
+            )
+
+        return evaluate_localizer(
+            strategy,
+            environment,
+            task,
+            graph,
+            list(task.instances),
+            task.source_budget_mode,
+        )
+
     # Built once here and applied to EVERY arm: an arm whose graph moved against
     # one whose graph did not would be measuring the stream, not the method
     stream = build_stream(graph, task.horizon, task.edit_rate, task.seed)
@@ -632,6 +703,40 @@ def baseline_anchor(
     The trajectory rides along because its per-node marginals are what
     reference_diff() compares against, which costs no further rollouts.
     """
+    if task.recovers:
+        # An inverse task's floor is the classical SOURCE-LOCALIZATION library.
+        # These go through `evaluate_strategy` like everything else, which routes
+        # them into the localization path — same instances, same k, same
+        # observation mode as the arm they are setting a bar for.
+        scored = []
+
+        for name in localization_anchor_algorithms:
+            localizer = LocalizeAnchor(
+                name, localization_algorithms[name], localization_scorers[name], task
+            )
+            trajectory, _ = evaluate_strategy(localizer, environment, task, graph)
+            scored.append((name, trajectory))
+
+        scored = rank_by(scored, lambda entry: entry[1].reward, task.sense)
+        best_name, best_trajectory = scored[0]
+
+        lines = [
+            "REFERENCE SCORES: classical source-localization baselines run on THESE "
+            "episodes, at the same k and the same observation. F1 against the true "
+            "source set, HIGHER is better; beating the top row is the bar. LPSI is "
+            "the row that matters — it is a 2017 label-propagation method with no "
+            "learning at all, and it beats both SL-VAE and DDMSL on real cascades:"
+        ]
+        lines += [
+            f"  {name:<20} F1 {trajectory.reward:7.4f} "
+            f"(PR {trajectory.cost['metrics']['precision']:.4f}  "
+            f"RE {trajectory.cost['metrics']['recall']:.4f}  "
+            f"AUC {trajectory.cost['metrics']['auc']:.4f})"
+            for name, trajectory in scored
+        ]
+
+        return "\n".join(lines), best_trajectory, best_name
+
     if task.contains:
         # A containment task's floor is the DISMANTLING library: the IM anchors
         # return seed sets, and this planner spends its budget on removals

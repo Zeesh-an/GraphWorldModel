@@ -238,6 +238,35 @@ These rebuild a model from a results JSON's `config`, reload its `.pt` checkpoin
 | `eval_planning.py`          | multi-graph planning regret                                                |
 | `eval_rollout_ensemble.py`  | stochastic ensemble rollout                                                |
 | `eval_structured_oracle.py` | the IC oracle rollout (q = true edge prob) — validates the structural form |
+| `wm_sl.py`                  | invert the model instead of scoring it: relaxed-source gradient descent, PR / RE / F1 / AUC per episode |
+
+---
+
+## Inverting the model — `wm_sl.py`
+
+Everything above scores FORWARD prediction. `wm_sl.py` asks the opposite question, and it is a genuinely different property: does the learned transition kernel support **inference about its own inputs**? Given an observed diffusion state `y`, freeze `f_θ`, relax the source set to `x̃ ∈ [0,1]^{|V|}`, and run Adam on
+
+```
+‖y − f_θ(x̃, G)‖²  +  λ (Σ x̃ − k)²  −  log p(x̃)
+```
+
+then take the top `k` entries. It is `source_localization`'s **arm A**, and it is a control rather than a method: that objective is SL-VAE's own procedure with our likelihood plugged in, and SL-VAE reports no significant difference across GAT, MONSTOR and DeepIS as the forward model. `--sl-prior none` reproduces `SL-VAE (a)`, `--sl-prior vae` the full method.
+
+Two things make it short, and both are properties of the structured heads rather than of this file:
+
+- **`ICTransmissionHead` is already continuous in its inputs.** It composes `p_new = 1 − Π(1 − q · frontier_u)` from the state channels, so feeding it a SOFT `(infected, frontier, add)` state is well defined with no relaxation of the head. `soft_rollout` is then a plain unroll of the same recursion `WorldModelEnvironment.rollout` runs, with the per-step Bernoulli replaced by the marginal — a mean-field approximation, named as one, and not exact wherever the head is locally nonlinear.
+- **The action enters through one channel.** `CH_ADD` *is* the decision variable, so `torch.autograd` reaches it through the whole unroll without a line of custom backward code.
+
+**This is also a sharp new diagnostic for the forward model.** A rollout that saturates (`ens_count_bias ≫ 0`) has destroyed exactly the information an inverse problem needs, so source-localization F1 collapses where one-step `delta_f1` — dominated by unchanged nodes — stays comfortable. Given that saturation was this project's hardest bug, a metric that regresses loudly when it recurs is worth having.
+
+Standalone, no coding agent and no pipeline:
+
+```bash
+python -m world_model.wm_sl \
+    --data-dir results/source_localization/jazz/default/data \
+    --wm-results-json results/source_localization/jazz/default/world_model/sage_IC.json \
+    --sl-prior vae --instances 20
+```
 
 ---
 
@@ -248,11 +277,13 @@ These rebuild a model from a results JSON's `config`, reload its `.pt` checkpoin
 | `train_wm.py`               | training loop, early stopping, results JSON                                                                                                      |
 | `wm_model.py`               | `WorldModel`, backbone registry, `ICTransmissionHead` / `LTThresholdHead` / linear head                                                          |
 | `wm_data.py`                | feature builder (`X`, channels), `GraphInput`, per-episode adjacency, dataset + collate                                                          |
-| `wm_metrics.py`             | F1 / accuracy / Brier / persistence primitives, plus the exact connectivity functionals (`containment_metrics`: pairwise conn, GCC, components, Schneider `R`, ANC, `rho` at `Theta`, degree-rank Spearman) |
+| `wm_metrics.py`             | F1 / accuracy / Brier / persistence primitives, plus the exact connectivity functionals (`containment_metrics`: pairwise conn, GCC, components, Schneider `R`, ANC, `rho` at `Theta`, degree-rank Spearman) and the inverse-task set (`localization_metrics`: PR / RE / F1 / AUC / ACC, `roc_auc` with tie handling, `resimulation_error`) |
 | `wm_eval.py`                | one-step eval, ensemble rollout, planning regret, simulator rebuild                                                                              |
+| `wm_sl.py`                  | arm A: differentiable soft rollout, relaxed-source descent, the source VAE prior                                                                 |
 | `eval_planning.py`          | recompute planning regret on a checkpoint                                                                                                        |
 | `eval_rollout_ensemble.py`  | recompute ensemble rollout on a checkpoint                                                                                                       |
 | `eval_structured_oracle.py` | IC structural-form oracle check                                                                                                                  |
 | `../coding_agent/check_containment.py` | runnable self-check for the critical-node-detection contract (outbreak, removal budget, minimize sense, structural metrics) |
+| `../coding_agent/check_source_localization.py` | runnable self-check for the inverse contract (localize, the four oracle bindings, label extraction, PR/RE/F1/AUC, the differentiable inversion) |
 | `model/*.py`                | the five backbone encoders + `model_utils.py` (each file also retains an unused legacy `*ForwardModel` class from the old seed→outcome pipeline) |
 | `checkpoints/`              | trained `.pt` weights, per-run results JSONs, and `RESULTS.md`                                                                                   |

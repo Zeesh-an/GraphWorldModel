@@ -374,6 +374,36 @@ def anchors_run_under_every_task_shape() -> None:
         assert best is not None
 
 
+def external_seed_script_emits_the_budgeted_op() -> None:
+    """
+    A published dismantler returns a set to REMOVE, and condition 7 must emit it
+    as such.
+
+    `seed_script` hardcoded `add_node`, so every external arm on a containment
+    task failed validation and looked like a bad generated program rather than a
+    wiring bug.
+    """
+    from baselines.run_baseline import seed_script
+
+    graph = _graph(path, 4, directed=False)
+    task = _task(budget=2)
+
+    strategy = attach_context(
+        build_strategy(seed_script([1, 2, 3], task.budget_op), "free"), task
+    )
+    plan = strategy.plan_horizon(graph, task.budget, task.horizon)
+
+    assert all(op.op == "remove_node" for bag in plan for op in bag), plan
+    validate_plan(plan, task, graph)
+
+    # ...and a seeding task still gets add_node
+    seeding = TaskSpec(budget=2, horizon=2, allowed_ops=("add_node",))
+    seed_plan = attach_context(
+        build_strategy(seed_script([1, 2], "add_node"), "free"), seeding
+    ).plan_horizon(graph, seeding.budget, seeding.horizon)
+    assert all(op.op == "add_node" for bag in seed_plan for op in bag), seed_plan
+
+
 def readers_resolve_the_sense_from_a_result() -> None:
     """Report, plots and summary all pick a winner through this."""
     assert result_sense([{"objective": "minimize"}]) == minimize
@@ -440,6 +470,7 @@ if __name__ == "__main__":
         dismantling_curve_is_sequential,
         degree_rank_spearman_catches_a_degree_ranking,
         scored_mode_emits_the_budgeted_op,
+        external_seed_script_emits_the_budgeted_op,
         anchors_run_under_every_task_shape,
         readers_resolve_the_sense_from_a_result,
         removals_expand_even_without_an_outbreak,

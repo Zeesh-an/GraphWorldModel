@@ -37,6 +37,18 @@ def fingerprint(config: object, method: str, graph: object) -> dict:
         "seed": config.seed,
         "num_nodes": graph.num_nodes,
         "num_edges": int(graph.edge_index.shape[1]),
+        # Source localization. Every one of these changes WHAT THE REWARD MEANS,
+        # so a resume across any of them would carry a population whose recorded
+        # scores were measured on a different problem: a different episode pool, a
+        # different observation, a different k, or — for `native_arm` — with or
+        # without a forward model in the search loop at all. `native_arm` is not
+        # recoverable from `evaluator`, which reads monte_carlo for both.
+        "native_arm": getattr(config, "native_arm", False),
+        "sl_select_split": getattr(config, "sl_select_split", None),
+        "sl_instances": getattr(config, "sl_instances", None),
+        "sl_observation": getattr(config, "sl_observation", None),
+        "sl_budget_mode": getattr(config, "sl_budget_mode", None),
+        "sl_source_tolerance": getattr(config, "sl_source_tolerance", None),
     }
 
 

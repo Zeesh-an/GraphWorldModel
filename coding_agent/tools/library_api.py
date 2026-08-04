@@ -10,12 +10,14 @@ from coding_agent.tools import (
     adaptive_algorithms,
     algorithms,
     dismantling_algorithms,
+    localization_algorithms,
     primitives,
 )
 
 algorithm_names = list(algorithms.algorithms.keys())
 adaptive_names = list(adaptive_algorithms.adaptive_algorithms.keys())
 dismantling_names = list(dismantling_algorithms.dismantling_algorithms.keys())
+localization_names = list(localization_algorithms.localization_algorithms.keys())
 
 # Three implementations shown in full, one per idiom the library uses: neighbour
 # discounting, per-community budget allocation, and RIS-then-refine. Signatures
@@ -135,6 +137,54 @@ def build_dismantling_reference(exclude: tuple = ()) -> str:
         "compared against: call one, beat one, or take its idea and improve on it.\n"
         "`adaptive_degree` is the one that actually has to be beaten:\n" + "\n".join(lines)
         + blocked_note
+    )
+
+
+def build_localization_menu() -> str:
+    """Return one `- name: summary` line per localization algorithm (routing prompt)."""
+    lines = []
+    for name in localization_names:
+        doc_lines = (
+            localization_algorithms.localization_algorithms[name].__doc__ or ""
+        ).strip().splitlines()
+        lines.append(f"- {name}: {doc_lines[0] if doc_lines else ''}")
+
+    return "\n".join(lines)
+
+
+def build_localization_reference(exclude: tuple = ()) -> str:
+    """The source-SET inference surface, shown only to an inverse task's prompt."""
+    lines = [
+        _signature_line(localization_algorithms.localization_algorithms[name])
+        for name in localization_names
+        if name not in exclude
+    ]
+
+    blocked_note = (
+        "\n  NOT AVAILABLE (calling one raises): "
+        + ", ".join(name for name in localization_names if name in exclude)
+        + " — it re-simulates every candidate on a PRIVATE simulator, which\n"
+        "  bypasses the metered evaluator. You already have the metered version:\n"
+        "  `self.predict_marginals(seeds)`."
+        if exclude
+        else ""
+    )
+
+    return (
+        "SOURCE-LOCALIZATION ALGORITHMS  (from\n"
+        "coding_agent.tools.localization_algorithms, imported as\n"
+        "`localization_algorithms`). Each returns a list of `budget` node ids it\n"
+        "believes STARTED the observed cascade. These are the published baselines\n"
+        "you are being compared against: call one, beat one, or take its idea and\n"
+        "improve on it. `lpsi` is the one that actually has to be beaten — it is a\n"
+        "2017 label-propagation method with NO learning and it beats both SL-VAE\n"
+        "and DDMSL on real cascades:\n" + "\n".join(lines) + blocked_note + "\n\n"
+        "PER-NODE SCORERS  (imported as `localization_scorers`, same names). Each\n"
+        "returns a float vector of length num_nodes, higher meaning more likely to\n"
+        "be a source. Return one of these (or your own) from source_scores() and\n"
+        "your AUC is measured on the real ranking instead of a rank-derived\n"
+        "stand-in:\n  "
+        + ", ".join(f"localization_scorers.{name}" for name in localization_names)
     )
 
 

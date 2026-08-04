@@ -80,13 +80,24 @@ All five appear in DeepIM's published tables, which are transcribed in [`../rese
 
 ### Per-task registration
 
-`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. Three tasks have entries today:
+`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. Four tasks have entries today:
 
 | task | registered | wired |
 | --- | --- | --- |
 | `influence_maximization` | 15 | 7 |
 | `adaptive_online_im` | 5 (`adaptiveim`, `mrim`, `rl4im`, `oim_lt`, `timlinucb`) | 0 |
 | `critical_node_detection` | 12 (`finder`, `gdm`, `mind`, `spr`, `nirm`, `dcrs`, `gnd`, `decycler`, `collective_influence`, `explosive_immunization`, `dismantling_review`, `selinda`) | 0 |
+| `source_localization` | 7 (`graphsl`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`, `cosasi`) | 0 |
+
+**For source localization, wire `graphsl` first**, and by a wide margin: one adapter buys LPSI, NETSLEUTH, OJC, GCNSI, IVGD **and** SL-VAE behind a single API returning accuracy / precision / recall / F1 / AUC — two of the three seed papers included — and it packages the six benchmark graphs, five of which we load. It also packages *our* Network Science (1,589 / 2,742), which [`../research/source_localization.md`](../research/source_localization.md) §6.4.1 shows is the version IVGD, SIDSL and Network Repository agree on and SL-VAE does not.
+
+⚠️ **Wiring one of these is not just an `export`/`command`/`parse_seeds` triple — the harness itself does not support the contract yet.** Three things have to change first, and they are ours rather than the third-party repos':
+
+1. **`run_external_baseline` has no observation parameter.** Its signature is `(name, graph, budget, diffusion_model, ...)`, which is the IM contract `G -> S`. A source localizer maps `(G, y) -> x̂` and there is nowhere to pass `y`.
+2. **`seed_script` emits `plan_horizon`.** On a recover task the executor requires `localize`, so a returned source set would be rejected by the contract check even if the subprocess produced one.
+3. **The loop shape is per-arm, not per-instance.** The pipeline invokes an external repo once per `(budget, arm)`; source localization scores over `--sl-instances` labelled episodes and needs one source set per episode — so the adapter needs N invocations or one batched call, and which of the two is right depends on the repo.
+
+None of that is hard, but it is deliberately not built ahead of a real adapter: the serialization format, and whether a batch call is possible, are decided by whichever repo gets wired first, and guessing them now would mean rewriting them. Everything AFTER those three is already shared — the output crosses back and our own referee scores it, exactly as on the IM side. Two more traps apply to every entry (§8.4): the **source fraction is not standardized** (10% uniform-random in SL-VAE, first 5% by infection time in SL-Diff, top 10% by influence time in SIDSL), and **nothing in that literature evaluates under IC or LT**, which §11 calls the single biggest comparability gap in the file.
 
 **For critical node detection, wire `dismantling_review` first.** It is the Artime et al. survey's harness rather than a method, and it already drives CI, CoreHD, GND, EI, MinSum, FINDER and GDM behind one interface — so it is one adapter instead of seven, and it is the only practical route to a FINDER number at all, since [`../research/critical_node_detection.md`](../research/critical_node_detection.md) §11 records that FINDER publishes its real-network results as heatmaps only, has no arXiv version, and the `results/` directory its README advertises does not exist in `master`.
 

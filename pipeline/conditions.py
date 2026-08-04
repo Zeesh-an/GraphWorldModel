@@ -30,6 +30,7 @@ from dataclasses import dataclass
 
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.localization_algorithms import localization_algorithms
 from coding_agent.types import improves
 from pipeline.tasks import get_task, maximize, minimize, tasks
 
@@ -44,8 +45,16 @@ valid_evaluators = (native, monte_carlo, oracle, world_model)
 # of a static plan decided up front. Pairing `adaptive_<mode>@E` with
 # `evolve_<mode>@E` at the same budget is what makes the adaptivity gap an A/B
 # on that one variable (research/adaptive_online_im.md §9.3 item 3).
-valid_methods = ("one_shot", "per_step", "windowed", "evolve", "adaptive")
+# `gradient` is arm A of research/source_localization.md §2.6, and it is the one
+# method here with NO LLM anywhere: it freezes the world model and runs Adam on a
+# relaxed source vector per instance, which is SL-VAE's own procedure with our
+# likelihood plugged in. The seed paper reports no significant difference across
+# GAT / MONSTOR / DeepIS forward models, so that swap is a no-op it already
+# published — which makes this the CONTROL program search is measured against
+# rather than a competing method.
+valid_methods = ("one_shot", "per_step", "windowed", "evolve", "adaptive", "gradient")
 adaptive_method = "adaptive"
+gradient_method = "gradient"
 # The non-adaptive counterpart an adaptive arm is divided by
 non_adaptive_method = "evolve"
 valid_modes = ("free", "scored")
@@ -54,6 +63,7 @@ pure_ga_condition = 1
 routing_condition = 2
 evaluator_conditions = {native: 3, monte_carlo: 4, oracle: 5, world_model: 6}
 external_condition = 7
+ablation_condition = 8
 
 condition_names = {
     1: "Pure GA",
@@ -63,6 +73,7 @@ condition_names = {
     5: "Agent + oracle dynamics",
     6: "Ours: agent + learned GWM",
     7: "Published baseline (external repo)",
+    8: "Ablation: per-instance descent on a frozen GWM",
 }
 
 # Conditions 1 and 2 have no refinement loop, so their evaluator only decides how
@@ -80,17 +91,24 @@ default_baselines = (
     "random_seeds",
 )
 
-# A `baseline:<name>` arm resolves against three pools, and which one it lands in
+# A `baseline:<name>` arm resolves against four pools, and which one it lands in
 # decides how it is driven: a static seed set, a per-round policy (method
-# "adaptive"), or a node-removal set. Collisions would make that silent, so they
-# are caught here rather than at the first budget.
-_collisions = set(adaptive_algorithms) & set(dismantling_algorithms)
-if _collisions:
-    raise ValueError(
-        f"algorithm names collide across the adaptive and dismantling pools, so "
-        f"parse_arm cannot tell which one a --baselines entry means: "
-        f"{sorted(_collisions)}"
-    )
+# "adaptive"), a node-removal set, or a source-set inference. Collisions would
+# make that silent, so they are caught here rather than at the first budget.
+_pools = {
+    "adaptive": set(adaptive_algorithms),
+    "dismantling": set(dismantling_algorithms),
+    "localization": set(localization_algorithms),
+}
+for _first, _members in _pools.items():
+    for _second, _others in _pools.items():
+        _collisions = _members & _others if _first < _second else set()
+        if _collisions:
+            raise ValueError(
+                f"algorithm names collide across the {_first} and {_second} pools, "
+                f"so parse_arm cannot tell which one a --baselines entry means: "
+                f"{sorted(_collisions)}"
+            )
 
 # Conditions 2-6. The method is held fixed across 3-6 so the only thing that
 # varies down that ladder is the inner-loop evaluator — the clean ablation.
@@ -127,8 +145,20 @@ class Arm:
 
     @property
     def is_agent(self) -> bool:
-        """True when an LLM actually synthesises code (conditions 3-6)."""
-        return self.baseline is None and not self.routing and self.external is None
+        """
+        True when an LLM actually synthesises code (conditions 3-6).
+
+        `gradient` is excluded even though it names an evaluator: it is a fixed
+        numerical procedure (Adam on a relaxed source vector against a frozen
+        world model) with no model in the loop, so giving it --outer-iters LLM
+        turns would charge it for calls it never makes.
+        """
+        return (
+            self.baseline is None
+            and not self.routing
+            and self.external is None
+            and self.method != gradient_method
+        )
 
 
 def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
@@ -183,6 +213,10 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
         # policy, not a static seed set, so it runs down the round path like any
         # other adaptive arm. Recorded as method="adaptive" so adaptivity_gaps
         # divides it by a static baseline rather than treating it as one.
+        #
+        # A published LOCALIZATION algorithm (LPSI, NETSLEUTH, OJC, ...) needs no
+        # method of its own: on a recover task the harness always calls localize(),
+        # so one_shot with a single canned pass is the whole arm.
         return Arm(
             spec=spec,
             name=f"baseline_{algorithm}{suffix}",
@@ -215,7 +249,15 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
         method=method,
         strategy_mode=mode,
         evaluator=evaluator,
-        condition=evaluator_conditions[evaluator],
+        # Arm A is its own condition rather than a member of the 3-6 ladder: those
+        # four hold the METHOD fixed and vary only the evaluator, and folding a
+        # different method into one of their cells would break exactly the
+        # ablation they exist to be
+        condition=(
+            ablation_condition
+            if method == gradient_method
+            else evaluator_conditions[evaluator]
+        ),
     )
 
 
@@ -270,6 +312,29 @@ def result_sense(results: list[dict]) -> str:
 def reward_direction(sense: str) -> str:
     """The one-word phrase a table header needs so a number is not read backwards."""
     return "lower is better" if sense == minimize else "higher is better"
+
+
+def is_recover(results: list[dict]) -> bool:
+    """
+    True when these results score an INVERSE prediction rather than a cascade.
+
+    Every reader that prints the word "spread" asks this first: a recover task's
+    reward is mean F1 against the true source set, in [0, 1], and labelling it a
+    node count would misread it by three orders of magnitude.
+    """
+    return any(result.get("localization") for result in results) or any(
+        result.get("task") in tasks and get_task(result["task"]).recovers
+        for result in results
+        if result.get("task")
+    )
+
+
+def reward_name(results: list[dict]) -> str:
+    """What the shared comparable column actually measures, for a table header."""
+    if is_recover(results):
+        return "F1"
+
+    return "final infected" if result_sense(results) == minimize else "spread"
 
 
 def is_ground_truth(results: list[dict]) -> bool:

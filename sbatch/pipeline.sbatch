@@ -253,8 +253,28 @@
 #   OUTBREAK_SELECTOR  how its sources are picked: random (default) degree
 #                   pagerank betweenness kshell. Deterministic in SEED, so
 #                   every arm in a sweep faces the same outbreak
+#   SL_SELECT_SPLIT source localization: episodes the outer loop's reward is
+#                   computed on (default: train)
+#   SL_EVAL_SPLIT   ...and the HELD-OUT episodes the winning program is re-run
+#                   on unmodified, which is the number every table reports.
+#                   Selecting and reporting on the same episodes proves nothing
+#                   about amortization (default: test)
+#   SL_INSTANCES    labelled episodes per split; every candidate program pays
+#                   this many executions (default: 20)
+#   SL_OBSERVATION  marginal (the MC-averaged P(infected), strictly MORE
+#                   informative than the published protocol's) or binary (a
+#                   single realized draw, the comparable column)
+#   SL_BUDGET_MODE  episode = each instance's own source count, the published
+#                   given-k convention; sweep = the pipeline's k, with the pool
+#                   filtered to that source fraction
+#   SL_PRIOR        arm A only: none = SL-VAE (a), vae = the full method
+#   SL_STEPS        arm A only: Adam steps per instance
+#   SL_TRANSFER_FROM  run ANOTHER run's winning program here, unmodified — the
+#                   graph axis of the amortization claim
 #   EVALUATOR       fallback for arms written without an @evaluator suffix
-#   BUDGET_PCTS     seed budgets as % of N, one run per value
+#   BUDGET_PCTS     seed budgets as % of N, one run per value. UNSET = the task
+#                   registry's own sweep, which is a single 10% point for source
+#                   localization because k there is a property of the instance
 #   BUDGETS         absolute k, overrides BUDGET_PCTS entirely
 #   COMPARE         1 = replay every winner on the shared ground-truth referee.
 #                   Keep this at 1. Without it the table is not comparable
@@ -459,6 +479,24 @@ HIDE_EDGE_WEIGHTS="${HIDE_EDGE_WEIGHTS:-0}"
 OUTBREAK_PCT="${OUTBREAK_PCT:-}"
 OUTBREAK_SELECTOR="${OUTBREAK_SELECTOR:-}"
 
+# Source localization; empty means the pipeline default. The two SPLITS are the
+# load-bearing pair: the outer loop's reward is computed on SL_SELECT_SPLIT and
+# the winning program is re-run unmodified on SL_EVAL_SPLIT, which is the number
+# every table reports (research/source_localization.md §8.5.1).
+SL_SELECT_SPLIT="${SL_SELECT_SPLIT:-}"
+SL_EVAL_SPLIT="${SL_EVAL_SPLIT:-}"
+SL_INSTANCES="${SL_INSTANCES:-}"
+SL_OBSERVATION="${SL_OBSERVATION:-}"
+SL_BUDGET_MODE="${SL_BUDGET_MODE:-}"
+SL_SOURCE_TOLERANCE="${SL_SOURCE_TOLERANCE:-}"
+SL_PRIOR="${SL_PRIOR:-}"
+SL_STEPS="${SL_STEPS:-}"
+SL_LR="${SL_LR:-}"
+SL_CARDINALITY_WEIGHT="${SL_CARDINALITY_WEIGHT:-}"
+SL_PRIOR_WEIGHT="${SL_PRIOR_WEIGHT:-}"
+SL_PRIOR_EPOCHS="${SL_PRIOR_EPOCHS:-}"
+SL_TRANSFER_FROM="${SL_TRANSFER_FROM:-}"
+
 # Dataset class drives the settings that genuinely cannot share a default:
 # graph population, seed selectors, encoder width, and memory.
 case "$DATASET" in
@@ -550,7 +588,11 @@ BASELINE_TIMEOUT="${BASELINE_TIMEOUT:-3600}"
 # every adaptive arm with its matched non-adaptive control
 ARMS="${ARMS:-}"
 NATIVE_MC_RUNS="${NATIVE_MC_RUNS:-1}"
-BUDGET_PCTS="${BUDGET_PCTS:-1 5 10 20}"
+# Empty means the task registry's own sweep. Source localization declares a
+# SINGLE 10%-of-N point because k there is a property of the instance rather than
+# a choice, and hardcoding the four-point ladder here would silently turn that
+# into four runs of one experiment.
+BUDGET_PCTS="${BUDGET_PCTS:-}"
 BUDGETS="${BUDGETS:-}"
 EVALUATOR="${EVALUATOR:-oracle}"
 LLM_MODEL="${LLM_MODEL:-gpt-5.6-terra}"
@@ -623,10 +665,11 @@ if [ "$ARMS" = "none" ]; then flags+=(--arms)
 elif [ -n "$ARMS" ]; then flags+=(--arms $ARMS); fi
 [ "$SKIP_STAGES" = "none" ] || flags+=(--skip-stages $SKIP_STAGES)
 
-# BUDGETS is absolute k and wins outright; otherwise budgets are percentages
+# BUDGETS is absolute k and wins outright; otherwise budgets are percentages, and
+# an empty BUDGET_PCTS omits the flag so the task registry supplies the sweep
 if [ -n "$BUDGETS" ]; then
   flags+=(--budgets $BUDGETS)
-else
+elif [ -n "$BUDGET_PCTS" ]; then
   flags+=(--budget-pcts $BUDGET_PCTS)
 fi
 
@@ -650,6 +693,20 @@ fi
 [ -n "$CAMPAIGNS" ]         && flags+=(--campaigns "$CAMPAIGNS")
 [ -n "$OUTBREAK_PCT" ]      && flags+=(--outbreak-pct "$OUTBREAK_PCT")
 [ -n "$OUTBREAK_SELECTOR" ] && flags+=(--outbreak-selector "$OUTBREAK_SELECTOR")
+
+[ -n "$SL_SELECT_SPLIT" ]      && flags+=(--sl-select-split "$SL_SELECT_SPLIT")
+[ -n "$SL_EVAL_SPLIT" ]        && flags+=(--sl-eval-split "$SL_EVAL_SPLIT")
+[ -n "$SL_INSTANCES" ]         && flags+=(--sl-instances "$SL_INSTANCES")
+[ -n "$SL_OBSERVATION" ]       && flags+=(--sl-observation "$SL_OBSERVATION")
+[ -n "$SL_BUDGET_MODE" ]       && flags+=(--sl-budget-mode "$SL_BUDGET_MODE")
+[ -n "$SL_SOURCE_TOLERANCE" ]  && flags+=(--sl-source-tolerance "$SL_SOURCE_TOLERANCE")
+[ -n "$SL_PRIOR" ]             && flags+=(--sl-prior "$SL_PRIOR")
+[ -n "$SL_STEPS" ]             && flags+=(--sl-steps "$SL_STEPS")
+[ -n "$SL_LR" ]                && flags+=(--sl-lr "$SL_LR")
+[ -n "$SL_CARDINALITY_WEIGHT" ] && flags+=(--sl-cardinality-weight "$SL_CARDINALITY_WEIGHT")
+[ -n "$SL_PRIOR_WEIGHT" ]      && flags+=(--sl-prior-weight "$SL_PRIOR_WEIGHT")
+[ -n "$SL_PRIOR_EPOCHS" ]      && flags+=(--sl-prior-epochs "$SL_PRIOR_EPOCHS")
+[ -n "$SL_TRANSFER_FROM" ]     && flags+=(--sl-transfer-from "$SL_TRANSFER_FROM")
 [ "$HIDE_EDGE_WEIGHTS" = "1" ] && flags+=(--hide-edge-weights)
 
 # ---------------------------------------------------------------------------

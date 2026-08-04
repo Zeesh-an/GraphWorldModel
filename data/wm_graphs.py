@@ -51,6 +51,12 @@ real_directed = {
     "pgp": False,
     "openflights": False,
     "p2p_gnutella": False,
+    # Source-localization benchmarks (research/source_localization.md §6.2).
+    # `dolphins` is the only graph that literature uses which the other task
+    # files did not already need; `deezer` is IVGD's scalability column and has no
+    # published F1 row at all, so it is a cost target rather than a comparison.
+    "dolphins": False,
+    "deezer": False,
 }
 
 

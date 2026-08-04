@@ -1,0 +1,6 @@
+# Third-party baseline repos are CLONED into the tree by
+# baselines/setup_baselines.py. They are gitignored, but `ruff check baselines`
+# names that directory explicitly, and an explicit path overrides the gitignore
+# walk — so without this, installing the published baselines turns a clean lint
+# into thousands of errors in other people's code.
+extend-exclude = ["baselines/external"]

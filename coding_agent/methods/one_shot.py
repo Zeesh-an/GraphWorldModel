@@ -62,6 +62,14 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
     ) -> tuple[Strategy, Trajectory]:
         system = build_system_prompt("one_shot", self.strategy_mode, task)
         self.effective_budget = task.budget
+        # What the reward MEASURES, in the model's own terms. "final spread" is a
+        # node count on the intervention tasks and meaningless on the inverse one,
+        # where the number is an F1 in [0, 1].
+        objective_label = (
+            "F1 against the true source set"
+            if task.recovers
+            else ("final infected count" if task.contains else "final spread")
+        )
 
         # One rollout per classical baseline up front: the score table in the
         # same env, so "increase final spread" becomes a concrete bar to clear
@@ -193,6 +201,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     script=last_script,
                     incumbent_script=best[0].source_script if best else None,
                     incumbent_reward=best[1].reward if best else None,
+                    objective=objective_label,
                 )
 
                 # After `pending` is built, so a resume re-sends the repair turn
@@ -250,7 +259,10 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             # Costs one extra rollout per action, but turns the scalar reward into causal feedback
             report = None
 
-            if self.credit:
+            # Counterfactual credit ablates one ACTION at a time, and an inverse
+            # task emits no actions — there is nothing to ablate and nothing the
+            # rollout would answer
+            if self.credit and not task.recovers:
                 # The bags that actually ran, not the plan object: identical for
                 # a static plan, and the only thing that exists for an adaptive
                 # policy. Replaying them as a fixed plan is the approximation
@@ -285,10 +297,12 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                         trajectory,
                         previous_best[1],
                         sense=task.sense,
+                        unit="F1" if task.recovers else "nodes",
                     )
                     if previous_best is not None
                     else None
                 ),
+                objective=objective_label,
             )
 
             self._checkpoint(

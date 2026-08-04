@@ -10,8 +10,10 @@ from pipeline.conditions import (
     condition_names,
     ground_truth_reward,
     is_ground_truth,
+    is_recover,
     result_sense,
     reward_direction,
+    reward_name,
 )
 from pipeline.layout import Layout
 from pipeline.tasks import minimize
@@ -41,6 +43,14 @@ reported_config_keys = (
     "campaigns",
     "outbreak_pct",
     "outbreak_selector",
+    "sl_select_split",
+    "sl_eval_split",
+    "sl_instances",
+    "sl_observation",
+    "sl_budget_mode",
+    "sl_prior",
+    "sl_steps",
+    "sl_transfer_from",
     "wm_model",
     "head",
     "hide_edge_weights",
@@ -97,6 +107,7 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
         5: "ceiling of model-based guidance — a perfect internal model",
         6: "does the *learned* model recover the true dynamics?",
         7: "the original authors' code, seeds scored by our referee",
+        8: "what program *search* buys over per-instance descent on the same likelihood",
     }
 
     lines = [
@@ -123,13 +134,138 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
     return lines + [""]
 
 
+def _localization_table(agent_results: list[dict]) -> list[str]:
+    """
+    PR / RE / F1 / AUC per arm, on HELD-OUT episodes, plus the cost each one paid.
+
+    The inverse task's results table, and it reads differently from the other two
+    in one important way: F1 against a known source set carries no evaluator noise,
+    so there is no ground-truth referee to fall back on and no fidelity column to
+    report. Every number here is exact.
+    """
+    first = agent_results[0]
+    lines = [
+        "**F1 is the headline.** SL-VAE calls it \"the most commonly used\" metric "
+        "and IVGD \"the most important metric for performance evaluation\"; AUC is "
+        "the tie-breaker, added because sources are a tiny positive class. "
+        "**Accuracy is near-useless alone** — IVGD's Table 3 has GCNSI at `ACC "
+        "0.8840` with `F1 0.0218`, so it is reported only beside F1 "
+        "([`research/source_localization.md`](../../../../research/source_localization.md) "
+        "§8.1).",
+        "",
+        f"Every row is scored on the **held-out** `{first.get('eval_split', '?')}` "
+        f"episodes, by re-running that arm's winning program unmodified. The "
+        f"`selection F1` column is what it scored on the "
+        f"`{first.get('select_split', '?')}` episodes the outer loop actually "
+        f"optimized against, and `gap` is the difference — a large negative gap "
+        f"means the program memorized specific cascades rather than learning an "
+        f"algorithm, which is the failure §8.5.1 exists to catch.",
+        "",
+        f"Observation: `{first.get('observation_mode', '?')}`. The MC marginal is "
+        f"strictly MORE informative than the single binary realization the "
+        f"published protocol observes, so a `marginal` table is optimistic against "
+        f"§5.1 and only the `binary` one is comparable (§2.9 risk 5).",
+        "",
+        "| # | arm | evaluator | F1 (higher is better) | PR | RE | AUC | ACC | "
+        "selection F1 | gap | AUC from | fwd calls / instance | eval s | total s |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+
+    ordered = sorted(
+        agent_results,
+        key=lambda result: (result.get("condition", 99), result["arm"]),
+    )
+
+    for result in ordered:
+        metrics = result.get("metrics") or {}
+        selection = result.get("selection_metrics") or {}
+        gap = result.get("generalization_gap")
+        # Arm A pays gradient steps rather than forward-oracle calls, and printing
+        # a 0 there would read as "this arm is free"
+        per_instance = result.get("forward_calls_per_instance")
+        if result.get("gradient_steps_per_instance"):
+            per_instance = f"{result['gradient_steps_per_instance']:g} (Adam steps)"
+
+        lines.append(
+            f"| {result.get('condition', '—')} | `{result['arm']}` "
+            f"| `{result.get('evaluator', '—')}` "
+            f"| {_format_number(metrics.get('f1'), 4)} "
+            f"| {_format_number(metrics.get('precision'), 4)} "
+            f"| {_format_number(metrics.get('recall'), 4)} "
+            f"| {_format_number(metrics.get('auc'), 4)} "
+            f"| {_format_number(metrics.get('accuracy'), 4)} "
+            f"| {_format_number(selection.get('f1'), 4)} "
+            f"| {'—' if gap is None else f'{gap:+.4f}'} "
+            f"| `{result.get('auc_source', '—')}` "
+            f"| {per_instance if per_instance is not None else '—'} "
+            f"| {_format_number(result.get('evaluator_seconds'), 1)} "
+            f"| {_format_number(result.get('elapsed_seconds'), 1)} |"
+        )
+
+    if any(result.get("resim_error") is not None for result in ordered):
+        lines += [
+            "",
+            "### Re-simulated error",
+            "",
+            "Re-run the ground-truth simulator from each arm's RECOVERED sources "
+            "and compare against what was observed. **No surveyed paper reports "
+            "this at all** (§11), so the column is self-contained and is not a "
+            "cross-paper comparison. It is reported beside the TRUE source set's "
+            "own error because the number is unreadable without it: on an ill-posed "
+            "problem a recovered set can reproduce `y` better than the truth did, "
+            "which is exactly why F1 and not this is the selection signal (§2.3.3).",
+            "",
+            "| arm | resim error (recovered) | resim error (true sources) | ratio |",
+            "| --- | --- | --- | --- |",
+        ]
+
+        for result in ordered:
+            recovered = result.get("resim_error")
+            truth = result.get("resim_error_true_sources")
+            if recovered is None:
+                continue
+
+            ratio = recovered / truth if truth else None
+            lines.append(
+                f"| `{result['arm']}` | {_format_number(recovered, 5)} "
+                f"| {_format_number(truth, 5)} "
+                f"| {'—' if ratio is None else f'{ratio:.3f}'} |"
+            )
+
+    transferred = [result for result in ordered if result.get("transfer_from")]
+    if transferred:
+        lines += [
+            "",
+            "### Transferred programs",
+            "",
+            "These rows ran a program selected on a DIFFERENT graph, unmodified. "
+            "That is the graph axis of §8.5.1 and the headline of the amortization "
+            "claim — and it is a comparison no per-instance method can enter, "
+            "because SL-VAE, IVGD and DDMSL have no artifact to transfer.",
+            "",
+            "| arm | selected on | F1 here |",
+            "| --- | --- | --- |",
+        ]
+        lines += [
+            f"| `{result['arm']}` | `{result['transfer_from']}` "
+            f"| {_format_number((result.get('metrics') or {}).get('f1'), 4)} |"
+            for result in transferred
+        ]
+
+    return lines + [""]
+
+
 def _results_table(agent_results: list[dict]) -> list[str]:
     if not agent_results:
         return []
 
     has_mc = any(result.get("mc_reward") is not None for result in agent_results)
     sense = result_sense(agent_results)
+    recover = is_recover(agent_results)
     lines = ["## Results", ""]
+
+    if recover:
+        return lines + _localization_table(agent_results)
 
     if sense == minimize:
         lines += [
@@ -360,16 +496,30 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
     winner = best_by(at_largest, ground_truth_reward, sense)
     spread = ground_truth_reward(winner)
 
-    judged = "ground-truth MC" if is_ground_truth(at_largest) else "its own evaluator"
+    if is_recover(at_largest):
+        headline = (
+            f"held-out {reward_name(at_largest)} {_format_number(spread, 4)} "
+            f"over {winner.get('n_eval_instances', '?')} "
+            f"`{winner.get('eval_split', '?')}` episodes"
+        )
+        title = f"## Winning arm at k={largest} (sources per episode)"
+    else:
+        judged = (
+            "ground-truth MC" if is_ground_truth(at_largest) else "its own evaluator"
+        )
+        headline = (
+            f"spread {_format_number(spread)} "
+            f"({_format_number(100.0 * spread / winner['graph']['num_nodes'])}% of "
+            f"N, {reward_direction(sense)}) by {judged}"
+        )
+        title = f"## Winning arm at k={largest}"
+
     lines = [
-        f"## Winning arm at k={largest}",
+        title,
         "",
         f"**`{winner['arm']}`** (condition {winner.get('condition', '—')} — "
-        f"{condition_names.get(winner.get('condition'), 'unknown')}) — spread "
-        f"{_format_number(spread)} "
-        f"({_format_number(100.0 * spread / winner['graph']['num_nodes'])}% of N, "
-        f"{reward_direction(sense)}) "
-        f"by {judged}, model `{winner.get('model')}`",
+        f"{condition_names.get(winner.get('condition'), 'unknown')}) — {headline}, "
+        f"model `{winner.get('model')}`",
         "",
         "```",
         str(winner.get("summary", "")).strip(),

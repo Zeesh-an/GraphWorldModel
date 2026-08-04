@@ -266,6 +266,95 @@ def edges_to_arrays(
     return edge_index, weights
 
 
+def load_episode_endpoints(
+    out_dir: Path, diffusion_model: str, split: str
+) -> list[dict]:
+    """
+    Regroup `transitions_<dm>_<split>.jsonl` by episode into (x, y) pairs.
+
+    The labelled data source localization needs, recovered from transitions that
+    already exist — no new simulator, no new action op, no regeneration
+    (research/source_localization.md §2.1). Per episode:
+
+      * **sources `x`** — the `t = 0`, `branch = "main"` record's action IS the seed
+        commit, a bag of `add_node` ops, and the generator writes it for every
+        episode of every task.
+      * **observation `y`** — the LAST main record's view of the terminal state, in
+        two forms. `marginal` is that record's `next_marginal_infected`, i.e. the
+        MC-averaged `P(infected)`; `binary` is its realized `next_state.infected`.
+        §2.9 risk 5 is why both are kept: our marginals are averaged over
+        `--mc-marginals` draws while SL-VAE observes a single binary realization,
+        so the marginal column is strictly MORE informative than the literature's
+        and only the binarized one is comparable to §5.1.
+
+    ⚠️ `marginal` is the marginal of the LAST STEP, conditioned on the realized
+    trajectory up to it — not the marginal of the whole cascade from `x`. Every
+    node infected earlier reads exactly 1.0 and only the final wave is fractional.
+    That is still a continuous `y in [0,1]^|V|`, which is the input type SL-VAE
+    assumes, and it is what the generator writes; stating it here so nobody reads
+    it as `P(infected | x)`.
+
+    Counterfactual branches are skipped: they fork the ACTION mid-episode, so
+    their terminal state was not produced by the `t = 0` seed set alone.
+    """
+    path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
+    store = load_graph_store(out_dir)
+
+    groups = defaultdict(list)
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+
+        record = json.loads(line)
+        if record["branch"] != "main":
+            continue
+
+        groups[(record["graph_id"], record["episode_id"])].append(record)
+
+    episodes = []
+
+    for (graph_id, episode_id), records in groups.items():
+        records.sort(key=lambda record: record["t"])
+        num_nodes = store[graph_id]["num_nodes"]
+
+        sources = sorted(
+            {
+                int(action["target"])
+                for action in records[0]["action"]
+                if action["op"] == "add_node"
+            }
+        )
+        # An episode whose t=0 bag seeded nothing has no source set to recover
+        if not sources or records[0]["t"] != 0:
+            continue
+
+        terminal = records[-1]
+        marginal = np.zeros(num_nodes, dtype=np.float32)
+        for node, probability in (terminal.get("next_marginal_infected") or {}).items():
+            marginal[int(node)] = probability
+
+        binary = np.zeros(num_nodes, dtype=np.float32)
+        binary[terminal["next_state"]["infected"]] = 1.0
+
+        episodes.append(
+            {
+                "graph_id": graph_id,
+                "episode_id": episode_id,
+                "algorithm": records[0].get("algorithm"),
+                "num_nodes": num_nodes,
+                "sources": sources,
+                "marginal": marginal,
+                "binary": binary,
+                # Steps the cascade actually ran, so a program can be told how
+                # long the diffusion it is inverting had to spread
+                "horizon": int(terminal["t"]) + 1,
+                "infected_count": int(binary.sum()),
+            }
+        )
+
+    return sorted(episodes, key=lambda episode: episode["episode_id"])
+
+
 class TransitionDataset(Dataset):
     """One item per transition (main + cf). Resolves A_t per episode."""
 

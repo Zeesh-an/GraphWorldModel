@@ -159,6 +159,17 @@ Each transition row (JSONL):
 - Edge ops carry the second endpoint as `"destination"` and, for `add_edge` / `set_edge_weight`, a `"weight"` (the IC transmission probability), e.g. `{"op": "set_edge_weight", "target": 4, "destination": 11, "weight": 0.62}`.
 - `next_marginal_infected` / `next_marginal_frontier` are sparse `{node: prob}` maps (string keys, rounded to 6 dp) — the soft MC targets. They are present whenever `--mc-marginals >= 1` (the default).
 
+### The same rows read as labelled `(x, y)` pairs (`--task source_localization`)
+
+Source localization needs no new simulator, no new action op and no regeneration run: the labels are already on disk, and `world_model/wm_data.py::load_episode_endpoints` regroups them by `episode_id`. Two rules, and getting either backwards produces a plausible, silent, wrong label:
+
+- **the source set `x` is the `t = 0`, `branch = "main"` record's `action`** — the seed commit, as a bag of `add_node` ops. Not its `state`, which is empty by construction.
+- **the observation `y` is the LAST main record's `next_state`** (binarized) or its `next_marginal_infected` (continuous). Not its `action`, which is `NULL` by then.
+
+⚠️ The continuous form is the marginal of the **last step**, conditioned on the realized trajectory up to it — not `P(infected | x)` for the whole cascade. Every node infected earlier reads exactly `1.0` and only the final wave is fractional. It is still a continuous `y ∈ [0,1]^{|V|}`, which is the input type SL-VAE assumes, and it is strictly **more** informative than the single binary draw that literature observes, which is why both forms are kept and only the binarized one is comparable to a published table.
+
+`branch = "cf_i"` rows are **skipped**: a counterfactual fork changes the action mid-episode, so its terminal state was not produced by the `t = 0` seed set alone. For the same reason the task registry pins `default_gen_action_ops = ()` for any `recover` task and asserts it — an episode carrying a mid-cascade injection has an observation its seed set did not cause, and its `(x, y)` pair would be a lie. With empty action ops `sample_injection` always returns `NULL` and `counterfactual_actions` produces nothing, so `--inject-p` and `--cf-prob` are inert rather than needing to be zeroed.
+
 ---
 
 ## The 5 action ops (identical set for every dataset)

@@ -6,12 +6,14 @@ by the data it needs, so a partial run just produces fewer plots instead of fail
 import os
 from pathlib import Path
 import matplotlib
+import numpy as np
 
 from pipeline.conditions import (
     adaptivity_gaps,
     condition_names,
     ground_truth_reward,
     is_ground_truth,
+    is_recover,
     result_sense,
 )
 from pipeline.tasks import minimize
@@ -76,6 +78,11 @@ def _reward_label(results: list[dict], normalize: bool = False) -> str:
     with an unlabelled y-axis is read as a win for the highest curve, which is
     exactly backwards.
     """
+    # An inverse task's reward is an F1 in [0, 1], not a node count, and it needs
+    # no referee to be comparable: it is measured against a source set we know
+    if is_recover(results):
+        return "F1 against the true sources — higher is better (held-out episodes)"
+
     unit = "% of nodes" if normalize else "nodes"
     judge = "ground-truth MC" if is_ground_truth(results) else "mixed evaluators"
 
@@ -550,7 +557,11 @@ def plot_convergence(
         return None
 
     axes.set_xlabel("outer-loop iteration")
-    axes.set_ylabel("best spread so far (nodes)")
+    axes.set_ylabel(
+        "best F1 so far (selection split)"
+        if is_recover(at_largest)
+        else "best spread so far (nodes)"
+    )
     axes.set_title(f"{title_prefix}: outer-loop convergence at k={largest}")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=8)
@@ -803,6 +814,210 @@ def plot_structural_vs_spread(
     return _save(figure, out_path)
 
 
+localization_metric_keys = ("precision", "recall", "f1", "auc")
+
+
+def plot_localization_metrics(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    PR / RE / F1 / AUC per arm, on held-out episodes — the SL literature's own figure.
+
+    None for every sweep that does not invert. Four bars per arm rather than one,
+    because the split between precision and recall is where this literature's
+    failure modes live: IVGD hits `RE = 1.0000` on five of six graphs and lets
+    precision carry F1, which is the signature of a thresholded relaxation
+    over-predicting (research/source_localization.md §5.2).
+    """
+    scored = [result for result in results if result.get("metrics")]
+    if not scored:
+        return None
+
+    arms = _sorted_arms(scored)
+    figure, axes = plt.subplots(figsize=(max(7.0, 0.9 * len(arms)), 4.8))
+
+    positions = np.arange(len(arms))
+    width = 0.8 / len(localization_metric_keys)
+    hatches = ("", "///", "...", "xxx")
+
+    for index, key in enumerate(localization_metric_keys):
+        values = [
+            float(_by_arm(scored, arm)[0]["metrics"].get(key) or 0.0) for arm in arms
+        ]
+        axes.bar(
+            positions + index * width - 0.4 + width / 2,
+            values,
+            width=width,
+            color=[
+                condition_colors.get(_condition_of(scored, arm), "#4C72B0")
+                for arm in arms
+            ],
+            edgecolor="white",
+            linewidth=0.6,
+            hatch=hatches[index % len(hatches)],
+        )
+
+    # Proxy patches, because each bar carries a LIST of colours (one per arm) and
+    # matplotlib would draw the legend swatch in whichever arm happened to be
+    # first — saying "precision is grey" on a figure where it is also blue
+    legend_handles = [
+        plt.Rectangle(
+            (0, 0), 1, 1, facecolor="white", edgecolor="#444444",
+            hatch=hatches[index % len(hatches)],
+        )
+        for index in range(len(localization_metric_keys))
+    ]
+
+    axes.set_xticks(positions)
+    axes.set_xticklabels(arms, rotation=30, ha="right", fontsize=7)
+    axes.set_ylabel("score on held-out episodes — HIGHER IS BETTER")
+    axes.set_ylim(0, 1.02)
+    axes.axhline(0.5, color="#888888", linestyle=":", linewidth=0.8)
+
+    # PR = RE = F1 whenever every arm spends its whole budget at the instance's own
+    # k, which is the published given-k convention and the default. Stated on the
+    # figure rather than left to look like a plotting bug — and `--sl-budget-mode
+    # sweep` genuinely separates them, so it cannot just be dropped.
+    given_k = all(
+        abs(
+            float(_by_arm(scored, arm)[0]["metrics"].get("precision") or 0.0)
+            - float(_by_arm(scored, arm)[0]["metrics"].get("recall") or 0.0)
+        )
+        < 1e-9
+        for arm in arms
+    )
+    note = (
+        "  —  PR = RE = F1 by construction: each arm is given the instance's own k"
+        if given_k
+        else ""
+    )
+    axes.set_title(
+        f"{title_prefix}: source recovery{note}",
+        fontsize=10,
+    )
+    axes.grid(alpha=0.3, axis="y")
+    # Below the axes rather than inside them: AUC routinely sits above 0.9 on this
+    # figure, so an in-axes legend covers the bars it is labelling
+    axes.legend(
+        legend_handles,
+        [key.upper() if key == "auc" else key for key in localization_metric_keys],
+        fontsize=7,
+        ncol=4,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.42),
+        title="hatch = metric; colour = condition",
+        title_fontsize=7,
+    )
+
+    return _save(figure, out_path)
+
+
+def plot_localization_cost(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    F1 against what each arm spent to get it — the cost claim, as one figure.
+
+    The load-bearing claim of §2.3.2 is a SEARCH-time one: with `P ~ 100` programs,
+    `M ~ 100` instances and `C ~ 100` candidate evaluations the product is a
+    million rollouts before the MC multiplier, which is why nobody has run a
+    program search over an inverse problem. This plots the axis that shows it.
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("metrics") and result.get("evaluator_seconds") is not None
+    ]
+    if len(scored) < 2:
+        return None
+
+    figure, axes = plt.subplots(figsize=(7.0, 4.8))
+
+    for arm in _sorted_arms(scored):
+        run = _by_arm(scored, arm)[0]
+        # Clamped away from zero so a native arm (which never calls an evaluator)
+        # still has a position on a log axis instead of vanishing
+        seconds = max(float(run.get("evaluator_seconds") or 0.0), 1e-2)
+        axes.scatter(
+            seconds,
+            float(run["metrics"].get("f1") or 0.0),
+            s=80,
+            color=condition_colors.get(run.get("condition", 99), "#4C72B0"),
+            edgecolors="white",
+            linewidths=0.8,
+            zorder=3,
+        )
+        axes.annotate(
+            arm,
+            (seconds, float(run["metrics"].get("f1") or 0.0)),
+            fontsize=6,
+            xytext=(5, 4),
+            textcoords="offset points",
+        )
+
+    axes.set_xscale("log")
+    axes.set_xlabel("seconds inside the evaluator (log scale) — lower is cheaper")
+    axes.set_ylabel("held-out F1 — higher is better")
+    axes.set_title(
+        f"{title_prefix}: recovery quality against search cost (top-left is best)"
+    )
+    axes.grid(alpha=0.3, which="both")
+
+    return _save(figure, out_path)
+
+
+def plot_generalization_gap(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Selection F1 against held-out F1 — did the program learn an algorithm or memorize?
+
+    §8.5.1's episode axis, plotted. A point on the diagonal transferred perfectly;
+    a point far below it scored well on the episodes the outer loop optimized
+    against and badly on ones it never saw, which is the failure that would make
+    the whole amortization claim vacuous.
+    """
+    paired = [
+        result
+        for result in results
+        if result.get("metrics") and result.get("selection_metrics")
+    ]
+    if len(paired) < 2:
+        return None
+
+    figure, axes = plt.subplots(figsize=(5.8, 5.4))
+    axes.plot([0, 1], [0, 1], color="#888888", linestyle="--", linewidth=1.0,
+              label="perfect transfer")
+
+    for arm in _sorted_arms(paired):
+        run = _by_arm(paired, arm)[0]
+        selection = float(run["selection_metrics"].get("f1") or 0.0)
+        heldout = float(run["metrics"].get("f1") or 0.0)
+        axes.scatter(
+            selection,
+            heldout,
+            s=80,
+            color=condition_colors.get(run.get("condition", 99), "#4C72B0"),
+            edgecolors="white",
+            linewidths=0.8,
+            zorder=3,
+        )
+        axes.annotate(
+            arm, (selection, heldout), fontsize=6, xytext=(5, 4),
+            textcoords="offset points",
+        )
+
+    axes.set_xlabel("F1 on the episodes the search optimized against")
+    axes.set_ylabel("F1 on held-out episodes")
+    axes.set_xlim(0, 1.02)
+    axes.set_ylim(0, 1.02)
+    axes.set_title(f"{title_prefix}: generalization across episodes")
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=7, loc="lower right")
+
+    return _save(figure, out_path)
+
+
 def build_plots(
     agent_results: list[dict],
     wm_results: dict | None,
@@ -810,37 +1025,49 @@ def build_plots(
     title_prefix: str,
 ) -> list[Path]:
     os.makedirs(plots_dir, exist_ok=True)
-    builders = [
-        plot_budget_vs_spread(
-            agent_results, plots_dir / "budget_vs_spread.png", title_prefix
-        ),
-        plot_budget_vs_spread(
-            agent_results,
-            plots_dir / "budget_vs_spread_pct.png",
-            title_prefix,
-            normalize=True,
-        ),
-        plot_ours_vs_baselines(
-            agent_results, plots_dir / "ours_vs_baselines.png", title_prefix
-        ),
-        plot_ours_vs_baselines(
-            agent_results,
-            plots_dir / "ours_vs_baselines_pct.png",
-            title_prefix,
-            normalize=True,
-        ),
-        plot_condition_comparison(
-            agent_results, plots_dir / "condition_comparison.png", title_prefix
-        ),
+
+    # Every figure below whose y-axis is a NODE COUNT. An inverse task's reward is
+    # an F1 in [0, 1], and drawing it under a "spread (nodes)" axis would be off by
+    # three orders of magnitude with a label that hides it — so those builders are
+    # skipped outright rather than relabelled.
+    spread_figures = (
+        []
+        if is_recover(agent_results)
+        else [
+            plot_budget_vs_spread(
+                agent_results, plots_dir / "budget_vs_spread.png", title_prefix
+            ),
+            plot_budget_vs_spread(
+                agent_results,
+                plots_dir / "budget_vs_spread_pct.png",
+                title_prefix,
+                normalize=True,
+            ),
+            plot_ours_vs_baselines(
+                agent_results, plots_dir / "ours_vs_baselines.png", title_prefix
+            ),
+            plot_ours_vs_baselines(
+                agent_results,
+                plots_dir / "ours_vs_baselines_pct.png",
+                title_prefix,
+                normalize=True,
+            ),
+            plot_condition_comparison(
+                agent_results, plots_dir / "condition_comparison.png", title_prefix
+            ),
+            plot_evaluator_fidelity(
+                agent_results, plots_dir / "evaluator_fidelity.png", title_prefix
+            ),
+            plot_cascade(agent_results, plots_dir / "cascade.png", title_prefix),
+        ]
+    )
+
+    builders = spread_figures + [
         plot_sample_efficiency(
             agent_results, plots_dir / "sample_efficiency.png", title_prefix
         ),
-        plot_evaluator_fidelity(
-            agent_results, plots_dir / "evaluator_fidelity.png", title_prefix
-        ),
         plot_runtime(agent_results, plots_dir / "runtime.png", title_prefix),
         plot_convergence(agent_results, plots_dir / "convergence.png", title_prefix),
-        plot_cascade(agent_results, plots_dir / "cascade.png", title_prefix),
         # Both return None on a non-adaptive sweep, so no guard is needed here
         plot_adaptivity_gap(
             agent_results, plots_dir / "adaptivity_gap.png", title_prefix
@@ -855,6 +1082,17 @@ def build_plots(
         ),
         plot_structural_vs_spread(
             agent_results, plots_dir / "structural_vs_spread.png", title_prefix
+        ),
+        # All three return None on a sweep that recovers nothing, same as the
+        # adaptive and dismantling pairs above
+        plot_localization_metrics(
+            agent_results, plots_dir / "localization_metrics.png", title_prefix
+        ),
+        plot_localization_cost(
+            agent_results, plots_dir / "localization_cost.png", title_prefix
+        ),
+        plot_generalization_gap(
+            agent_results, plots_dir / "generalization_gap.png", title_prefix
         ),
     ]
 

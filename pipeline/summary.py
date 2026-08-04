@@ -102,6 +102,33 @@ summary_columns = (
     "anc_sigma",
     "rho_at_threshold",
     "degree_rank_spearman",
+    # Source localization: the inverse task's own metric set. Empty for every arm
+    # that intervenes, so one table still holds all four runnable tasks.
+    # `sl_f1` is the held-out score and duplicates `spread_ground_truth` on
+    # purpose — the shared column keeps cross-task readers working, and the named
+    # one keeps a spreadsheet from calling an F1 a spread.
+    "localization",
+    "sl_f1",
+    "sl_precision",
+    "sl_recall",
+    "sl_auc",
+    "sl_accuracy",
+    "sl_f1_selection",
+    "sl_generalization_gap",
+    "sl_auc_source",
+    "sl_observation_mode",
+    "sl_budget_mode",
+    "sl_select_split",
+    "sl_eval_split",
+    "sl_select_instances",
+    "sl_eval_instances",
+    "sl_forward_calls",
+    "sl_forward_calls_per_instance",
+    "sl_gradient_steps_per_instance",
+    "sl_prior",
+    "sl_transfer_from",
+    "sl_resim_error",
+    "sl_resim_error_true_sources",
 )
 
 
@@ -126,6 +153,8 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         else None
     )
     structural = result.get("structural") or {}
+    metrics = result.get("metrics") or {}
+    selection_metrics = result.get("selection_metrics") or {}
 
     return {
         "arm": result.get("arm"),
@@ -224,6 +253,31 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "anc_sigma": structural.get("anc_sigma"),
         "rho_at_threshold": structural.get("rho_at_threshold"),
         "degree_rank_spearman": structural.get("degree_rank_spearman"),
+        # Source localization. Empty for every seeding or containment arm; the
+        # metrics are exact (F1 against a known source set carries no evaluator
+        # noise), so there is no fidelity column here and none is expected.
+        "localization": result.get("localization"),
+        "sl_f1": metrics.get("f1"),
+        "sl_precision": metrics.get("precision"),
+        "sl_recall": metrics.get("recall"),
+        "sl_auc": metrics.get("auc"),
+        "sl_accuracy": metrics.get("accuracy"),
+        "sl_f1_selection": selection_metrics.get("f1"),
+        "sl_generalization_gap": result.get("generalization_gap"),
+        "sl_auc_source": result.get("auc_source"),
+        "sl_observation_mode": result.get("observation_mode"),
+        "sl_budget_mode": result.get("source_budget_mode"),
+        "sl_select_split": result.get("select_split"),
+        "sl_eval_split": result.get("eval_split"),
+        "sl_select_instances": result.get("n_select_instances"),
+        "sl_eval_instances": result.get("n_eval_instances"),
+        "sl_forward_calls": result.get("forward_calls"),
+        "sl_forward_calls_per_instance": result.get("forward_calls_per_instance"),
+        "sl_gradient_steps_per_instance": result.get("gradient_steps_per_instance"),
+        "sl_prior": result.get("sl_prior"),
+        "sl_transfer_from": result.get("transfer_from"),
+        "sl_resim_error": result.get("resim_error"),
+        "sl_resim_error_true_sources": result.get("resim_error_true_sources"),
     }
 
 

@@ -74,8 +74,17 @@ from coding_agent.credit import counterfactual_credit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
+from coding_agent.localization import (
+    episode_budget,
+    evaluate_localizer,
+    load_instances,
+    referee_resimulation_error,
+    valid_budget_modes,
+    valid_observations,
+)
 from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.evolve import EvolveSearch
+from coding_agent.methods.gradient import GradientInversion
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
 from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
@@ -92,7 +101,12 @@ from coding_agent.rounds import (
 )
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
-from coding_agent.tools.library_api import algorithm_names, dismantling_names
+from coding_agent.tools.library_api import (
+    algorithm_names,
+    dismantling_names,
+    localization_names,
+)
+from coding_agent.tools.localization_algorithms import localization_algorithms
 from coding_agent.types import GraphInfo, TaskSpec, full_adoption, valid_feedback_models
 from data.wm_simulator import spent, valid_action_ops, valid_remove_semantics
 from pipeline.conditions import parse_arm
@@ -100,6 +114,7 @@ from pipeline.layout import budget_label, checkpoint_suffix
 from pipeline.tasks import get_task, maximize
 from world_model.wm_data import load_graph_store
 from world_model.wm_metrics import containment_metrics
+from world_model.wm_sl import valid_priors, vae_prior
 
 world_model = "world_model"
 monte_carlo = "monte_carlo"
@@ -156,6 +171,38 @@ class ExperimentConfig:
     # the outbreak, not the method.
     outbreak_pct: float | None = None
     outbreak_selector: str = "random"
+    # Source localization. The two SPLITS are the load-bearing pair
+    # (research/source_localization.md §8.5.1): the outer loop's reward is computed
+    # on `sl_select_split` and the winning program is then re-scored, unmodified,
+    # on `sl_eval_split`. Without that separation a program that memorized specific
+    # cascades is indistinguishable from an algorithm, and the amortization claim
+    # is the whole point of the task.
+    sl_select_split: str = "train"
+    sl_eval_split: str = "test"
+    sl_instances: int = 20
+    sl_observation: str = "marginal"
+    sl_budget_mode: str = episode_budget
+    sl_source_tolerance: float = 0.5
+    # Arm A knobs; read only by method="gradient". `none` reproduces SL-VAE (a)
+    # (forward model + descent, no prior) and `vae` the full method, which is
+    # SL-VAE's own ablation and worth +0.19 F1 on Jazz in its Table 4.
+    sl_prior: str = vae_prior
+    sl_steps: int = 200
+    sl_lr: float = 0.1
+    sl_cardinality_weight: float = 0.05
+    sl_prior_weight: float = 1.0
+    sl_prior_epochs: int = 300
+    # §8.5.1's GRAPH axis: run the winning program of ANOTHER run, unmodified, on
+    # this dataset. That comparison is the headline of the amortization claim and
+    # is one no per-instance method can even enter — SL-VAE has no artifact to
+    # transfer. Points at another arm's results JSON; its `script` field is run as
+    # a canned strategy here.
+    sl_transfer_from: str | None = None
+    # True when this arm is the @native condition. The evaluator has already been
+    # resolved to monte_carlo with one episode by then, so the arm identity cannot
+    # be recovered from `evaluator` — and it decides whether `predict_marginals`
+    # exists at all (§2.4.3).
+    native_arm: bool = False
     outer_iters: int = 3
     mc_runs: int = 200
     # Runs for the --compare ground-truth replay; None -> mc_runs. Kept separate
@@ -233,6 +280,8 @@ def build_method(
     use_anchor: bool = True,
     checkpoint_path: Path | None = None,
     checkpoint_fingerprint: dict | None = None,
+    instances: list | None = None,
+    training_sources: list | None = None,
 ) -> OuterLoopMethod:
     """
     The single construction site for every method.
@@ -240,8 +289,36 @@ def build_method(
     `strategy_mode` / `allow_mc_algorithms` are the resolved values, not
     config's: a canned script overrides both. Only the two methods with a
     refinement loop take a checkpoint — per_step and windowed have nothing to
-    resume.
+    resume, and `gradient` is a single deterministic pass.
     """
+    if config.method == "gradient":
+        # Arm A. No agent, no population, no refinement: Adam on a relaxed source
+        # vector against a frozen f_theta, which is SL-VAE's own procedure with our
+        # likelihood plugged in — the control program search is measured against
+        # (research/source_localization.md §2.6 arm A).
+        if config.evaluator in (monte_carlo,):
+            raise ValueError(
+                f"the gradient method needs GRADIENTS through the forward model, "
+                f"and the {config.evaluator!r} evaluator is a sampler with none. "
+                f"Use gradient_free@world_model (or @oracle for the analytic IC "
+                f"form); arms 3 and 4 are agent conditions, not this one."
+            )
+
+        return GradientInversion(
+            wm_results_json=config.wm_results_json,
+            instances=instances or [],
+            budget_mode=config.sl_budget_mode,
+            steps=config.sl_steps,
+            lr=config.sl_lr,
+            cardinality_weight=config.sl_cardinality_weight,
+            prior_kind=config.sl_prior,
+            prior_weight=config.sl_prior_weight,
+            prior_epochs=config.sl_prior_epochs,
+            training_sources=training_sources or [],
+            device=config.device,
+            seed=config.seed,
+        )
+
     if config.method == "one_shot":
         return OneShotSuperAlgorithm(
             outer_iters=config.outer_iters,
@@ -281,7 +358,7 @@ def build_method(
 
     raise ValueError(
         f"unknown method {config.method!r}; "
-        f"choose one_shot|per_step|windowed|evolve|adaptive"
+        f"choose one_shot|per_step|windowed|evolve|adaptive|gradient"
     )
 
 
@@ -437,6 +514,52 @@ def run_experiment(
         else ()
     )
 
+    # The labelled (G, y, x) episodes an inverse task is scored on. Two disjoint
+    # pools, and the split between them is what makes the amortization claim
+    # testable at all (research/source_localization.md §8.5.1): the outer loop's
+    # reward is computed on `select`, and the winner is re-run unmodified on
+    # `evaluate`. A program that memorized specific cascades scores well on the
+    # first and badly on the second.
+    select_instances, evaluate_instances, training_sources = [], [], []
+
+    if registry.recovers:
+        select_instances = load_instances(
+            config.data_dir,
+            config.diffusion_model,
+            config.sl_select_split,
+            graph_id=graph_id,
+            observation=config.sl_observation,
+            limit=config.sl_instances,
+            budget_mode=config.sl_budget_mode,
+            budget=config.budget,
+            source_tolerance=config.sl_source_tolerance,
+            seed=config.seed,
+        )
+        evaluate_instances = load_instances(
+            config.data_dir,
+            config.diffusion_model,
+            config.sl_eval_split,
+            graph_id=graph_id,
+            observation=config.sl_observation,
+            limit=config.sl_instances,
+            budget_mode=config.sl_budget_mode,
+            budget=config.budget,
+            source_tolerance=config.sl_source_tolerance,
+            seed=config.seed,
+        )
+        # Arm A's prior is fit on the SELECTION split's source sets: withholding it
+        # strawmans the control, and fitting it on the held-out split leaks the
+        # answer. Both mistakes flip the sign of the headline claim.
+        training_sources = [instance.sources for instance in select_instances]
+
+        print(
+            f"[run] source localization: selecting on {len(select_instances)} "
+            f"{config.sl_select_split} episodes, held out on "
+            f"{len(evaluate_instances)} {config.sl_eval_split} episodes "
+            f"(observation={config.sl_observation}, k from "
+            f"{config.sl_budget_mode})"
+        )
+
     task = TaskSpec(
         task=config.task,
         objective=registry.summary,
@@ -445,6 +568,15 @@ def run_experiment(
         horizon=config.horizon,
         allowed_ops=tuple(config.allowed_ops),
         remove_semantics=config.remove_semantics,
+        # `recover` reaches the prompt, the contract check and the summary through
+        # this one field, so a task that inverts cannot be driven as one that
+        # intervenes by forgetting a flag
+        objective_kind=registry.objective or maximize,
+        instances=tuple(select_instances),
+        source_budget_mode=config.sl_budget_mode,
+        # False is the @native condition: no forward model in the search loop at
+        # all, which is the arm that answers whether one is worth anything
+        forward_model=not config.native_arm,
         # From the registry, never from a flag: the objective sign and what a unit
         # of budget buys are properties of the TASK, and a run that disagreed with
         # its own registry entry would optimize one thing and be reported as another
@@ -497,23 +629,58 @@ def run_experiment(
         )
         # A containment task's menu is the DISMANTLING pool; routing into the IM
         # pool would return a seed set the executor then rejects
-        config.baseline = _parse_routing_choice(
-            routing_reply, dismantling_names if task.contains else algorithm_names
-        )
+        if task.recovers:
+            menu = localization_names
+        elif task.contains:
+            menu = dismantling_names
+        else:
+            menu = algorithm_names
+
+        config.baseline = _parse_routing_choice(routing_reply, menu)
         print(f"[run] routing picked {config.baseline!r}")
+
+    # §8.5.1's graph axis: the winning program of another run, executed here
+    # unmodified. Read before the canned-baseline branch so a transfer arm is a
+    # transfer arm regardless of what else was set.
+    if config.sl_transfer_from is not None:
+        if canned_script is not None:
+            raise ValueError(
+                "--sl-transfer-from supplies the script to run and cannot be "
+                "combined with another canned script"
+            )
+
+        source = json.loads(Path(config.sl_transfer_from).read_text())
+        canned_script = source.get("script")
+
+        if not canned_script:
+            raise ValueError(
+                f"{config.sl_transfer_from} has no `script` field to transfer; "
+                f"point at an arm's results JSON that synthesized a program"
+            )
+
+        print(
+            f"[run] TRANSFER: running the winner of "
+            f"{source.get('task')}/{source.get('graph', {}).get('graph_id')} "
+            f"(arm {source.get('arm')}, its own reward "
+            f"{source.get('reward')}) unmodified on this instance"
+        )
 
     if canned_script is not None:
         provider_label = "canned"
     elif config.baseline is not None:
         # Classical-library baseline: same pipeline, envs, and metrics — no LLM
         if config.baseline not in (
-            algorithm_names + list(adaptive_algorithms) + dismantling_names
+            algorithm_names
+            + list(adaptive_algorithms)
+            + dismantling_names
+            + localization_names
         ):
             raise ValueError(
                 f"unknown baseline {config.baseline!r}; choose a static algorithm "
                 f"from {algorithm_names}, an adaptive policy from "
-                f"{sorted(adaptive_algorithms)}, or a dismantler from "
-                f"{dismantling_names}"
+                f"{sorted(adaptive_algorithms)}, a dismantler from "
+                f"{dismantling_names}, or a source localizer from "
+                f"{localization_names}"
             )
 
         provider_label = (
@@ -554,6 +721,30 @@ class AdaptiveBaseline(Strategy):
                 total_budget={config.budget},
             )
         ]
+"""
+        elif config.baseline in localization_algorithms:
+            # A published localizer is a source-set INFERENCE, not a plan: it is
+            # handed the observation and returns the nodes it believes started the
+            # cascade. Its paired scorer rides along so the arm gets a real AUC
+            # rather than the rank-derived stand-in a set-only method falls back to.
+            canned_script = f"""\
+class LocalizationBaseline(Strategy):
+    def localize(self, graph, observation, budget):
+        return [
+            int(node)
+            for node in localization_algorithms.{config.baseline}(
+                graph,
+                observation,
+                budget,
+                diffusion_model="{config.diffusion_model}",
+                horizon={config.horizon},
+            )
+        ]
+
+    def source_scores(self, graph, observation):
+        return localization_scorers.{config.baseline}(
+            graph, observation, diffusion_model="{config.diffusion_model}"
+        )
 """
         elif config.baseline in dismantling_algorithms:
             # A dismantler is a static REMOVAL set, committed at t=0. It is handed
@@ -635,16 +826,49 @@ class Baseline(Strategy):
             if checkpoint_path is None
             else checkpoint.fingerprint(config, config.method, graph)
         ),
+        instances=select_instances,
+        training_sources=training_sources,
     )
 
     # Optimize the method with the outer-loop coding agent iteration loop to find the best strategy and trajectory result
     print(f"[run] optimizing with {config.method} (provider {provider_label})...")
     strategy, trajectory = method.optimize(agent, environment, task, graph)
-    print(
-        f"[run] winner: reward={trajectory.reward:.2f} "
-        f"({100.0 * trajectory.reward / graph.num_nodes:.2f}% of N"
-        f"{', lower is better' if task.contains else ''})"
-    )
+
+    if task.recovers:
+        print(
+            f"[run] winner: F1={trajectory.reward:.4f} on the "
+            f"{config.sl_select_split} split (selection score, higher is better)"
+        )
+    else:
+        print(
+            f"[run] winner: reward={trajectory.reward:.2f} "
+            f"({100.0 * trajectory.reward / graph.num_nodes:.2f}% of N"
+            f"{', lower is better' if task.contains else ''})"
+        )
+
+    # The held-out number, and the one every table reads. Selecting and reporting
+    # on the same episodes proves nothing about amortization: a program that
+    # memorized specific cascades is indistinguishable from an algorithm until it
+    # meets episodes the search never saw (research/source_localization.md §8.5.1).
+    heldout = None
+    if task.recovers and evaluate_instances:
+        print(
+            f"[run] re-running the winner on {len(evaluate_instances)} held-out "
+            f"{config.sl_eval_split} episodes..."
+        )
+        heldout, _ = evaluate_localizer(
+            strategy,
+            environment,
+            task,
+            graph,
+            evaluate_instances,
+            config.sl_budget_mode,
+        )
+        print(
+            f"[run] held-out F1={heldout.reward:.4f} "
+            f"(selection {trajectory.reward:.4f}, "
+            f"generalization gap {heldout.reward - trajectory.reward:+.4f})"
+        )
 
     # One closing turn on the generation thread: what it tried each iteration and
     # how the winner works. Canned arms (classical baselines, routing picks) are
@@ -762,6 +986,50 @@ class Baseline(Strategy):
     # the per-arm JSON is read standalone by plots/report/summary
     result["objective"] = task.sense
 
+    if task.recovers:
+        # The F1 an inverse task reports needs NO ground-truth referee to be
+        # comparable across conditions: it is measured against a source set we
+        # know, so it carries no evaluator noise at all. That is unusual for this
+        # pipeline and is why `mc_reward` is filled from the held-out score rather
+        # than from a Monte-Carlo replay — every reader that asks for "the number
+        # comparable across arms" then gets the right one unchanged.
+        selection = trajectory.cost.get("metrics", {})
+        reported = heldout if heldout is not None else trajectory
+        metrics = reported.cost.get("metrics", {})
+
+        result["localization"] = True
+        result["metrics"] = metrics
+        result["selection_metrics"] = selection
+        result["select_split"] = config.sl_select_split
+        result["eval_split"] = config.sl_eval_split
+        result["n_select_instances"] = len(select_instances)
+        result["n_eval_instances"] = len(evaluate_instances)
+        result["observation_mode"] = config.sl_observation
+        result["source_budget_mode"] = config.sl_budget_mode
+        result["auc_source"] = reported.cost.get("auc_source")
+        result["forward_calls"] = reported.cost.get("forward_calls")
+        result["forward_calls_per_instance"] = reported.cost.get(
+            "forward_calls_per_instance"
+        )
+        result["gradient_steps_per_instance"] = trajectory.cost.get(
+            "gradient_steps_per_instance"
+        )
+        result["sl_prior"] = trajectory.cost.get("sl_prior")
+        result["transfer_from"] = config.sl_transfer_from
+        # The generalization gap §8.5.1 exists to expose: large and positive-side
+        # means the program memorized the episodes it was selected on
+        result["generalization_gap"] = (
+            round(reported.reward - trajectory.reward, 6)
+            if heldout is not None
+            else None
+        )
+        result["mc_reward"] = reported.reward
+        result["reward"] = reported.reward
+        result["mc_reward_se"] = reported.cost.get("reward_se")
+        result["spread_pct"] = None
+        result["per_instance"] = reported.cost.get("per_instance")
+        result["summary"] = summarize(reported, graph, task)
+
     if task.contains:
         result["containment"] = True
         result["outbreak"] = list(outbreak)
@@ -836,7 +1104,37 @@ class Baseline(Strategy):
     # single ground-truth referee that makes rewards comparable ACROSS conditions.
     # A native arm's own reward is one noisy episode; a monte_carlo arm's carries
     # the winner's curse from being the max over outer iterations.
-    if config.compare:
+    if config.compare and task.recovers:
+        # An inverse task's F1 is already ground truth, so the referee measures the
+        # OTHER thing §8.5.5 asks for: re-simulate the recovered sources on NDlib
+        # and compare against what was observed. Reported beside the TRUE source
+        # set's own error, because on an ill-posed problem a recovered set can
+        # reproduce y better than the truth did, and the number is unreadable
+        # without knowing that. §11: no surveyed paper reports this at all, so the
+        # column is self-contained and is not a cross-paper comparison.
+        referee_runs = config.referee_mc_runs or config.mc_runs
+        result["referee_mc_runs"] = referee_runs
+        print(f"[run] re-simulation referee ({referee_runs} NDlib runs per set)...")
+
+        referee = MonteCarloEnvironment(
+            graph,
+            config.diffusion_model,
+            mc_runs=referee_runs,
+            base_seed=config.seed,
+            remove_semantics=config.remove_semantics,
+        )
+        reported = heldout if heldout is not None else trajectory
+        result |= referee_resimulation_error(
+            referee,
+            task,
+            evaluate_instances or list(task.instances),
+            reported.cost.get("per_instance", []),
+        )
+        print(
+            f"[run] resim_error={result.get('resim_error', float('nan')):.5f} "
+            f"(true sources score {result.get('resim_error_true_sources', float('nan')):.5f})"
+        )
+    elif config.compare:
         referee_runs = config.referee_mc_runs or config.mc_runs
         result["referee_mc_runs"] = referee_runs
         print(f"[run] MC compare replay ({referee_runs} runs)...")
@@ -1015,8 +1313,16 @@ if __name__ == "__main__":
         "--baseline",
         type=str,
         default=None,
-        choices=algorithm_names,
-        help="evaluate this classical library algorithm instead of an LLM strategy (default: None).",
+        choices=(
+            algorithm_names
+            + list(adaptive_algorithms)
+            + dismantling_names
+            + localization_names
+        ),
+        metavar="NAME",
+        help="evaluate this classical library algorithm instead of an LLM strategy: "
+        "a static IM algorithm, a per-round adaptive policy, a network dismantler, "
+        "or a source localizer (default: None).",
     )
     parser.add_argument(
         "--routing",
@@ -1027,8 +1333,19 @@ if __name__ == "__main__":
         "--method",
         type=str,
         default="one_shot",
-        choices=["one_shot", "per_step", "windowed", "evolve", "adaptive"],
-        help="outer-loop method; evolve = population edits with refine/restructure operators; adaptive = the same search over a per-round policy for adaptive IM (default: one_shot).",
+        choices=["one_shot", "per_step", "windowed", "evolve", "adaptive", "gradient"],
+        help="outer-loop method; evolve = population edits with refine/restructure "
+        "operators; adaptive = the same search over a per-round policy for adaptive "
+        "IM; gradient = arm A for source localization, per-instance Adam on a "
+        "relaxed source vector against a frozen world model, no LLM "
+        "(default: one_shot).",
+    )
+    parser.add_argument(
+        "--native-arm",
+        action="store_true",
+        help="mark this run as the @native condition: `predict_marginals` is "
+        "removed, so a source-localization program must be a pure structural "
+        "heuristic. Pair with --evaluator monte_carlo --mc-runs 1 (default: False).",
     )
     parser.add_argument(
         "--task",
@@ -1085,6 +1402,106 @@ if __name__ == "__main__":
         default="random",
         choices=list(outbreak_selectors),
         help="how the outbreak's source nodes are chosen; deterministic in --seed so every arm faces the same one. `random` is the honest default: a targeted outbreak makes blocking the same ranking problem (default: random).",
+    )
+    # Source localization
+    parser.add_argument(
+        "--sl-select-split",
+        type=str,
+        default="train",
+        choices=["train", "val", "test"],
+        help="source localization: episodes the outer loop's reward is computed on "
+        "(default: train).",
+    )
+    parser.add_argument(
+        "--sl-eval-split",
+        type=str,
+        default="test",
+        choices=["train", "val", "test"],
+        help="source localization: HELD-OUT episodes the winning program is re-run "
+        "on, unmodified. This is the reported number; selecting and reporting on "
+        "the same episodes proves nothing about amortization (default: test).",
+    )
+    parser.add_argument(
+        "--sl-instances",
+        type=int,
+        default=20,
+        help="source localization: labelled episodes per split. Every candidate "
+        "program pays this many executions, so it is the M of the P x M x C search "
+        "cost (default: 20).",
+    )
+    parser.add_argument(
+        "--sl-observation",
+        type=str,
+        default="marginal",
+        choices=list(valid_observations),
+        help="source localization: which y the program sees. marginal is the "
+        "MC-averaged P(infected); binary is a single realized draw and is the "
+        "column comparable to the published tables (default: marginal).",
+    )
+    parser.add_argument(
+        "--sl-budget-mode",
+        type=str,
+        default=episode_budget,
+        choices=list(valid_budget_modes),
+        help="source localization: where k comes from. episode = the instance's own "
+        "source count (the published given-k convention); sweep = the pipeline's k, "
+        "with the episode pool filtered to that source fraction "
+        f"(default: {episode_budget}).",
+    )
+    parser.add_argument(
+        "--sl-source-tolerance",
+        type=float,
+        default=0.5,
+        help="source localization: relative band around k that --sl-budget-mode "
+        "sweep keeps an episode in (default: 0.5).",
+    )
+    parser.add_argument(
+        "--sl-prior",
+        type=str,
+        default=vae_prior,
+        choices=list(valid_priors),
+        help="arm A only: none reproduces SL-VAE (a) (frozen forward model + "
+        f"descent, no prior); vae reproduces the full method (default: {vae_prior}).",
+    )
+    parser.add_argument(
+        "--sl-steps",
+        type=int,
+        default=200,
+        help="arm A only: Adam steps per instance (default: 200).",
+    )
+    parser.add_argument(
+        "--sl-lr",
+        type=float,
+        default=0.1,
+        help="arm A only: Adam learning rate on the source logits (default: 0.1).",
+    )
+    parser.add_argument(
+        "--sl-cardinality-weight",
+        type=float,
+        default=0.05,
+        help="arm A only: weight on (sum(x~) - k)^2, the given-k constraint "
+        "(default: 0.05).",
+    )
+    parser.add_argument(
+        "--sl-prior-weight",
+        type=float,
+        default=1.0,
+        help="arm A only: weight on -log p(x~) (default: 1.0).",
+    )
+    parser.add_argument(
+        "--sl-prior-epochs",
+        type=int,
+        default=300,
+        help="arm A only: epochs fitting the source VAE (default: 300).",
+    )
+    parser.add_argument(
+        "--sl-transfer-from",
+        type=str,
+        default=None,
+        help="source localization: run the winning program named by ANOTHER arm's "
+        "results JSON, unmodified, on this dataset. The graph axis of the "
+        "amortization claim, and a comparison no per-instance method can enter "
+        "(default: None).",
     )
     parser.add_argument(
         "--strategy-mode",
@@ -1253,6 +1670,20 @@ if __name__ == "__main__":
         campaigns=args.campaigns,
         outbreak_pct=args.outbreak_pct,
         outbreak_selector=args.outbreak_selector,
+        sl_select_split=args.sl_select_split,
+        sl_eval_split=args.sl_eval_split,
+        sl_instances=args.sl_instances,
+        sl_observation=args.sl_observation,
+        sl_budget_mode=args.sl_budget_mode,
+        sl_source_tolerance=args.sl_source_tolerance,
+        sl_prior=args.sl_prior,
+        sl_steps=args.sl_steps,
+        sl_lr=args.sl_lr,
+        sl_cardinality_weight=args.sl_cardinality_weight,
+        sl_prior_weight=args.sl_prior_weight,
+        sl_prior_epochs=args.sl_prior_epochs,
+        sl_transfer_from=args.sl_transfer_from,
+        native_arm=args.native_arm,
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,
         diffusion_model=args.diffusion_model,

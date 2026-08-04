@@ -1,3 +1,5 @@
+import numpy as np
+
 from coding_agent.rounds import round_batches, round_schedule
 from coding_agent.types import GraphInfo, TaskSpec, myopic
 from data.wm_simulator import blocked, spent
@@ -5,6 +7,7 @@ from coding_agent.executor import (
     allowed_imports,
     mc_blocked_algorithms,
     mc_blocked_dismantling,
+    mc_blocked_localization,
     scored_blocked_primitives,
 )
 from coding_agent.tools.graph_profile import build_graph_profile
@@ -15,15 +18,19 @@ from coding_agent.tools.library_api import (
     build_api_reference,
     build_dismantling_menu,
     build_dismantling_reference,
+    build_localization_menu,
+    build_localization_reference,
     build_primitives_reference,
 )
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 
-# The two problem families the prompt preamble has to distinguish. They are not
+# The three problem families the prompt preamble has to distinguish. They are not
 # rephrasings of each other: the objective sign, what a unit of budget buys, and
 # whether the planner starts the cascade all differ, and a model told the wrong
-# one optimizes the wrong direction with a perfectly valid program.
+# one optimizes the wrong direction with a perfectly valid program. The inverse
+# family differs more than the other two do from each other — it emits no action
+# at all.
 seeding_brief = """\
 You are designing an Influence Maximization algorithm as an executable Python script.
 
@@ -61,8 +68,106 @@ WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
 """
 
 
+localization_brief = """\
+You are designing a Source Localization algorithm as an executable Python script.
+
+YOUR GOAL: given a graph and an OBSERVED diffusion state, recover the SEED SET
+that produced it. You are not intervening in anything — you are inferring a hidden
+cause. You are scored on F1 against the true source set, averaged over many
+labelled cascades. HIGHER IS BETTER.
+
+You will be given `observation`, a numpy float array of length num_nodes. Entry v
+is P(node v was infected) at the end of the cascade, in [0, 1]. You return the
+`budget` node ids you believe the cascade STARTED from.
+
+WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
+- The problem is ILL-POSED. Diffusion is many-to-one: different seed sets produce
+  the same final state, and a cascade that saturated retains almost no trace of
+  where it began. Perfect F1 is not achievable and chasing it is not the goal —
+  beating the reference table is.
+- Sources are a TINY MINORITY of nodes, so accuracy is worthless as a signal.
+  A rule that names nothing scores 90%+ accuracy and 0 F1.
+- The strongest classical method is LPSI: label the infected +1 and the
+  uninfected -1, propagate to convergence, and take the LOCAL MAXIMA of the
+  converged field. It has no learning in it and it beats several deep generative
+  methods on real cascades. Assume you have to beat it, not merely match it.
+- High degree is a trap. A hub the cascade passed THROUGH looks exactly like a hub
+  the cascade started from, and the reference diagnostics will tell you when you
+  have fallen for it.
+- Sources rarely cluster. Two adjacent nodes are usually one source and one of its
+  first infections, so a separation constraint (one per community, one per k-hop
+  ball, local maxima only) is usually worth more than a better score function.
+"""
+
+
+def _localization_rules(task: TaskSpec) -> str:
+    """The inverse-task preamble: no actions, one method, and the forward oracle."""
+    if task.forward_model:
+        oracle_block = """\
+
+THE FORWARD ORACLE — `self.predict_marginals(seeds)`:
+    Returns a numpy array of length num_nodes: P(node infected at the end) if the
+    cascade had STARTED from `seeds`. This is the simulator the observation came
+    from, and it is the one thing a purely structural rule does not have.
+
+    Use it to TEST a hypothesis: re-simulate a candidate source set and compare
+    the prediction against what you observed.
+
+        predicted = self.predict_marginals(candidate)
+        error = float(((predicted - observation) ** 2).sum())
+
+    It is not free. Every call is a full rollout and the calls are counted, so a
+    scan over all nodes inside a per-pick loop will not finish. Narrow to a short
+    candidate list with a cheap structural rule FIRST, then spend calls ranking it.
+    You are also free to never call it at all — if structure alone wins, that is a
+    result."""
+    else:
+        oracle_block = """\
+
+NO FORWARD ORACLE IN THIS CONDITION. `self.predict_marginals` raises if you call
+it. This arm exists to measure what pure structure achieves, so your algorithm
+must be a structural inference rule over the graph and the observation alone."""
+
+    return f"""\
+{localization_brief}
+OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
+no prose before or after. The block contains import lines (if you need any) and
+then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
+example usage, no test code.
+
+IMPORTS: you MAY import any of {", ".join(allowed_imports)}. Use numpy for
+anything you would otherwise write as a Python loop over all nodes.
+Importing anything else is rejected.
+
+AVAILABLE NAMES (already in your script's namespace — do NOT import these):
+- `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node),
+  .degree(node), .edge_index (2, E), .ic_probs (E,).
+- `localization_algorithms` and `localization_scorers` : the published baselines
+  and their per-node score vectors (API below).
+- `primitives` : structural helpers (API below).
+- `ActionOp` and `State` exist but you will not need them — this task emits no
+  actions.
+
+WHAT YOU IMPLEMENT:
+    def localize(self, graph, observation, budget) -> list[int]
+        The node ids you believe started the cascade. AT MOST `budget` of them,
+        no duplicates, every id in [0, num_nodes). Returning more than `budget` is
+        REJECTED — extra names would buy recall for free.
+
+    def source_scores(self, graph, observation) -> np.ndarray     (OPTIONAL)
+        One float per node, higher meaning more likely to be a source. Implement
+        it and your AUC is measured on that real ranking; omit it and AUC falls
+        back to the ORDER of the list localize() returned, which ties every node
+        you did not name. It costs a few lines and it is a reported column.
+{oracle_block}
+"""
+
+
 def _common_rules(task: TaskSpec | None) -> str:
     """The preamble, with the problem family and the budgeted op filled in."""
+    if task is not None and task.recovers:
+        return _localization_rules(task)
+
     contains = task is not None and task.contains
     brief = containment_brief if contains else seeding_brief
 
@@ -308,6 +413,102 @@ it is the tuple of source node ids, and it is also printed in the task block.
 Beat both. Combining their ideas, or replacing them, are both fair game.
 """
 
+# The inverse-task counterpart. Neither of the other two exemplar sets works here:
+# both emit action bags from plan_horizon, and this task calls localize and
+# rejects actions outright, so showing them would spend the first iteration on a
+# repair turn for a contract the model was never asked to implement.
+localization_exemplars = """\
+EXAMPLES — two algorithms at the level you should START from, not finish at.
+
+Example 1, LPSI with a community separation constraint (pure structure, no
+forward model — this is roughly the classical bar):
+```python
+import numpy as np
+
+class FieldMaxima(Strategy):
+    def source_scores(self, graph, observation):
+        # Label propagation over the observed state: +1 infected, -1 uninfected
+        labels = np.where(observation >= 0.5, 1.0, -1.0)
+        sources, targets = graph.edge_index[0], graph.edge_index[1]
+        degree = np.zeros(graph.num_nodes)
+        np.add.at(degree, sources, 1.0)
+        np.add.at(degree, targets, 1.0)
+        scale = np.where(degree > 0, degree, 1.0) ** -0.5
+        weight = scale[sources] * scale[targets]
+
+        field = labels.copy()
+        for _ in range(60):
+            spread = np.zeros(graph.num_nodes)
+            np.add.at(spread, targets, weight * field[sources])
+            np.add.at(spread, sources, weight * field[targets])
+            field = 0.5 * spread + 0.5 * labels
+
+        # A node the observation never saw infected cannot be a source
+        return np.where(observation >= 0.5, field, field.min() - 1.0)
+
+    def localize(self, graph, observation, budget):
+        field = self.source_scores(graph, observation)
+        communities = primitives.detect_communities(graph)
+
+        # One candidate per community, and only local maxima of the field:
+        # adjacent high-field nodes are one source plus its first infection
+        best_per_community = {}
+        for node in range(graph.num_nodes):
+            if observation[node] < 0.5:
+                continue
+            neighbours = graph.out_neighbors(node) + graph.in_neighbors(node)
+            if any(field[other] > field[node] for other in neighbours):
+                continue
+            group = communities.get(node, -1)
+            if group not in best_per_community or field[node] > field[best_per_community[group]]:
+                best_per_community[group] = node
+
+        ranked = sorted(best_per_community.values(), key=lambda v: -field[v])
+        # Top up if there were fewer communities than the budget
+        for node in np.argsort(-field):
+            if len(ranked) >= budget:
+                break
+            if int(node) not in ranked:
+                ranked.append(int(node))
+
+        return [int(node) for node in ranked[:budget]]
+```
+
+Example 2, propose-then-test: a cheap structural shortlist, then the forward
+oracle ranks it by how well re-simulating it reproduces the observation:
+```python
+import numpy as np
+
+class ResimulationGreedy(Strategy):
+    def source_scores(self, graph, observation):
+        return localization_scorers.lpsi(graph, observation)
+
+    def localize(self, graph, observation, budget):
+        field = self.source_scores(graph, observation)
+        field = np.where(observation >= 0.5, field, field.min() - 1.0)
+        # Shortlist FIRST: a forward call per node per pick does not finish
+        shortlist = [int(node) for node in np.argsort(-field)[:25]]
+
+        selected = []
+        for _ in range(budget):
+            best, best_error = None, float("inf")
+            for candidate in shortlist:
+                if candidate in selected:
+                    continue
+                predicted = self.predict_marginals(selected + [candidate])
+                error = float(((predicted - observation) ** 2).sum())
+                if error < best_error:
+                    best, best_error = candidate, error
+            if best is None:
+                break
+            selected.append(best)
+
+        return selected
+```
+Beat both. Combining their ideas, or replacing them, are both fair game — and if
+the forward oracle turns out not to help, say so with a program that does not use it.
+"""
+
 # Only shown when the task actually allows edge ops. Under add_node-only IC the
 # cascade is progressive and monotone, so delaying a seed is weakly worse and
 # every schedule is dominated by "all seeds at t=0" — telling the model to
@@ -327,6 +528,18 @@ USING THE HORIZON: this task is add_node-only under a progressive cascade, so a
 seed placed at t>0 has strictly fewer steps to spread than the same seed at t=0.
 Put every seed in element 0 and leave the rest of the plan empty. All of your
 effort belongs in WHICH nodes you pick, not when.
+"""
+
+# The inverse-task counterpart. There is no horizon to schedule across at all:
+# nothing is emitted, nothing is timed, and the model needs to be told that
+# explicitly or it will try to return an action plan it was never asked for.
+localization_timing_note = """\
+
+THERE IS NO HORIZON TO PLAN ACROSS. You emit no actions and nothing you return is
+scheduled. `horizon` appears in the task block only because it is how long the
+cascade you are inverting ran for — a longer cascade means a more saturated
+observation and therefore LESS information about where it started, which is worth
+knowing when you decide how much to trust the observed state.
 """
 
 # The containment counterpart of seed_timing_note, and its mirror image: the
@@ -443,6 +656,19 @@ class MyStrategy(Strategy):
         return [ActionOp("add_node", node) for _, node in scored[:batch]]
 ```
 """,
+    "localize": """\
+
+METHOD: SOURCE-SET INFERENCE.
+Implement `localize(self, graph, observation, budget) -> list[int]`, and
+optionally `source_scores(self, graph, observation) -> np.ndarray`.
+
+You are called ONCE PER LABELLED CASCADE, with that cascade's own observation and
+its own source count as `budget`. Your score is the mean F1 across all of them, so
+a rule that nails one episode and collapses on the rest loses to a rule that is
+uniformly decent. Write an ALGORITHM, not a fit to one graph: hardcoded node ids
+will score zero on every other episode.
+
+""",
 }
 
 
@@ -508,6 +734,65 @@ def build_outbreak_block(task: TaskSpec) -> str:
     )
 
 
+max_listed_episodes = 6
+
+
+def build_observation_block(task: TaskSpec) -> str:
+    """
+    What `y` actually is, and how many episodes the score averages over.
+
+    Spelled out because the observation mode changes the problem: an MC marginal
+    is a continuous, averaged view of the last wave, while a binarized draw is one
+    realization. Ours is strictly MORE informative than the published protocol's
+    (research/source_localization.md §2.9 risk 5), so a model told the wrong one
+    calibrates its threshold against a distribution it will not see.
+    """
+    if not task.recovers:
+        return ""
+
+    instances = list(task.instances)
+    if not instances:
+        return ""
+
+    counts = [instance.source_count for instance in instances]
+    infected = [instance.infected_count for instance in instances]
+    binary = all(set(np.unique(instance.observation)) <= {0.0, 1.0} for instance in instances)
+
+    lines = [
+        "",
+        f"THE EPISODES YOU ARE SCORED ON ({len(instances)} labelled cascades, "
+        f"mean F1 across all of them):",
+        f"  sources per episode: {min(counts)}-{max(counts)} nodes "
+        f"({100.0 * np.mean(counts) / instances[0].num_nodes:.1f}% of N on average) "
+        f"— you are handed the exact count as `budget`",
+        f"  observed infected per episode: {min(infected)}-{max(infected)} nodes "
+        f"({100.0 * np.mean(infected) / instances[0].num_nodes:.1f}% of N on average)",
+    ]
+
+    if binary:
+        lines.append(
+            "  observation is a BINARIZED single draw: every entry is exactly 0.0 "
+            "or 1.0, so `observation >= 0.5` is the infected set and there is no "
+            "extra signal in the magnitudes"
+        )
+    else:
+        lines.append(
+            "  observation is a CONTINUOUS Monte-Carlo marginal: entries strictly "
+            "between 0 and 1 are nodes the last wave reached only sometimes, so "
+            "the fractional values carry real information about the cascade's "
+            "FRONTIER — a node at 0.3 was reached late, a node at 1.0 early"
+        )
+
+    lines.append(
+        f"  the cascades ran for up to {max(instance.horizon for instance in instances)} "
+        f"timesteps; a longer cascade is a more saturated observation and therefore "
+        f"a harder inversion"
+    )
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 def build_user_prompt(
     method: str,
     task: TaskSpec,
@@ -517,16 +802,37 @@ def build_user_prompt(
 ) -> str:
     if strategy_mode == "scored":
         # Library source is inspiration, not callable — ideas must be written
-        # out inside score()/schedule(), where they can be mutated
-        menu = build_dismantling_menu() if task.contains else build_algorithm_menu()
+        # out inside score()/schedule()/source_score(), where they can be mutated
+        if task.recovers:
+            menu = build_localization_menu()
+        elif task.contains:
+            menu = build_dismantling_menu()
+        else:
+            menu = build_algorithm_menu()
+
         reference = (
             "PRIMITIVES API (available as `primitives`; spread-simulation "
             "functions are NOT available):\n"
             f"{build_primitives_reference(exclude=scored_blocked_primitives)}\n\n"
-            "ALGORITHM IDEAS (NOT callable — steal the ideas into your score()):\n"
+            "ALGORITHM IDEAS (NOT callable — steal the ideas into your "
+            f"{'source_score()' if task.recovers else 'score()'}):\n"
             f"{menu}"
         )
         final_line = "Write the ScoredStrategy subclass now."
+    elif task.recovers:
+        # An inverse task's library is the localization pool. The IM algorithms
+        # return seed sets to maximize with and the dismantlers return deletions;
+        # neither is an inference rule, and showing them invites a program that
+        # confuses "where would a cascade start best" with "where did this one".
+        reference = (
+            build_localization_reference(
+                exclude=() if allow_mc_algorithms else mc_blocked_localization
+            )
+            + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as "
+            "`primitives`)\n"
+            + build_primitives_reference(exclude=scored_blocked_primitives)
+        )
+        final_line = f"Write the Strategy now (method = {method})."
     else:
         blocked = () if allow_mc_algorithms else mc_blocked_algorithms
         # Signatures alone do not teach the idiom — the model reproduces the
@@ -553,20 +859,30 @@ def build_user_prompt(
         )
         final_line = f"Write the Strategy now (method = {method})."
 
-    budget_unit = "max removals total" if task.contains else "max seeds total"
-    objective_line = (
-        "MINIMIZE the final infected count (lower is better)"
-        if task.contains
-        else task.objective
-    )
+    if task.recovers:
+        budget_unit = "max sources to name per episode"
+        objective_line = (
+            "recover the seed set that produced the observation — MAXIMIZE F1 "
+            "against the true sources (higher is better)"
+        )
+        ops_line = "allowed_ops = none — this task emits no actions\n"
+    else:
+        budget_unit = "max removals total" if task.contains else "max seeds total"
+        objective_line = (
+            "MINIMIZE the final infected count (lower is better)"
+            if task.contains
+            else task.objective
+        )
+        ops_line = (
+            f"allowed_ops = {', '.join(task.allowed_ops)}   (any other op is REJECTED)\n"
+        )
 
     return f"""\
 TASK: {task.task} — {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
-allowed_ops = {", ".join(task.allowed_ops)}   (any other op is REJECTED)
-{build_outbreak_block(task)}{build_round_block(task)}
+{ops_line}{build_outbreak_block(task)}{build_round_block(task)}{build_observation_block(task)}
 {build_graph_profile(graph)}
 
 {reference}
@@ -576,7 +892,76 @@ allowed_ops = {", ".join(task.allowed_ops)}   (any other op is REJECTED)
 
 # Scored mode: the agent edits an algorithm's internals (score/schedule hooks),
 # never whole programs and never compositions over the library
+def _scored_localization_system(task: TaskSpec) -> str:
+    """
+    Scored mode for the inverse task (research/source_localization.md §2.4.2).
+
+    The same trick as the intervention half — a fixed harness the agent cannot
+    override, with one hook it can — and it is a better fit here than anywhere
+    else: LPSI, the Comin-Costa centralities and rumor centrality are ALL exactly
+    node-scoring functions over the observed state, so the constrained search space
+    is directly comparable to the classical methods rather than a subset of them.
+    """
+    oracle_line = (
+        "- `self.predict_marginals(seeds)` -> np.ndarray of P(infected at the end) "
+        "if the\n  cascade had started from `seeds`. Every call is a full rollout "
+        "and calls are\n  counted, so use it sparingly inside score() — it runs "
+        "once per candidate per pick."
+        if task.forward_model
+        else "- `self.predict_marginals` RAISES in this condition: this arm has no "
+        "forward\n  model by design. Score from structure and the observation alone."
+    )
+
+    return f"""\
+You are designing the SCORING RULE of a Source Localization algorithm — not a
+whole program.
+
+Given a graph and an OBSERVED diffusion state, the task is to recover the SEED SET
+that produced it. You are scored on F1 against the true sources, averaged over
+many labelled cascades. HIGHER IS BETTER.
+
+A fixed harness (ScoredStrategy.localize) greedily names the highest-scoring node
+until the budget is spent. You may override ONLY:
+
+- source_score(self, node, graph, observation, selected) -> float
+    Called for every candidate node at every pick. `observation[v]` is
+    P(node v was infected) at the end of the cascade, in [0, 1]. `selected` is the
+    tuple of sources already named — use it to penalize a candidate whose
+    neighbourhood an earlier pick already explains, because sources rarely cluster.
+    Higher score = named sooner. Return float("-inf") to rule a node out.
+- source_scores(self, graph, observation) -> np.ndarray            (optional)
+    One float per node, for the AUC column. Omit it and AUC falls back to the
+    order the harness happened to name nodes in.
+
+RULES:
+- Overriding localize (or plan_horizon) is REJECTED by the executor.
+- `localization_algorithms.*` does NOT exist here. Write your own scoring logic
+  from graph structure, the observation, and `primitives`.
+- Reply with exactly ONE fenced ```python block containing ONE class subclassing
+  ScoredStrategy. No imports, no module-level code, no prose.
+- `GraphInfo` has .num_nodes, .out_neighbors(node), .in_neighbors(node),
+  .degree(node), .edge_index, .ic_probs.
+{oracle_line}
+
+REPLY SHAPE (adapt the logic — improve on it, do not return it unchanged):
+```python
+class MyLocalizer(ScoredStrategy):
+    def source_score(self, node, graph, observation, selected):
+        if observation[node] < 0.5:
+            return float("-inf")            # never infected, cannot be a source
+        neighbours = graph.out_neighbors(node) + graph.in_neighbors(node)
+        infected_around = sum(1 for other in neighbours if observation[other] >= 0.5)
+        # Penalize a candidate an already-named source sits next to
+        overlap = sum(1 for other in neighbours if other in selected)
+        return infected_around - 3.0 * overlap
+```
+"""
+
+
 def _scored_system(task: TaskSpec | None) -> str:
+    if task is not None and task.recovers:
+        return _scored_localization_system(task)
+
     contains = task is not None and task.contains
     problem = (
         "a Critical Node Detection algorithm" if contains else "an Influence Maximization algorithm"
@@ -638,9 +1023,12 @@ def build_system_prompt(
     horizon_note = ""
     remove_note = remove_semantics_notes[spent]
     contains = task is not None and task.contains
+    recovers = task is not None and task.recovers
 
     if task is not None:
-        if task.adaptive:
+        if recovers:
+            horizon_note = localization_timing_note
+        elif task.adaptive:
             horizon_note = adaptive_timing_note
         elif contains:
             horizon_note = containment_timing_note
@@ -651,8 +1039,9 @@ def build_system_prompt(
 
         remove_note = remove_semantics_notes[task.remove_semantics]
 
-    # Only worth stating when the strategy may actually emit the op
-    if "remove_node" not in (task.allowed_ops if task is not None else ()):
+    # Only worth stating when the strategy may actually emit the op, which an
+    # inverse task never does
+    if recovers or "remove_node" not in (task.allowed_ops if task is not None else ()):
         remove_note = ""
 
     if strategy_mode == "scored":
@@ -664,17 +1053,28 @@ def build_system_prompt(
             f"use one_shot or evolve"
         )
 
-    # evolve generates plan_horizon strategies under the same contract as one_shot
-    resolved = "one_shot" if method == "evolve" else method
+    # The CONTRACT is decided by the task, not by the method: `evolve` is a
+    # population search over programs, and what those programs implement is
+    # plan_horizon on an intervention task and localize on an inverse one. `method`
+    # only picks which body describes the outer loop.
+    if recovers:
+        resolved = "localize"
+    else:
+        # evolve generates plan_horizon strategies under the same contract as one_shot
+        resolved = "one_shot" if method == "evolve" else method
+
     base = _common_rules(task) + method_bodies[resolved]
 
     # Worked programs, matched to the family: the IM exemplars emit add_node,
-    # which a containment task REJECTS, so showing them would cost the search its
-    # first iteration on a repair turn
-    if resolved == "one_shot":
+    # which a containment task REJECTS and an inverse task has no use for at all,
+    # so showing the wrong set would cost the search its first iteration on a
+    # repair turn for a contract nobody asked for
+    if resolved == "localize":
+        base += localization_exemplars
+    elif resolved == "one_shot":
         base += containment_exemplars if contains else one_shot_exemplars
 
-    if method in ("one_shot", "evolve", "adaptive"):
+    if resolved == "localize" or method in ("one_shot", "evolve", "adaptive"):
         return base + remove_note + horizon_note
 
     return base + remove_note
@@ -753,7 +1153,21 @@ Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
 no explanation."""
 
 
+localization_routing_system = """\
+You are an algorithm-selection router for Source Localization.
+You will be given a task, a graph description, a summary of the cascades to invert,
+and a menu of classical source-localization algorithms. Each takes the observed
+diffusion state and returns the nodes it believes STARTED the cascade. Pick the
+single one most likely to MAXIMIZE F1 against the true sources on these instances.
+
+Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+no explanation."""
+
+
 def build_routing_system(task: TaskSpec | None = None) -> str:
+    if task is not None and task.recovers:
+        return localization_routing_system
+
     return (
         containment_routing_system
         if task is not None and task.contains
@@ -762,20 +1176,25 @@ def build_routing_system(task: TaskSpec | None = None) -> str:
 
 
 def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
-    budget_unit = "max removals total" if task.contains else "max seeds total"
-    objective_line = (
-        "MINIMIZE the final infected count (lower is better)"
-        if task.contains
-        else task.objective
-    )
-    menu = build_dismantling_menu() if task.contains else build_algorithm_menu()
+    if task.recovers:
+        budget_unit = "max sources to name per episode"
+        objective_line = "MAXIMIZE F1 against the true source set (higher is better)"
+        menu = build_localization_menu()
+    else:
+        budget_unit = "max removals total" if task.contains else "max seeds total"
+        objective_line = (
+            "MINIMIZE the final infected count (lower is better)"
+            if task.contains
+            else task.objective
+        )
+        menu = build_dismantling_menu() if task.contains else build_algorithm_menu()
 
     return f"""\
 TASK: {task.task} — {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
-{build_outbreak_block(task)}
+{build_outbreak_block(task)}{build_observation_block(task)}
 {build_graph_profile(graph)}
 
 ALGORITHM MENU:
@@ -861,6 +1280,7 @@ def build_feedback_prompt(
     incumbent_script: str | None = None,
     incumbent_reward: float | None = None,
     delta_report: str | None = None,
+    objective: str = "final spread",
 ) -> str:
     """
     `script` is the code that produced this reward; `incumbent_script` is the
@@ -890,20 +1310,20 @@ def build_feedback_prompt(
             f"```python\n{incumbent_script}\n```\n"
         )
         instruction = (
-            "EDIT THE BEST SCRIPT ABOVE to increase final spread. The attempt that "
-            "just ran is shown so you can see what did not work — do not build on "
-            "it. Change what the diagnostics say is weak and keep what is working."
+            f"EDIT THE BEST SCRIPT ABOVE to improve {objective}. The attempt that "
+            f"just ran is shown so you can see what did not work — do not build on "
+            f"it. Change what the diagnostics say is weak and keep what is working."
         )
     else:
         target_text = ""
         instruction = (
-            "That attempt is your best so far. EDIT it to increase final spread — "
-            "change what the diagnostics say is weak and keep what is working, "
-            "rather than starting a new design from scratch."
+            f"That attempt is your best so far. EDIT it to improve {objective} — "
+            f"change what the diagnostics say is weak and keep what is working, "
+            f"rather than starting a new design from scratch."
         )
 
     return f"""\
-Your previous strategy achieved final spread (reward) = {reward}.
+Your previous strategy achieved {objective} (reward) = {reward}.
 {delta_text}Trajectory summary: {summary}{reference_text}{error_text}{credit_text}{script_text}{target_text}
 {instruction}
 Reply with one ```python block containing the complete updated script."""

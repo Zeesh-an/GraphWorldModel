@@ -11,11 +11,12 @@ import numpy as np
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
-from coding_agent.executor import StrategyError
+from coding_agent.executor import StrategyError, _namespace
 from coding_agent.methods.base import _AdaptiveAnchor, evaluate_strategy
 from coding_agent.prompts import build_round_block, build_system_prompt
 from coding_agent.tools.adaptive_algorithms import (
     adapt_degree,
+    mc_adaptive_algorithms,
     adapt_degree_discount,
     adaptive_algorithms,
     static_split,
@@ -39,6 +40,7 @@ from coding_agent.types import (
 )
 from data.wm_graphs import kronecker_graph, make_synthetic_bundle
 from pipeline.conditions import adaptivity_gaps, parse_arm
+from pipeline.run import expand_baselines
 
 
 def batches_sum_to_the_budget() -> None:
@@ -635,6 +637,57 @@ def adaptive_runs_under_the_world_model_loop_order() -> None:
     assert union.cost["campaigns"] == 3
 
 
+def the_expensive_adaptive_baseline_is_metered() -> None:
+    """
+    adapt_greedy must be blocked from GENERATED code and runnable as a baseline.
+
+    It re-simulates every candidate on a private simulator, so a generated act()
+    calling it spends thousands of episodes that `episodes_used` never sees. That
+    is the same honesty hole executor.py documents at length for celf and
+    vanilla_greedy, and it stayed open until this was wired: the
+    mc_adaptive_algorithms constant existed but nothing read it.
+    """
+    namespace = _namespace("free", allow_mc_algorithms=False)
+
+    try:
+        namespace["adaptive_algorithms"].adapt_greedy(None, None, 1)
+    except StrategyError as error:
+        assert "adapt_greedy" in str(error), error
+    else:
+        raise AssertionError("adapt_greedy must be blocked from generated scripts")
+
+    # The cheap policies stay callable: blocking them would delete the ideas the
+    # prompt is trying to hand over
+    for name in ("adapt_epic", "adapt_degree_discount", "static_split"):
+        assert name not in mc_adaptive_algorithms, name
+
+    # ...and a declared --baselines arm IS the expensive algorithm, so that path
+    # must still run it
+    allowed = _namespace("free", allow_mc_algorithms=True)
+    assert callable(allowed["adaptive_algorithms"].adapt_greedy)
+
+
+def published_baselines_cannot_cross_tasks() -> None:
+    """An IM repo in an adaptive table would be a category error, not a datapoint."""
+    assert expand_baselines(("external:adaptiveim",), "adaptive_online_im") == [
+        "external:adaptiveim"
+    ]
+    assert expand_baselines(("external:moeim",), "influence_maximization") == [
+        "external:moeim"
+    ]
+
+    try:
+        expand_baselines(("external:moeim",), "adaptive_online_im")
+    except ValueError as error:
+        assert "influence_maximization" in str(error), error
+    else:
+        raise AssertionError("an IM baseline must not join an adaptive sweep")
+
+    # The `all` aliases already filtered; every adaptive repo is unwired, so this
+    # is empty and must stay honest about that rather than expanding to the IM set
+    assert expand_baselines(("all-external",), "adaptive_online_im") == []
+
+
 def the_new_synthetic_families_generate() -> None:
     plc = make_synthetic_bundle("powerlaw_cluster", index=0, num_nodes=200, seed=1)
     assert plc.nx_graph.number_of_nodes() == 200
@@ -676,6 +729,8 @@ if __name__ == "__main__":
         multi_round_unions_separate_campaigns,
         the_spread_curve_makes_sigma_s_t_readable,
         adaptive_runs_under_the_world_model_loop_order,
+        the_expensive_adaptive_baseline_is_metered,
+        published_baselines_cannot_cross_tasks,
         the_new_synthetic_families_generate,
     ]
 

@@ -121,6 +121,7 @@ Node ops set the `act_add` / `act_remove` input channels; edge ops set the `act_
 
 | `--dataset`       | Nodes     | Edges     | Type                              | Node features                       |
 | ----------------- | --------- | --------- | --------------------------------- | ----------------------------------- |
+| `dolphins`        | 62        | 159       | Undirected (dolphin associations) | log(1 + degree)                     |
 | `jazz`            | 198       | 2,742     | Undirected (collaborations)       | log(1 + degree)                     |
 | `email_eu_core`   | 1,005     | 24,929    | Directed (emails)                 | log(1 + total degree) · **42 department labels** |
 | `netscience`      | 1,589     | 2,742     | Undirected (coauthorship)         | log(1 + degree)                     |
@@ -131,6 +132,7 @@ Node ops set the `act_add` / `act_remove` input channels; edge ops set the `act_
 | `wiki_vote`       | 7,115     | 103,689   | Directed (adminship votes)        | log(1 + total degree)               |
 | `lastfm_asia`     | 7,624     | 27,806    | Undirected (mutual follows)       | log(1 + degree) · **18 country labels** |
 | `nethept`         | 15,229    | 62,752    | Directed (coauthorship, both arcs)| log(1 + total degree)               |
+| `deezer`          | 47,538    | 222,887   | Undirected (friendships, HU)      | log(1 + degree)                     |
 | `netphy`          | 37,154    | 174,161   | Undirected (coauthorship)         | log(1 + degree)                     |
 | `twitter`         | 81,306    | ≈1.3M     | Undirected (follows, symmetrized) | log(1 + degree)                     |
 | `digg`            | 116,893   | ≈2.6M     | Undirected (friendships)          | log(1 + degree)                     |
@@ -141,7 +143,9 @@ Undirected rows quote undirected edges; directed rows quote arcs. `cora_ml` is l
 
 The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what the current NDlib rollout + selector pipeline can simulate in reasonable time — they are targets for a future scalable-simulation pass, not day-one datasets.
 
-**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one.
+The table above is the IM core; `CLAUDE.md` lists every loader, including the twelve network-dismantling benchmarks `critical_node_detection` uses. `dolphins` and `deezer` were added for `source_localization`: Dolphins (62 / 159, in IVGD, GraphSL and the 2026 GNN benchmark) is the only graph that literature uses which no other task needed, and `deezer` is IVGD's scalability column — **the HUNGARY subgraph**, not the union, which is a version distinction its own paper does not make and the SNAP release does not force (see the loader docstring).
+
+**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one. [`research/critical_node_detection.md`](research/critical_node_detection.md) §6 and [`research/source_localization.md`](research/source_localization.md) §6 are the counterparts for the other two literatures, each with its own set of name collisions.
 
 ---
 
@@ -178,8 +182,10 @@ Two orthogonal axes — who designs the algorithm, and what feedback the designe
 | 4 | Agent + MC simulation | `evolve_free@monte_carlo` | LLM writes code | averaged simulator rollouts |
 | 5 | Agent + oracle dynamics | `evolve_free@oracle` | LLM writes code | true transition dynamics |
 | 6 | **Ours: agent + learned GWM** | `evolve_free@world_model` | LLM writes code | learned `f_θ` rollouts |
+| 7 | Published baseline | `external:<name>` | the original authors | none (our referee scores its output) |
+| 8 | Ablation: per-instance descent | `gradient_free@world_model` | fixed numerical procedure | gradients through a frozen `f_θ` |
 
-Conditions 3–6 hold the method fixed, so the **only** thing varying down that ladder is the inner-loop evaluator — which is what makes it a clean ablation. `@native` means the real simulator at `--native-mc-runs` episode(s) per candidate: model-free trial and error that pays real experience for every noisy number it gets back. Swap `evolve_free` for `one_shot_free`, `evolve_scored`, or any `<method>_<mode>` to run a different synthesis method down the same ladder.
+Conditions 3–6 hold the method fixed, so the **only** thing varying down that ladder is the inner-loop evaluator — which is what makes it a clean ablation. Conditions 7 and 8 sit outside it deliberately: 7 is somebody else's code and 8 is a different **method** (source localization's arm A, Adam on a relaxed source vector against a frozen world model), and folding either into one of the four evaluator cells would break exactly the ablation those cells exist to be. `@native` means the real simulator at `--native-mc-runs` episode(s) per candidate: model-free trial and error that pays real experience for every noisy number it gets back. Swap `evolve_free` for `one_shot_free`, `evolve_scored`, or any `<method>_<mode>` to run a different synthesis method down the same ladder.
 
 The synthesis method is `evolve`, not `one_shot`: both refine a program against the same feedback under the same LLM-call budget, but `evolve` edits the **population best** each generation while `one_shot` edits the latest attempt, so `one_shot` compounds a regression instead of rejecting it. Same cost, strictly better search.
 
@@ -275,22 +281,26 @@ Every run is scoped to a **graph task**. `pipeline/tasks.py` is the registry —
 python -m pipeline.run --dataset jazz                          # influence_maximization
 python -m pipeline.run --dataset ppi_yeast \
     --task critical_node_detection --compare                   # contain an outbreak
+python -m pipeline.run --dataset jazz \
+    --task source_localization --compare                       # recover the sources
 python -m pipeline.run --dataset jazz --run gcnii_ablation \
     --wm-model gcnii --n-layers 8                              # a second variant
 python -c "from pipeline.tasks import runnable_task_names; print(runnable_task_names())"
 ```
 
-**Three run today:** `influence_maximization`, `adaptive_online_im`, and `critical_node_detection`. The other ten are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
+**Four run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, and `source_localization`. The other nine are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
 
 ```
 $ python -m pipeline.run --dataset ba --task influence_blocking
 ValueError: task 'influence_blocking' is planned, not runnable by this pipeline.
 NDlib ships no competitive model ... See research/influence_blocking.md for the
 full analysis. Runnable today: ['adaptive_online_im', 'critical_node_detection',
-'influence_maximization']
+'influence_maximization', 'source_localization']
 ```
 
-The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it — it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
+The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, the budget sweep, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it — it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
+
+The three runnable **problem families** are further apart than a sign flip. A `maximize` task seeds a cascade, a `minimize` task fights one it did not start, and a **`recover`** task emits no action at all: `source_localization` hands the agent a graph and an observed diffusion state and asks which seed set produced it. That changes the CONTRACT, not just the objective — the generated program implements `localize(graph, observation, budget)` instead of `plan_horizon`, it is scored on F1 against the true sources, and the world model stops being the thing optimized against and becomes a subroutine the program calls through `self.predict_marginals(seeds)`. The four bindings of that one name ARE conditions 3–6. See [`research/source_localization.md`](research/source_localization.md) §2.3 for why the inversion and not the likelihood is the contribution, and `coding_agent/check_source_localization.py` for the runnable contract.
 
 Adding one is a registry entry plus whatever its `blocker` names — usually a head in `wm_model.py` and a simulator branch in `wm_simulator.py`. The stages, feature builder, encoders, collate, plots, and report are task-agnostic.
 

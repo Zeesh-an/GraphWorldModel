@@ -19,6 +19,7 @@ from coding_agent.tools import (
     adaptive_algorithms,
     algorithms,
     dismantling_algorithms,
+    localization_algorithms,
     primitives,
 )
 from coding_agent.types import ActionOp, GraphInfo, ScoredStrategy, State, Strategy
@@ -116,6 +117,22 @@ if _unknown_blocked:
         f"not in dismantling_algorithms; fix the list or the rename"
     )
 
+# Same rule on the source-localization side. `resim_greedy` falls back to a
+# PRIVATE NDlib estimator when it is not handed a forward oracle, so a generated
+# script calling it would bypass `real_env_episodes` exactly as `celf` does — and
+# a generated script has `self.predict_marginals`, which is the metered binding,
+# so nothing is lost by blocking it.
+mc_blocked_localization = localization_algorithms.mc_localization_algorithms
+
+_unknown_blocked = set(mc_blocked_localization) - set(
+    localization_algorithms.localization_algorithms
+)
+if _unknown_blocked:
+    raise ValueError(
+        f"mc_localization_algorithms names {sorted(_unknown_blocked)}, which are "
+        f"not in localization_algorithms; fix the list or the rename"
+    )
+
 
 class StrategyError(RuntimeError):
     """A generated script failed to parse, execute, or expose a valid Strategy."""
@@ -188,11 +205,17 @@ def _blocked_algorithm(name: str, *_args, **_kwargs) -> None:
     Raising here rather than letting the attribute be missing turns a wasted
     refinement iteration into a repair turn that says what to do instead.
     """
+    blocked = (
+        adaptive_algorithms.mc_adaptive_algorithms
+        if name in adaptive_algorithms.mc_adaptive_algorithms
+        else mc_blocked_algorithms
+    )
+
     raise StrategyError(
-        f"algorithms.{name} is not available: it estimates spread by simulating "
+        f"{name} is not available: it estimates spread by simulating "
         f"the cascade for every candidate node, which bypasses the metered "
         f"evaluator and dominates wall clock. Blocked: "
-        f"{', '.join(mc_blocked_algorithms)}. Use a structural or RIS-based "
+        f"{', '.join(blocked)}. Use a structural or RIS-based "
         f"algorithm (e.g. degree_discount, imm, tim, voterank, collective_influence) "
         f"or write your own selection logic."
     )
@@ -206,6 +229,17 @@ def _blocked_dismantler(name: str, *_args, **_kwargs) -> None:
         f"{', '.join(mc_blocked_dismantling)}. Use a structural dismantler "
         f"(adaptive_degree, corehd, collective_influence_removal, "
         f"explosive_immunization, netshield) or write your own selection logic."
+    )
+
+
+def _blocked_localizer(name: str, *_args, **_kwargs) -> None:
+    raise StrategyError(
+        f"localization_algorithms.{name} is not available: it re-simulates every "
+        f"candidate on its own private simulator, which bypasses the metered "
+        f"evaluator. Blocked: {', '.join(mc_blocked_localization)}. You already "
+        f"have the metered version — call `self.predict_marginals(seeds)` and "
+        f"write the search around it yourself, which is also the only way its "
+        f"cost lands in this arm's forward-call count."
     )
 
 
@@ -242,6 +276,20 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         for name, function in algorithms.algorithms.items()
     }
 
+    # Same treatment for the per-round policies: adapt_greedy re-simulates every
+    # candidate on a PRIVATE simulator, so a generated act() calling it would
+    # spend thousands of episodes that episodes_used never sees. Exactly the
+    # honesty problem documented for celf above, one task over.
+    callable_adaptive = {
+        name: (
+            function
+            if allow_mc_algorithms
+            or name not in adaptive_algorithms.mc_adaptive_algorithms
+            else partial(_blocked_algorithm, name)
+        )
+        for name, function in adaptive_algorithms.adaptive_algorithms.items()
+    }
+
     return {
         "ActionOp": ActionOp,
         "State": State,
@@ -251,9 +299,7 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         # Per-round policies for adaptive IM. Present under every task: a
         # non-adaptive arm simply never has a round to call one from, and hiding
         # them per task would mean the namespace no longer matches the prompt.
-        "adaptive_algorithms": SimpleNamespace(
-            **adaptive_algorithms.adaptive_algorithms
-        ),
+        "adaptive_algorithms": SimpleNamespace(**callable_adaptive),
         # Node-REMOVAL selectors for critical node detection, on the same terms:
         # present under every task, and the MC-heavy member blocked unless
         # --allow-mc-algorithms, exactly like `celf` on the seeding side
@@ -266,6 +312,24 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
                 )
                 for name, function in dismantling_algorithms.dismantling_algorithms.items()
             }
+        ),
+        # SOURCE-SET inference for source localization, on the same terms again.
+        # These are the published methods a localize() program is being compared
+        # against, so hiding them would ask the model to reinvent LPSI.
+        "localization_algorithms": SimpleNamespace(
+            **{
+                name: (
+                    function
+                    if allow_mc_algorithms or name not in mc_blocked_localization
+                    else partial(_blocked_localizer, name)
+                )
+                for name, function in localization_algorithms.localization_algorithms.items()
+            }
+        ),
+        # ...and their per-node score vectors, which is what an AUC-aware program
+        # returns from source_scores() and what a hybrid rule combines
+        "localization_scorers": SimpleNamespace(
+            **localization_algorithms.localization_scorers
         ),
         "primitives": primitives,
         # Containment helpers a canned dismantling baseline needs (removal_plan
@@ -316,24 +380,32 @@ def build_strategy(
             # Identity check, not name: a script may legally name its class "Strategy"
             if isinstance(value, type)
             and value is not Strategy
-            and (hasattr(value, "plan_horizon") or hasattr(value, "act"))
+            and (
+                hasattr(value, "plan_horizon")
+                or hasattr(value, "act")
+                or hasattr(value, "localize")
+            )
         ]
 
         if not candidates:
             raise StrategyError(
-                "No Strategy subclass with plan_horizon()/act() found in the script."
+                "No Strategy subclass with plan_horizon()/act()/localize() found "
+                "in the script."
             )
 
     strategy_class = candidates[-1]
 
-    if (
-        strategy_mode == "scored"
-        and strategy_class.plan_horizon is not ScoredStrategy.plan_horizon
-    ):
-        raise StrategyError(
-            "scored mode: plan_horizon is the fixed harness and may not be "
-            "overridden — override only score() and/or schedule()."
-        )
+    # Both harnesses are fixed in scored mode: plan_horizon for the intervention
+    # tasks, localize for the inverse one. Overriding either turns scored mode back
+    # into free mode, which is the one thing the condition exists to prevent.
+    for fixed in ("plan_horizon", "localize"):
+        if strategy_mode == "scored" and getattr(strategy_class, fixed) is not getattr(
+            ScoredStrategy, fixed
+        ):
+            raise StrategyError(
+                f"scored mode: {fixed} is the fixed harness and may not be "
+                f"overridden — override only score(), schedule() or source_score()."
+            )
     try:
         strategy = strategy_class()
     except Exception as error:

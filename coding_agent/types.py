@@ -10,7 +10,7 @@ from typing import Callable, Iterable, Protocol
 import numpy as np
 
 from data.wm_simulator import ActionOp, State, spent, valid_action_ops
-from pipeline.tasks import maximize, minimize
+from pipeline.tasks import maximize, minimize, recover
 
 # ActionFn is the interface between strategies and environments (every environment's rollout() consumes one of these; every method produces one):
 # ActionFn is a function mapping (current state, timestep) -> action bag for that timestep
@@ -177,6 +177,27 @@ class TaskSpec:
     # Multi-round IM (§1.5): r SEPARATE campaigns of k seeds each, scored on the
     # union of what they activate. 1 = a single campaign, i.e. every other task.
     campaigns: int = 1
+    # Source localization: the program INVERTS the transition instead of choosing
+    # an intervention, so it writes localize() rather than plan_horizon(), it is
+    # scored on F1 against the true source set, and no action is ever emitted.
+    # From the task registry's `objective == recover`.
+    objective_kind: str = maximize
+    # The labelled (G, y, x) episodes one reward evaluation sweeps over, as
+    # coding_agent.localization.SourceInstance. Carried on the task for the same
+    # reason `outbreak` is: it is instance data every arm must face identically,
+    # and every call site that has a task already has it. Empty for every task
+    # that does not invert.
+    instances: tuple = ()
+    # Where each instance's k comes from — `episode` (its own source count, the
+    # published given-k convention) or `sweep` (the pipeline's k, for §8.5.1's
+    # source-fraction axis)
+    source_budget_mode: str = "episode"
+    # Whether `predict_marginals` is bound to a real evaluator for this arm. False
+    # is the `@native` condition of research/source_localization.md §2.4.3: the
+    # program has NO forward model and must be a pure structural heuristic, which
+    # is the arm that answers "is a forward model in the search loop worth
+    # anything at all". Ignored by every task that does not invert.
+    forward_model: bool = True
     # Drives the edit stream's schedule. Carried on the task rather than read
     # from the environment so the same seed produces the same graph history for
     # every arm, which is what makes a cross-arm comparison under a stream mean
@@ -191,6 +212,18 @@ class TaskSpec:
     def contains(self) -> bool:
         """True when the planner is fighting a cascade it did not start."""
         return self.sense == minimize
+
+    @property
+    def recovers(self) -> bool:
+        """
+        True when the program infers a hidden cause instead of choosing an action.
+
+        The third problem family, and the one that changes the CONTRACT rather than
+        only the sign: no rollout, no action bag, no budget spent on the graph —
+        `localize(graph, observation, budget)` returning the nodes that started the
+        cascade, scored on F1 against the truth.
+        """
+        return self.objective_kind == recover
 
     @property
     def streaming(self) -> bool:
@@ -237,20 +270,46 @@ class Strategy(Protocol):
     # Methods 2 (Per-step algorithm generation) and 3 (Windowed algorithm generation)
     def act(self, state: State, graph: GraphInfo, timestep: int) -> list[ActionOp]: ...
 
+    # Inverse tasks (source localization). Not an intervention: given the graph and
+    # an observed diffusion state `observation` (P(infected) per node, in [0, 1]),
+    # return the `budget` node ids that STARTED the cascade. The harness binds
+    # `self.predict_marginals(seeds) -> np.ndarray` before calling this, which is
+    # the forward oracle the program may query; under the @native condition that
+    # attribute raises instead (research/source_localization.md §2.4).
+    def localize(
+        self, graph: GraphInfo, observation: np.ndarray, budget: int
+    ) -> list[int]: ...
+
+    # Optional companion to localize(). F1 scores the SET, AUC scores the RANKING,
+    # so a program that exposes a per-node score vector gets a true AUC; one that
+    # does not gets an AUC derived from the ORDER of the list localize() returned,
+    # which leaves every un-nominated node tied. Which rule was used is recorded
+    # per result rather than silently averaged in.
+    def source_scores(
+        self, graph: GraphInfo, observation: np.ndarray
+    ) -> np.ndarray: ...
+
 
 class ScoredStrategy:
     """
-    Scored-mode contract: plan_horizon is a fixed greedy harness the agent cannot
-    override — generated code may only override score() and/or schedule(). This
-    forces edits to the algorithm's internals instead of free-form programs or
-    composition over the library.
+    Scored-mode contract: plan_horizon and localize are fixed harnesses the agent
+    cannot override — generated code may only override score(), schedule(), or
+    source_score(). This forces edits to the algorithm's internals instead of
+    free-form programs or composition over the library.
+
+    The inverse-task half (`source_score` + the fixed top-k `localize`) is the
+    analogue described in research/source_localization.md §2.4.2, and it makes the
+    search space directly comparable to the classical methods: LPSI, the
+    Comin-Costa centralities and rumor centrality are all exactly node-scoring
+    functions over the observed state.
     """
 
-    # Both are stamped by methods.base.attach_context before plan_horizon runs.
+    # All three are stamped by methods.base.attach_context before the harness runs.
     # Defaulted here so the class is usable standalone (tests, a bare harness) and
     # so a seeding task needs no context at all.
     budget_op: str = "add_node"
     outbreak: tuple = ()
+    predict_marginals: Callable | None = None
 
     def score(self, node: int, selected: tuple, graph: GraphInfo) -> float:
         return float(graph.degree(node))
@@ -295,3 +354,73 @@ class ScoredStrategy:
         plan += [[] for _ in range(horizon + 1 - len(plan))]
 
         return plan
+
+    def source_score(
+        self,
+        node: int,
+        graph: GraphInfo,
+        observation: np.ndarray,
+        selected: tuple,
+    ) -> float:
+        """
+        How likely `node` is to have STARTED the observed cascade. Higher = named sooner.
+
+        The default is the Comin-Costa floor: degree within the infected subgraph.
+        `selected` is the tuple of sources already named, so a rule can penalize a
+        candidate whose neighbourhood an earlier pick already explains.
+        """
+        if observation[node] < 0.5:
+            return float("-inf")
+
+        return float(
+            sum(1 for other in graph.out_neighbors(node) if observation[other] >= 0.5)
+        )
+
+    def source_scores(
+        self, graph: GraphInfo, observation: np.ndarray
+    ) -> np.ndarray:
+        """
+        The whole score vector at the first pick, so scored mode gets a REAL AUC.
+
+        Free for the agent — it wrote `source_score`, and this only evaluates it
+        once per node with an empty `selected`. Non-finite entries (the natural way
+        a rule rules a node out) are pushed below the lowest finite score rather
+        than left as -inf, so the ranking stays total.
+        """
+        scores = np.array(
+            [
+                float(self.source_score(node, graph, observation, ()))
+                for node in range(graph.num_nodes)
+            ],
+            dtype=np.float64,
+        )
+        finite = scores[np.isfinite(scores)]
+        floor = float(finite.min()) - 1.0 if finite.size else 0.0
+
+        return np.where(np.isfinite(scores), scores, floor)
+
+    def localize(
+        self, graph: GraphInfo, observation: np.ndarray, budget: int
+    ) -> list[int]:
+        """Fixed top-k harness over source_score; not overridable in scored mode."""
+        selected = []
+
+        for _ in range(min(budget, graph.num_nodes)):
+            best_node, best_score = -1, float("-inf")
+
+            for node in range(graph.num_nodes):
+                if node in selected:
+                    continue
+
+                node_score = float(
+                    self.source_score(node, graph, observation, tuple(selected))
+                )
+                if node_score > best_score:
+                    best_node, best_score = node, node_score
+
+            if best_node < 0:
+                break
+
+            selected.append(best_node)
+
+        return selected

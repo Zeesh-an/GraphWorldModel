@@ -183,7 +183,7 @@ def run_external_baseline(
     elapsed = time.perf_counter() - start
 
 
-    if completed.returncode != 0:
+    if completed.returncode != 0 and not spec.allow_nonzero_exit:
         raise BaselineError(
             f"baseline {name!r} exited {completed.returncode}. Logs in {work_dir}. "
             f"output tail:\n{completed.stdout[-1500:]}"
@@ -246,19 +246,24 @@ def run_external_baseline(
     }
 
 
-def seed_script(seeds: list[int]) -> str:
+def seed_script(seeds: list[int], budget_op: str = "add_node") -> str:
     """
-    Wrap a seed set as a canned Strategy.
+    Wrap an external repo's node set as a canned Strategy.
 
     This is why external baselines need no special result format: the canned
     script flows through the identical executor, validation, rollout, MC referee,
     and results JSON that every other arm uses.
+
+    `budget_op` is what the TASK budgets. A dismantling repo returns a set to
+    REMOVE, not to seed, and emitting it as `add_node` is rejected by
+    `validate_actions` — so condition 7 would fail on every containment task
+    while looking like a bad generated program rather than a wiring bug.
     """
     return f"""\
 class ExternalBaseline(Strategy):
     def plan_horizon(self, graph, budget, horizon):
-        seeds = {seeds!r}[:budget]
-        return [[ActionOp("add_node", node) for node in seeds]] + [
+        picks = [n for n in {seeds!r} if n not in self.outbreak][:budget]
+        return [[ActionOp({budget_op!r}, node) for node in picks]] + [
             [] for _ in range(horizon)
         ]
 """

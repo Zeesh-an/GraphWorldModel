@@ -1,15 +1,22 @@
 """
-Metric suite + persistence baseline for the world model, plus the structural
-connectivity metrics a critical-node-detection arm is described by.
+Metric suite + persistence baseline for the world model, plus the per-task metric
+primitives an arm is described by.
 
-The two halves answer different questions and must not be confused. Everything
-above `connectivity_profile` scores the LEARNED TRANSITION against the simulator.
-Everything below it is computed exactly by BFS on the residual graph and is never
-a training target — `research/critical_node_detection.md` §2.1 argues at length
-that a k-layer message-passing model provably cannot represent giant-component
-membership on a diameter-46 graph, and §8.3 therefore puts the connectivity
-functionals in the report as descriptive context beside the diffusion number that
-the arm was actually optimized for.
+Three blocks, answering three different questions; confusing them is how a table
+ends up reporting one thing under another's name.
+
+  * Everything above `roc_auc` scores the LEARNED TRANSITION against the
+    simulator — one-step forward prediction.
+  * `roc_auc` through `resimulation_error` score an INVERSE prediction: a
+    recovered source set against the true one, in the PR / RE / F1 / AUC form the
+    source-localization literature reports (`research/source_localization.md` §8.1).
+  * Everything from `gcc_threshold` down is computed exactly by BFS on the
+    residual graph and is never a training target —
+    `research/critical_node_detection.md` §2.1 argues at length that a k-layer
+    message-passing model provably cannot represent giant-component membership on
+    a diameter-46 graph, and §8.3 therefore puts the connectivity functionals in
+    the report as descriptive context beside the diffusion number that the arm was
+    actually optimized for.
 """
 
 import numpy as np
@@ -95,6 +102,120 @@ def persistence_baseline(
     return score_predictions(
         infected_t, frontier_t, y_inf, y_fr, infected_t, frontier_t
     )
+
+
+def roc_auc(scores: np.ndarray, target: np.ndarray) -> float:
+    """
+    ROC AUC by the Mann-Whitney rank statistic, with proper tie handling.
+
+    Ties matter more here than anywhere else in this file. Source localization is
+    scored over ALL of V with a positive class of 1-10% of nodes, and an arm that
+    supplies no per-node scores gets a rank-derived vector in which every
+    un-nominated node ties — so an implementation that broke ties arbitrarily
+    would report a number that depended on node ordering.
+    """
+    scores = np.asarray(scores, dtype=np.float64)
+    positive = np.asarray(target).astype(bool)
+    n_positive = int(positive.sum())
+    n_negative = int(scores.size - n_positive)
+
+    if n_positive == 0 or n_negative == 0:
+        return float("nan")
+
+    order = np.argsort(scores, kind="mergesort")
+    ranks = np.empty(scores.size, dtype=np.float64)
+    ranks[order] = np.arange(1, scores.size + 1, dtype=np.float64)
+
+    # Average the ranks inside each tie block, which is what makes a fully tied
+    # score vector score exactly 0.5 instead of whatever the sort happened to do
+    sorted_scores = scores[order]
+    start = 0
+    for position in range(1, scores.size + 1):
+        if position == scores.size or sorted_scores[position] != sorted_scores[start]:
+            if position - start > 1:
+                ranks[order[start:position]] = ranks[order[start:position]].mean()
+            start = position
+
+    return float(
+        (ranks[positive].sum() - n_positive * (n_positive + 1) / 2.0)
+        / (n_positive * n_negative)
+    )
+
+
+def localization_metrics(
+    predicted: list[int],
+    sources: list[int],
+    num_nodes: int,
+    scores: np.ndarray | None = None,
+) -> dict[str, float]:
+    """
+    PR / RE / F1 / AUC / ACC for one recovered source set — the SL literature's set.
+
+    Node-level binary classification over V with the source set as the positive
+    class (research/source_localization.md §8.1). Four notes on the columns, each
+    one a trap that file names explicitly:
+
+      * **F1 is the headline.** SL-VAE calls it "the most commonly used", IVGD "the
+        most important metric for performance evaluation" [both verified].
+      * **ACC is near-useless alone.** IVGD's Table 3 has GCNSI at `ACC 0.8840` with
+        `F1 0.0218` on Network Science, because sources are a tiny minority class.
+        It is reported only beside F1.
+      * **AUC needs a RANKING, not a set.** When `scores` is None the ranking is
+        derived from the returned list's order, which leaves every un-nominated
+        node tied — a real, monotone number, but not the continuous AUC SL-VAE
+        reports. Which rule an arm used is recorded per result.
+      * **`RE` is an overloaded column name in this literature** — Recall in
+        SL-Diff and SIDSL, re-simulated error elsewhere (§8.1). Here `recall` is
+        recall, and the re-simulated error has its own key.
+    """
+    truth = np.zeros(num_nodes, dtype=bool)
+    truth[list(sources)] = True
+
+    prediction = np.zeros(num_nodes, dtype=bool)
+    prediction[list(predicted)] = True
+
+    true_positive = int(np.logical_and(prediction, truth).sum())
+    precision = true_positive / len(predicted) if predicted else 0.0
+    recall = true_positive / len(sources) if len(sources) else 0.0
+    f1 = (
+        2.0 * precision * recall / (precision + recall)
+        if precision + recall > 0
+        else 0.0
+    )
+
+    if scores is None:
+        # Rank-derived: 1/(rank + 1) down the returned list, 0 for everything else
+        scores = np.zeros(num_nodes, dtype=np.float64)
+        for rank, node in enumerate(predicted):
+            scores[int(node)] = 1.0 / (rank + 1.0)
+
+    return {
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+        "accuracy": float((prediction == truth).mean()),
+        "auc": roc_auc(np.asarray(scores, dtype=np.float64), truth),
+        "n_predicted": float(len(predicted)),
+        "n_sources": float(len(sources)),
+        "true_positive": float(true_positive),
+    }
+
+
+def resimulation_error(predicted_marginal: np.ndarray, observation: np.ndarray) -> float:
+    """
+    Mean squared error between re-simulating the RECOVERED sources and the observed y.
+
+    The metric this literature should report and does not: §11 records that no
+    surveyed paper reports a genuine re-simulated error, so this column is
+    self-contained and must not be presented as a cross-paper comparison. It is
+    also NOT the outer loop's reward — diffusion is many-to-one, so a program that
+    systematically recovers the wrong member of an equivalence class scores well
+    here and badly on F1, which is exactly why §2.3.3 selects on F1.
+    """
+    predicted_marginal = np.asarray(predicted_marginal, dtype=np.float64)
+    observation = np.asarray(observation, dtype=np.float64)
+
+    return float(np.mean((predicted_marginal - observation) ** 2))
 
 
 # Fraction of N the giant component must fall below for the graph to count as

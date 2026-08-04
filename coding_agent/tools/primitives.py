@@ -181,6 +181,53 @@ def mc_simulate_spread(
     return float(np.mean(totals))
 
 
+def predict_marginals_mc(
+    graph: GraphInfo,
+    seeds: list[int],
+    diffusion_model: str,
+    mc_runs: int = 50,
+    horizon: int = 20,
+    seed: int = 0,
+) -> np.ndarray:
+    """
+    Per-node P(infected at the end) from `seeds`, over mc_runs rollouts. Shape (N,).
+
+    The vector-valued twin of `mc_simulate_spread`: the same call, returning the
+    per-node marginal rather than its sum. That vector is what an INVERSE problem
+    needs — source localization compares a hypothesis's predicted marginal against
+    the observed one, and the sum throws away exactly the spatial information the
+    comparison runs on (research/source_localization.md §2.4.3).
+
+    This is the raw classical estimator on its own private NDlib simulator, so it
+    is invisible to `MonteCarloEnvironment.episodes_used`. A generated program gets
+    the METERED binding instead, as `self.predict_marginals`, which routes through
+    whichever evaluator its arm was assigned.
+    """
+    marginals = np.zeros(graph.num_nodes, dtype=np.float64)
+
+    if not seeds:
+        return marginals
+
+    rng = np.random.default_rng(seed)
+    seed_bag = [ActionOp("add_node", int(node)) for node in seeds]
+
+    for _ in range(mc_runs):
+        simulator = build_simulator(
+            graph, diffusion_model, seed=int(rng.integers(seed_upper_bound))
+        )
+        state = simulator.advance(seed_bag)
+
+        for _ in range(horizon):
+            if not state.frontier:
+                break
+
+            state = simulator.advance([])
+
+        marginals[list(state.infected)] += 1.0
+
+    return marginals / mc_runs
+
+
 def mc_simulate_containment(
     graph: GraphInfo,
     outbreak: list[int],
