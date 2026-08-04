@@ -368,7 +368,7 @@ def netsleuth(
     """
     NETSLEUTH (ICDM 2012): submatrix-Laplacian eigenvector, seeds picked by deflation.
 
-    ⚠️ **The MDL half of the paper is not implemented.** NETSLEUTH's headline
+    Warning: **The MDL half of the paper is not implemented.** NETSLEUTH's headline
     contribution is that it INFERS the number of sources, by encoding the source
     set plus the ripple that grows from it and picking the `k` that minimizes total
     description length. This harness is given `k` (§2.4.1: `budget` is the source
@@ -586,7 +586,7 @@ def ojc(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[i
     Built for PARTIAL observation, which is why its candidate set is the infected
     nodes plus their neighbours rather than the infected nodes alone.
 
-    ⚠️ **The cover here is GREEDY, tie-broken by Jordan centrality.** The paper
+    Warning: **The cover here is GREEDY, tie-broken by Jordan centrality.** The paper
     solves for an optimal cover and proves optimality on tree-like graphs; this is
     the standard greedy set-cover approximation, made sequential so it returns a
     ranked set of exactly `budget` sources. It is also run under FULL observation,

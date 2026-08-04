@@ -58,7 +58,7 @@ Two negative results motivated it. Salganik, Dodds & Watts (Science 2006) showed
 
 ## 2. Fit with our methodology
 
-**Status: ⚠️ moderate fit — and the reason matters more than the verdict.**
+**Status: Warning: moderate fit — and the reason matters more than the verdict.**
 
 | Element          | How cascade prediction maps onto `f_θ(G, s_t, a_t) → s_{t+1}`                                                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -115,9 +115,9 @@ Extract hand-crafted features from the observed prefix, feed a linear model, ran
 | Method | Year | Venue | Idea | Paper | Code |
 | ------ | ---- | ----- | ---- | ----- | ---- |
 | **Szabo & Huberman (S&H)** | 2008/2010 | CACM | The origin: `log P(t_p)` is near-linear in `log P(t_o)`. One feature, one line. Still the baseline every paper calls "Feature-S&H". | [arXiv 0811.0405](https://arxiv.org/abs/0811.0405) | no public code found |
-| **Kupavskii et al.** | 2012 | CIKM | Retweet-cascade size over time from user/flow/temporal features; introduced the "predict at fixed elapsed time" protocol | [ACM 10.1145/2396761.2398634](https://dl.acm.org/doi/10.1145/2396761.2398634) ⚠️ ACM blocks `curl` (403 with and without browser UA); resolves in a browser | no public code found |
-| **Cui et al.** | 2013 | KDD | "Cascading outbreak prediction" — selects a small set of *sensor* nodes whose early activation predicts outbreak; a structural, not temporal, view | [ACM 10.1145/2487575.2487639](https://dl.acm.org/doi/10.1145/2487575.2487639) ⚠️ ACM 403 to `curl` | no public code found |
-| **Cheng et al.** ⭐ | 2014 | WWW | *Can cascades be predicted?* Reframes size prediction as balanced binary "will it double". Five feature classes: content, root, structural, temporal, community. **Temporal features dominate.** | [arXiv 1403.4608](https://arxiv.org/abs/1403.4608) | no public code found (Facebook-internal data) |
+| **Kupavskii et al.** | 2012 | CIKM | Retweet-cascade size over time from user/flow/temporal features; introduced the "predict at fixed elapsed time" protocol | [ACM 10.1145/2396761.2398634](https://dl.acm.org/doi/10.1145/2396761.2398634) Warning: ACM blocks `curl` (403 with and without browser UA); resolves in a browser | no public code found |
+| **Cui et al.** | 2013 | KDD | "Cascading outbreak prediction" — selects a small set of *sensor* nodes whose early activation predicts outbreak; a structural, not temporal, view | [ACM 10.1145/2487575.2487639](https://dl.acm.org/doi/10.1145/2487575.2487639) Warning: ACM 403 to `curl` | no public code found |
+| **Cheng et al.** (key) | 2014 | WWW | *Can cascades be predicted?* Reframes size prediction as balanced binary "will it double". Five feature classes: content, root, structural, temporal, community. **Temporal features dominate.** | [arXiv 1403.4608](https://arxiv.org/abs/1403.4608) | no public code found (Facebook-internal data) |
 | **Weng, Menczer & Ahn** | 2014 | ICWSM / Sci. Rep. | Community structure of the early adopter set predicts meme virality better than volume — early diffusion across many communities ⇒ viral | [arXiv 1403.6199](https://arxiv.org/abs/1403.6199) | no public code found |
 | **Martin et al.** | 2016 | WWW | Measures the *ceiling*: even with perfect features, an irreducible-noise bound caps achievable `R²`. The sober counterweight to §5's leaderboard. | [arXiv 1602.01013](https://arxiv.org/abs/1602.01013) | no public code found |
 
@@ -128,8 +128,8 @@ Model the arrival process itself; predict by integrating the fitted intensity to
 | Method | Year | Venue | Idea | Paper | Code |
 | ------ | ---- | ----- | ---- | ----- | ---- |
 | **RPP (Reinforced Poisson)** | 2014 | AAAI / Sci. Rep. | `λ_t = c · f_γ(t) · r_α(R_t)` — fitness × aging × rich-get-richer. Built for citation counts. | [arXiv 1401.0778](https://arxiv.org/abs/1401.0778) | no public code found |
-| **SEISMIC** ⭐ | 2015 | KDD | Self-exciting point process with a *time-varying infectiousness* `p_t` estimated online; closed-form final-size estimator, O(n) per cascade, no features | [arXiv 1506.02594](https://arxiv.org/abs/1506.02594) | [CRAN `seismic`](https://cran.r-project.org/package=seismic) |
-| **Hawkes + predictive layer** ⭐ | 2016 | CIKM | Fits a marked Hawkes process per cascade, then trains a random forest on `{c, θ, A_1, n*}` to correct the generative estimate. Beats SEISMIC on both mean ARE and on *how many* cascades it can score at all. | [arXiv 1608.04862](https://arxiv.org/abs/1608.04862) | [github.com/s-mishra/featuredriven-hawkes](https://github.com/s-mishra/featuredriven-hawkes) |
+| **SEISMIC** (key) | 2015 | KDD | Self-exciting point process with a *time-varying infectiousness* `p_t` estimated online; closed-form final-size estimator, O(n) per cascade, no features | [arXiv 1506.02594](https://arxiv.org/abs/1506.02594) | [CRAN `seismic`](https://cran.r-project.org/package=seismic) |
+| **Hawkes + predictive layer** (key) | 2016 | CIKM | Fits a marked Hawkes process per cascade, then trains a random forest on `{c, θ, A_1, n*}` to correct the generative estimate. Beats SEISMIC on both mean ARE and on *how many* cascades it can score at all. | [arXiv 1608.04862](https://arxiv.org/abs/1608.04862) | [github.com/s-mishra/featuredriven-hawkes](https://github.com/s-mishra/featuredriven-hawkes) |
 | **HIP** | 2017 | WWW | Hawkes Intensity Process: adds *exogenous* promotion (search, shares) as an external stimulus — the term IC has no place for | [arXiv 1602.06033](https://arxiv.org/abs/1602.06033) | [github.com/andrei-rizoiu/hip-popularity](https://github.com/andrei-rizoiu/hip-popularity) |
 
 **Why §3.2 matters to us more than §3.1.** SEISMIC and HIP are exactly what our world model is: a stated transition mechanism plus a fitted parameter, rolled forward. Their failure mode is also ours — SEISMIC produces **no prediction at all** for supercritical cascades (`p ≥ 1/n*`), 507 of ~30K on Tweet-1Mo at 5 minutes [verified, §5.4], because the branching factor exceeds 1 and the expected size diverges. That is the same runaway our `ens_count_bias` metric was built to catch, and the same reason our structured head gates on `frontier_u`. The field's answer — a learned corrective layer on top of a generative core (Mishra et al.) — is structurally identical to our `structured_residual` head.
@@ -142,22 +142,22 @@ Model the arrival process itself; predict by integrating the fitted intensity to
 
 | Method | Year | Venue | Approach | Paper | Code |
 | ------ | ---- | ----- | -------- | ----- | ---- |
-| **DeepCas** ⭐ | 2017 | WWW | The founding deep model. Samples random walks over the cascade graph, encodes with bi-GRU + attention, regresses `log ΔP`. Kills hand-crafted features. | [arXiv 1611.05373](https://arxiv.org/abs/1611.05373) | [github.com/chengli-um/DeepCas](https://github.com/chengli-um/DeepCas) |
-| **DeepHawkes** ⭐ | 2017 | CIKM | Injects the three Hawkes ingredients (user influence, self-excitation, time decay) into a GRU over *diffusion paths*. The interpretability-vs-accuracy bridge; still the most-reproduced baseline. | [ACM 10.1145/3132847.3132973](https://dl.acm.org/doi/10.1145/3132847.3132973) ⚠️ ACM 403 to `curl` | [github.com/CaoQi92/DeepHawkes](https://github.com/CaoQi92/DeepHawkes) |
+| **DeepCas** (key) | 2017 | WWW | The founding deep model. Samples random walks over the cascade graph, encodes with bi-GRU + attention, regresses `log ΔP`. Kills hand-crafted features. | [arXiv 1611.05373](https://arxiv.org/abs/1611.05373) | [github.com/chengli-um/DeepCas](https://github.com/chengli-um/DeepCas) |
+| **DeepHawkes** (key) | 2017 | CIKM | Injects the three Hawkes ingredients (user influence, self-excitation, time decay) into a GRU over *diffusion paths*. The interpretability-vs-accuracy bridge; still the most-reproduced baseline. | [ACM 10.1145/3132847.3132973](https://dl.acm.org/doi/10.1145/3132847.3132973) Warning: ACM 403 to `curl` | [github.com/CaoQi92/DeepHawkes](https://github.com/CaoQi92/DeepHawkes) |
 | **Topo-LSTM** | 2017 | ICDM | LSTM whose gates are wired to the cascade's dynamic DAG rather than a linear sequence. Microscopic, but the structural idea seeded CasCN. | [arXiv 1711.10162](https://arxiv.org/abs/1711.10162) | [github.com/vwz/topolstm](https://github.com/vwz/topolstm) |
-| **CasCN** ⭐ | 2019 | ICDE | Cascade as a *sequence of sub-cascade graphs*; GCN each snapshot, LSTM across them. First to use both structure and time properly. | [PDF via NSF-PAR](https://par.nsf.gov/servlets/purl/10122600) ⚠️ `curl` rejects the cert (hostname mismatch); downloads fine in a browser and with `-k` | [github.com/ChenNed/CasCN](https://github.com/ChenNed/CasCN) |
-| **CoupledGNN** ⭐ | 2020 | WSDM | **The closest published method to our formulation.** Two coupled GNNs: one propagates node *activation state*, one propagates *influence*, iterated over `K` layers to imitate the cascading effect on the global graph. | [arXiv 1906.09032](https://arxiv.org/abs/1906.09032) | [github.com/CaoQi92/CoupledGNN](https://github.com/CaoQi92/CoupledGNN) |
-| **VaCas** | 2020 | INFOCOM | Hierarchical VAE over cascade graph + Bayesian node embeddings; the first to model *diffusion uncertainty* rather than a point estimate | [IEEE 10.1109/INFOCOM41043.2020.9155349](https://doi.org/10.1109/INFOCOM41043.2020.9155349) ⚠️ IEEE returns 202 to `curl` | no public code found |
-| **CasFlow** ⭐ | 2021 | TKDE | VaCas + **normalizing flows** over the latent, plus a global (whole social network) embedding alongside the local cascade graph. The reference SOTA of 2021–23 and the baseline every later paper reports. | [PDF (author copy)](https://www.xoveexu.com/file/paper/21-11-TKDE-CasFlow.pdf) ⚠️ `curl` cert hostname mismatch; fetches fine with `-k` and in a browser · [IEEE 9611000](https://ieeexplore.ieee.org/document/9611000) | [github.com/Xovee/casflow](https://github.com/Xovee/casflow) (mirror: [kpzhang/casflow](https://github.com/kpzhang/casflow)) |
+| **CasCN** (key) | 2019 | ICDE | Cascade as a *sequence of sub-cascade graphs*; GCN each snapshot, LSTM across them. First to use both structure and time properly. | [PDF via NSF-PAR](https://par.nsf.gov/servlets/purl/10122600) Warning: `curl` rejects the cert (hostname mismatch); downloads fine in a browser and with `-k` | [github.com/ChenNed/CasCN](https://github.com/ChenNed/CasCN) |
+| **CoupledGNN** (key) | 2020 | WSDM | **The closest published method to our formulation.** Two coupled GNNs: one propagates node *activation state*, one propagates *influence*, iterated over `K` layers to imitate the cascading effect on the global graph. | [arXiv 1906.09032](https://arxiv.org/abs/1906.09032) | [github.com/CaoQi92/CoupledGNN](https://github.com/CaoQi92/CoupledGNN) |
+| **VaCas** | 2020 | INFOCOM | Hierarchical VAE over cascade graph + Bayesian node embeddings; the first to model *diffusion uncertainty* rather than a point estimate | [IEEE 10.1109/INFOCOM41043.2020.9155349](https://doi.org/10.1109/INFOCOM41043.2020.9155349) Warning: IEEE returns 202 to `curl` | no public code found |
+| **CasFlow** (key) | 2021 | TKDE | VaCas + **normalizing flows** over the latent, plus a global (whole social network) embedding alongside the local cascade graph. The reference SOTA of 2021–23 and the baseline every later paper reports. | [PDF (author copy)](https://www.xoveexu.com/file/paper/21-11-TKDE-CasFlow.pdf) Warning: `curl` cert hostname mismatch; fetches fine with `-k` and in a browser · [IEEE 9611000](https://ieeexplore.ieee.org/document/9611000) | [github.com/Xovee/casflow](https://github.com/Xovee/casflow) (mirror: [kpzhang/casflow](https://github.com/kpzhang/casflow)) |
 | **CasSeqGCN** | 2021 | ESWA | Snapshot GCN + LSTM, but the node state (not the structure) is what varies across snapshots — a cheaper CasCN | [arXiv 2110.06836](https://arxiv.org/abs/2110.06836) | [github.com/MrYansong/CasSeqGCN](https://github.com/MrYansong/CasSeqGCN) |
 | **TempCas** | 2021 | IPM | Adds an explicit *macroscopic temporal* branch (full-size-sequence CNN + attention) on top of cascade-graph learning | DOI [10.1016/j.ipm.2021.102593](https://doi.org/10.1016/j.ipm.2021.102593) | no public code found |
 | **CCasGNN** | 2021/22 | CSCWD | Collaborative framework: GAT + GCN with positional encoding, fused in sequence | [arXiv 2112.03644](https://arxiv.org/abs/2112.03644) | [github.com/MrYansong/CCasGNN](https://github.com/MrYansong/CCasGNN) |
 | **MUCas** | 2022 | IJCAI | Multi-scale **graph capsule** network with influence attention; directional/dynamic/position-aware cascade encoding | DOI [10.24963/ijcai.2022/300](https://doi.org/10.24963/ijcai.2022/300) | [github.com/ChenNed/MUCas](https://github.com/ChenNed/MUCas) |
 | **CCGL** | 2022 | TKDE | Contrastive **self-supervised** pretraining on augmented cascade graphs, then fine-tune — the transfer-learning entry | [github README](https://github.com/Xovee/ccgl) | [github.com/Xovee/ccgl](https://github.com/Xovee/ccgl) |
-| **CTCP** ⭐ | 2023 | IJCAI | **Continuous-time**, cross-cascade: one evolving user/cascade state updated event-by-event, shared across *all* cascades instead of per-cascade encoding | [arXiv 2306.03756](https://arxiv.org/abs/2306.03756) | [github.com/lxd99/CTCP](https://github.com/lxd99/CTCP) |
-| **CasDO** | 2024 | TKDE | Probabilistic **diffusion model** denoiser + neural ODE for irregular event times; models both temporal and label uncertainty | DOI [10.1109/TKDE.2024.3465241](https://doi.org/10.1109/TKDE.2024.3465241) ⚠️ IEEE 202 to `curl` | no public code found |
-| **CasFT** ⭐ | 2024 | AAAI-25 | Neural-ODE growth rate → *dynamic cues* → conditional **DDIM** that generates the future incremental-popularity **sequence**, not just the endpoint. Current best on the standard protocol. | [arXiv 2409.16619](https://arxiv.org/abs/2409.16619) | no public code found |
-| **CasTemp** ⭐ | 2025/26 | (preprint) | Temporal random walks + time-aware attention + an inter-cascade *competition* graph. Deliberately lightweight; its real contribution is the **leak-free split** (§8.3). | [arXiv 2510.25348](https://arxiv.org/abs/2510.25348) | [github.com/Lucas-PJ/CasTemp-ALGO](https://github.com/Lucas-PJ/CasTemp-ALGO) |
+| **CTCP** (key) | 2023 | IJCAI | **Continuous-time**, cross-cascade: one evolving user/cascade state updated event-by-event, shared across *all* cascades instead of per-cascade encoding | [arXiv 2306.03756](https://arxiv.org/abs/2306.03756) | [github.com/lxd99/CTCP](https://github.com/lxd99/CTCP) |
+| **CasDO** | 2024 | TKDE | Probabilistic **diffusion model** denoiser + neural ODE for irregular event times; models both temporal and label uncertainty | DOI [10.1109/TKDE.2024.3465241](https://doi.org/10.1109/TKDE.2024.3465241) Warning: IEEE 202 to `curl` | no public code found |
+| **CasFT** (key) | 2024 | AAAI-25 | Neural-ODE growth rate → *dynamic cues* → conditional **DDIM** that generates the future incremental-popularity **sequence**, not just the endpoint. Current best on the standard protocol. | [arXiv 2409.16619](https://arxiv.org/abs/2409.16619) | no public code found |
+| **CasTemp** (key) | 2025/26 | (preprint) | Temporal random walks + time-aware attention + an inter-cascade *competition* graph. Deliberately lightweight; its real contribution is the **leak-free split** (§8.3). | [arXiv 2510.25348](https://arxiv.org/abs/2510.25348) | [github.com/Lucas-PJ/CasTemp-ALGO](https://github.com/Lucas-PJ/CasTemp-ALGO) |
 
 ### 4.2 Microscopic (next adopter / will-x-adopt)
 
@@ -172,7 +172,7 @@ Model the arrival process itself; predict by integrating the fitted intensity to
 
 | Work | Year | Venue | What it gives you |
 | ---- | ---- | ----- | ----------------- |
-| **Zhou, Xu, Trajcevski & Zhang** ⭐ | 2021 | ACM CSUR 54(2) | *A Survey of Information Cascade Analysis: Models, Predictions, and Recent Advances* — the standard taxonomy (feature-based / generative / deep) and the source of most "macroscopic vs microscopic" phrasing. [arXiv 2005.11041](https://arxiv.org/abs/2005.11041) · [ACM 10.1145/3433000](https://dl.acm.org/doi/10.1145/3433000) ⚠️ ACM 403 to `curl` |
+| **Zhou, Xu, Trajcevski & Zhang** (key) | 2021 | ACM CSUR 54(2) | *A Survey of Information Cascade Analysis: Models, Predictions, and Recent Advances* — the standard taxonomy (feature-based / generative / deep) and the source of most "macroscopic vs microscopic" phrasing. [arXiv 2005.11041](https://arxiv.org/abs/2005.11041) · [ACM 10.1145/3433000](https://dl.acm.org/doi/10.1145/3433000) Warning: ACM 403 to `curl` |
 | **Gao, Zhou et al.** | 2022 | arXiv | *Graph Representation Learning for Popularity Prediction Problem: A Survey* — narrower, GNN-focused, tabulates which model uses which graph. [arXiv 2203.07632](https://arxiv.org/abs/2203.07632) |
 
 ---
@@ -181,7 +181,7 @@ Model the arrival process itself; predict by integrating the fitted intensity to
 
 Four transcribable tables exist. They are **not mutually comparable** — §5.5 explains exactly why. Read §8 before quoting any cell.
 
-### 5.1 CasFT (AAAI-25) ⭐ the most usable table in the literature
+### 5.1 CasFT (AAAI-25) (key) the most usable table in the literature
 
 The widest baseline set under the standard protocol, and the only recent paper whose result table survives `pdftotext`. Lower is better throughout.
 
@@ -197,7 +197,7 @@ The widest baseline set under the standard protocol, and the only recent paper w
 | VaCas | 5.5124 | 0.4796 | 4.2147 | 0.4871 | 1.7764 | 0.2697 | 1.6945 | 0.3012 | 2.5246 | 0.2847 | 2.3451 | 0.2997 |
 | CasFlow | 4.7799 | 0.4150 | 3.6888 | 0.4222 | 1.4370 | 0.2401 | 1.3346 | 0.2624 | 2.3370 | 0.2665 | 2.2232 | 0.2949 |
 | CTCP | 5.3991 | 0.3757 | 3.6016 | 0.3773 | 1.7676 | 0.3054 | 1.3751 | 0.2908 | 2.5572 | 0.3056 | 2.2968 | 0.3010 |
-| **CasFT** ⭐ | **3.8546** | **0.3674** | **3.4496** | **0.3605** | **1.2468** | **0.2282** | **1.1748** | **0.2561** | **2.1728** | **0.2448** | **2.0655** | **0.2695** |
+| **CasFT** (key) | **3.8546** | **0.3674** | **3.4496** | **0.3605** | **1.2468** | **0.2282** | **1.1748** | **0.2561** | **2.1728** | **0.2448** | **2.0655** | **0.2695** |
 
 Dataset sizes **as used by CasFT** [verified, Table 1]:
 
@@ -230,11 +230,11 @@ Protocol [verified]: prediction horizon 15 days (Twitter) / 20 years (APS) / 24 
 | MS-HGAT | 5.9992 | 1.9006 | 0.4741 | 0.7507 | OOM | OOM | OOM | OOM | OOM | OOM | OOM | OOM |
 | TempCas | 5.5870 | 1.7584 | 0.4574 | 0.7651 | 2.7453 | 1.1702 | 0.2786 | 0.7500 | 2.0043 | 1.1022 | 0.2957 | 0.6346 |
 | CasFlow | 5.2549 | 1.5775 | 0.4031 | 0.7847 | 2.6336 | 1.1230 | 0.2687 | 0.7619 | 2.0064 | 1.1053 | 0.2936 | 0.6320 |
-| **CTCP** ⭐ | **4.6916** | **1.5668** | **0.3562** | **0.8136** | **2.5929** | 1.1414 | 0.2723 | **0.7667** | **1.6289** | **0.9906** | **0.2611** | **0.7176** |
+| **CTCP** (key) | **4.6916** | **1.5668** | **0.3562** | **0.8136** | **2.5929** | 1.1414 | 0.2723 | **0.7667** | **1.6289** | **0.9906** | **0.2611** | **0.7176** |
 
 CTCP's datasets [verified, Table 1]: Twitter 199,005 users / 19,718 cascades / 602,253 retweets · Weibo 918,852 / 39,076 / 1,572,287 · APS 218,323 / 48,575 / 939,686. Features for XGBoost/MLP follow Cheng et al. (edge count, max depth, avg depth, breadth, publication time) [verified].
 
-### 5.3 CasTemp / "Beyond Leakage" (2025) ⭐ the table that changes the story
+### 5.3 CasTemp / "Beyond Leakage" (2025) (key) the table that changes the story
 
 Same six baselines, re-run under a **leak-free time-ordered split** (§8.3). Mean ± std over three runs, lower is better [verified, Table 4]:
 
@@ -246,7 +246,7 @@ Same six baselines, re-run under a **leak-free time-ordered split** (§8.3). Mea
 | CasFlow | 1.329 ± 0.009 | 0.930 ± 0.004 | 1.685 ± 0.017 | 0.950 ± 0.004 | 2.438 ± 0.038 | 1.438 ± 0.024 | 3.300 ± 0.036 | 1.436 ± 0.049 |
 | CTCP | 1.446 ± 0.001 | 0.928 ± 0.001 | 1.890 ± 0.003 | 0.966 ± 0.000 | 2.807 ± 0.013 | 1.248 ± 0.003 | 3.308 ± 0.022 | 1.398 ± 0.024 |
 | CasDO | 2.130 ± 0.032 | 0.972 ± 0.001 | 2.490 ± 0.413 | 1.063 ± 0.005 | 4.815 ± 0.253 | 1.723 ± 0.036 | 9.921 ± 0.168 | 2.638 ± 0.071 |
-| **CasTemp** ⭐ | **1.171 ± 0.002** | **0.905 ± 0.003** | **1.475 ± 0.007** | **0.919 ± 0.006** | **1.926 ± 0.018** | **1.074 ± 0.010** | **0.685 ± 0.038** | **0.548 ± 0.015** |
+| **CasTemp** (key) | **1.171 ± 0.002** | **0.905 ± 0.003** | **1.475 ± 0.007** | **0.919 ± 0.006** | **1.926 ± 0.018** | **1.074 ± 0.010** | **0.685 ± 0.038** | **0.548 ± 0.015** |
 
 **The finding that matters more than the winner:** under leak-free splits, **CasFlow and CasDO fall below a plain MLP** on the toy diagnostic [verified, Table 2 — CasFlow 4.6503 / CasDO 5.6532 vs MLP 2.9478 MSLE on Scenario 1], and on APS the whole field compresses into 2.28–4.82 where §5.1 reported 1.19–2.11. The authors' diagnosis, from train-vs-test loss curves: "CasFlow and CasDo exhibit low training losses but significantly higher test losses… their complex architectures have likely learned dataset-specific shortcuts enabled by temporal leakage" [verified, §6.1 prose].
 
@@ -270,7 +270,7 @@ Adding hand-crafted features on top [verified, Table 3, News July'15]:
 | SEISMIC | 15.16 ± 375.08 | 0.71 ± 4.89 | 0.32 ± 0.40 |
 | Feature-driven | 0.25 ± 0.18 | 0.22 ± 0.17 | 0.17 ± 0.14 |
 | Hawkes | 0.27 ± 1.83 | 0.22 ± 0.80 | 0.17 ± 0.36 |
-| **Hybrid** ⭐ | **0.17 ± 0.16** | **0.15 ± 0.14** | **0.11 ± 0.12** |
+| **Hybrid** (key) | **0.17 ± 0.16** | **0.15 ± 0.14** | **0.11 ± 0.12** |
 
 SEISMIC's own numbers, on its own corpus [verified, prose §5.5.2]: after 10 minutes of observation the 95th/75th/50th APE percentiles are 71% / 44% / 25%; after 1 hour, 62% / 30% / 15%. Breakout coverage: **78 of the top-100** and **281 of the top-500** most-reshared tweets identified within 10 minutes.
 
@@ -283,7 +283,7 @@ The only table here that uses **MRSE / mRSE / MAPE / WroPerc** instead of MSLE, 
 | SEISMIC | — | 0.2112 | — | 48.63% | — | 0.1347 | — | 34.59% | — | 0.0823 | — | 27.15% |
 | Feature-based | 0.2106 | 0.1254 | 0.3749 | 35.17% | 0.1796 | 0.1041 | 0.3557 | 28.86% | 0.1581 | 0.0804 | 0.3147 | 18.97% |
 | DeepCas | 0.2077 | **0.0930** | 0.3633 | 30.00% | 0.1650 | 0.0670 | 0.3134 | 20.55% | 0.1365 | 0.0361 | 0.2813 | 17.24% |
-| **CoupledGNN** ⭐ | **0.1816** | 0.0946 | **0.3515** | **25.68%** | **0.1397** | **0.0519** | **0.2989** | **17.81%** | **0.1120** | **0.0333** | **0.2611** | **13.01%** |
+| **CoupledGNN** (key) | **0.1816** | 0.0946 | **0.3515** | **25.68%** | **0.1397** | **0.0519** | **0.2989** | **17.81%** | **0.1120** | **0.0333** | **0.2611** | **13.01%** |
 
 `WroPerc` = fraction of cascades whose relative error exceeds ε = 0.5 [verified]. SEISMIC has no MRSE/MAPE cell because it predicts **infinite** popularity for some cascades — the supercritical failure again.
 
@@ -322,7 +322,7 @@ Practical rule: **quote a row only together with the paper it came from.** The o
 
 ## 6. Datasets
 
-### 6.1 What we already load ✅
+### 6.1 What we already load yes
 
 **None of them carry cascades.** Every graph in [`influence_maximization.md` §6.1](influence_maximization.md) is topology only — `jazz` 198/2,742 · `email_eu_core` 1,005/24,929 arcs · `netscience` 1,589/2,742 · `cora_ml` 2,810/7,981 · `facebook` 4,039/88,234 · `power_grid` 4,941/6,594 · `ca_grqc` 5,242/14,484 · `wiki_vote` 7,115/103,689 arcs · `lastfm_asia` 7,624/27,806 · `nethept` 15,229/62,752 arcs · `netphy` 37,154/174,161 · `twitter` 81,306/1.77M arcs · `digg` 116,893/≈2.6M · `youtube` 1,134,890/2,987,624 · `weibo` 1,787,443/≈216M arcs. Plus synthetic `er`, `ba`, `ws`, `sbm`, `karate`. All counts [verified] by running the loaders.
 
@@ -330,12 +330,12 @@ Two of those names collide with cascade corpora and **are not the same data**:
 
 | We load | The cascade literature's version | Same? |
 | ------- | -------------------------------- | ----- |
-| `digg` — Syracuse friendship graph, 116,893 / ≈2.6M | ISI/Lerman Digg 2009 — 279,632 nodes / 2,617,993 edges **+ 3,553 vote cascades** [verified, Topo-LSTM Table II] | ❌ different graph, and ours has no cascades |
-| `weibo` — AMiner *following network*, 1,787,443 / ≈216M arcs | DeepHawkes Weibo — the **retweet cascades** built from the same AMiner release | ⚠️ same source, different artefact: we load the graph, they load the traces |
+| `digg` — Syracuse friendship graph, 116,893 / ≈2.6M | ISI/Lerman Digg 2009 — 279,632 nodes / 2,617,993 edges **+ 3,553 vote cascades** [verified, Topo-LSTM Table II] | no different graph, and ours has no cascades |
+| `weibo` — AMiner *following network*, 1,787,443 / ≈216M arcs | DeepHawkes Weibo — the **retweet cascades** built from the same AMiner release | Warning: same source, different artefact: we load the graph, they load the traces |
 
 **The `weibo` overlap is the cheapest possible entry point.** We already download and parse the AMiner Influence-Locality release. The retweet cascades live in the same release; adding them means a second parser, not a second download. See §6.3.
 
-### 6.2 The cascade corpora ⭐
+### 6.2 The cascade corpora (key)
 
 Everything a comparison needs, in one place. "Cascades" is the count *after* the paper's own filtering unless noted; observation windows and splits are the two columns that make or break comparability.
 
@@ -359,17 +359,17 @@ Everything a comparison needs, in one place. "Cascades" is the count *after* the
 
 | Corpus | Direct link | Auto-DL? | Format |
 | ------ | ----------- | -------- | ------ |
-| **Weibo, Twitter, APS** — CasFlow's preprocessed bundle ⭐ | [Google Drive `1o4KAZs…`](https://drive.google.com/file/d/1o4KAZs19fl4Qa5LUtdnmNy57gHa15AF-/view) · [Baidu mirror, pw `1msd`](https://pan.baidu.com/s/1tWcEefxoRHj002F0s9BCTQ) | ❌ Drive interstitial | one line per cascade: `cascade_id \t root \t pub_time \t n \t path1:t1 path2:t2 …` where a path is `u1/u2/u3` |
-| **Weibo** — original DeepHawkes release | [github.com/CaoQi92/DeepHawkes](https://github.com/CaoQi92/DeepHawkes) · [Drive `1fgkLeF…`](https://drive.google.com/file/d/1fgkLeFRYQDQOKPujsmn61sGbJt6PaERF/view) | ❌ | same path format |
-| **Weibo** — raw source (what *we* already fetch) | [AMiner Influence Locality](https://www.aminer.cn/influencelocality) | ❌ registration ([`data/datasets/weibo.py`](../data/datasets/weibo.py) documents the manual steps) | `weibo_network.txt` (graph, already parsed by us) + `total.txt` (retweet traces, **not** currently parsed) |
-| **Twitter** — original | [carl.cs.indiana.edu/data #virality2013](http://carl.cs.indiana.edu/data/#virality2013) ⚠️ **404 as of 2026-07-28** — use CasFlow's mirror. Paper: [Weng et al., Sci. Rep. 2013](https://www.nature.com/articles/srep02522) | ❌ dead | — |
-| **APS** | [journals.aps.org/datasets](https://journals.aps.org/datasets) ⚠️ 403 to `curl`, loads in a browser; requires a request form | ❌ manual | citation edge list + metadata; cascade = a paper and its citers |
-| **Digg 2009** | [ISI/Lerman](https://www.isi.edu/~lerman/downloads/digg2009.html) | ✅ plain HTTP | vote log `(story, user, timestamp)` + friendship graph |
-| **MemeTracker** | [SNAP memetracker9](https://snap.stanford.edu/data/memetracker9.html) | ✅ | phrase-cluster time series |
-| **Tweet-1Mo** | [SNAP SEISMIC page](https://snap.stanford.edu/seismic/) | ✅ | `(cascade_id, relative_time, n_followers)` — **no graph at all** |
-| **Taoke** | [github.com/Lucas-PJ/CasTemp-ALGO](https://github.com/Lucas-PJ/CasTemp-ALGO) | ⚠️ release-dependent | cascade + node + product features, plus purchase conversions |
+| **Weibo, Twitter, APS** — CasFlow's preprocessed bundle (key) | [Google Drive `1o4KAZs…`](https://drive.google.com/file/d/1o4KAZs19fl4Qa5LUtdnmNy57gHa15AF-/view) · [Baidu mirror, pw `1msd`](https://pan.baidu.com/s/1tWcEefxoRHj002F0s9BCTQ) | no Drive interstitial | one line per cascade: `cascade_id \t root \t pub_time \t n \t path1:t1 path2:t2 …` where a path is `u1/u2/u3` |
+| **Weibo** — original DeepHawkes release | [github.com/CaoQi92/DeepHawkes](https://github.com/CaoQi92/DeepHawkes) · [Drive `1fgkLeF…`](https://drive.google.com/file/d/1fgkLeFRYQDQOKPujsmn61sGbJt6PaERF/view) | no | same path format |
+| **Weibo** — raw source (what *we* already fetch) | [AMiner Influence Locality](https://www.aminer.cn/influencelocality) | no registration ([`data/datasets/weibo.py`](../data/datasets/weibo.py) documents the manual steps) | `weibo_network.txt` (graph, already parsed by us) + `total.txt` (retweet traces, **not** currently parsed) |
+| **Twitter** — original | [carl.cs.indiana.edu/data #virality2013](http://carl.cs.indiana.edu/data/#virality2013) Warning: **404 as of 2026-07-28** — use CasFlow's mirror. Paper: [Weng et al., Sci. Rep. 2013](https://www.nature.com/articles/srep02522) | no dead | — |
+| **APS** | [journals.aps.org/datasets](https://journals.aps.org/datasets) Warning: 403 to `curl`, loads in a browser; requires a request form | no manual | citation edge list + metadata; cascade = a paper and its citers |
+| **Digg 2009** | [ISI/Lerman](https://www.isi.edu/~lerman/downloads/digg2009.html) | yes plain HTTP | vote log `(story, user, timestamp)` + friendship graph |
+| **MemeTracker** | [SNAP memetracker9](https://snap.stanford.edu/data/memetracker9.html) | yes | phrase-cluster time series |
+| **Tweet-1Mo** | [SNAP SEISMIC page](https://snap.stanford.edu/seismic/) | yes | `(cascade_id, relative_time, n_followers)` — **no graph at all** |
+| **Taoke** | [github.com/Lucas-PJ/CasTemp-ALGO](https://github.com/Lucas-PJ/CasTemp-ALGO) | Warning: release-dependent | cascade + node + product features, plus purchase conversions |
 
-### 6.4 ⚠️ Name collisions — read before quoting any MSLE
+### 6.4 Warning: Name collisions — read before quoting any MSLE
 
 Same three names, seven different artefacts. This is §5.7 made concrete.
 
@@ -405,30 +405,30 @@ Ranked, cheapest first:
 
 ## 7. Which paper uses which
 
-`●` = reports results on it. Superscript marks *which version* per §6.4.
+`yes` = reports results on it. Superscript marks *which version* per §6.4.
 
 | Method | Weibo | Twitter | APS | Digg | Memes | Tweet-1Mo / News | Taoke | Other |
 | ------ | ----- | ------- | --- | ---- | ----- | ---------------- | ----- | ----- |
 | Cheng et al. 2014 | | | | | | | | Facebook photos |
-| Weng et al. 2014 | | ● | | | | | | |
+| Weng et al. 2014 | | yes | | | | | | |
 | RPP (Shen 2014) | | | | | | | | APS/citations |
-| SEISMIC 2015 | | | | | | ● | | |
-| Mishra et al. 2016 | | | | | | ● (both) | | |
+| SEISMIC 2015 | | | | | | yes | | |
+| Mishra et al. 2016 | | | | | | yes (both) | | |
 | HIP 2017 | | | | | | | | YouTube views |
-| DeepCas 2017 | ●ᴬ | ● | | | | | | |
-| DeepHawkes 2017 | ●ᴬ | | | | | | | |
-| Topo-LSTM 2017 | | ●ᴱ | | ● | ● | | | |
-| DeepInf 2018 | ● | ● | | ● | | | | OAG |
-| CasCN 2019 | ●ᴬ | | ● | | | | | |
-| CoupledGNN 2020 | ●ᴰ | | | | | | | synthetic |
-| VaCas 2020 | ●ᴬ | ●ᴬ | ● | | | | | |
-| **CasFlow 2021** ⭐ | ●ᴬ | ●ᴬ | ●ᴬ | | | | | |
-| CCGL 2022 | ●ᴬ | ●ᴬ | ●ᴬ | | | | | |
-| MUCas 2022 | ●ᴬ | ●ᴬ | ●ᴬ | | | | | |
-| **CTCP 2023** | ●ᴮ | ●ᶜ | ●ᴮ | | | | | |
-| CasDO 2024 | ●ᴬ | ●ᴬ | ●ᴬ | | | | | |
-| **CasFT 2024** ⭐ | ●ᴬ | ●ᴮ | ●ᴬ | | | | | |
-| **CasTemp 2025** ⭐ | ●ᶜ | ●ᴰ | ●ᶜ | | | | ● | |
+| DeepCas 2017 | yesᴬ | yes | | | | | | |
+| DeepHawkes 2017 | yesᴬ | | | | | | | |
+| Topo-LSTM 2017 | | yesᴱ | | yes | yes | | | |
+| DeepInf 2018 | yes | yes | | yes | | | | OAG |
+| CasCN 2019 | yesᴬ | | yes | | | | | |
+| CoupledGNN 2020 | yesᴰ | | | | | | | synthetic |
+| VaCas 2020 | yesᴬ | yesᴬ | yes | | | | | |
+| **CasFlow 2021** (key) | yesᴬ | yesᴬ | yesᴬ | | | | | |
+| CCGL 2022 | yesᴬ | yesᴬ | yesᴬ | | | | | |
+| MUCas 2022 | yesᴬ | yesᴬ | yesᴬ | | | | | |
+| **CTCP 2023** | yesᴮ | yesᶜ | yesᴮ | | | | | |
+| CasDO 2024 | yesᴬ | yesᴬ | yesᴬ | | | | | |
+| **CasFT 2024** (key) | yesᴬ | yesᴮ | yesᴬ | | | | | |
+| **CasTemp 2025** (key) | yesᶜ | yesᴰ | yesᶜ | | | | yes | |
 
 Reading it: **the Weibo-A / Twitter-A / APS-A row is the field's spine**, and CTemp/CTCP each broke it by re-preprocessing. Any table that lists CasFlow, CTCP and CasFT side by side without saying which version it used is wrong.
 
@@ -440,9 +440,9 @@ Reading it: **the Weibo-A / Twitter-A / APS-A row is the field's spine**, and CT
 
 | Metric | Definition | Who uses it | Note |
 | ------ | ---------- | ----------- | ---- |
-| **MSLE** ⭐ | `1/M Σ (log₂ P̂ − log₂ P)²` | **everyone since DeepCas** | The field standard. Log base **2**, not `e`, in CasFlow/CasFT; CTCP's loss uses natural log [verified] — a constant factor `(ln2)² ≈ 0.48` between them. Check before comparing. |
+| **MSLE** (key) | `1/M Σ (log₂ P̂ − log₂ P)²` | **everyone since DeepCas** | The field standard. Log base **2**, not `e`, in CasFlow/CasFT; CTCP's loss uses natural log [verified] — a constant factor `(ln2)² ≈ 0.48` between them. Check before comparing. |
 | **MALE** | `1/M Σ \|log₂ P̂ − log₂ P\|` | CTCP, CasTemp | L1 version; more robust to the few huge cascades |
-| **MAPE** | `1/M Σ \|log₂(P+2) − log₂(P̂+2)\| / log₂(P+2)` | CasFlow, CasFT, CTCP | ⚠️ **relative error in log space, not on popularity.** Named MAPE, is not MAPE. |
+| **MAPE** | `1/M Σ \|log₂(P+2) − log₂(P̂+2)\| / log₂(P+2)` | CasFlow, CasFT, CTCP | Warning: **relative error in log space, not on popularity.** Named MAPE, is not MAPE. |
 | **MRSE / mRSE** | mean / median `((P̂−P)/P)²` | CoupledGNN | genuinely relative, on raw counts |
 | **APE / ARE** | `\|P̂ − P\| / P` | SEISMIC, Mishra | reported as *quantiles* because the mean is outlier-dominated |
 | **R²** | coefficient of determination | CasFlow | reported only in figures |
@@ -466,7 +466,7 @@ Reading it: **the Weibo-A / Twitter-A / APS-A row is the field's spine**, and CT
 
 The pairing is deliberate: every macroscopic paper reports **two** windows so a reader can see whether a method's edge survives more observation. A single-window result is not publishable in this literature.
 
-### 8.3 ⚠️ The split is the trap — and it may invalidate a decade of numbers
+### 8.3 Warning: The split is the trap — and it may invalidate a decade of numbers
 
 The standard protocol is **70/15/15 random over cascades** [verified, CasFlow §5.1; CasFT "Datasets and Preprocessing"]. CasTemp (§5.3) argues this **leaks the future**: cascades overlap in wall-clock time, so a training cascade's *prediction* window can sit inside a test cascade's *observation* window. The model then learns "there was a burst around time T" — a global temporal shortcut that is unavailable at deployment.
 
@@ -530,17 +530,17 @@ Consequence: there is **no leaderboard to enter and no split to inherit**. If we
 
 ## 10. Reference list
 
-**Feature-driven and classical** [Szabo & Huberman 2008 (arXiv 0811.0405)](https://arxiv.org/abs/0811.0405) · [Kupavskii 2012 CIKM (ACM 10.1145/2396761.2398634)](https://dl.acm.org/doi/10.1145/2396761.2398634) ⚠️ ACM 403 to `curl` · [Cui 2013 KDD (ACM 10.1145/2487575.2487639)](https://dl.acm.org/doi/10.1145/2487575.2487639) ⚠️ ACM 403 · [Cheng 2014 WWW *Can Cascades be Predicted?* (arXiv 1403.4608)](https://arxiv.org/abs/1403.4608) · [Weng 2014 (arXiv 1403.6199)](https://arxiv.org/abs/1403.6199) · [Sci. Rep. 2013](https://www.nature.com/articles/srep02522) · [Martin 2016 WWW *Exploring limits to prediction* (arXiv 1602.01013)](https://arxiv.org/abs/1602.01013)
+**Feature-driven and classical** [Szabo & Huberman 2008 (arXiv 0811.0405)](https://arxiv.org/abs/0811.0405) · [Kupavskii 2012 CIKM (ACM 10.1145/2396761.2398634)](https://dl.acm.org/doi/10.1145/2396761.2398634) Warning: ACM 403 to `curl` · [Cui 2013 KDD (ACM 10.1145/2487575.2487639)](https://dl.acm.org/doi/10.1145/2487575.2487639) Warning: ACM 403 · [Cheng 2014 WWW *Can Cascades be Predicted?* (arXiv 1403.4608)](https://arxiv.org/abs/1403.4608) · [Weng 2014 (arXiv 1403.6199)](https://arxiv.org/abs/1403.6199) · [Sci. Rep. 2013](https://www.nature.com/articles/srep02522) · [Martin 2016 WWW *Exploring limits to prediction* (arXiv 1602.01013)](https://arxiv.org/abs/1602.01013)
 
 **Point processes** [Shen 2014 RPP (arXiv 1401.0778)](https://arxiv.org/abs/1401.0778) · [Zhao 2015 SEISMIC (arXiv 1506.02594)](https://arxiv.org/abs/1506.02594) · [CRAN `seismic`](https://cran.r-project.org/package=seismic) · [SNAP data](https://snap.stanford.edu/seismic/) · [Mishra 2016 CIKM (arXiv 1608.04862)](https://arxiv.org/abs/1608.04862) · [code](https://github.com/s-mishra/featuredriven-hawkes) · [Rizoiu 2017 HIP (arXiv 1602.06033)](https://arxiv.org/abs/1602.06033) · [code](https://github.com/andrei-rizoiu/hip-popularity)
 
-**Deep macroscopic** [DeepCas 2017 (arXiv 1611.05373)](https://arxiv.org/abs/1611.05373) · [code](https://github.com/chengli-um/DeepCas) · [DeepHawkes 2017 (ACM 10.1145/3132847.3132973)](https://dl.acm.org/doi/10.1145/3132847.3132973) ⚠️ ACM 403 · [code](https://github.com/CaoQi92/DeepHawkes) · [CasCN 2019 (NSF-PAR PDF)](https://par.nsf.gov/servlets/purl/10122600) ⚠️ cert hostname mismatch · [code](https://github.com/ChenNed/CasCN) · [CoupledGNN 2020 (arXiv 1906.09032)](https://arxiv.org/abs/1906.09032) · [code](https://github.com/CaoQi92/CoupledGNN) · [VaCas 2020 (10.1109/INFOCOM41043.2020.9155349)](https://doi.org/10.1109/INFOCOM41043.2020.9155349) ⚠️ IEEE 202 · [CasFlow 2021 (author PDF)](https://www.xoveexu.com/file/paper/21-11-TKDE-CasFlow.pdf) ⚠️ cert mismatch · [IEEE 9611000](https://ieeexplore.ieee.org/document/9611000) · [code](https://github.com/Xovee/casflow) · [mirror](https://github.com/kpzhang/casflow) · [CasSeqGCN 2021 (arXiv 2110.06836)](https://arxiv.org/abs/2110.06836) · [code](https://github.com/MrYansong/CasSeqGCN) · [TempCas 2021 (10.1016/j.ipm.2021.102593)](https://doi.org/10.1016/j.ipm.2021.102593) · [CCasGNN 2021 (arXiv 2112.03644)](https://arxiv.org/abs/2112.03644) · [code](https://github.com/MrYansong/CCasGNN) · [MUCas 2022 (10.24963/ijcai.2022/300)](https://doi.org/10.24963/ijcai.2022/300) · [code](https://github.com/ChenNed/MUCas) · [CCGL 2022](https://github.com/Xovee/ccgl) · [CTCP 2023 (arXiv 2306.03756)](https://arxiv.org/abs/2306.03756) · [code](https://github.com/lxd99/CTCP) · [CasDO 2024 (10.1109/TKDE.2024.3465241)](https://doi.org/10.1109/TKDE.2024.3465241) ⚠️ IEEE 202 · [CasFT 2024 (arXiv 2409.16619)](https://arxiv.org/abs/2409.16619) · [CasTemp / Beyond Leakage 2025 (arXiv 2510.25348)](https://arxiv.org/abs/2510.25348) · [code](https://github.com/Lucas-PJ/CasTemp-ALGO)
+**Deep macroscopic** [DeepCas 2017 (arXiv 1611.05373)](https://arxiv.org/abs/1611.05373) · [code](https://github.com/chengli-um/DeepCas) · [DeepHawkes 2017 (ACM 10.1145/3132847.3132973)](https://dl.acm.org/doi/10.1145/3132847.3132973) Warning: ACM 403 · [code](https://github.com/CaoQi92/DeepHawkes) · [CasCN 2019 (NSF-PAR PDF)](https://par.nsf.gov/servlets/purl/10122600) Warning: cert hostname mismatch · [code](https://github.com/ChenNed/CasCN) · [CoupledGNN 2020 (arXiv 1906.09032)](https://arxiv.org/abs/1906.09032) · [code](https://github.com/CaoQi92/CoupledGNN) · [VaCas 2020 (10.1109/INFOCOM41043.2020.9155349)](https://doi.org/10.1109/INFOCOM41043.2020.9155349) Warning: IEEE 202 · [CasFlow 2021 (author PDF)](https://www.xoveexu.com/file/paper/21-11-TKDE-CasFlow.pdf) Warning: cert mismatch · [IEEE 9611000](https://ieeexplore.ieee.org/document/9611000) · [code](https://github.com/Xovee/casflow) · [mirror](https://github.com/kpzhang/casflow) · [CasSeqGCN 2021 (arXiv 2110.06836)](https://arxiv.org/abs/2110.06836) · [code](https://github.com/MrYansong/CasSeqGCN) · [TempCas 2021 (10.1016/j.ipm.2021.102593)](https://doi.org/10.1016/j.ipm.2021.102593) · [CCasGNN 2021 (arXiv 2112.03644)](https://arxiv.org/abs/2112.03644) · [code](https://github.com/MrYansong/CCasGNN) · [MUCas 2022 (10.24963/ijcai.2022/300)](https://doi.org/10.24963/ijcai.2022/300) · [code](https://github.com/ChenNed/MUCas) · [CCGL 2022](https://github.com/Xovee/ccgl) · [CTCP 2023 (arXiv 2306.03756)](https://arxiv.org/abs/2306.03756) · [code](https://github.com/lxd99/CTCP) · [CasDO 2024 (10.1109/TKDE.2024.3465241)](https://doi.org/10.1109/TKDE.2024.3465241) Warning: IEEE 202 · [CasFT 2024 (arXiv 2409.16619)](https://arxiv.org/abs/2409.16619) · [CasTemp / Beyond Leakage 2025 (arXiv 2510.25348)](https://arxiv.org/abs/2510.25348) · [code](https://github.com/Lucas-PJ/CasTemp-ALGO)
 
 **Deep microscopic** [Topo-LSTM 2017 (arXiv 1711.10162)](https://arxiv.org/abs/1711.10162) · [code](https://github.com/vwz/topolstm) · [DeepInf 2018 (arXiv 1807.05560)](https://arxiv.org/abs/1807.05560) · [code](https://github.com/xptree/DeepInf) · [FOREST 2019 (IJCAI)](https://www.ijcai.org/proceedings/2019/560) · [code](https://github.com/albertyang33/FOREST) · [MS-HGAT 2022 (AAAI)](https://ojs.aaai.org/index.php/AAAI/article/view/20334) · [code](https://github.com/slingling/MS-HGAT)
 
-**Surveys** [Zhou, Xu, Trajcevski & Zhang, ACM CSUR 2021 (arXiv 2005.11041)](https://arxiv.org/abs/2005.11041) · [ACM 10.1145/3433000](https://dl.acm.org/doi/10.1145/3433000) ⚠️ ACM 403 · [Graph representation learning for popularity prediction (arXiv 2203.07632)](https://arxiv.org/abs/2203.07632) · [DiffusionPapers reading list](https://github.com/yangchengbupt/DiffusionPapers)
+**Surveys** [Zhou, Xu, Trajcevski & Zhang, ACM CSUR 2021 (arXiv 2005.11041)](https://arxiv.org/abs/2005.11041) · [ACM 10.1145/3433000](https://dl.acm.org/doi/10.1145/3433000) Warning: ACM 403 · [Graph representation learning for popularity prediction (arXiv 2203.07632)](https://arxiv.org/abs/2203.07632) · [DiffusionPapers reading list](https://github.com/yangchengbupt/DiffusionPapers)
 
-**Data** [CasFlow bundle — Weibo/Twitter/APS](https://drive.google.com/file/d/1o4KAZs19fl4Qa5LUtdnmNy57gHa15AF-/view) · [DeepHawkes Weibo](https://drive.google.com/file/d/1fgkLeFRYQDQOKPujsmn61sGbJt6PaERF/view) · [APS datasets](https://journals.aps.org/datasets) ⚠️ 403 to `curl`, browser-only · [AMiner Influence Locality](https://www.aminer.cn/influencelocality) · [ISI/Lerman Digg 2009](https://www.isi.edu/~lerman/downloads/digg2009.html) · [SNAP MemeTracker](https://snap.stanford.edu/data/memetracker9.html) · [Weng Twitter (carl.cs.indiana.edu)](http://carl.cs.indiana.edu/data/#virality2013) ⚠️ **404 as of 2026-07-28**
+**Data** [CasFlow bundle — Weibo/Twitter/APS](https://drive.google.com/file/d/1o4KAZs19fl4Qa5LUtdnmNy57gHa15AF-/view) · [DeepHawkes Weibo](https://drive.google.com/file/d/1fgkLeFRYQDQOKPujsmn61sGbJt6PaERF/view) · [APS datasets](https://journals.aps.org/datasets) Warning: 403 to `curl`, browser-only · [AMiner Influence Locality](https://www.aminer.cn/influencelocality) · [ISI/Lerman Digg 2009](https://www.isi.edu/~lerman/downloads/digg2009.html) · [SNAP MemeTracker](https://snap.stanford.edu/data/memetracker9.html) · [Weng Twitter (carl.cs.indiana.edu)](http://carl.cs.indiana.edu/data/#virality2013) Warning: **404 as of 2026-07-28**
 
 ---
 

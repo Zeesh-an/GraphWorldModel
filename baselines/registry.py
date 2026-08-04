@@ -22,10 +22,13 @@ it, and how to read its seeds back. `status` records whether it can actually run
 
 import csv
 import json
+import random
+import struct
 from functools import partial
 import os
 import pickle
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -44,6 +47,17 @@ learned = "learned"
 
 # Cascades simulated per DeepIM .SG training file
 deepim_training_samples = 1000
+
+# AdaptiveIM: its own example uses epsilon 0.5, and one possible world per -time
+adaptiveim_epsilon = 0.5
+adaptiveim_realization_seed = 0
+
+# RL4IM defaults, taken from its own src/tasks/config/basic_env.yaml rather than
+# from its paper, which states an average degree its config does not produce
+rl4im_graph_type = "powerlaw"
+rl4im_m = 3
+rl4im_p = 0.05
+rl4im_propagate_p = 0.1
 
 # Collective Influence's ball radius L. 2 is the value Morone & Makse use
 # throughout and the one their scaling results are quoted at.
@@ -98,6 +112,11 @@ class ExternalBaseline:
     # Every entry today is influence_maximization, which is exactly why the
     # field exists — a blocking or CND baseline must not join an IM sweep.
     task: str = "influence_maximization"
+    # True when the repo selects seeds in BATCHES and returns them in selection
+    # order. run_baseline then hands it the round schedule and the pipeline
+    # replays the result per round instead of as one t=0 plan, which is the
+    # difference between an adaptive arm and a static one wearing its name.
+    rounds_aware: bool = False
     status: str = "needs_setup"
     blocker: str | None = None
     python: str = "3.10"
@@ -124,6 +143,16 @@ class ExternalBaseline:
     command: object = None
     # (work_dir, stdout, budget) -> list[int]
     parse_seeds: object = None
+    # Extra packages to pip-install into the venv, for a library published on
+    # PyPI rather than driven from its clone (GraphSL, cosasi). Installed after
+    # `requirements`, so a repo can use both.
+    pip_packages: tuple = ()
+    # Share another entry's clone and venv. One PACKAGE can ship several
+    # published METHODS (GraphSL is six), and each deserves its own arm — but
+    # six clones of one repo means six multi-GB torch installs for no reason.
+    # `installed()` and the setup path both follow this, so the first entry
+    # installs and the rest report ready.
+    install_name: str | None = None
     notes: str = ""
     # Some repos return non-zero on SUCCESS. EI calls exit() once it reaches
     # its percolation threshold, which is its normal termination; OPIM's
@@ -135,7 +164,7 @@ class ExternalBaseline:
     @property
     def root(self) -> Path:
         """Where the repo is cloned, and where a per-baseline venv lives."""
-        return external_root / self.name
+        return external_root / (self.install_name or self.name)
 
     @property
     def directory(self) -> Path:
@@ -762,7 +791,7 @@ def _gnd_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dic
     """
     GND reads a plain `id1 id2` edge list, 1-indexed, one undirected edge per line.
 
-    ⚠️ Upstream hardcodes the node count, the filenames and the stopping threshold
+    Warning: Upstream hardcodes the node count, the filenames and the stopping threshold
     as compile-time constants (GND.cpp lines 37-41), which would mean recompiling
     once per graph. `setup_baselines` applies a patch making main() read them from
     argv; the patch is verified to reproduce the shipped CrimeNet result byte for
@@ -964,13 +993,13 @@ def _ei_command(
 
 def _ei_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
     """
-    ⚠️ EI answers a different question than a fixed budget asks.
+    Warning: EI answers a different question than a fixed budget asks.
 
     `threshold_conditions.dat` is `<node> <flag>` for every node: the vaccination
     state at EI's approximate percolation threshold (1/sqrt(N)), with no ordering
     and no way to ask for k.
 
-    ⚠️ **The flag is inverted relative to the README**, which states "A 1 means
+    Warning: **The flag is inverted relative to the README**, which states "A 1 means
     vaccinated, and a 0 means unvaccinated". It is the other way round, and the
     difference is not subtle — on `crime` the file has 707 ones and 47 zeros, and
     47 (6% of N) is the plausible immunization set while 707 is not. Scoring
@@ -1005,7 +1034,7 @@ def _ei_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
 
 # --- learned CND repos ------------------------------------------------------
 #
-# ⚠️ EVERY ADAPTER BELOW IS UNTESTED. They were written from the cloned source —
+# Warning: EVERY ADAPTER BELOW IS UNTESTED. They were written from the cloned source —
 # entry points, argument names and output paths were read, not guessed — but none
 # of these repos' dependency stacks install on the machine this was built on
 # (TensorFlow 1.14 for FINDER, torch-geometric 1.7.2 for NIRM, CUDA-pinned conda
@@ -1176,7 +1205,7 @@ def _gdm_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dic
     GDM scores every node in ONE pass (it is the static member of this family) and
     the removal order is that score, descending.
 
-    ⚠️ The clone ships no trained weights, so this needs `--weights` pointing at a
+    Warning: The clone ships no trained weights, so this needs `--weights` pointing at a
     model produced by the repo's own training script before it can run at all.
     """
     network = _edgelist_export(graph, work_dir)
@@ -1241,7 +1270,7 @@ def _dcrs_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> di
     """
     DCRS scores nodes by diffusion competence + role significance, one pass.
 
-    ⚠️ The clone ships NO trained weights — only `train_synthetic.py` /
+    Warning: The clone ships NO trained weights — only `train_synthetic.py` /
     `train_realworld.py` — so this cannot run until a model has been trained by
     the repo's own scripts. The runner points at `checkpoints/dcrs.pt` by
     convention; confirm the real filename after training.
@@ -1275,7 +1304,7 @@ def _selinda_export(graph, work_dir: Path, budget: int, diffusion_model: str) ->
     Selinda learns an RL attack policy and symbolic-regresses it into a closed-form
     resilience law; its dismantling arm rides on a bundled GDM-slim model.
 
-    ⚠️ The repo is driven by shell scripts (`app_rl.sh`, `app_sr.sh`, ...) rather
+    Warning: The repo is driven by shell scripts (`app_rl.sh`, `app_sr.sh`, ...) rather
     than a library entry point, and its published output is a fitted LAW, not a
     dismantling set. This runner targets the bundled GDM-slim scorer, which is the
     only part with a per-node output; confirm the module path before trusting it.
@@ -1471,6 +1500,420 @@ def _opim_parse(name: str, work_dir: Path, stdout: str, budget: int) -> list[int
             return [int(token) for token in numbers][:budget]
 
     return parse_seed_integers(stdout, budget)
+
+
+# Adaptive IM: AdaptiveIM (Han et al.) and RL4IM ------------------------------
+#
+# Both select seeds in BATCHES, so both are rounds_aware and both read
+# round_schedule.json out of work_dir (written by run_baseline).
+
+
+def _read_batches(work_dir: Path) -> list[int]:
+    from baselines.run_baseline import schedule_filename
+
+    return json.loads((work_dir / schedule_filename).read_text())
+
+
+def _adaptiveim_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
+    """
+    Write the three inputs AdaptiveIM reads, in the formats its source defines.
+
+    The dataset argument MUST be exactly `<dir>/<name>/`: load_possible_world()
+    recovers the dataset name by slicing between the FIRST TWO slashes of that
+    string, so a deeper path makes it look for `<dir>/<name>/<wrong>_0` and
+    die in mmap. That is why this writes into the repo rather than into
+    work_dir, which is an absolute path several levels deep.
+    """
+    spec = external_baselines["adaptiveim"]
+    name = "gwm"
+    data_dir = spec.directory / "gwmdata" / name
+    os.makedirs(data_dir, exist_ok=True)
+
+    edges = {
+        (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge])): float(
+            graph.ic_probs[edge]
+        )
+        for edge in range(graph.edge_index.shape[1])
+    }
+
+    (data_dir / "attribute.txt").write_text(
+        f"n={graph.num_nodes}\nm={len(edges)}\n"
+    )
+
+    # graph.h::readGraph mmaps m records of (int src, int dst, double p) and
+    # indexes them by dst. 16 bytes each, native endianness.
+    binary = "graph_lt.inf" if diffusion_model == "LT" else "graph_ic.inf"
+    with open(data_dir / binary, "wb") as handle:
+        for (source, destination), probability in edges.items():
+            handle.write(struct.pack("iid", source, destination, probability))
+
+    # The "realization" files the README defers to an unlinked Tools repo. They
+    # are IC possible worlds: each edge present independently with its own
+    # probability. Format read verbatim from load_possible_world(): TEXT, one
+    # "src dst" per line, PO[src].push_back(dst), with an "_lt" suffix under LT.
+    # Generated from OUR probabilities, so the algorithm adapts against the same
+    # dynamics our referee will score it under.
+    rng = random.Random(adaptiveim_realization_seed)
+    suffix = "_lt" if diffusion_model == "LT" else ""
+    live = [
+        f"{source} {destination}"
+        for (source, destination), probability in edges.items()
+        if rng.random() < probability
+    ]
+    (data_dir / f"{name}_0{suffix}").write_text("\n".join(live) + "\n")
+
+    return {"dataset": f"gwmdata/{name}", "batches": _read_batches(work_dir)}
+
+
+def _adaptiveim_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    batches = extras["batches"]
+    # -batch is a single size, so a ragged schedule (k not divisible by r) is
+    # run at its largest batch and sliced back to the real sizes afterwards
+    return [
+        "./exp_epic",
+        "-dataset",
+        extras["dataset"],
+        "-model",
+        "LT" if diffusion_model == "LT" else "IC",
+        "-epsilon",
+        str(adaptiveim_epsilon),
+        "-k",
+        str(sum(batches)),
+        "-batch",
+        str(max(batches)),
+        "-seedfile",
+        str((work_dir / "seeds.txt").resolve()),
+        "-time",
+        "1",
+    ]
+
+
+def _adaptiveim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
+    """Seeds in SELECTION order, space separated, so the batch structure survives."""
+    seed_file = work_dir / "seeds.txt"
+    if not seed_file.exists():
+        raise ValueError(
+            f"adaptiveim wrote no seedfile at {seed_file}; output tail:\n"
+            f"{stdout[-500:]}"
+        )
+
+    return [int(token) for token in seed_file.read_text().split()][:budget]
+
+
+def _rl4im_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
+    """
+    RL4IM generates its own graphs, so the only thing exported is the config.
+
+    It has no flag for "run on this graph": src/environment/graph.py builds
+    powerlaw_cluster graphs from node_train / graph_nbr_train. The honest
+    reading is that RL4IM is trained on a DISTRIBUTION and applied zero-shot,
+    which is the regime its own paper reports, so the adapter matches our graph
+    on size and family and lets it train there. That is stated on the arm rather
+    than hidden: it is not the same as running it on our exact graph.
+    """
+    batches = _read_batches(work_dir)
+
+    return {
+        "batches": batches,
+        # T is the number of node-selection steps; budget is per main step
+        "T": str(sum(batches)),
+        "budget": str(max(batches)),
+        "nodes": str(graph.num_nodes),
+    }
+
+
+def _rl4im_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    """
+    sacred, not argparse: overrides go through `with key=value`.
+
+    No pretrained checkpoint ships, so this TRAINS before it selects. Its own
+    defaults cap training at max_global_t=2000 steps, which is minutes rather
+    than hours (research/adaptive_online_im.md §11).
+    """
+    return [
+        "python",
+        "main.py",
+        "with",
+        f"T={extras['T']}",
+        f"budget={extras['budget']}",
+        f"node_train={extras['nodes']}",
+        f"node_test={extras['nodes']}",
+        f"graph_type={rl4im_graph_type}",
+        f"m={rl4im_m}",
+        f"p={rl4im_p}",
+        f"propagate_p={rl4im_propagate_p}",
+        "mode=train",
+        "use_cuda=False",
+        f"results_path={work_dir.resolve()}",
+    ]
+
+
+def _rl4im_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
+    """
+    Read the invited set out of the test log.
+
+    runners.py prints `invited:  [...]` and `present:  [...]` under verbose. The
+    INVITED set is the seed set: `present` is what survived the willingness
+    draw (q=0.6), which is RL4IM's contingency model and not something our
+    action space has. Scoring `present` would hand it a budget it did not spend.
+    """
+    match = re.findall(r"invited:\s*\[([^\]]*)\]", stdout)
+    if not match:
+        raise ValueError(
+            f"rl4im printed no `invited:` line; it is emitted only when "
+            f"verbose=True, so the command needs that override. Output tail:\n"
+            f"{stdout[-800:]}"
+        )
+
+    return [int(token) for token in re.findall(r"\d+", match[-1])][:budget]
+
+
+# Source localization --------------------------------------------------------
+#
+# The inverse contract, and it differs from every adapter above in shape: the
+# repo is handed a GRAPH plus a BATCH of observed diffusion states and returns
+# one source set per observation, so `export` takes the instance list where the
+# intervention adapters take a budget, and `parse_seeds` returns a dict keyed by
+# episode id rather than a flat list. `run_baseline.run_external_baseline`
+# dispatches on whether `instances` was passed.
+
+graphsl_methods = ("lpsi", "netsleuth", "ojc", "gcnsi", "ivgd", "slvae")
+# Training epochs for GraphSL's three learned methods. Low by the papers'
+# standards and deliberately so: this is a default that has to finish on a
+# laptop, and it is the one number to raise before quoting a GCNSI/IVGD/SL-VAE
+# comparison as anything but a smoke result.
+graphsl_epochs = 50
+
+
+def _graphsl_export(graph, work_dir: Path, instances: list, diffusion_model: str) -> dict:
+    """
+    Our episodes as GraphSL's own two arrays: a CSR adjacency and per-instance
+    (seed, observation) columns.
+
+    Both instance POOLS arrive together (selection and evaluation), flagged by
+    `is_train`, because GraphSL's methods tune on labelled data and then predict.
+    The driver trains on the selection rows only.
+    """
+    import numpy as np
+
+    os.makedirs(work_dir, exist_ok=True)
+    num_nodes = graph.num_nodes
+
+    # Undirected and unweighted: GraphSL builds a normalized Laplacian and a
+    # networkx view off this, and every method in it is defined on the symmetric
+    # contact graph
+    view = _undirected_view(graph)
+    adjacency = nx.to_scipy_sparse_array(
+        view, nodelist=list(range(num_nodes)), format="csr", dtype=float
+    )
+    np.savez(
+        work_dir / "graph.npz",
+        data=adjacency.data,
+        indices=adjacency.indices,
+        indptr=adjacency.indptr,
+        shape=np.array(adjacency.shape),
+    )
+
+    seeds = np.zeros((len(instances), num_nodes), dtype=np.float32)
+    observations = np.zeros((len(instances), num_nodes), dtype=np.float32)
+
+    for row, instance in enumerate(instances):
+        seeds[row, instance.sources] = 1.0
+        # Binarized: GraphSL's methods index `influ_mat[:, -1]` as an indicator
+        # and OJC compares it against 1 exactly, so a continuous marginal would
+        # silently empty its infected set
+        observations[row] = (np.asarray(instance.observation) >= 0.5).astype(np.float32)
+
+    # An episode appears in only one pool, so the first occurrence decides
+    seen = set()
+    is_train = np.zeros(len(instances), dtype=bool)
+    for row, instance in enumerate(instances):
+        is_train[row] = instance.episode_id not in seen
+        seen.add(instance.episode_id)
+
+    np.savez(
+        work_dir / "instances.npz",
+        seeds=seeds,
+        observations=observations,
+        episode_ids=np.array([instance.episode_id for instance in instances]),
+        budgets=np.array([max(1, instance.source_count) for instance in instances]),
+        is_train=is_train,
+    )
+
+    driver = baselines_root / "drivers" / "graphsl_driver.py"
+    shutil.copy(driver, work_dir / "graphsl_driver.py")
+
+    return {"driver": str(work_dir / "graphsl_driver.py")}
+
+
+def _graphsl_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    return ["python", extras["driver"], str(work_dir)]
+
+
+def _graphsl_parse(work_dir: Path, stdout: str, instances: list) -> dict:
+    payload = json.loads((work_dir / "predictions.json").read_text())
+
+    return {episode: nodes for episode, nodes in payload["sources"].items()}
+
+
+def _localization_export(
+    graph, work_dir: Path, instances: list, diffusion_model: str, driver: str
+) -> dict:
+    """
+    The shared inverse export: an edge list, and one row per instance.
+
+    Everything except GraphSL reads a plain graph rather than a CSR triple, so
+    this writes the edge list and lets each driver build whatever it needs. The
+    per-instance arrays are the same for all of them: seed labels (used only by
+    the drivers that train), binarized observations, budgets, horizons, the
+    train/evaluate flag, and the trajectory for the ones that condition on
+    intermediate snapshots.
+    """
+    import numpy as np
+
+    os.makedirs(work_dir, exist_ok=True)
+    num_nodes = graph.num_nodes
+    view = _undirected_view(graph)
+
+    np.savez(
+        work_dir / "graph.npz",
+        edges=np.array(list(view.edges()), dtype=np.int64).reshape(-1, 2),
+        num_nodes=np.array(num_nodes),
+    )
+
+    seeds = np.zeros((len(instances), num_nodes), dtype=np.float32)
+    observations = np.zeros((len(instances), num_nodes), dtype=np.float32)
+
+    for row, instance in enumerate(instances):
+        seeds[row, instance.sources] = 1.0
+        # Binarized: every one of these repos treats the observation as an
+        # indicator, and several compare it against 1 exactly
+        observations[row] = (np.asarray(instance.observation) >= 0.5).astype(np.float32)
+
+    # Longest recorded path, so every instance's trajectory can be padded to one
+    # array. Padding holds the last step, which is exact for a monotone cascade.
+    depth = max(
+        (
+            instance.trajectory.shape[0]
+            for instance in instances
+            if instance.trajectory is not None
+        ),
+        default=1,
+    )
+    trajectories = np.zeros((len(instances), depth, num_nodes), dtype=np.float32)
+    for row, instance in enumerate(instances):
+        path = (
+            instance.trajectory
+            if instance.trajectory is not None
+            else observations[row][None, :]
+        )
+        trajectories[row, : path.shape[0]] = path
+        trajectories[row, path.shape[0] :] = path[-1]
+
+    seen = set()
+    is_train = np.zeros(len(instances), dtype=bool)
+    for row, instance in enumerate(instances):
+        is_train[row] = instance.episode_id not in seen
+        seen.add(instance.episode_id)
+
+    np.savez(
+        work_dir / "instances.npz",
+        seeds=seeds,
+        observations=observations,
+        trajectories=trajectories,
+        episode_ids=np.array([instance.episode_id for instance in instances]),
+        budgets=np.array([max(1, instance.source_count) for instance in instances]),
+        horizons=np.array([instance.horizon for instance in instances]),
+        is_train=is_train,
+    )
+
+    shutil.copy(baselines_root / "drivers" / driver, work_dir / driver)
+
+    return {"driver": str(work_dir / driver)}
+
+
+def _localization_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    return ["python", extras["driver"], str(work_dir)]
+
+
+def _localization_parse(work_dir: Path, stdout: str, instances: list) -> dict:
+    return json.loads((work_dir / "predictions.json").read_text())["sources"]
+
+
+def _cosasi_entry(method: str, title: str, venue: str, notes: str) -> ExternalBaseline:
+    """One arm per cosasi estimator, all sharing its single install."""
+    return ExternalBaseline(
+        name=f"cosasi_{method}",
+        kind=classical,
+        title=title,
+        venue=venue,
+        repo="https://github.com/lmiconsulting/cosasi",
+        paper="https://joss.theoj.org/papers/10.21105/joss.04894",
+        entry=f"cosasi package ({method})",
+        task="source_localization",
+        status="needs_setup",
+        # Warning: The published `cosasi` wheel declares NO dependencies, so a bare
+        # `pip install cosasi` imports and then fails on `networkx`. Its clone
+        # carries a requirements.txt, but every line in it is pinned to 2022
+        # (numpy 1.21, scikit-learn 1.1) and resolving those on a current Python
+        # fails outright — so the deps are listed here UNPINNED instead, and the
+        # one incompatibility that causes is shimmed in the driver rather than
+        # frozen around.
+        requirements=None,
+        pip_packages=(
+            "cosasi",
+            "networkx",
+            "numpy",
+            "scipy",
+            "scikit-learn",
+            "ndlib",
+            "six",
+            "matplotlib",
+        ),
+        install_name="cosasi",
+        export=partial(_localization_export, driver="cosasi_driver.py"),
+        command=_localization_command,
+        parse_seeds=_localization_parse,
+        extra_env={"GWM_COSASI_METHOD": method},
+        notes=notes,
+    )
+
+
+def _graphsl_entry(method: str, title: str, venue: str, notes: str) -> ExternalBaseline:
+    """One arm per published method, all six sharing GraphSL's single install."""
+    return ExternalBaseline(
+        name=f"graphsl_{method}",
+        kind=classical if method in ("lpsi", "netsleuth", "ojc") else learned,
+        title=title,
+        venue=venue,
+        repo="https://github.com/xianggebenben/GraphSL",
+        paper="https://arxiv.org/abs/2405.03724",
+        entry=f"GraphSL package ({method})",
+        task="source_localization",
+        status="needs_setup",
+        # The clone carries no usable requirements file; the PyPI package is the
+        # install. `six` and `matplotlib` are undeclared transitive imports of
+        # GraphSL's own `utils` module, which fails at import without them.
+        requirements=None,
+        pip_packages=("GraphSL", "six", "matplotlib"),
+        install_name="graphsl",
+        export=_graphsl_export,
+        command=_graphsl_command,
+        parse_seeds=_graphsl_parse,
+        extra_env={
+            "GWM_GRAPHSL_METHOD": method,
+            "GWM_GRAPHSL_EPOCHS": str(graphsl_epochs),
+        },
+        notes=notes,
+    )
 
 
 # Registry -------------------------------------------------------------------
@@ -1899,19 +2342,24 @@ external_baselines: dict[str, ExternalBaseline] = {
         requirements=None,
         build=["make"],
         notes=(
-            "CORRECTED 2026-08-01. This entry previously said 'no public code "
-            "release found' and sat under influence_maximization; both were "
-            "wrong. Code IS published by a co-author at github.com/smaniu/oim "
-            "(research/adaptive_online_im.md §3.2), and the method is an "
-            "online/bandit IM algorithm, so it belongs to this task. NOT WIRED: "
-            "OIM's own protocol is a SEQUENCE of campaigns reporting the UNION "
-            "of activated nodes across trials, which §8.2 trap 2 shows is not "
-            "comparable to a single-campaign spread: the number grows "
-            "monotonically in the trial count. Driving it as a condition-7 arm "
-            "needs the repeated-campaign loop this task does not have (see the "
-            "regret entry in §11). DeepIM sidestepped this by re-running OIM "
-            "under its own single-campaign protocol; those numbers are "
-            "transcribed in research/influence_maximization.md §5.1."
+            "CORRECTED 2026-08-01, interface read from source 2026-08-03. Code "
+            "IS published by a co-author (research/adaptive_online_im.md §3.2) "
+            "and the method is online IM, so it belongs to this task.\n\n"
+            "  argv    ./oim real <graph> <exploit> <budget> <k> [model] "
+            "[samples]  (positional, src/main.cpp)\n"
+            "  build   make; needs GCC >= 4.9, C++14, and Boost HEADERS in "
+            "/usr/local/include (header-only, no linking)\n\n"
+            "NOT WIRED, and the obstacle is the PROBLEM SETTING rather than the "
+            "interface. `budget` here is the number of TRIALS, not a seed count: "
+            "OIM runs a sequence of campaigns, updates a Beta posterior per edge "
+            "from observed activations, and reports the UNION over trials. There "
+            "is no single seed set to hand back, and the union grows "
+            "monotonically in the trial count, so it is not comparable to a "
+            "single-campaign spread (§8.2 trap 2). A faithful arm needs a "
+            "repeated-campaign external protocol that our contract does not "
+            "have. DeepIM sidestepped this by re-running OIM under its own "
+            "single-campaign protocol; those numbers are transcribed in "
+            "research/influence_maximization.md §5.1."
         ),
     ),
     # Adaptive / online IM (research/adaptive_online_im.md §3.1, §3.2, §4.2).
@@ -1930,23 +2378,63 @@ external_baselines: dict[str, ExternalBaseline] = {
         venue="PVLDB 11, 2018",
         repo="https://github.com/kkhuang81/AdaptiveIM",
         paper="http://www.vldb.org/pvldb/vol11/p1029-han.pdf",
-        entry="C++ (make)",
+        entry="C++ (make -f Makefile_expepic)",
         task="adaptive_online_im",
         status="needs_setup",
+        rounds_aware=True,
         requirements=None,
-        build=["make"],
+        build=["make", "-f", "Makefile_expepic"],
+        patches=[
+            # head.h's rdtsc() is x86 inline asm, so the repo does not compile on
+            # arm64 at all ("invalid output constraint '=a' in asm"). It feeds
+            # only the RUN_TIME diagnostic macro and two commented-out lines, so
+            # a steady_clock counter is functionally identical and portable.
+            (
+                "expepic/head.h",
+                'uint64 rdtsc(void)\n{\n    unsigned a, d;\n    //asm("cpuid");\n'
+                '    asm volatile("rdtsc" : "=a" (a), "=d" (d));\n'
+                "    return (((uint64)a) | (((uint64)d) << 32));\n}",
+                "uint64 rdtsc(void)\n{\n    return (uint64)std::chrono::"
+                "duration_cast<std::chrono::nanoseconds>(\n        std::chrono::"
+                "steady_clock::now().time_since_epoch()).count();\n}",
+            ),
+            ("expepic/head.h", "#include <cstring>", "#include <cstring>\n#include <chrono>"),
+        ],
+        export=_adaptiveim_export,
+        command=_adaptiveim_command,
+        parse_seeds=_adaptiveim_parse,
+        allow_nonzero_exit=True,
         notes=(
-            "THE reference implementation for this task, by the authors. Our "
+            "WIRED 2026-08-03, built and run. THE reference implementation for "
+            "this task, by the authors. Our "
             "library's `adapt_greedy` and `adapt_epic` are Python "
             "reimplementations of AdaptGreedy and its RIS instantiation, good "
-            "enough as condition-1 arms, but this is the original and the one "
-            "whose figures §5.2 describes. Its two sweeps are the b-setting "
-            "(k=500 fixed, b in {1,2,5,10,20,50,500}) and the k-setting (r=50 "
-            "fixed), which map onto our --per-round-budget and --rounds "
-            "respectively. TO WIRE: clone, make, read its graph format and the "
-            "flag that sets b, and confirm where the per-round seed sets are "
-            "written. Note that the paper reports AdaptIM-1 running out of "
-            "memory at b<5 on LiveJournal and Orkut, so expect the same."
+            "enough as condition-1 arms, but this is the original.\n\n"
+            "INTERFACE, read from source on 2026-08-03 (expepic/aim.cpp, "
+            "graph.h, infgraph.h) so the remaining work is known rather than "
+            "guessed:\n"
+            "  argv    ./exp_epic -dataset <dir>/<name>/ -model IC|LT "
+            "-epsilon 0.5 -k <k> -batch <b> -seedfile <path> -time 1\n"
+            "  reads   <dir>/<name>/attribute.txt  ('n=<N>' and 'm=<M>')\n"
+            "          <dir>/<name>/graph_ic.inf   BINARY, m records of "
+            "(int src, int dst, double p), 16 bytes each, indexed by dst\n"
+            "          <dir>/<name>/<name>_<i>     possible world i, TEXT, one "
+            "'src dst' pair per line (a live-edge sample). We can GENERATE "
+            "these: it is the standard IC possible world, and the format is "
+            "read verbatim from load_possible_world().\n"
+            "  writes  the seedfile, space-separated node ids, in SELECTION "
+            "order, so slicing by <b> recovers the per-batch sets\n"
+            "  build   make -f Makefile_expepic\n\n"
+            "The possible-world files the README defers to an unlinked Tools "
+            "repo are generated by the adapter: they are IC live-edge samples "
+            "drawn from OUR probabilities, so it adapts against the dynamics "
+            "our referee scores it under.\n\n"
+            "READ THE ARM AS: AdaptGreedy's SCHEDULE replayed under our referee. "
+            "Its batches were chosen against its own realizations, not against "
+            "the state our simulator goes on to produce, so this is not the "
+            "algorithm adapting inside our environment. True cross-process "
+            "adaptivity would need it to accept an already-active set per round, "
+            "which its CLI does not expose."
         ),
     ),
     "mrim": ExternalBaseline(
@@ -1956,19 +2444,26 @@ external_baselines: dict[str, ExternalBaseline] = {
         venue="KDD 2018",
         repo="https://github.com/lichao-sun/Multi-Round-Influence-Maximization",
         paper="https://arxiv.org/abs/1802.04189",
-        entry="see repo",
+        entry="n/a",
         task="adaptive_online_im",
-        status="needs_setup",
+        status="blocked",
+        blocker=(
+            "THE CODE IS NOT IN THE REPOSITORY. Cloned and inspected "
+            "2026-08-03: the README says verbatim 'If you wana the code, "
+            "please email to james.lichao.sun@gmail.com'. What the repo does "
+            "ship is maxinf_v2.1.0, which is Wei Chen's older SINGLE-round "
+            "max_influence toolkit (cgreedy, degreediscount_ic, pmia, "
+            "general_cascade) plus three Windows .exe binaries. Not one file "
+            "under code/ mentions multi-round or MRIM. Wiring it would put Wei "
+            "Chen's static IM code in the table under MRIM's name, which is "
+            "worse than an empty cell. Unblocking means emailing the author."
+        ),
         notes=(
-            "r separate campaigns of k seeds each, non-adaptive and adaptive "
-            "variants, both with approximation guarantees. Distinct from "
-            "adaptive IM in our sense: MRIM's rounds are separate DIFFUSIONS "
-            "whose union is scored, whereas ours is one diffusion observed in "
-            "stages (§1.5). Comparing the two needs the multi-round state "
-            "bookkeeping §2.4e describes (reset `frontier` between campaigns, "
-            "keep `infected` as the union), which is not built. §11 also records "
-            "that this paper's dataset and result tables were never extracted, "
-            "so there is no published number to check an adapter against yet."
+            "Our own --campaigns flag now implements the multi-round SETTING "
+            "(r separate diffusions scored on their union, §1.5), so the "
+            "protocol side is no longer the obstacle; the algorithm is. §11 "
+            "also records that this paper's tables were never extracted, so "
+            "there would be no published number to check an adapter against."
         ),
     ),
     "rl4im": ExternalBaseline(
@@ -1978,10 +2473,52 @@ external_baselines: dict[str, ExternalBaseline] = {
         venue="UAI 2021",
         repo="https://github.com/wmd3i/RL4IM-Contingency",
         paper="https://arxiv.org/abs/2106.07039",
-        entry="see repo",
+        entry="main.py (sacred; TRAINS before selecting)",
         task="adaptive_online_im",
         status="needs_setup",
+        rounds_aware=True,
+        # torch 1.7.0 and torch_geometric 1.6.3 are 2020 pins with no wheels for
+        # a modern interpreter, so the venv has to be built on 3.9
+        python="3.9",
+        patches=[
+            # ipdb 0.12 builds with use_2to3, which setuptools removed in v58,
+            # so the install dies before torch is even reached. It is a DEBUGGER,
+            # but src/tasks/task_rl4im.py imports it at module scope, so it must
+            # be unpinned rather than dropped.
+            # NB the replacement must not be a SUBSTRING of the original, or
+            # setup_baselines' idempotency check ("already applied?") matches
+            # the unpatched line and skips the patch silently
+            ("requirements.txt", "ipdb==0.12", "ipdb>=0.13"),
+        ],
+        export=_rl4im_export,
+        command=_rl4im_command,
+        parse_seeds=_rl4im_parse,
+        extra_env={"PYTHONUNBUFFERED": "1"},
         notes=(
+            "WIRED 2026-08-03, adapter written from source. INSTALL VERIFIED "
+            "up to one architecture-specific blocker: `uv pip install -r "
+            "requirements.txt` on python 3.9 resolves everything except "
+            "`torch==1.7.0 has no wheels with a matching Python ABI tag`, "
+            "because PyTorch published no arm64 macOS wheels before 1.12. On "
+            "linux x86_64, which is where the sbatch scripts run, torch 1.7.0 "
+            "ships cp36-cp39 wheels and the pinned interpreter above resolves "
+            "it. So this is untested end to end on THIS machine and expected to "
+            "install on the cluster; run "
+            "`python -m baselines.setup_baselines --only rl4im` there first.\n\n"
+            "It TRAINS before it selects (no checkpoint ships). Budget from its "
+            "own config: max_global_t=2000 steps, minutes rather than hours; the "
+            "540k IC simulations that bound implies were measured at about half "
+            "a minute total (research/adaptive_online_im.md §11).\n\n"
+            "TWO HONEST LIMITS on the arm. (1) It generates its own graphs: "
+            "there is no flag for 'run on this graph', so the adapter matches "
+            "our graph on size and family (powerlaw_cluster, m=3, p=0.05, its "
+            "own config values) and lets it train there. That is zero-shot "
+            "transfer from a distribution, which is the regime its paper "
+            "reports, not a run on our exact graph. (2) It models WILLINGNESS "
+            "(q=0.6, a seed may decline). parse_seeds reads `invited`, not "
+            "`present`: scoring the survivors would credit it with a budget it "
+            "did not spend, since our action space has no notion of a seed "
+            "declining.\n\n"
             "The closest published thing to our setting and the ONLY genuinely "
             "multi-round RL baseline in the literature (§4.1: DISCO, PIANO, "
             "GCOMB and ToupleGDD are all RL over seed-set CONSTRUCTION, with no "
@@ -1993,7 +2530,14 @@ external_baselines: dict[str, ExternalBaseline] = {
             "IC p=0.1, 100 sims per number. Two mismatches to resolve before "
             "wiring: its `willingness` q=0.6 (a seed may DECLINE, which our "
             "action space has no notion of) and the fact that all its results "
-            "are figure-only, so there is no table to validate against."
+            "are figure-only, so there is no table to validate against.\n\n"
+            "Inspected 2026-08-03: main.py is driven by `sacred` "
+            "(Experiment/FileStorageObserver) rather than plain argparse, and "
+            "NO pretrained checkpoint is shipped, so an arm has to TRAIN a DQN "
+            "before it can select anything. That makes it the largest single "
+            "piece of the five, and unlike the bandit entries it is a genuine "
+            "contract fit: it does produce per-round seed sets. Highest-value "
+            "target once the per-round contract exists."
         ),
     ),
     "oim_lt": ExternalBaseline(
@@ -2008,11 +2552,16 @@ external_baselines: dict[str, ExternalBaseline] = {
         status="needs_setup",
         notes=(
             "The LT counterpart of IMLinUCB, and the official implementation. "
-            "Same blocker as `oim`: bandit IM is a repeated-campaign regret "
-            "setting, not single-campaign spread, so it needs the loop §11 "
-            "records as missing. Worth registering now because it is the only "
-            "online-IM code we found that targets LT at all, and our LT arms "
-            "otherwise have no published online baseline."
+            "Inspected 2026-08-03: Main.py is a SIMULATION HARNESS, not a seed "
+            "selector. It instantiates bandit algorithms (OIM_ETC, "
+            "IMLinUCB_LT), runs them for `iterationTime` rounds against its own "
+            "datasets, and accumulates reward, loss and regret against an "
+            "oracle. There is no entry point that answers 'give me k seeds for "
+            "this graph', which is what our contract asks for. Same "
+            "repeated-campaign obstacle as `oim`, plus the harness shape. Worth "
+            "keeping registered because it is the only online-IM code found "
+            "that targets LT at all, and our LT arms otherwise have no "
+            "published online baseline."
         ),
     ),
     "timlinucb": ExternalBaseline(
@@ -2026,14 +2575,20 @@ external_baselines: dict[str, ExternalBaseline] = {
         task="adaptive_online_im",
         status="needs_setup",
         notes=(
-            "⚠️ THIRD-PARTY, not the authors'. Wen et al. released no code; this "
-            "is a temporal port found by the review (§3.2), so any number it "
-            "produces is attributable to this repo and not to the paper, so say so "
-            "if it is ever reported. Same repeated-campaign blocker as the other "
-            "bandit entries. Scale note from §5.4: the strongest theory result in "
-            "bandit IM was validated on a 327-node Facebook subgraph, and §6.2 "
-            "records that the exact subgraph is unpublished, so its own figure "
-            "cannot be reproduced regardless."
+            "THIRD-PARTY, not the authors'. Wen et al. released no code; this is "
+            "a temporal port found by the review (§3.2), so any number it "
+            "produces is attributable to this repo and not to the paper, and "
+            "must be labelled that way if it is ever reported.\n\n"
+            "Inspected 2026-08-03: the surface is library functions, not a CLI "
+            "(timlinucb.py exposes timlinucb(), oim_node2vec(), "
+            "timlinucb_parallel_t()), and it needs node2vec edge features built "
+            "first (get_features_nodes / generate_node2vec_fetures, with a "
+            "vendored node2vec/). Same repeated-campaign obstacle as the other "
+            "two bandit entries: it optimizes cumulative regret over rounds, "
+            "not one seed set. Scale note from §5.4: the strongest theory "
+            "result in bandit IM was validated on a 327-node Facebook subgraph, "
+            "and §6.2 records that the exact subgraph is unpublished, so its own "
+            "figure cannot be reproduced regardless."
         ),
     ),
     # -- critical node detection -------------------------------------------
@@ -2044,7 +2599,7 @@ external_baselines: dict[str, ExternalBaseline] = {
     # comparison — their seed set crosses the process boundary and OUR referee
     # scores it, exactly as on the IM side — but it does mean a fair report has to
     # show both columns, which is what the report's structural section is for.
-    # ⚠️ Two shared traps before any of these is wired (§8.2): almost all of them
+    # Warning: Two shared traps before any of these is wired (§8.2): almost all of them
     # run on the LARGEST CONNECTED COMPONENT of the input silently (trap 7), and
     # several ship a REINSERTION pass that makes `X` and `X+R` different methods
     # cited under one name (trap 2).
@@ -2069,8 +2624,8 @@ external_baselines: dict[str, ExternalBaseline] = {
             "node-weighted cost); pick the ND unit-cost one to match a cardinality "
             "budget. TO WIRE: clone, build the Cython extensions, read which of "
             "`FINDER_CN` / `FINDER_ND` the entry point drives and what its graph "
-            "format is. ⚠️ TensorFlow 1.x and Cython pin this to Python 3.7, which "
-            "is why it is the most expensive entry here to install. ⚠️ §11 records "
+            "format is. Warning: TensorFlow 1.x and Cython pin this to Python 3.7, which "
+            "is why it is the most expensive entry here to install. Warning: §11 records "
             "that its per-network results are HEATMAP-ONLY (no arXiv version, "
             "paywalled PDF, and the `results/` directory its README advertises does "
             "not exist in master), so there is no published table to validate an "
@@ -2120,7 +2675,7 @@ external_baselines: dict[str, ExternalBaseline] = {
             "one 47-network table, which makes its Table 5 the single most useful "
             "comparison target in this literature. Drops handcrafted structural "
             "features entirely; O(|V|+|E|). TO WIRE: clone, read the graph format "
-            "and which of MIND-AM / MIND-MP the entry point drives. ⚠️ Its table is "
+            "and which of MIND-AM / MIND-MP the entry point drives. Warning: Its table is "
             "published AUC RELATIVE TO ITSELF = 100 (§8.2 trap 5), so it is "
             "internally consistent and externally useless — you cannot combine it "
             "with an absolute number, only re-run it. The rows to read first are "
@@ -2222,7 +2777,7 @@ external_baselines: dict[str, ExternalBaseline] = {
         # makes main() read them from argv, defaulting to the shipped CrimeNet
         # example when called with none — verified to reproduce its 290-node
         # result byte for byte. Idempotent: re-running setup is a no-op.
-        # ⚠️ Each `new` carries a /*gwm*/ marker so it is NOT a substring of its
+        # Warning: Each `new` carries a /*gwm*/ marker so it is NOT a substring of its
         # own `old`. setup_baselines.patch() treats "new already in text" as
         # "already applied", and dropping `const` alone leaves the replacement
         # inside the original — so the de-const edits would be skipped forever
@@ -2270,7 +2825,7 @@ external_baselines: dict[str, ExternalBaseline] = {
             "the SOURCE of six of our datasets (`crime`, `corruption`, "
             "`hamsterster`, `road_eu`, `intnet1`, `ppi_yeast` all load its "
             "`Datasets_*` files), so the graphs already match byte for byte. "
-            "⚠️ Its contribution is COST-weighted dismantling, so comparing its "
+            "Warning: Its contribution is COST-weighted dismantling, so comparing its "
             "cost-optimal set against a cardinality budget is unfair in both "
             "directions (§8.2 trap 4) — run it with unit costs, or report a cost "
             "budget. TO WIRE: clone, make, read the flag that selects unit vs "
@@ -2328,7 +2883,7 @@ external_baselines: dict[str, ExternalBaseline] = {
             "O(N log N) tree breaking, then reverse-greedy reinsertion. Our "
             "`decycling` reproduces the SHAPE with a greedy first stage and is "
             "explicitly not this; wire it before quoting any Min-Sum comparison. "
-            "⚠️ §11 records that its real-network table does not exist — the PNAS "
+            "Warning: §11 records that its real-network table does not exist — the PNAS "
             "paper reports two graphs in prose, and the Hamsterster/PGP/Enron rows "
             "commonly attributed to Min-Sum actually come from CoreHD and BPD."
         ),
@@ -2379,7 +2934,7 @@ external_baselines: dict[str, ExternalBaseline] = {
         # which is its normal, successful termination and returns 1
         allow_nonzero_exit=True,
         notes=(
-            "⚠️ TWO TRAPS, both verified by running it — read _ei_parse before "
+            "Warning: TWO TRAPS, both verified by running it — read _ei_parse before "
             "reporting a number. (1) Its output flag is INVERTED relative to its "
             "README: 0 means vaccinated, not 1, and reading it the documented way "
             "leaves a giant component of 626 against 18. (2) It emits a SET at its "
@@ -2446,12 +3001,75 @@ external_baselines: dict[str, ExternalBaseline] = {
     # return a seed set from a graph, they return a SOURCE set from a (graph,
     # observation) pair, so the process boundary has to carry `y` across as well.
     # Our own referee then scores it exactly as it scores our arms.
-    # ⚠️ Two shared traps (§8.4): the SOURCE FRACTION is not standardized (10%
+    # Warning: Two shared traps (§8.4): the SOURCE FRACTION is not standardized (10%
     # uniform-random in SL-VAE, first 5% by infection time in SL-Diff, top 10% by
     # influence time in SIDSL), and NOTHING in this literature evaluates under IC
     # or LT — SL-VAE uses SI/SIR, everything else uses real cascades. §11 calls
     # that the single biggest comparability gap in the file, and it is bigger than
     # any graph-version disagreement.
+    # Six published methods behind one package, one arm each, one shared install.
+    # This is the entry that makes SL-VAE, IVGD and GCNSI runnable at all: the
+    # standalone repos for the first two are worse packaging of the same methods
+    # (see their entries below).
+    "graphsl_lpsi": _graphsl_entry(
+        "lpsi",
+        "LPSI: multiple source detection without the propagation model",
+        "AAAI 2017",
+        "The row that has to be beaten. SIDSL's Table 1 puts this 2017 "
+        "label-propagation method at F1 0.544 on Digg against SL-VAE's 0.479 and "
+        "DDMSL's 0.517, with no learning in it at all. Cross-checks our own "
+        "`lpsi` reimplementation, which differs in the selection rule (we take "
+        "local maxima of the field, GraphSL thresholds it).",
+    ),
+    "graphsl_netsleuth": _graphsl_entry(
+        "netsleuth",
+        "NETSLEUTH: identifying culprits in epidemics (MDL)",
+        "ICDM 2012",
+        "The multi-source MDL reference. GraphSL's version tunes `k` on the "
+        "training split, so unlike our own `netsleuth` it does exercise the "
+        "count-inference half of the paper, then we take its top-k for a matched "
+        "comparison. Beats LPSI on Power Grid in SL-VAE's Table 1.",
+    ),
+    "graphsl_ojc": _graphsl_entry(
+        "ojc",
+        "OJC: locating multiple sources with partial observations",
+        "AAAI 2017",
+        "Built for the sparse-observer regime, run here under full observation "
+        "because that is what our episodes record, so this row understates it by "
+        "construction rather than by accident.",
+    ),
+    "graphsl_gcnsi": _graphsl_entry(
+        "gcnsi",
+        "GCNSI: multiple rumor source detection with graph convolutional networks",
+        "CIKM 2019",
+        "The first GNN for this task and every later paper's WEAKEST learned "
+        "baseline: lowest-scoring learned method in §5.1, §5.2, §5.3 and §5.5 "
+        "without exception. Its `ACC 0.8840` with `F1 0.0218` on Network Science "
+        "is the single clearest demonstration that accuracy is useless alone "
+        "here. Trained at `graphsl_epochs`, which is far below the paper's.",
+    ),
+    "graphsl_ivgd": _graphsl_entry(
+        "ivgd",
+        "IVGD: invertible validity-aware graph diffusion",
+        "WWW 2022",
+        "The near-miss on the amortization axis: its inversion is one backward "
+        "pass, but the validity-aware projection layers are an unrolled "
+        "per-instance optimization, so inference still scales with an inner loop. "
+        "Its published recall is 1.0000 on five of six graphs, which means the "
+        "projection is tuned to over-predict and let precision carry F1 — worth "
+        "knowing before treating its FS ~ 0.97 as a ceiling.",
+    ),
+    "graphsl_slvae": _graphsl_entry(
+        "slvae",
+        "SL-VAE: source localization with a learned generative prior",
+        "KDD 2022",
+        "The seed paper, and the method arm A reimplements against OUR likelihood. "
+        "Running the original matters precisely because §2.2's argument is that "
+        "swapping the forward model is a no-op the authors already published — "
+        "the way to show that rather than assert it is to run both. Its inference "
+        "is itself a per-instance gradient loop, which is what puts it in the "
+        "non-amortized row of §1's table and what the cost columns should show.",
+    ),
     "graphsl": ExternalBaseline(
         name="graphsl",
         kind=classical,
@@ -2461,8 +3079,14 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2405.03724",
         entry="pip install GraphSL",
         task="source_localization",
-        status="needs_setup",
+        status="blocked",
         fetch="git",
+        blocker=(
+            "the umbrella entry is not an arm — it ships SIX methods, and one arm "
+            "returning one of them would hide which. Use graphsl_lpsi, "
+            "graphsl_netsleuth, graphsl_ojc, graphsl_gcnsi, graphsl_ivgd or "
+            "graphsl_slvae, all of which share this clone and venv."
+        ),
         notes=(
             "THE one to wire first, and by a wide margin. It ships LPSI, NETSLEUTH, "
             "OJC, GCNSI, IVGD and SL-VAE behind ONE API returning accuracy / "
@@ -2475,7 +3099,7 @@ external_baselines: dict[str, ExternalBaseline] = {
             "does not. Written by IVGD's first author. TO WIRE: `pip install "
             "GraphSL` into a per-baseline venv, then serialize our adjacency AND "
             "the observation vector across the process boundary and read the "
-            "source set back. ⚠️ An adapter alone is NOT enough: "
+            "source set back. Warning: An adapter alone is NOT enough: "
             "`run_baseline.run_external_baseline` takes no observation argument, "
             "`seed_script` emits `plan_horizon` rather than `localize`, and the "
             "pipeline invokes an external repo once per arm rather than once per "
@@ -2494,17 +3118,27 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2206.12327",
         entry="PyTorch",
         task="source_localization",
-        status="needs_setup",
+        status="blocked",
+        blocker=(
+            "superseded by `graphsl_slvae`, which is WIRED and runs the same "
+            "method. This standalone repo is strictly worse packaging: slvae.py "
+            "prints P/R/F1/AUC and writes no artifact to parse, and its "
+            "load_dataset looks for `<name>_25c.SG` while the shipped files carry "
+            "no `_25c` suffix. Wiring it means patching the repo to dump "
+            "predictions, for a second copy of a number graphsl_slvae already "
+            "produces. Unblock it only if a discrepancy against graphsl_slvae "
+            "needs adjudicating."
+        ),
         notes=(
             "The seed paper, and the method our arm A reimplements against our own "
             "likelihood. Worth wiring the ORIGINAL anyway: §2.2's whole argument is "
             "that swapping the forward model is a no-op the paper already "
             "published, and the way to show that rather than assert it is to run "
-            "both. Its Table 1/2 are the ⭐ comparable tables (§5.1) — five of its "
+            "both. Its Table 1/2 are the (key) comparable tables (§5.1) — five of its "
             "seven graphs are ours — but read §5.1's column-order warning first: "
             "Table 1 is RE·PR·F1·AUC and Table 2 is PR·RE·F1·AUC, and a summarizer "
             "that assumes one ordering transposes precision and recall for a whole "
-            "table. ⚠️ Its Network Science is 1,565 / 13,532, which is NOT ours and "
+            "table. Warning: Its Network Science is 1,565 / 13,532, which is NOT ours and "
             "is not publicly downloadable (§6.4.1), so that row is not comparable "
             "in either direction. TO WIRE: clone, read which diffusion estimator "
             "the entry point defaults to (it tries GAT / MONSTOR / DeepIS) and how "
@@ -2520,14 +3154,23 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2206.09214",
         entry="PyTorch (pretrain.py then main.py)",
         task="source_localization",
-        status="needs_setup",
+        status="blocked",
+        blocker=(
+            "superseded by `graphsl_ivgd`, which is WIRED and runs the same "
+            "method (GraphSL is written by this repo's first author). The "
+            "standalone is not drivable as shipped: main.py sets "
+            "`dataset = 'karate'` at module scope with no argparse, and the clone "
+            "carries a committed virtualenv (Lib/, Scripts/, pyvenv.cfg) that "
+            "collides with ours. Wiring it means rewriting its entry point for a "
+            "second copy of a number graphsl_ivgd already produces."
+        ),
         notes=(
             "The near-miss on §1's amortization axis: its inversion is a single "
             "backward pass, but the validity-aware projection layers are an "
             "unrolled per-instance optimization, so its inference cost still scales "
             "with an inner loop. `pretrain.py` exists purely so `main.py` has "
             "something to invert, which is the cleanest statement in the literature "
-            "that the forward model is a component. ⚠️ Its Table 3 numbers are far "
+            "that the forward model is a component. Warning: Its Table 3 numbers are far "
             "higher than SL-VAE's on the identical graph NAMES and the two are not "
             "comparable (§5.2): different protocol, different unstated seed "
             "fraction, and a different Network Science. Its recall is 1.0000 on "
@@ -2546,7 +3189,16 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2404.14668",
         entry="PyTorch",
         task="source_localization",
-        status="needs_setup",
+        status="blocked",
+        blocker=(
+            "the CONTRACT does not fit. CNSL localizes across a PAIR of coupled "
+            "networks, with the diffusion originating in one that is never "
+            "observed; our instance is one graph and one observation over it. "
+            "There is no honest way to hand it our episodes, and an adapter that "
+            "fed it the same graph twice would be measuring something else. It "
+            "stays registered because it is the closest published relative of our "
+            "transfer experiment, not because it is runnable here."
+        ),
         notes=(
             "Diffusion crosses from an UNOBSERVED source network into an observed "
             "one, with network-specific propagation learned jointly. Registered as "
@@ -2566,7 +3218,24 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2605.03550",
         entry="PyTorch",
         task="source_localization",
-        status="needs_setup",
+        status="blocked",
+        blocker=(
+            "its published inference SELECTS ON THE GROUND TRUTH, so it cannot be "
+            "run honestly as shipped. `utiles.x_hat_initialization` scores every "
+            "optimizer iterate against the true source vector `x` "
+            "(`f1_score(x[0], x_pred[0])`, line 36) and appends it to a list; "
+            "`PDSL.py` then takes `initial_x[initial_x_prec.index(max(...))]`, "
+            "i.e. the iterate closest to the answer. Verified by reading the repo "
+            "at HEAD on 2026-08-03, not inferred from the paper. Under our "
+            "contract a label may never reach an evaluation-split prediction "
+            "(research/source_localization.md §2.3.3), so wiring it as-is would "
+            "put an oracle-selected row in the same column as label-free ones. "
+            "TO WIRE HONESTLY: replace that selection with a label-free rule (its "
+            "own `loss`, which is what it already computes and optimizes), report "
+            "the result as a MODIFIED method, and report the as-shipped number "
+            "beside it so the size of the leak is visible. That is a worthwhile "
+            "experiment and it is not this baseline."
+        ),
         notes=(
             "The closest published framing to ours: it infers "
             "`argmax p_psi(Y_T | s*, Y_t, G) * p_phi(s* | z, Y_t, G) * p(z)`, which "
@@ -2585,12 +3254,21 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2512.20657",
         entry="PyTorch",
         task="source_localization",
-        status="needs_setup",
+        status="blocked",
+        blocker=(
+            "the METRIC does not fit. It is single-source, scored by top-k "
+            "accuracy under SIR; our table is multi-source F1 at matched k. "
+            "research/source_localization.md §8.2 states the two literatures' "
+            "numbers never mix, so a wired adapter would emit a value that looks "
+            "comparable in the spread column and is not. Run it as its own study "
+            "against a --budgets 1 sweep if the single-source question is wanted; "
+            "do not put it in the same table."
+        ),
         notes=(
             "Not a method — the only reproducible THIRD-PARTY evaluation in this "
             "literature, and the only one authored by none of the method groups. "
             "SIR, SINGLE-source, top-k accuracy on six contact networks against "
-            "Jordan centre, betweenness, SME and MCMF. ⚠️ Its framing is not ours: "
+            "Jordan centre, betweenness, SME and MCMF. Warning: Its framing is not ours: "
             "single-source ranking is a different problem from multi-source "
             "classification and the two never mix (§8.2), so its numbers cannot "
             "join our table without a dedicated `--budgets 1` run. Its value is the "
@@ -2599,6 +3277,48 @@ external_baselines: dict[str, ExternalBaseline] = {
             "picture of how hard this problem is, against §5.2's near-perfect F1. "
             "Its Karate is 34 / 77, one edge fewer than `nx.karate_club_graph()`."
         ),
+    ),
+    # Four estimators, one arm each, one shared install. Their value is a
+    # CROSS-CHECK: `lpsi`, `netsleuth`, `jordan_center` and `rumor_centrality` in
+    # our own pool are reimplementations from the papers' prose, and rumor
+    # centrality has no first-party code anywhere.
+    "cosasi_jordan": _cosasi_entry(
+        "jordan",
+        "Jordan centrality (multi-source), cosasi implementation",
+        "JOSS 2022",
+        "Cross-checks our `jordan_center`. cosasi partitions the infected "
+        "subgraph by spectral clustering and takes a centre per part; we take one "
+        "centre per connected COMPONENT and then rank by eccentricity, so a large "
+        "gap between the two rows is a difference in the multi-source "
+        "generalization rather than in the underlying estimator.",
+    ),
+    "cosasi_netsleuth": _cosasi_entry(
+        "netsleuth",
+        "NETSLEUTH (multi-source), cosasi implementation",
+        "JOSS 2022",
+        "The third independent NETSLEUTH in the sweep, alongside our own and "
+        "GraphSL's. Three implementations of one 2012 paper is unusual and worth "
+        "using: they differ in how `k` is fixed, so their spread bounds how much "
+        "of a NETSLEUTH number is the method and how much is the harness.",
+    ),
+    "cosasi_lisn": _cosasi_entry(
+        "lisn",
+        "LISN: infection-time likelihood source inference",
+        "JOSS 2022",
+        "The one estimator in this file we do NOT have our own version of, so it "
+        "is coverage rather than a cross-check. It conditions on elapsed time, "
+        "which our episodes record exactly (`SourceInstance.horizon`) — most "
+        "published evaluations have to assume it.",
+    ),
+    "cosasi_rumor_centrality": _cosasi_entry(
+        "rumor_centrality",
+        "Rumor centrality (Shah & Zaman), cosasi implementation",
+        "JOSS 2022",
+        "The highest-value cross-check in the file. Shah & Zaman published no "
+        "code, so our `rumor_centrality` is reimplemented from the paper's prose "
+        "and cosasi's is an independent reading of the same text. Warning: "
+        "SINGLE-SOURCE: under a multi-source protocol at k = 10% of N it scores "
+        "near zero by construction (§8.2), so compare it at `--budgets 1`.",
     ),
     "cosasi": ExternalBaseline(
         name="cosasi",
@@ -2609,15 +3329,21 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://joss.theoj.org/papers/10.21105/joss.04894",
         entry="pip install cosasi",
         task="source_localization",
-        status="needs_setup",
+        status="blocked",
         fetch="git",
+        blocker=(
+            "the umbrella entry is not an arm — it ships several estimators, and "
+            "one arm returning one of them would hide which. Use cosasi_jordan, "
+            "cosasi_netsleuth, cosasi_lisn or cosasi_rumor_centrality, all of "
+            "which share this clone and venv."
+        ),
         notes=(
             "The centrality-style classical estimators, including the rumor "
             "centrality reimplementation there is no first-party code for. Overlaps "
             "our own `localization_algorithms` pool by design — wiring it is a "
             "CROSS-CHECK on our implementations rather than new coverage, which is "
             "worth doing once for LPSI and rumor centrality specifically, since "
-            "both are reimplemented from prose here. ⚠️ Several secondary sources "
+            "both are reimplemented from prose here. Warning: Several secondary sources "
             "cite a `qwertyjl/cosasi` URL that 404s; the repo above is the one its "
             "JOSS paper names."
         ),

@@ -21,7 +21,7 @@
 # every blocker as infected and biases the containment number by +k
 # (research/critical_node_detection.md §2.3).
 #
-# ⚠️ GCNII is the backbone to reach for on `power_grid` and the road networks:
+# Warning: GCNII is the backbone to reach for on `power_grid` and the road networks:
 # §9.4 predicts a 3-6 layer receptive field cannot see across a diameter-46 mesh,
 # and 16 layers is the only configuration here that can. Expect it to lose anyway,
 # and report that.

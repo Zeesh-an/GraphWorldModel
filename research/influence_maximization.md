@@ -110,8 +110,8 @@ Our library (`coding_agent/tools/algorithms.py`) implements simplified versions 
 | **GLIE**               | 2021→2023 | ASONAM          | GNN learns an upper bound on spread; replaces MC                                                     | [arXiv 2108.04623](https://arxiv.org/abs/2108.04623)                                                                  | [github.com/geopanag/learn_im](https://github.com/geopanag/learn_im)     |
 | **LeNSE**              | 2022      | ICML            | Learns to prune to a solvable subgraph                                                               | [Ireland & Montana](https://proceedings.mlr.press/v162/ireland22a.html)                                               | [github.com/davidireland3/LeNSE](https://github.com/davidireland3/LeNSE) |
 | **ToupleGDD**          | 2023      | TCSS            | 3 coupled GNNs + Double DQN. Trains on <300-node graphs, generalizes to 1M+.                         | [arXiv 2210.07500](https://arxiv.org/abs/2210.07500)                                                                  | [github.com/Dtrycode/ToupleGDD](https://github.com/Dtrycode/ToupleGDD)   |
-| **DeepIM** ⭐          | 2023      | **ICML**        | Autoencoder over seed sets + GNN diffusion; optimizes in latent space. IC/LT/SIS.                    | [arXiv 2305.02200](https://arxiv.org/abs/2305.02200) · [PMLR](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf) | [github.com/triplej0079/DeepIM](https://github.com/triplej0079/DeepIM)   |
-| **MOEIM** ⭐           | 2024      | GECCO           | Many-objective EA (spread, budget, fairness, communities, time) with graph-aware operators           | [arXiv 2403.18755](https://arxiv.org/abs/2403.18755)                                                                  | [github.com/eliacunegatti/MOEIM](https://github.com/eliacunegatti/MOEIM) |
+| **DeepIM** (key)          | 2023      | **ICML**        | Autoencoder over seed sets + GNN diffusion; optimizes in latent space. IC/LT/SIS.                    | [arXiv 2305.02200](https://arxiv.org/abs/2305.02200) · [PMLR](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf) | [github.com/triplej0079/DeepIM](https://github.com/triplej0079/DeepIM)   |
+| **MOEIM** (key)           | 2024      | GECCO           | Many-objective EA (spread, budget, fairness, communities, time) with graph-aware operators           | [arXiv 2403.18755](https://arxiv.org/abs/2403.18755)                                                                  | [github.com/eliacunegatti/MOEIM](https://github.com/eliacunegatti/MOEIM) |
 | **DeepIM-accelerated** | 2024      | Neural Networks | DeepIM with faster inference                                                                         | [ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S0893608024005732)                              | —                                                                        |
 | **HIM**                | 2025      | —               | Influence strength estimation in hyperbolic space                                                    | [arXiv 2502.13571](https://arxiv.org/abs/2502.13571)                                                                  | —                                                                        |
 | **REM**                | 2025      | —               | Seed2Vec VAE + RL, **multiplex** networks (different problem)                                        | [arXiv 2501.00779](https://arxiv.org/abs/2501.00779)                                                                  | —                                                                        |
@@ -123,7 +123,7 @@ Our library (`coding_agent/tools/algorithms.py`) implements simplified versions 
 
 ## 5. Published results
 
-### 5.1 DeepIM (ICML 2023) ⭐ the most comparable table
+### 5.1 DeepIM (ICML 2023) (key) the most comparable table
 
 **The single most directly comparable published result to our setup**: same budget convention (1/5/10/20% of nodes), same IC weighted-cascade probability (`p = 1/in-degree`), same reported metric (**% of nodes infected**), and two of its graphs are byte-identical to ours.
 
@@ -152,7 +152,7 @@ Dataset sizes **as used by DeepIM** (Table 1) [verified]:
 | PIANO         | 9.8        | 25.2     | 37.4     | 51.1     | 4.7       | 16.3     | 27.1     | 47.2     | 5.3          | 18.1     | 31.7     | 50.2     | 2.2     | 19.2     | 36.6     | 43.2 |
 | ToupleGDD     | 10.6       | 27.5     | 38.5     | 51.5     | 6.3       | 17.8     | 28.3     | 50.5     | 5.4          | 19.3     | 31.6     | 51.3     | 3.3     | 20.4     | 37.2     | 45.7 |
 | DeepIM_s      | 13.6       | 27.7     | 38.5     | 51.8     | 6.9       | 19.1     | 29.3     | 50.5     | 5.9          | 20.2     | 31.7     | 51.5     | 4.6     | 22.4     | 41.4     | 49.9 |
-| **DeepIM** ⭐ | **14.1**   | **28.1** | **39.6** | **52.4** | **7.8**   | **20.9** | **31.5** | **51.2** | **6.3**      | **21.0** | **32.5** | **52.4** | **4.9** | **23.3** | **41.5** | 49.9 |
+| **DeepIM** (key) | **14.1**   | **28.1** | **39.6** | **52.4** | **7.8**   | **20.9** | **31.5** | **51.2** | **6.3**      | **21.0** | **32.5** | **52.4** | **4.9** | **23.3** | **41.5** | 49.9 |
 
 Large graphs, IC [verified]:
 
@@ -165,7 +165,7 @@ Large graphs, IC [verified]:
 | IMINFECTOR    | 9.1          | 26.2     | 36.1     | 51.5     | 7.9     | 18.6     | 33.5     | 49.8     | 9.4      | 23.5     | 36.9     | 50.3     |
 | PIANO         | 9.1          | 26.4     | 36.2     | 51.6     | —       | —        | —        | —        | —        | —        | —        | —        |
 | ToupleGDD     | 9.5          | 26.8     | 37.1     | 51.4     | —       | —        | —        | —        | —        | —        | —        | —        |
-| **DeepIM** ⭐ | **11.6**     | **27.4** | **38.7** | **52.1** | **8.4** | **19.3** | **34.2** | **51.3** | **11.2** | **26.5** | **37.9** | **51.8** |
+| **DeepIM** (key) | **11.6**     | **27.4** | **38.7** | **52.1** | **8.4** | **19.3** | **34.2** | **51.3** | **11.2** | **26.5** | **37.9** | **51.8** |
 
 #### LT diffusion — % of nodes infected [verified, Table 3]
 
@@ -178,7 +178,7 @@ Large graphs, IC [verified]:
 | PIANO         | 2.1        | 33.5     | 53.3     | 69.8     | 2.1       | 11.3     | 19.1     | 33.9     | 4.3          | 21.3     | 31.4     | 57.1     | 1.1     | 6.2     | 12.1     | 22.4     |
 | ToupleGDD     | 2.3        | 36.2     | 54.5     | 70.9     | 2.8       | 12.4     | 19.8     | 34.6     | 4.8          | 21.9     | 32.6     | 58.1     | 1.4     | 6.5     | 12.9     | 23.6     |
 | DeepIM_s      | 10.7       | 65.6     | 75.1     | 85.2     | 3.5       | 14.6     | 23.8     | 37.8     | 6.1          | 24.1     | 45.2     | 71.5     | 1.9     | 6.5     | 16.1     | 97.1     |
-| **DeepIM** ⭐ | **13.4**   | **69.2** | **83.5** | **94.1** | **4.1**   | **16.6** | **26.7** | **41.5** | **6.3**      | **24.4** | **46.8** | **71.7** | **1.9** | **6.5** | **16.4** | **99.1** |
+| **DeepIM** (key) | **13.4**   | **69.2** | **83.5** | **94.1** | **4.1**   | **16.6** | **26.7** | **41.5** | **6.3**      | **24.4** | **46.8** | **71.7** | **1.9** | **6.5** | **16.4** | **99.1** |
 
 Large graphs, LT [verified]:
 
@@ -189,7 +189,7 @@ Large graphs, LT [verified]:
 | SubSIM        | 1.4          | 5.5     | 13.1     | 69.6     | 2.4     | 11.3     | 37.9     | 56.9     | 1.7      | 6.7     | 19.2     | 46.8     |
 | IMINFECTOR    | 1.3          | 5.5     | 13.5     | 67.4     | 2.2     | 11.1     | 38.9     | 58.7     | 1.8      | 6.4     | 18.6     | 47.5     |
 | ToupleGDD     | 1.3          | 5.5     | 13.4     | 70.2     | —       | —        | —        | —        | —        | —       | —        | —        |
-| **DeepIM** ⭐ | **1.5**      | **6.5** | **15.5** | **99.9** | **3.5** | **15.9** | **41.3** | **76.2** | **3.1**  | **7.6** | **39.3** | **72.4** |
+| **DeepIM** (key) | **1.5**      | **6.5** | **15.5** | **99.9** | **3.5** | **15.9** | **41.3** | **76.2** | **3.1**  | **7.6** | **39.3** | **72.4** |
 
 #### Reading these tables
 
@@ -197,7 +197,7 @@ Large graphs, LT [verified]:
 - **Under IC the field is nearly tied.** At 20% budget every method on Cora-ML lands in 50.2–52.4%. DeepIM's IC margin is ~1–2 points. This is the same saturation effect we hit on BA-100 — **at 20% budget on a well-connected graph, the problem is close to solved by any reasonable method.** It is a strong argument for reporting the 1% and 5% columns, where the spread between methods is 8.1→14.1 (74% relative).
 - **1% budget is where methods actually separate.** Cora-ML IC 1%: IMM 8.1 vs DeepIM 14.1.
 
-### 5.2 MOEIM (GECCO 2024) ⭐ beats DeepIM
+### 5.2 MOEIM (GECCO 2024) (key) beats DeepIM
 
 MOEIM is a many-objective evolutionary algorithm (spread ↑, seed-set size ↓, communities ↑, fairness ↑, budget ↓, time ↓) with graph-aware mutation and smart initialization. It is the most recent method found that **directly compares against DeepIM on our datasets** and claims to beat it.
 
@@ -251,11 +251,11 @@ Datasets [verified, Table I] — almost entirely disjoint from ours, **except Yo
 | soc-dolphins   | 62        | 159    | directed   | 5          |
 | Twitter        | 0.8k      | 1k     | directed   | 2          |
 | Wiki-1         | 0.9k      | 3k     | directed   | 6          |
-| caGr ✅        | 4.2k      | 13.4k  | undirected | 5          |
-| Wiki-2 ✅      | 7.1k      | 103.7k | directed   | 29         |
+| caGr yes        | 4.2k      | 13.4k  | undirected | 5          |
+| Wiki-2 yes      | 7.1k      | 103.7k | directed   | 29         |
 | Epinions       | 76k       | 509k   | directed   | 13         |
 | Buzznet        | 101k      | 3M     | directed   | 55         |
-| **YouTube** ✅ | **1.13M** | **3M** | undirected | 5          |
+| **YouTube** yes | **1.13M** | **3M** | undirected | 5          |
 
 Budgets: **b ∈ {10, 20, 30, 40, 50}** (absolute). Edge weights: in-degree (= weighted cascade), plus 0.1 and 0.5 uniform settings for generalization tests.
 
@@ -329,21 +329,21 @@ CELF / degree-discount    ← cheap strong baselines, tie at high budget
 
 | `--dataset`     | Nodes     | Edges                        | Type                                 | Node features                                  | Source                                                                                                                                                 | Auto-DL       |
 | --------------- | --------- | ---------------------------- | ------------------------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------- |
-| `jazz`          | 198       | 2,742                        | Undirected (collaboration)           | log1p(degree)                                  | [nrvis `arenas-jazz.zip`](https://nrvis.com/download/data/misc/arenas-jazz.zip) · [page](https://networkrepository.com/arenas-jazz.php)                | ✅            |
-| `email_eu_core` | 1,005     | 24,929 arcs                  | Directed (emails)                    | log1p(total degree) · **42 department labels** | [SNAP email-Eu-core](https://snap.stanford.edu/data/email-Eu-core.html)                                                                                | ✅            |
-| `netscience`    | 1,589     | 2,742                        | Undirected (coauthorship)            | log1p(degree)                                  | [Netzschleuder `netscience`](https://networks.skewed.de/net/netscience)                                                                                | ✅            |
-| `cora_ml`       | 2,810     | 7,981                        | Undirected (citations, standardized) | 2,879-dim bag-of-words, 7 labels               | [graph2gauss `cora_ml.npz`](https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz)                                                    | ✅            |
-| `facebook`      | 4,039     | 88,234                       | Undirected (friendships)             | log1p(degree)                                  | [SNAP ego-Facebook](https://snap.stanford.edu/data/ego-Facebook.html)                                                                                  | ✅            |
-| `power_grid`    | 4,941     | 6,594                        | Undirected (power lines)             | log1p(degree)                                  | [nrvis `opsahl-powergrid.zip`](https://nrvis.com/download/data/misc/opsahl-powergrid.zip) · [page](https://networkrepository.com/opsahl-powergrid.php) | ✅            |
-| `ca_grqc`       | 5,242     | 14,484                       | Undirected (coauthorship)            | log1p(degree)                                  | [SNAP ca-GrQc](https://snap.stanford.edu/data/ca-GrQc.html)                                                                                            | ✅            |
-| `wiki_vote`     | 7,115     | 103,689 arcs                 | Directed (adminship votes)           | log1p(total degree)                            | [SNAP wiki-Vote](https://snap.stanford.edu/data/wiki-Vote.html)                                                                                        | ✅            |
-| `lastfm_asia`   | 7,624     | 27,806                       | Undirected (mutual follows)          | log1p(degree) · **18 country labels**          | [SNAP feather-lastfm-social](https://snap.stanford.edu/data/feather-lastfm-social.html)                                                                | ✅            |
-| `nethept`       | 15,229    | 62,752 arcs                  | Directed (coauthorship, both arcs)   | log1p(total degree)                            | [SparklyYS/Simultaneous-IMM mirror](https://github.com/SparklyYS/Simultaneous-IMM)                                                                     | ✅            |
-| `netphy`        | 37,154    | 174,161                      | Undirected (coauthorship)            | log1p(degree)                                  | [Wei Chen `weic-graphdata.zip`](https://www.microsoft.com/en-us/research/people/weic/selected-projects/)                                               | ✅            |
-| `twitter`       | 81,306    | 1,768,149 arcs → symmetrized | Undirected (follows)                 | log1p(degree)                                  | [SNAP ego-Twitter](https://snap.stanford.edu/data/ego-Twitter.html)                                                                                    | ✅            |
-| `digg`          | 116,893   | ≈2.6M                        | Undirected (friendships)             | log1p(degree)                                  | [Syracuse `Digg-dataset.zip`](https://datasets.syr.edu/datasets/Digg.html)                                                                             | ✅            |
-| `youtube`       | 1,134,890 | 2,987,624                    | Undirected (friendships)             | log1p(degree)                                  | [SNAP com-Youtube](https://snap.stanford.edu/data/com-Youtube.html)                                                                                    | ✅            |
-| `weibo`         | 1,787,443 | ≈216M arcs                   | Directed (influence u→v)             | log1p(total degree)                            | [AMiner Influence Locality](https://www.aminer.cn/influencelocality)                                                                                   | ❌ **manual** |
+| `jazz`          | 198       | 2,742                        | Undirected (collaboration)           | log1p(degree)                                  | [nrvis `arenas-jazz.zip`](https://nrvis.com/download/data/misc/arenas-jazz.zip) · [page](https://networkrepository.com/arenas-jazz.php)                | yes            |
+| `email_eu_core` | 1,005     | 24,929 arcs                  | Directed (emails)                    | log1p(total degree) · **42 department labels** | [SNAP email-Eu-core](https://snap.stanford.edu/data/email-Eu-core.html)                                                                                | yes            |
+| `netscience`    | 1,589     | 2,742                        | Undirected (coauthorship)            | log1p(degree)                                  | [Netzschleuder `netscience`](https://networks.skewed.de/net/netscience)                                                                                | yes            |
+| `cora_ml`       | 2,810     | 7,981                        | Undirected (citations, standardized) | 2,879-dim bag-of-words, 7 labels               | [graph2gauss `cora_ml.npz`](https://github.com/abojchevski/graph2gauss/raw/master/data/cora_ml.npz)                                                    | yes            |
+| `facebook`      | 4,039     | 88,234                       | Undirected (friendships)             | log1p(degree)                                  | [SNAP ego-Facebook](https://snap.stanford.edu/data/ego-Facebook.html)                                                                                  | yes            |
+| `power_grid`    | 4,941     | 6,594                        | Undirected (power lines)             | log1p(degree)                                  | [nrvis `opsahl-powergrid.zip`](https://nrvis.com/download/data/misc/opsahl-powergrid.zip) · [page](https://networkrepository.com/opsahl-powergrid.php) | yes            |
+| `ca_grqc`       | 5,242     | 14,484                       | Undirected (coauthorship)            | log1p(degree)                                  | [SNAP ca-GrQc](https://snap.stanford.edu/data/ca-GrQc.html)                                                                                            | yes            |
+| `wiki_vote`     | 7,115     | 103,689 arcs                 | Directed (adminship votes)           | log1p(total degree)                            | [SNAP wiki-Vote](https://snap.stanford.edu/data/wiki-Vote.html)                                                                                        | yes            |
+| `lastfm_asia`   | 7,624     | 27,806                       | Undirected (mutual follows)          | log1p(degree) · **18 country labels**          | [SNAP feather-lastfm-social](https://snap.stanford.edu/data/feather-lastfm-social.html)                                                                | yes            |
+| `nethept`       | 15,229    | 62,752 arcs                  | Directed (coauthorship, both arcs)   | log1p(total degree)                            | [SparklyYS/Simultaneous-IMM mirror](https://github.com/SparklyYS/Simultaneous-IMM)                                                                     | yes            |
+| `netphy`        | 37,154    | 174,161                      | Undirected (coauthorship)            | log1p(degree)                                  | [Wei Chen `weic-graphdata.zip`](https://www.microsoft.com/en-us/research/people/weic/selected-projects/)                                               | yes            |
+| `twitter`       | 81,306    | 1,768,149 arcs → symmetrized | Undirected (follows)                 | log1p(degree)                                  | [SNAP ego-Twitter](https://snap.stanford.edu/data/ego-Twitter.html)                                                                                    | yes            |
+| `digg`          | 116,893   | ≈2.6M                        | Undirected (friendships)             | log1p(degree)                                  | [Syracuse `Digg-dataset.zip`](https://datasets.syr.edu/datasets/Digg.html)                                                                             | yes            |
+| `youtube`       | 1,134,890 | 2,987,624                    | Undirected (friendships)             | log1p(degree)                                  | [SNAP com-Youtube](https://snap.stanford.edu/data/com-Youtube.html)                                                                                    | yes            |
+| `weibo`         | 1,787,443 | ≈216M arcs                   | Directed (influence u→v)             | log1p(total degree)                            | [AMiner Influence Locality](https://www.aminer.cn/influencelocality)                                                                                   | no **manual** |
 
 **Simulable today:** everything down to and including `netphy` — eleven graphs. The four large ones (`twitter`, `digg`, `youtube`, `weibo`) load fine but exceed what the NDlib rollout + CELF/local-search selector pipeline finishes in reasonable time; they are scalable-simulation targets, not day-one datasets.
 
@@ -362,14 +362,14 @@ CELF / degree-discount    ← cheap strong baselines, tie at high budget
 | `er`        | `nx.gnp_random_graph`       | `--er-p` (0.05)                       | standard (GCOMB, ToupleGDD, DeepIM, S2V-DQN) |
 | `ba`        | `nx.barabasi_albert_graph`  | `--ba-m` (3)                          | standard                                     |
 | `ws`        | `nx.watts_strogatz_graph`   | `--ws-k` (6), `--ws-p` (0.1)          | standard                                     |
-| `sbm`       | `nx.stochastic_block_model` | `--sbm-blocks/--sbm-p-in/--sbm-p-out` | ⚠️ **no published IM baseline found**        |
-| `karate`    | `nx.karate_club_graph`      | —                                     | ⚠️ used by SL-VAE, not by IM papers          |
+| `sbm`       | `nx.stochastic_block_model` | `--sbm-blocks/--sbm-p-in/--sbm-p-out` | Warning: **no published IM baseline found**        |
+| `karate`    | `nx.karate_club_graph`      | —                                     | Warning: used by SL-VAE, not by IM papers          |
 
 DeepIM's "Synthetic" row (50,000 nodes / 250,000 edges, avg degree 10) is a **random graph of that density** — an ER/BA-class graph we can reproduce with `--dataset ba --syn-nodes 50000 --ba-m 5`. It is the only synthetic row in the literature with a published per-cell table (§5.1).
 
 ### 6.2 Full catalogue
 
-✅ = already implemented in `data/datasets/`.
+yes = already implemented in `data/datasets/`.
 
 #### Small graphs (< 10K nodes)
 
@@ -377,35 +377,35 @@ DeepIM's "Synthetic" row (50,000 nodes / 250,000 edges, avg degree 10) is a **ra
 | ----------------------- | ----- | ---------------------- | ---------- | ------- | --------------------------------------------------------------------------- | ---------------------------------- |
 | soc-dolphins            | 62    | 159                    | undirected | 5       | [NetRepo](https://networkrepository.com/soc-dolphins.php)                   | ToupleGDD                          |
 | Karate                  | 34    | 78                     | undirected | 4.6     | `nx.karate_club_graph()`                                                    | SL-VAE                             |
-| **Jazz** ✅             | 198   | 2,742                  | undirected | 27.7    | [nrvis](https://nrvis.com/download/data/misc/arenas-jazz.zip)               | DeepIM, MOEIM, SL-VAE              |
+| **Jazz** yes             | 198   | 2,742                  | undirected | 27.7    | [nrvis](https://nrvis.com/download/data/misc/arenas-jazz.zip)               | DeepIM, MOEIM, SL-VAE              |
 | soc-wiki-Vote (NetRepo) | 889   | 2,900                  | directed   | 6       | [NetRepo](https://networkrepository.com/soc-wiki-Vote.php)                  | ToupleGDD ("Wiki-1")               |
-| **email-Eu-core** ✅    | 1,005 | 25,571 (24,929 usable) | directed   | 51      | [SNAP](https://snap.stanford.edu/data/email-Eu-core.html)                   | MOEIM                              |
-| **NetScience** ✅       | 1,589 | 2,742                  | undirected | 3.45    | [Netzschleuder](https://networks.skewed.de/net/netscience)                  | DeepIM, SL-VAE                     |
-| **Cora-ML** ✅          | 2,810 | 7,981                  | undirected | 5.7     | [graph2gauss](https://github.com/abojchevski/graph2gauss) + `standardize()` | DeepIM, MOEIM, SL-VAE              |
-| **ego-Facebook** ✅     | 4,039 | 88,234                 | undirected | 43.7    | [SNAP](https://snap.stanford.edu/data/ego-Facebook.html)                    | MOEIM, LeNSE                       |
-| **Power Grid** ✅       | 4,941 | 6,594                  | undirected | 2.67    | [nrvis](https://nrvis.com/download/data/misc/opsahl-powergrid.zip)          | DeepIM, MOEIM, SL-VAE              |
-| **ca-GrQc** ✅          | 5,242 | 14,496 (14,484 usable) | undirected | 5.5     | [SNAP](https://snap.stanford.edu/data/ca-GrQc.html)                         | ToupleGDD                          |
+| **email-Eu-core** yes    | 1,005 | 25,571 (24,929 usable) | directed   | 51      | [SNAP](https://snap.stanford.edu/data/email-Eu-core.html)                   | MOEIM                              |
+| **NetScience** yes       | 1,589 | 2,742                  | undirected | 3.45    | [Netzschleuder](https://networks.skewed.de/net/netscience)                  | DeepIM, SL-VAE                     |
+| **Cora-ML** yes          | 2,810 | 7,981                  | undirected | 5.7     | [graph2gauss](https://github.com/abojchevski/graph2gauss) + `standardize()` | DeepIM, MOEIM, SL-VAE              |
+| **ego-Facebook** yes     | 4,039 | 88,234                 | undirected | 43.7    | [SNAP](https://snap.stanford.edu/data/ego-Facebook.html)                    | MOEIM, LeNSE                       |
+| **Power Grid** yes       | 4,941 | 6,594                  | undirected | 2.67    | [nrvis](https://nrvis.com/download/data/misc/opsahl-powergrid.zip)          | DeepIM, MOEIM, SL-VAE              |
+| **ca-GrQc** yes          | 5,242 | 14,496 (14,484 usable) | undirected | 5.5     | [SNAP](https://snap.stanford.edu/data/ca-GrQc.html)                         | ToupleGDD                          |
 | p2p-Gnutella08          | 6,301 | 20,777                 | directed   | 6.6     | [SNAP](https://snap.stanford.edu/data/p2p-Gnutella08.html)                  | MOEIM                              |
-| **wiki-Vote (SNAP)** ✅ | 7,115 | 103,689                | directed   | 29.1    | [SNAP](https://snap.stanford.edu/data/wiki-Vote.html)                       | ToupleGDD ("Wiki-2"), MOEIM, LeNSE |
-| **LastFM Asia** ✅      | 7,624 | 27,806                 | undirected | 7.3     | [SNAP](https://snap.stanford.edu/data/feather-lastfm-social.html)           | MOEIM                              |
+| **wiki-Vote (SNAP)** yes | 7,115 | 103,689                | directed   | 29.1    | [SNAP](https://snap.stanford.edu/data/wiki-Vote.html)                       | ToupleGDD ("Wiki-2"), MOEIM, LeNSE |
+| **LastFM Asia** yes      | 7,624 | 27,806                 | undirected | 7.3     | [SNAP](https://snap.stanford.edu/data/feather-lastfm-social.html)           | MOEIM                              |
 | ca-HepTh                | 9,877 | 25,998                 | undirected | 5.3     | [SNAP](https://snap.stanford.edu/data/ca-HepTh.html)                        | MOEIM                              |
 
 #### Classical mid-size IM benchmarks (10K – 500K)
 
 | Dataset                | Nodes   | Edges                                                   | Type       | Avg deg | Source                                                                                                   | Used by                                                              |
 | ---------------------- | ------- | ------------------------------------------------------- | ---------- | ------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| **NetHEPT** ✅         | 15,233  | 31,376 undirected (= 62,752 arcs)                       | undirected | 4.18    | [SparklyYS mirror](https://github.com/SparklyYS/Simultaneous-IMM)                                        | Kempe, CELF, DegreeDiscount, PMIA, IRIE, TIM, IMM, SSA, OPIM, SubSIM |
+| **NetHEPT** yes         | 15,233  | 31,376 undirected (= 62,752 arcs)                       | undirected | 4.18    | [SparklyYS mirror](https://github.com/SparklyYS/Simultaneous-IMM)                                        | Kempe, CELF, DegreeDiscount, PMIA, IRIE, TIM, IMM, SSA, OPIM, SubSIM |
 | ca-CondMat             | 23,133  | 93,497                                                  | undirected | 8.1     | [SNAP](https://snap.stanford.edu/data/ca-CondMat.html)                                                   | misc                                                                 |
 | Flixster [claim]       | 29,357  | 425,228 arcs                                            | directed   | 14.5    | topic-aware IM literature (Barbieri/Goyal)                                                               | TIM+, topic-aware IM                                                 |
 | Enron                  | 36,692  | 183,831                                                 | undirected | 10.0    | [SNAP](https://snap.stanford.edu/data/email-Enron.html)                                                  | SSA, D-SSA, IMM, GLIE                                                |
-| **NetPHY** ✅          | 37,154  | 174,161 (231,584 raw lines; SSA quotes 180,826 ordered) | undirected | 9.38    | [Wei Chen `weic-graphdata.zip`](https://www.microsoft.com/en-us/research/people/weic/selected-projects/) | PMIA, IRIE, TIM, IMM, SSA                                            |
+| **NetPHY** yes          | 37,154  | 174,161 (231,584 raw lines; SSA quotes 180,826 ordered) | undirected | 9.38    | [Wei Chen `weic-graphdata.zip`](https://www.microsoft.com/en-us/research/people/weic/selected-projects/) | PMIA, IRIE, TIM, IMM, SSA                                            |
 | Brightkite             | 58,228  | 214,078                                                 | undirected | 7.4     | [SNAP](https://snap.stanford.edu/data/loc-Brightkite.html)                                               | GCOMB                                                                |
 | Deezer HR              | 54,573  | 498,202                                                 | undirected | 18.3    | [SNAP gemsec-Deezer](https://snap.stanford.edu/data/gemsec-Deezer.html)                                  | LeNSE                                                                |
 | soc-Epinions1          | 75,879  | 508,837                                                 | directed   | 13.4    | [SNAP](https://snap.stanford.edu/data/soc-Epinions1.html)                                                | ToupleGDD                                                            |
-| **Twitter (ego)** ✅   | 81,306  | 1,768,149 arcs                                          | directed   | 43.5    | [SNAP](https://snap.stanford.edu/data/ego-Twitter.html)                                                  | GCOMB ("TW-ew"), LeNSE                                               |
+| **Twitter (ego)** yes   | 81,306  | 1,768,149 arcs                                          | directed   | 43.5    | [SNAP](https://snap.stanford.edu/data/ego-Twitter.html)                                                  | GCOMB ("TW-ew"), LeNSE                                               |
 | Slashdot0902           | 82,168  | 948,464                                                 | directed   | 23.1    | [SNAP](https://snap.stanford.edu/data/soc-Slashdot0902.html)                                             | IRIE, LeNSE                                                          |
 | Buzznet                | 101,200 | ≈2,800,000                                              | undirected | 54      | [NetRepo](https://networkrepository.com/soc-buzznet.php)                                                 | ToupleGDD                                                            |
-| **Digg (Syracuse)** ✅ | 116,893 | ≈2.6M                                                   | undirected | ≈45     | [Syracuse](https://datasets.syr.edu/datasets/Digg.html)                                                  | (ours only)                                                          |
+| **Digg (Syracuse)** yes | 116,893 | ≈2.6M                                                   | undirected | ≈45     | [Syracuse](https://datasets.syr.edu/datasets/Digg.html)                                                  | (ours only)                                                          |
 | Epinions (signed)      | 131,828 | 841,372                                                 | directed   | 13.4    | [SNAP](https://snap.stanford.edu/data/soc-sign-epinions.html)                                            | IMM, SSA, D-SSA, TIM, IRIE                                           |
 | Gowalla                | 196,591 | 950,327                                                 | undirected | 9.7     | [SNAP](https://snap.stanford.edu/data/loc-Gowalla.html)                                                  | GCOMB                                                                |
 | Digg 2009 (ISI)        | 279,631 | 2,251,166                                               | directed   | 16.1    | [ISI/Lerman](https://www.isi.edu/~lerman/downloads/digg2009.html)                                        | IMINFECTOR, DeepIM                                                   |
@@ -418,12 +418,12 @@ DeepIM's "Synthetic" row (50,000 nodes / 250,000 edges, avg degree 10) is a **ra
 | Dataset                 | Nodes      | Edges                                   | Type       | Avg deg | Source                                                                                                                                                                                                                                                                         | Used by                                                              |
 | ----------------------- | ---------- | --------------------------------------- | ---------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
 | DBLP (classical)        | 655,000    | 1,990,000                               | undirected | 6.08    | Wei Chen / arnetminer release                                                                                                                                                                                                                                                  | IMM, SSA, TIM, PMIA, IRIE                                            |
-| **YouTube** ✅          | 1,134,890  | 2,987,624                               | undirected | 5.3     | [SNAP](https://snap.stanford.edu/data/com-Youtube.html)                                                                                                                                                                                                                        | ToupleGDD, GCOMB, LeNSE, GLIE                                        |
+| **YouTube** yes          | 1,134,890  | 2,987,624                               | undirected | 5.3     | [SNAP](https://snap.stanford.edu/data/com-Youtube.html)                                                                                                                                                                                                                        | ToupleGDD, GCOMB, LeNSE, GLIE                                        |
 | Sina Weibo (IMINFECTOR) | 1,170,689  | 225,877,808                             | directed   | 386     | AMiner via IMINFECTOR                                                                                                                                                                                                                                                          | IMINFECTOR, DeepIM                                                   |
 | MAG (CS)                | 1,436,158  | 15,928,078                              | directed   | 22.2    | Microsoft Academic Graph                                                                                                                                                                                                                                                       | IMINFECTOR                                                           |
 | soc-Pokec               | 1,632,803  | 30,622,564                              | directed   | 37.5    | [SNAP](https://snap.stanford.edu/data/soc-Pokec.html)                                                                                                                                                                                                                          | misc                                                                 |
 | as-Skitter              | 1,696,415  | 11,095,298                              | undirected | 13.1    | [SNAP](https://snap.stanford.edu/data/as-Skitter.html)                                                                                                                                                                                                                         | LeNSE                                                                |
-| **Weibo (raw)** ✅      | 1,787,443  | ≈216M arcs                              | directed   | ≈242    | [AMiner](https://www.aminer.cn/influencelocality)                                                                                                                                                                                                                              | (ours only)                                                          |
+| **Weibo (raw)** yes      | 1,787,443  | ≈216M arcs                              | directed   | ≈242    | [AMiner](https://www.aminer.cn/influencelocality)                                                                                                                                                                                                                              | (ours only)                                                          |
 | Weibo (DeepIM)          | 2,251,166  | 225,877,808                             | directed   | 200     | — see §6.4.5 (transcription error)                                                                                                                                                                                                                                             | DeepIM                                                               |
 | wiki-Talk               | 2,394,385  | 5,021,410                               | directed   | 4.2     | [SNAP](https://snap.stanford.edu/data/wiki-Talk.html)                                                                                                                                                                                                                          | LeNSE ("Talk")                                                       |
 | sx-stackoverflow        | 2,601,977  | 63,497,050 temporal / 36,233,450 static | directed   | 27.8    | [SNAP](https://snap.stanford.edu/data/sx-stackoverflow.html)                                                                                                                                                                                                                   | GCOMB ("Stack", quotes 2.69M/5.9M after their action-log derivation) |
@@ -431,7 +431,7 @@ DeepIM's "Synthetic" row (50,000 nodes / 250,000 edges, avg degree 10) is a **ra
 | cit-Patents             | 3,774,768  | 16,518,948                              | directed   | 8.8     | [SNAP](https://snap.stanford.edu/data/cit-Patents.html)                                                                                                                                                                                                                        | adjacent literature                                                  |
 | com-LiveJournal         | 3,997,962  | 34,681,189                              | undirected | 17.3    | [SNAP](https://snap.stanford.edu/data/com-LiveJournal.html)                                                                                                                                                                                                                    | misc                                                                 |
 | soc-LiveJournal1        | 4,847,571  | 68,993,773                              | directed   | 28.5    | [SNAP](https://snap.stanford.edu/data/soc-LiveJournal1.html)                                                                                                                                                                                                                   | IMM, SSA, TIM, IRIE                                                  |
-| Twitter (Kwak'10)       | ≈41.7M     | ≈1.47G                                  | directed   | 70.5    | [KAIST](https://anlab-kaist.github.io/traces/WWW2010) · [LAW mirror](https://law.di.unimi.it/webdata/twitter-2010/) — ⚠️ the LAW host timed out from our network on 2026-07-29; [Wayback copy](https://web.archive.org/web/2024/https://law.di.unimi.it/webdata/twitter-2010/) | IMM, SSA, TIM, GCOMB                                                 |
+| Twitter (Kwak'10)       | ≈41.7M     | ≈1.47G                                  | directed   | 70.5    | [KAIST](https://anlab-kaist.github.io/traces/WWW2010) · [LAW mirror](https://law.di.unimi.it/webdata/twitter-2010/) — Warning: the LAW host timed out from our network on 2026-07-29; [Wayback copy](https://web.archive.org/web/2024/https://law.di.unimi.it/webdata/twitter-2010/) | IMM, SSA, TIM, GCOMB                                                 |
 | com-Friendster          | 65,608,366 | 1,806,067,135                           | undirected | 55.1    | [SNAP](https://snap.stanford.edu/data/com-Friendster.html)                                                                                                                                                                                                                     | SSA, GCOMB                                                           |
 
 #### Cascade datasets — a _different_ evaluation protocol
@@ -448,7 +448,7 @@ These carry observed diffusion traces, not just topology. They enable the IMINFE
 
 All five counts above are **[verified]** from IMINFECTOR's Table 3 by direct text extraction, except Memetracker/Flixster which are **[claim]**.
 
-### 6.3 ⚠️ Name collisions — read this before comparing any number
+### 6.3 Warning: Name collisions — read this before comparing any number
 
 **Seven dataset names in this literature denote more than one graph.** Quoting a published number against the wrong version is the single most common way to produce an invalid comparison table. Each row below is two _different graphs_ that share a name.
 
@@ -482,12 +482,12 @@ Each discrepancy between our version of a graph and the literature's, traced to 
 
 | Dataset        | Cause                                                        | Status                       |
 | -------------- | ------------------------------------------------------------ | ---------------------------- |
-| **NetHEPT**    | Edge-count _convention_, not a different graph               | ✅ **resolved — same graph** |
-| **Cora-ML**    | Largest-connected-component extraction; same source file     | ✅ **applied in the loader** |
-| **Digg**       | Different source repository (Syracuse vs ISI/Lerman)         | ❌ different graph           |
-| **Twitter**    | Different repository _and_ different graph (SNAP vs NetRepo) | ❌ unrelated graph           |
-| **Weibo**      | Same source; DeepIM's table has a **transcription error**    | ⚠️ see §6.4.5                |
-| **NetScience** | Their numbers match neither the cited source nor its LCC     | ❓ **unresolved**            |
+| **NetHEPT**    | Edge-count _convention_, not a different graph               | yes **resolved — same graph** |
+| **Cora-ML**    | Largest-connected-component extraction; same source file     | yes **applied in the loader** |
+| **Digg**       | Different source repository (Syracuse vs ISI/Lerman)         | no different graph           |
+| **Twitter**    | Different repository _and_ different graph (SNAP vs NetRepo) | no unrelated graph           |
+| **Weibo**      | Same source; DeepIM's table has a **transcription error**    | Warning: see §6.4.5                |
+| **NetScience** | Their numbers match neither the cited source nor its LCC     | **unresolved**            |
 
 #### 6.4.1 NetHEPT — resolved, it is the same graph
 
@@ -588,7 +588,7 @@ So the anomaly is not a DeepIM idiosyncrasy but a shared preprocessing lineage b
 
 Ordered by _research value per hour of implementation_.
 
-#### Tier 1 — ✅ DONE (small, canonical, published numbers exist)
+#### Tier 1 — yes DONE (small, canonical, published numbers exist)
 
 | `--dataset`     | Nodes  | Edges   | Why it earned a slot                                                                                                               |
 | --------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -667,44 +667,44 @@ Cells mark the dataset **as that paper reports it** — check §6.3 before assum
 
 | Dataset              | Kempe'03 | PMIA'10 | IRIE'12 | TIM'14 | IMM'15 | SSA'16 | GCOMB'20 | IMINFECTOR'20 | LeNSE'22 | GLIE'23 | ToupleGDD'23 | DeepIM'23 | MOEIM'24 |
 | -------------------- | -------- | ------- | ------- | ------ | ------ | ------ | -------- | ------------- | -------- | ------- | ------------ | --------- | -------- |
-| NetHEPT              | ✔        | ✔       | ✔       | ✔      | ✔      | ✔      |          |               |          |         |              |           |          |
-| NetPHY               |          | ✔       | ✔       | ✔      | ✔      | ✔      |          |               |          |         |              |           |          |
-| Enron                |          |         |         | ✔      | ✔      | ✔      |          |               |          | ✔       |              |           |          |
-| Epinions             |          | ✔       | ✔       | ✔      | ✔      | ✔      |          |               |          |         | ✔            |           |          |
-| Slashdot             |          |         | ✔       |        |        |        |          |               | ✔        |         |              |           |          |
-| Amazon               |          |         | ✔       |        |        |        |          |               |          |         |              |           |          |
-| DBLP                 |          | ✔       | ✔       | ✔      | ✔      | ✔      |          |               | ✔        |         |              |           |          |
-| LiveJournal          |          |         | ✔       | ✔      | ✔      | ✔      |          |               |          |         |              |           |          |
-| Orkut                |          |         |         | ✔      | ✔      | ✔      | ✔        |               |          |         |              |           |          |
-| Twitter              |          |         |         | ✔      | ✔      | ✔      | ✔        |               | ✔        |         | ✔            |           |          |
-| Friendster           |          |         |         |        |        | ✔      | ✔        |               |          |         |              |           |          |
-| YouTube              |          |         |         |        |        |        | ✔        |               | ✔        | ✔       | ✔            |           |          |
-| Brightkite           |          |         |         |        |        |        | ✔        |               |          |         |              |           |          |
-| Gowalla              |          |         |         |        |        |        | ✔        |               |          |         |              |           |          |
-| Stack                |          |         |         |        |        |        | ✔        |               |          |         |              |           |          |
-| Skitter              |          |         |         |        |        |        |          |               | ✔        |         |              |           |          |
-| wiki-Talk            |          |         |         |        |        |        |          |               | ✔        |         |              |           |          |
-| Deezer               |          |         |         |        |        |        |          |               | ✔        |         |              |           |          |
-| **Facebook** ✅      |          |         |         |        |        |        |          |               | ✔        | ✔       |              |           | ✔        |
-| **wiki-Vote** ✅     |          |         |         |        |        |        |          |               | ✔        |         | ✔            |           | ✔        |
-| **ca-GrQc** ✅       |          |         |         |        |        |        |          |               |          | ✔       | ✔            |           |          |
-| ca-HepTh             |          |         |         |        |        |        |          |               |          |         |              |           | ✔        |
-| **email-Eu-core** ✅ |          |         |         |        |        |        |          |               |          |         |              |           | ✔        |
-| **LastFM** ✅        |          |         |         |        |        |        |          |               |          |         |              |           | ✔        |
-| Gnutella             |          |         |         |        |        |        |          |               |          |         |              |           | ✔        |
-| soc-dolphins         |          |         |         |        |        |        |          |               |          |         | ✔            |           |          |
-| Buzznet              |          |         |         |        |        |        |          |               |          |         | ✔            |           |          |
-| Crime, HI-II-14      |          |         |         |        |        |        |          |               |          | ✔       |              |           |          |
-| **Jazz** ✅          |          |         |         |        |        |        |          |               |          |         |              | ✔         | ✔        |
-| **Cora-ML** ✅       |          |         |         |        |        |        |          |               |          |         |              | ✔         | ✔        |
-| **NetScience** ✅    |          |         |         |        |        |        |          |               |          |         |              | ✔         |          |
-| **Power Grid** ✅    |          |         |         |        |        |        |          |               |          |         |              | ✔         | ✔        |
-| Digg                 |          |         |         |        |        |        |          | ✔             |          |         |              | ✔         |          |
-| Weibo                |          |         |         |        |        |        |          | ✔             |          |         |              | ✔         |          |
-| MAG                  |          |         |         |        |        |        |          | ✔             |          |         |              |           |          |
-| Synthetic ER/BA/WS   | ✔        |         |         |        |        |        | ✔        |               |          | ✔       | ✔            | ✔         |          |
+| NetHEPT              | yes        | yes       | yes       | yes      | yes      | yes      |          |               |          |         |              |           |          |
+| NetPHY               |          | yes       | yes       | yes      | yes      | yes      |          |               |          |         |              |           |          |
+| Enron                |          |         |         | yes      | yes      | yes      |          |               |          | yes       |              |           |          |
+| Epinions             |          | yes       | yes       | yes      | yes      | yes      |          |               |          |         | yes            |           |          |
+| Slashdot             |          |         | yes       |        |        |        |          |               | yes        |         |              |           |          |
+| Amazon               |          |         | yes       |        |        |        |          |               |          |         |              |           |          |
+| DBLP                 |          | yes       | yes       | yes      | yes      | yes      |          |               | yes        |         |              |           |          |
+| LiveJournal          |          |         | yes       | yes      | yes      | yes      |          |               |          |         |              |           |          |
+| Orkut                |          |         |         | yes      | yes      | yes      | yes        |               |          |         |              |           |          |
+| Twitter              |          |         |         | yes      | yes      | yes      | yes        |               | yes        |         | yes            |           |          |
+| Friendster           |          |         |         |        |        | yes      | yes        |               |          |         |              |           |          |
+| YouTube              |          |         |         |        |        |        | yes        |               | yes        | yes       | yes            |           |          |
+| Brightkite           |          |         |         |        |        |        | yes        |               |          |         |              |           |          |
+| Gowalla              |          |         |         |        |        |        | yes        |               |          |         |              |           |          |
+| Stack                |          |         |         |        |        |        | yes        |               |          |         |              |           |          |
+| Skitter              |          |         |         |        |        |        |          |               | yes        |         |              |           |          |
+| wiki-Talk            |          |         |         |        |        |        |          |               | yes        |         |              |           |          |
+| Deezer               |          |         |         |        |        |        |          |               | yes        |         |              |           |          |
+| **Facebook** yes      |          |         |         |        |        |        |          |               | yes        | yes       |              |           | yes        |
+| **wiki-Vote** yes     |          |         |         |        |        |        |          |               | yes        |         | yes            |           | yes        |
+| **ca-GrQc** yes       |          |         |         |        |        |        |          |               |          | yes       | yes            |           |          |
+| ca-HepTh             |          |         |         |        |        |        |          |               |          |         |              |           | yes        |
+| **email-Eu-core** yes |          |         |         |        |        |        |          |               |          |         |              |           | yes        |
+| **LastFM** yes        |          |         |         |        |        |        |          |               |          |         |              |           | yes        |
+| Gnutella             |          |         |         |        |        |        |          |               |          |         |              |           | yes        |
+| soc-dolphins         |          |         |         |        |        |        |          |               |          |         | yes            |           |          |
+| Buzznet              |          |         |         |        |        |        |          |               |          |         | yes            |           |          |
+| Crime, HI-II-14      |          |         |         |        |        |        |          |               |          | yes       |              |           |          |
+| **Jazz** yes          |          |         |         |        |        |        |          |               |          |         |              | yes         | yes        |
+| **Cora-ML** yes       |          |         |         |        |        |        |          |               |          |         |              | yes         | yes        |
+| **NetScience** yes    |          |         |         |        |        |        |          |               |          |         |              | yes         |          |
+| **Power Grid** yes    |          |         |         |        |        |        |          |               |          |         |              | yes         | yes        |
+| Digg                 |          |         |         |        |        |        |          | yes             |          |         |              | yes         |          |
+| Weibo                |          |         |         |        |        |        |          | yes             |          |         |              | yes         |          |
+| MAG                  |          |         |         |        |        |        |          | yes             |          |         |              |           |          |
+| Synthetic ER/BA/WS   | yes        |         |         |        |        |        | yes        |               |          | yes       | yes            | yes         |          |
 
-**✅ = we already load it.** Nine rows now intersect our suite; before the Tier-1 additions it was four.
+**yes = we already load it.** Nine rows now intersect our suite; before the Tier-1 additions it was four.
 
 GLIE additionally uses **Crime** (829 / 2,946) and **HI-II-14** (4,165 / 26,172), both small and both [verified] from its Table I.
 
@@ -781,7 +781,7 @@ MC replication counts: DeepIM uses **100 rounds**; the classical NetHEPT protoco
 
 **Surveys / benchmarks** [ML-based IM survey (arXiv 2211.03074, TKDD'23)](https://arxiv.org/abs/2211.03074) · [IM survey (arXiv 2309.04668)](https://arxiv.org/abs/2309.04668) · [Behaviour-aware IM survey (arXiv 2108.03438)](https://arxiv.org/abs/2108.03438) · [Deep-RL max-coverage benchmark (arXiv 2406.14697)](https://arxiv.org/abs/2406.14697)
 
-**Data repositories** [SNAP](https://snap.stanford.edu/data/) · [Network Repository](https://networkrepository.com/) · [Netzschleuder](https://networks.skewed.de/) · [KONECT](http://konect.cc/networks/) · [AMiner](https://www.aminer.cn/data-sna) · [ISI/Lerman](https://www.isi.edu/~lerman/downloads/) · [Syracuse](https://datasets.syr.edu/) · [LAW (Twitter-2010 mirror)](https://law.di.unimi.it/webdata/twitter-2010/) — ⚠️ the LAW host timed out from our network on 2026-07-29; [Wayback copy](https://web.archive.org/web/2024/https://law.di.unimi.it/webdata/twitter-2010/)
+**Data repositories** [SNAP](https://snap.stanford.edu/data/) · [Network Repository](https://networkrepository.com/) · [Netzschleuder](https://networks.skewed.de/) · [KONECT](http://konect.cc/networks/) · [AMiner](https://www.aminer.cn/data-sna) · [ISI/Lerman](https://www.isi.edu/~lerman/downloads/) · [Syracuse](https://datasets.syr.edu/) · [LAW (Twitter-2010 mirror)](https://law.di.unimi.it/webdata/twitter-2010/) — Warning: the LAW host timed out from our network on 2026-07-29; [Wayback copy](https://web.archive.org/web/2024/https://law.di.unimi.it/webdata/twitter-2010/)
 
 **Dataset tables transcribed for this file** [Revisiting SSA (VLDB'17) Table 2](http://www.vldb.org/pvldb/vol10/p913-Huang.pdf) — NetHEPT/NetPHY/Enron/Epinions/DBLP/Orkut/LiveJournal/Twitter · [IMINFECTOR (TKDE'20) Table 3](https://arxiv.org/abs/1904.08804) — Digg/MAG/Weibo + cascades · [LeNSE (ICML'22) Table 2](https://arxiv.org/abs/2205.10106) — train/test edge splits (full graphs reconstructed by summation) · [GCOMB (NeurIPS'20) Table 1a](https://arxiv.org/abs/1903.03332) · [GLIE (arXiv 2108.04623) Table I](https://arxiv.org/abs/2108.04623) · [ToupleGDD (TCSS'23) Table I](https://arxiv.org/abs/2210.07500) · [DeepIM (ICML'23) Table 1](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf) · [MOEIM (GECCO'24) Table 1](https://arxiv.org/abs/2403.18755) · [IRIE (ICDM'12) Table 3](https://arxiv.org/abs/1111.4795) · [PMIA (KDD'10)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/msr-tr-2010-2_v2.pdf) — NetHEPT/NetPHY sizes
 

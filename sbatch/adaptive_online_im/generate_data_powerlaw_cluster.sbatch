@@ -21,10 +21,10 @@ RUN_JOBID="${RUN_JOBID:-1}"
 OUT="results/$TASK/$DATASET/$RUN/data"
 
 # RL4IM's family and the only synthetic one in this literature with a matching
-# published protocol: BA growth + a triangle-closing step, avg degree ~2m,
-# triangle probability 0.05 (research/adaptive_online_im.md §6.3b). RL4IM quotes
-# avg degree 3, which this generator cannot hit at integer m; --plc-m 2 is the
-# nearest above and the discrepancy is recorded in §11.
+# published protocol: BA growth + a triangle-closing step, triangle probability
+# 0.05 (research/adaptive_online_im.md §6.3b). m=3 and p=0.05 are RL4IM's OWN
+# basic_env.yaml values, read from the repo; its paper says "average degree 3",
+# which no integer m produces, so the code wins. See §11.
 #
 # 200 nodes matches RL4IM's default |V|. 40 graphs x 20 rollouts = 800 episodes
 # per (model, algorithm).
@@ -38,7 +38,7 @@ export OUT
 
 python -m data.generate_wm_data \
     --dataset powerlaw_cluster --num-graphs 40 --syn-nodes 200 \
-    --plc-m 2 --plc-p 0.05 \
+    --plc-m 3 --plc-p 0.05 \
     --models IC LT --prob-model weighted --budget-pct-range 1 20 \
     --algorithms random degree pagerank betweenness \
     --rollouts 20 --horizon 10 --inject-p 0.4 --cf-prob 0.4 --cf-branches 2 \

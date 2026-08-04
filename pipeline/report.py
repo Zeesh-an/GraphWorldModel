@@ -166,14 +166,29 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
         f"published protocol observes, so a `marginal` table is optimistic against "
         f"§5.1 and only the `binary` one is comparable (§2.9 risk 5).",
         "",
-        "| # | arm | evaluator | F1 (higher is better) | PR | RE | AUC | ACC | "
+        "Warning: **The `AUC from` column decides whether two AUCs are comparable.** An "
+        "arm that supplied a per-node ranking (`source_scores`) is scored on that "
+        "ranking; one that supplied only a SET (`rank_derived`, which every "
+        "external repo is, because a set is all that crosses the process "
+        "boundary) has every un-nominated node tied and lands near 0.5 whatever "
+        "its quality. Compare AUC only within one value of that column. **F1 is "
+        "exact for every row** and is the column to read across them.",
+        "",
+        "| # | k | arm | evaluator | F1 (higher is better) | PR | RE | AUC | ACC | "
         "selection F1 | gap | AUC from | fwd calls / instance | eval s | total s |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
+    # Sorted and LABELLED by budget: `--sl-budget-mode sweep` runs the same arm at
+    # several source fractions, and without the k column those rows are three
+    # identical arm names with different numbers
     ordered = sorted(
         agent_results,
-        key=lambda result: (result.get("condition", 99), result["arm"]),
+        key=lambda result: (
+            result.get("budget", 0),
+            result.get("condition", 99),
+            result["arm"],
+        ),
     )
 
     for result in ordered:
@@ -187,7 +202,8 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
             per_instance = f"{result['gradient_steps_per_instance']:g} (Adam steps)"
 
         lines.append(
-            f"| {result.get('condition', '—')} | `{result['arm']}` "
+            f"| {result.get('condition', '—')} | {result.get('budget', '—')} "
+            f"| `{result['arm']}` "
             f"| `{result.get('evaluator', '—')}` "
             f"| {_format_number(metrics.get('f1'), 4)} "
             f"| {_format_number(metrics.get('precision'), 4)} "

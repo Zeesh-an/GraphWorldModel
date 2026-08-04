@@ -287,7 +287,7 @@ def load_episode_endpoints(
         so the marginal column is strictly MORE informative than the literature's
         and only the binarized one is comparable to §5.1.
 
-    ⚠️ `marginal` is the marginal of the LAST STEP, conditioned on the realized
+    Warning: `marginal` is the marginal of the LAST STEP, conditioned on the realized
     trajectory up to it — not the marginal of the whole cascade from `x`. Every
     node infected earlier reads exactly 1.0 and only the final wave is fractional.
     That is still a continuous `y in [0,1]^|V|`, which is the input type SL-VAE
@@ -336,6 +336,16 @@ def load_episode_endpoints(
         binary = np.zeros(num_nodes, dtype=np.float32)
         binary[terminal["next_state"]["infected"]] = 1.0
 
+        # The whole observed path, one row per step. Free here (every main record
+        # already carries its own next_state) and it is a genuine observation
+        # SETTING rather than plumbing for one baseline: §8.3 lists the full
+        # trajectory alongside the snapshot, and DDMSL / DDMIX / DIPT reconstruct
+        # it rather than assuming it. PDSL conditions on intermediate snapshots
+        # and cannot be run from the endpoint alone.
+        trajectory = np.zeros((len(records), num_nodes), dtype=np.float32)
+        for step, record in enumerate(records):
+            trajectory[step, record["next_state"]["infected"]] = 1.0
+
         episodes.append(
             {
                 "graph_id": graph_id,
@@ -345,6 +355,7 @@ def load_episode_endpoints(
                 "sources": sources,
                 "marginal": marginal,
                 "binary": binary,
+                "trajectory": trajectory,
                 # Steps the cascade actually ran, so a program can be told how
                 # long the diffusion it is inverting had to spread
                 "horizon": int(terminal["t"]) + 1,

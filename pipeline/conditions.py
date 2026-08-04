@@ -178,10 +178,20 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
 
         evaluator = explicit or selection_evaluator
 
+        # A rounds-aware repo emits act() per round, so its arm has to run down
+        # the same path as any other adaptive arm; parse_arm is the only place
+        # that decides which, and getting it wrong would send an act()-shaped
+        # canned script into plan_horizon and fail at the executor
+        from baselines.registry import external_baselines
+
+        rounds_aware = (
+            name in external_baselines and external_baselines[name].rounds_aware
+        )
+
         return Arm(
             spec=spec,
             name=f"external_{name}",
-            method="one_shot",
+            method=adaptive_method if rounds_aware else "one_shot",
             strategy_mode="free",
             evaluator=evaluator,
             condition=external_condition,

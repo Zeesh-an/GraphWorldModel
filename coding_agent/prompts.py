@@ -51,7 +51,7 @@ along with all its edges, so it can never be infected, never transmit, and never
 counts toward the final total. You are cutting the routes the outbreak would
 otherwise travel.
 
-⚠️ REMOVING AN OUTBREAK SOURCE IS REJECTED. Deleting a source ends the outbreak
+Warning: REMOVING AN OUTBREAK SOURCE IS REJECTED. Deleting a source ends the outbreak
 rather than containing it, which is a different problem. Filter the sources out of
 your candidate set before you rank anything.
 

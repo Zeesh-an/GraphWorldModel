@@ -59,7 +59,13 @@ from baselines.registry import (
     external_baselines,
     runnable_baselines,
 )
-from baselines.run_baseline import BaselineError, run_external_baseline, seed_script
+from baselines.run_baseline import (
+    BaselineError,
+    localize_script,
+    round_seed_script,
+    run_external_baseline,
+    seed_script,
+)
 from coding_agent import executor
 from coding_agent.run import ExperimentConfig, run_experiment
 from data.generate_wm_data import (
@@ -75,9 +81,11 @@ from coding_agent.tools.library_api import algorithm_names
 from coding_agent.containment import outbreak_selectors
 from coding_agent.localization import (
     episode_budget,
+    load_instances,
     valid_budget_modes,
     valid_observations,
 )
+from coding_agent.rounds import round_batches
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
 from data.wm_graphs import kronecker_seeds
 from data.wm_simulator import valid_action_ops, valid_remove_semantics
@@ -121,7 +129,7 @@ class PipelineConfig:
     sbm_blocks: int = 4
     sbm_p_in: float = 0.15
     sbm_p_out: float = 0.01
-    plc_m: int = 2
+    plc_m: int = 3
     plc_p: float = 0.05
     kron_variant: str = "core_periphery"
     gen_models: tuple = ("IC", "LT")
@@ -559,6 +567,59 @@ def _load_pipeline_graph(layout: Layout, config: PipelineConfig) -> GraphInfo:
     return config._graph
 
 
+def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
+    """
+    Canned script for a published repo's seed set.
+
+    A rounds-aware repo returns its seeds in SELECTION order, so slicing by the
+    schedule it was run at recovers the batches and the arm replays them one
+    round at a time. Using the flat script for those would deal every batch at
+    t=0 and put an adaptive method on the non-adaptive side of the gap table.
+    """
+    # An inverse task's repo returns one SOURCE SET PER OBSERVATION rather than
+    # one seed set, so the canned script is a localize() keyed by observation
+    if "sources" in external_seeds:
+        return localize_script(external_seeds["sources"])
+
+    budget_op = get_task(config.task).budget_op
+    batches = external_seeds.get("batches")
+
+    if batches:
+        return round_seed_script(
+            external_seeds["seeds"], batches, config.round_gap, budget_op
+        )
+
+    return seed_script(external_seeds["seeds"], budget_op)
+
+
+def _external_instances(config: PipelineConfig, layout: Layout, budget: int) -> list:
+    """
+    Both instance pools an inverse task's external repo has to predict for.
+
+    Selection AND evaluation, in one batch, because the arm makes two passes
+    (`run_experiment` scores the winner on the held-out pool after selecting on
+    the other) and a repo invoked once has to cover both. `load_instances` is a
+    pure function of the config, so this reproduces exactly what `run_experiment`
+    loads; the canned script keys by OBSERVATION, so a disagreement surfaces as a
+    loud KeyError rather than as a silently wrong row.
+    """
+    common = dict(
+        graph_id=config.graph_id,
+        observation=config.sl_observation,
+        limit=config.sl_instances,
+        budget_mode=config.sl_budget_mode,
+        budget=budget,
+        source_tolerance=config.sl_source_tolerance,
+        seed=config.seed,
+    )
+
+    return load_instances(
+        str(layout.data_dir), config.diffusion_model, config.sl_select_split, **common
+    ) + load_instances(
+        str(layout.data_dir), config.diffusion_model, config.sl_eval_split, **common
+    )
+
+
 def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
     wm_results = (
         Path(config.wm_results_json)
@@ -633,6 +694,23 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 resolved = budget or max(
                     1, round(graph.num_nodes * budget_pct / 100)
                 )
+                # A rounds-aware repo selects in batches, so it needs the same
+                # schedule the adaptive arms run at, or it would be handed one
+                # batch of k and quietly become a static method
+                external_batches = (
+                    round_batches(resolved, config.rounds, config.per_round_budget)
+                    if external_baselines[arm.external].rounds_aware
+                    else None
+                )
+
+                # An inverse task's repo predicts per OBSERVATION, so it is handed
+                # both instance pools at once rather than a budget
+                external_instances = (
+                    _external_instances(config, layout, resolved)
+                    if get_task(config.task).recovers
+                    else None
+                )
+
                 try:
                     external_seeds = run_external_baseline(
                         arm.external,
@@ -641,6 +719,8 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                         config.diffusion_model,
                         work_dir=layout.baselines_dir / "_runs" / arm.external / label,
                         timeout=config.baseline_timeout,
+                        batches=external_batches,
+                        instances=external_instances,
                     )
                 except BaselineError as error:
                     tqdm.write(f"[agent] {label}/{arm.name}: SKIPPED — {error}")
@@ -727,9 +807,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             result = run_experiment(
                 experiment,
                 canned_script=(
-                    seed_script(
-                        external_seeds["seeds"], get_task(config.task).budget_op
-                    )
+                    _external_script(external_seeds, config)
                     if external_seeds
                     else None
                 ),
@@ -754,9 +832,13 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     "kind": spec.kind,
                     "repo": spec.repo,
                     "paper": spec.paper,
-                    "seeds": external_seeds["seeds"],
-                    # Time the external repo itself spent selecting seeds; our
-                    # scoring time is in elapsed_seconds as for every other arm
+                    # One of the two, never both: a seed/removal set for an
+                    # intervention task, per-instance source sets for an inverse one
+                    "seeds": external_seeds.get("seeds"),
+                    "instances": external_seeds.get("instances"),
+                    "instances_short": external_seeds.get("instances_short"),
+                    # Time the external repo itself spent selecting; our scoring
+                    # time is in elapsed_seconds as for every other arm
                     "selection_seconds": external_seeds["seconds"],
                 }
                 result["model"] = f"external:{arm.external}"
@@ -1098,9 +1180,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--plc-m",
         type=int,
-        default=2,
-        help="powerlaw_cluster: edges added per new node; average degree ~2m "
-        "(RL4IM quotes 3) (default: 2).",
+        default=3,
+        help="powerlaw_cluster: edges added per new node. RL4IM's own config uses "
+        "3; its paper says avg degree 3, which no integer m produces "
+        "(default: 3).",
     )
     parser.add_argument(
         "--plc-p",

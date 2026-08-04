@@ -317,7 +317,7 @@ def schneider_r(curve: list[float], num_nodes: int) -> float:
     """
     Schneider's robustness integral R = (1/N) * sum_q s(q) over the removals made.
 
-    ⚠️ Schneider et al. define R over the FULL sweep q = 1..N, which bounds it in
+    Warning: Schneider et al. define R over the FULL sweep q = 1..N, which bounds it in
     [1/N, 0.5]. A budgeted arm removes only k nodes, so this is the partial
     integral over the prefix that was actually removed and is comparable ACROSS
     ARMS at the same k, never against a published full-sweep R. Lower = a better

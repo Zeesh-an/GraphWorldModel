@@ -11,7 +11,7 @@ The most widely shared biological benchmark in this literature: CoreHD, BPD, GND
 FINDER, NIRM ("PPI"), DCRS, SPR and BPHD all report it
 (research/critical_node_detection.md §7).
 
-⚠️ Three graphs go by "PPI" (§6.4): CoreHD's Table I quotes the RAW 2,361 / 6,646
+Warning: Three graphs go by "PPI" (§6.4): CoreHD's Table I quotes the RAW 2,361 / 6,646
 network, this file is its 2,224-node giant component, and networkrepository's
 `bio-yeast` is a different 1,458 / 1,948 graph entirely.
 """

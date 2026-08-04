@@ -9,7 +9,7 @@ Source: https://networkrepository.com/inf-openflights.php (Opsahl snapshot)
     - No inherent node features — uses log(1 + degree) as synthetic features
     - No node labels
 
-⚠️ Name collision (§6.4). KONECT publishes a bigger, later `openflights`
+Warning: Name collision (§6.4). KONECT publishes a bigger, later `openflights`
 snapshot at 3,425 / 37,595 arcs and papers cite the two interchangeably. This is
 the Opsahl one.
 

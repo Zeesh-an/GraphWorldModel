@@ -93,6 +93,12 @@ class SourceInstance:
     horizon: int
     infected_count: int
     algorithm: str | None = None
+    # The whole observed path, shape (T, N), one binary row per step. NOT given to
+    # a generated program — its contract is a single snapshot, which is the
+    # setting every comparable published number uses (§8.3). It is carried for the
+    # external baselines that condition on intermediate observations rather than
+    # on the endpoint alone, PDSL being the one wired today.
+    trajectory: np.ndarray | None = None
 
     @property
     def source_count(self) -> int:
@@ -242,6 +248,7 @@ def load_instances(
             horizon=record["horizon"],
             infected_count=record["infected_count"],
             algorithm=record.get("algorithm"),
+            trajectory=record.get("trajectory"),
         )
         for record in episodes
     ]

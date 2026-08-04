@@ -21,7 +21,7 @@
 #                the graph the 2026 GNN benchmark shows a 72.9% top-5 ceiling on
 #   dolphins     62 / 159, in IVGD, GraphSL and the GNN benchmark. THE graph this
 #                literature uses that no other task file needed
-#   jazz         198 / 2,742 — four papers agree to the digit. ⭐
+#   jazz         198 / 2,742 — four papers agree to the digit. (key)
 #   netscience   1,589 / 2,742 — comparable to IVGD, GraphSL and SIDSL, and NOT
 #                to SL-VAE, whose 1,565 / 13,532 is a different graph that is
 #                undocumented and not publicly downloadable (§6.4.1). Say so in
@@ -35,7 +35,7 @@
 #                so there is no F1 row to compare against. It is here for the
 #                COST axis of §2.3.2, which needs a size the others cannot give.
 #
-# ⚠️ NO published number in this literature is under IC or LT. SL-VAE uses SI/SIR,
+# Warning: NO published number in this literature is under IC or LT. SL-VAE uses SI/SIR,
 # SL-Diff / SIDSL / DDMSL use real cascades, the GNN benchmark uses SIR. Our
 # graphs match byte-for-byte and our DYNAMICS do not, so every number this sweep
 # produces is self-contained (§11). That is the biggest comparability gap in the

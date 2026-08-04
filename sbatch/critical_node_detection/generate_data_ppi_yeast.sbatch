@@ -17,7 +17,7 @@
 # (mean degree 5.9, small diameter). If the world model is going to win anywhere,
 # it is here, which makes this the natural companion run to the power-grid one.
 #
-# ⚠️ Three graphs go by "PPI" (§6.4). This loader is the 2,224-node GCC that GND
+# Warning: Three graphs go by "PPI" (§6.4). This loader is the 2,224-node GCC that GND
 # publishes; CoreHD's Table I quotes the raw 2,361/6,646 network.
 
 set -euo pipefail

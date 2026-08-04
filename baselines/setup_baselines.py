@@ -160,13 +160,19 @@ def _create_venv(name: str, venv: Path) -> None:
 def install(name: str) -> None:
     spec = external_baselines[name]
 
-    if spec.requirements is None:
-        print(f"[setup] {name}: no Python requirements ({spec.entry}) — build manually")
-        return
+    requirements = spec.root / spec.requirements if spec.requirements else None
+    has_requirements = requirements is not None and requirements.exists()
 
-    requirements = spec.root / spec.requirements
-    if not requirements.exists():
-        print(f"[setup] {name}: no {spec.requirements} in the repo, skipping install")
+    # A package-distributed baseline (GraphSL, cosasi) has no usable requirements
+    # file in its clone: the PyPI package IS the install, so a venv is still
+    # needed even though `requirements` is None
+    if not has_requirements and not spec.pip_packages:
+        if spec.requirements is None:
+            print(
+                f"[setup] {name}: no Python requirements ({spec.entry}) — build manually"
+            )
+        else:
+            print(f"[setup] {name}: no {spec.requirements} in the repo, skipping install")
         return
 
     venv = spec.root / ".venv"
@@ -179,7 +185,6 @@ def install(name: str) -> None:
         print(f"[setup] {name}: creating venv")
         _create_venv(name, venv)
 
-    print(f"[setup] {name}: installing {spec.requirements}")
     uv = shutil.which("uv")
 
     # `uv venv` deliberately does not put pip inside the venv, so install
@@ -189,10 +194,30 @@ def install(name: str) -> None:
         if uv is not None
         else [str(venv / "bin" / "pip"), "install"]
     )
-    _run(
-        command + ["-q", "-r", str(requirements)],
-        timeout=install_timeout_seconds,
-    )
+
+    if has_requirements:
+        print(f"[setup] {name}: installing {spec.requirements}")
+        _run(
+            command + ["-q", "-r", str(requirements)],
+            timeout=install_timeout_seconds,
+        )
+
+    _install_packages(name, spec, command)
+
+
+def _install_packages(name: str, spec, command: list[str]) -> None:
+    """
+    The spec's PyPI packages, for a library driven as a package rather than a clone.
+
+    GraphSL and cosasi are published on PyPI and their clones carry no usable
+    requirements file, so the package IS the install. Kept separate from
+    `requirements` rather than folded into it: a repo may legitimately need both.
+    """
+    if not spec.pip_packages:
+        return
+
+    print(f"[setup] {name}: installing {' '.join(spec.pip_packages)}")
+    _run(command + ["-q", *spec.pip_packages], timeout=install_timeout_seconds)
 
 
 def setup(name: str) -> None:

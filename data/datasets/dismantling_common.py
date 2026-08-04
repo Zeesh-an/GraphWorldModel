@@ -7,7 +7,7 @@ inside a tarball, networkrepository ships Matrix Market inside a zip. Once the
 bytes are on disk the four formats differ only in which leading lines to skip, so
 one function does the parse and each `data/datasets/<name>.py` supplies the URL.
 
-⚠️ Nearly every dismantling paper silently runs on the LARGEST CONNECTED
+Warning: Nearly every dismantling paper silently runs on the LARGEST CONNECTED
 COMPONENT (§8.2 trap 7), which is why the GND repo's files are named `*_Gcc`.
 Loaders that fetch a raw file therefore pass `lcc=True` to reproduce the published
 node count; loaders that fetch an already-extracted GCC leave it off.

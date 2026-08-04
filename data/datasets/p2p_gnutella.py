@@ -10,7 +10,7 @@ Source: https://snap.stanford.edu/data/p2p-Gnutella31.html
     - No inherent node features — uses log(1 + degree) as synthetic features
     - No node labels
 
-⚠️ SCALE WARNING. At 62.6K nodes this is well past what the NDlib rollout +
+Warning: SCALE WARNING. At 62.6K nodes this is well past what the NDlib rollout +
 selector pipeline simulates in reasonable time; it is registered because it is the
 one large graph CoreHD, BPD, FINDER, DCRS and MIND all report, i.e. the target for
 a scalable-simulation follow-up, not a day-one dataset. Generation on it will be

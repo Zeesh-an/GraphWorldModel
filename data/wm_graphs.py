@@ -202,7 +202,7 @@ def make_synthetic_bundle(
     sbm_blocks: int = 4,
     sbm_p_in: float = 0.15,
     sbm_p_out: float = 0.01,
-    plc_m: int = 2,
+    plc_m: int = 3,
     plc_p: float = 0.05,
     kron_variant: str = "core_periphery",
     seed: int = 0,
@@ -238,8 +238,8 @@ def make_synthetic_bundle(
     elif family == "powerlaw_cluster":
         # RL4IM's family (research/adaptive_online_im.md 6.3b): BA growth plus a
         # triangle-closing step, so it has the clustering BA lacks while keeping
-        # the heavy tail. RL4IM quotes average degree 3; this generator gives
-        # ~2*m, so m=2 is the nearest setting above and m=1 the one below.
+        # the heavy tail. Defaults are RL4IM's, read from its repo rather than
+        # its paper: RL4IM's own basic_env.yaml sets m=3, p=0.05 (avg degree 5.9), which is what its graph.py passes to nx.powerlaw_cluster_graph. The paper's "average degree 3" disagrees with its own code; the code wins.
         graph = nx.powerlaw_cluster_graph(num_nodes, plc_m, plc_p, seed=instance_seed)
         graph_id = f"plc_n{num_nodes}_m{plc_m}_p{plc_p}_s{instance_seed}"
     elif family == "kronecker":

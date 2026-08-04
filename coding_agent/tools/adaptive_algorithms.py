@@ -22,7 +22,7 @@ Two conventions every member obeys, because the harness enforces them anyway
     raises, and under myopic it silently wastes the slot;
   * never return more than `batch` nodes.
 
-⚠️ Name collision worth knowing: `algorithms.adaptive_greedy` is adaptive
+Warning: Name collision worth knowing: `algorithms.adaptive_greedy` is adaptive
 *sampling* (coarse MC to rank, refined MC on the top few), not adaptive
 *seeding*. Han et al.'s algorithm is called AdaptGreedy, which is the name used
 here, so the two never collide in the `--baselines` namespace.

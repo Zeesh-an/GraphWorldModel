@@ -10,7 +10,7 @@ Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
 The single most-shared graph in this literature: GND, Min-Sum, NIRM ("P-H"),
 GDM, MIND, BPHD ("Social") and Wandelt all report it.
 
-⚠️ Name collision (research/critical_node_detection.md §6.4). KONECT's
+Warning: Name collision (research/critical_node_detection.md §6.4). KONECT's
 `petster-hamster` is 2,426 / 16,631 and networkrepository's `soc-hamsterster` is
 2,426 / 16,630 — both the RAW graph. The dismantling number is the 2,000-node
 giant component, which is what this file is.

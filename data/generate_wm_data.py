@@ -199,7 +199,7 @@ class GenConfig:
     sbm_p_in: float = 0.15
     sbm_p_out: float = 0.01
     # powerlaw_cluster (RL4IM) and kronecker (ConTinEst); see data/wm_graphs.py
-    plc_m: int = 2
+    plc_m: int = 3
     plc_p: float = 0.05
     kron_variant: str = "core_periphery"
 
@@ -536,9 +536,10 @@ def parse_args() -> GenConfig:
     parser.add_argument(
         "--plc-m",
         type=int,
-        default=2,
-        help="powerlaw_cluster: edges added per new node; average degree is ~2m, "
-        "and RL4IM quotes 3 (default: 2).",
+        default=3,
+        help="powerlaw_cluster: edges added per new node. RL4IM's own config uses "
+        "3 (avg degree ~5.9); its paper says avg degree 3, which no integer m "
+        "produces, so the code wins (default: 3).",
     )
     parser.add_argument(
         "--plc-p",

@@ -254,7 +254,7 @@ def _reinsert(
     one name, which is why the reinserting variants are registered separately here
     rather than folded in.
 
-    ⚠️ The bar is `max(threshold * N, the giant component this set already
+    Warning: The bar is `max(threshold * N, the giant component this set already
     achieved)`, and the second term is ours. The published pass is defined only
     once the graph is dismantled below `threshold`, because its job is to shrink
     `|S|` at a FIXED threshold — an unbounded-budget setting. Our budget is a fixed
@@ -1000,7 +1000,7 @@ def egnd(
     to cover. This sweeps the split quantile and keeps the removal set with the
     smallest residual giant component.
 
-    ⚠️ §3.3 lists EGND as a distinct baseline in the GDM and Artime tables but
+    Warning: §3.3 lists EGND as a distinct baseline in the GDM and Artime tables but
     gives it **no paper and no code**, so "ensemble of GND cuts" is the entire
     published specification and the quantile sweep is our reading of it. Report it
     as our variant, not as the EGND of those tables.

@@ -40,6 +40,7 @@ from coding_agent.types import (
 )
 from data.wm_graphs import kronecker_graph, make_synthetic_bundle
 from pipeline.conditions import adaptivity_gaps, parse_arm
+from baselines.run_baseline import round_seed_script
 from pipeline.run import expand_baselines
 
 
@@ -575,12 +576,18 @@ def the_spread_curve_makes_sigma_s_t_readable() -> None:
     # 1e-4, not 1e-6: the curve is rounded to 4 dp on the way into the JSON
     assert abs(curve[-1] - trajectory.reward) < 1e-4, (curve[-1], trajectory.reward)
 
-    # Padding is exact, not smoothing: once the cascade dies the value repeats
-    assert curve[-1] == curve[-2]
-
-    # pad_counts on an already-full vector is the identity
-    full = list(range(horizon + 2))
-    assert pad_counts([float(v) for v in full], horizon) == [float(v) for v in full]
+    # The padding property is pad_counts's, and it is asserted there rather than
+    # on the ensemble curve. spread_curve is a MEAN over runs that break at
+    # different timesteps, so its tail keeps rising while any single run is still
+    # spreading; an earlier version asserted curve[-1] == curve[-2] here and
+    # passed only because the old sparser default happened to terminate first.
+    short = [0.0, 4.0, 7.0]
+    assert pad_counts(short, horizon) == short + [7.0] * (horizon + 2 - len(short))
+    assert len(pad_counts(short, horizon)) == horizon + 2
+    # ...identity on an already-full vector, and safe on an empty one
+    full = [float(value) for value in range(horizon + 2)]
+    assert pad_counts(full, horizon) == full
+    assert pad_counts([], horizon) == [0.0] * (horizon + 2)
 
 
 def adaptive_runs_under_the_world_model_loop_order() -> None:
@@ -683,15 +690,78 @@ def published_baselines_cannot_cross_tasks() -> None:
     else:
         raise AssertionError("an IM baseline must not join an adaptive sweep")
 
-    # The `all` aliases already filtered; every adaptive repo is unwired, so this
-    # is empty and must stay honest about that rather than expanding to the IM set
-    assert expand_baselines(("all-external",), "adaptive_online_im") == []
+    # The `all` aliases filter on the task, so this expands to the adaptive
+    # repos that have an adapter and never to the IM set. It was empty until
+    # adaptiveim and rl4im were wired.
+    assert set(expand_baselines(("all-external",), "adaptive_online_im")) == {
+        "external:adaptiveim",
+        "external:rl4im",
+    }
+    assert "external:moeim" not in expand_baselines(
+        ("all-external",), "adaptive_online_im"
+    )
+
+
+def external_round_replay_preserves_the_batches() -> None:
+    """
+    A rounds-aware repo's seeds must be dealt per round, not all at t=0.
+
+    The seeds arrive in SELECTION order and the batch structure lives only in
+    that order, so this is the one place it can be lost. Getting it wrong turns
+    AdaptGreedy into a static plan and moves it to the wrong side of the gap
+    table, which would look like a weak method rather than a wiring bug.
+    """
+    seeds = [10, 11, 12, 13, 20, 21, 22, 23, 30, 31]
+    batches = [4, 4, 2]
+
+    script = round_seed_script(seeds, batches, round_gap=1)
+    namespace = _namespace("free", allow_mc_algorithms=True)
+    exec(compile(script, "<test>", "exec"), namespace)
+    policy = namespace["ExternalAdaptiveBaseline"]()
+
+    empty = State([], [])
+    assert [a.target for a in policy.act(empty, None, 0)] == [10, 11, 12, 13]
+    assert [a.target for a in policy.act(empty, None, 1)] == [20, 21, 22, 23]
+    assert [a.target for a in policy.act(empty, None, 2)] == [30, 31]
+    assert policy.act(empty, None, 3) == []
+
+    # round_gap spaces the rounds out the same way the schedule does
+    spaced = round_seed_script(seeds, batches, round_gap=2)
+    exec(compile(spaced, "<test>", "exec"), namespace)
+    policy = namespace["ExternalAdaptiveBaseline"]()
+    assert [a.target for a in policy.act(empty, None, 2)] == [20, 21, 22, 23]
+    assert policy.act(empty, None, 1) == []
+
+    # Already-active picks are dropped rather than re-seeded: the repo chose its
+    # schedule against ITS realization, and ours will differ, so an arm can
+    # legitimately under-spend k. That is visible in round_spreads, not silent.
+    active = State([20, 21], [])
+    policy = namespace["ExternalAdaptiveBaseline"]()
+    assert [a.target for a in policy.act(active, None, 2)] == [22, 23]
+
+
+def rounds_aware_externals_are_declared_and_dispatched() -> None:
+    """The three places that must agree, or the arm silently runs as static."""
+    from baselines.registry import external_baselines
+
+    for name in ("adaptiveim", "rl4im"):
+        spec = external_baselines[name]
+        assert spec.rounds_aware, name
+        assert spec.task == "adaptive_online_im", name
+        # wired means an adapter exists to drive it
+        assert spec.wired, name
+        assert parse_arm(f"external:{name}").method == "adaptive", name
+
+    # ...and an IM repo stays static, so it lands on the control side
+    assert not external_baselines["moeim"].rounds_aware
+    assert parse_arm("external:moeim").method == "one_shot"
 
 
 def the_new_synthetic_families_generate() -> None:
     plc = make_synthetic_bundle("powerlaw_cluster", index=0, num_nodes=200, seed=1)
     assert plc.nx_graph.number_of_nodes() == 200
-    assert plc.graph_id.startswith("plc_n200_m2"), plc.graph_id
+    # m=3 is RL4IM's own config value, not the paper's stated avg degree
+    assert plc.graph_id.startswith("plc_n200_m3"), plc.graph_id
     # Triangles are the whole reason this family exists over plain BA
     assert nx.transitivity(plc.nx_graph) > 0.0
 
@@ -731,6 +801,8 @@ if __name__ == "__main__":
         adaptive_runs_under_the_world_model_loop_order,
         the_expensive_adaptive_baseline_is_metered,
         published_baselines_cannot_cross_tasks,
+        external_round_replay_preserves_the_batches,
+        rounds_aware_externals_are_declared_and_dispatched,
         the_new_synthetic_families_generate,
     ]
 

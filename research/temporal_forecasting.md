@@ -2,7 +2,7 @@
 
 Spatio-temporal forecasting on graphs: predict the next `H` steps of a continuous node signal (traffic speed, flow, occupancy) from the last `P` steps, on a road network whose topology is fixed. This is the largest and most professionalized "dynamics on a graph" literature in existence — roughly a decade of work, six canonical datasets, four benchmark libraries, and a rigidly standardized evaluation protocol.
 
-**Verdict up front: ❌ poor fit, and not a task to implement.** The state is continuous and periodic, not binary activation; there are **no interventions**, so `T_exo` — the action-conditioned half of our contribution — has nothing to do; the data is measured rather than simulated, so there are no counterfactual forks and no MC marginals; and the dataset overlap with our suite is exactly zero. §2 works that argument through axis by axis.
+**Verdict up front: no poor fit, and not a task to implement.** The state is continuous and periodic, not binary activation; there are **no interventions**, so `T_exo` — the action-conditioned half of our contribution — has nothing to do; the data is measured rather than simulated, so there are no counterfactual forks and no MC marginals; and the dataset overlap with our suite is exactly zero. §2 works that argument through axis by axis.
 
 **What this file is actually for: §9.** This literature has thought harder about _autoregressive error accumulation over a multi-step horizon_ than any other graph community, because their headline metric is a 12-step rollout. Our `rollout_ensemble` saturation problem (`research_notes`, "solved but fragile") is their central engineering problem under a different name. Scheduled sampling, horizon curriculum learning, and the closed-loop/open-loop distinction are the transferable goods.
 
@@ -134,14 +134,14 @@ Three things, and they are not nothing:
 
 | Axis                 | Verdict                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------- |
-| State type           | ❌ continuous + periodic vs our binary/probabilistic; both structured heads inapplicable |
-| Actions              | ❌ **none exist**; `T_exo` unused; 3 of 6 input channels dead                            |
-| Simulator            | ❌ measured data — no counterfactual forks, no MC marginals (`build_features` raises)    |
-| Datasets             | ❌ zero overlap with our fifteen graphs                                                  |
-| Objective            | ❌ masked MAE regression vs BCE + planning regret                                        |
-| Encoders             | ✅ shared — GCN / GAT / GT / (GCNII) all appear on both sides                            |
-| Rollout evaluation   | ✅ per-horizon reporting is strictly better than our aggregate                           |
-| Rollout **training** | ✅ ⭐ scheduled sampling + curriculum — the reason to read this file                     |
+| State type           | no continuous + periodic vs our binary/probabilistic; both structured heads inapplicable |
+| Actions              | no **none exist**; `T_exo` unused; 3 of 6 input channels dead                            |
+| Simulator            | no measured data — no counterfactual forks, no MC marginals (`build_features` raises)    |
+| Datasets             | no zero overlap with our fifteen graphs                                                  |
+| Objective            | no masked MAE regression vs BCE + planning regret                                        |
+| Encoders             | yes shared — GCN / GAT / GT / (GCNII) all appear on both sides                            |
+| Rollout evaluation   | yes per-horizon reporting is strictly better than our aggregate                           |
+| Rollout **training** | yes (key) scheduled sampling + curriculum — the reason to read this file                     |
 
 ---
 
@@ -172,21 +172,21 @@ Every paper URL and code URL below returned HTTP 200 on **2026-07-28**.
 | Method               | Year | Venue       | Idea                                                                                                                                                                                                                                     | Paper                                                              | Code                                                                                                                |
 | -------------------- | ---- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | **STGCN**            | 2018 | IJCAI       | ChebNet spatial conv + 1-D gated temporal conv. First fully-convolutional ST model; no RNN.                                                                                                                                              | [arXiv 1709.04875](https://arxiv.org/abs/1709.04875)               | [VeritasYin/STGCN_IJCAI-18](https://github.com/VeritasYin/STGCN_IJCAI-18)                                           |
-| **DCRNN** ⭐         | 2018 | **ICLR**    | Traffic as a **diffusion process** on a directed graph: bidirectional random-walk conv inside a GRU, seq2seq decoder, **scheduled sampling**. Defines the task, the datasets, and the 70/10/20 split.                                    | [arXiv 1707.01926](https://arxiv.org/abs/1707.01926)               | [liyaguang/DCRNN](https://github.com/liyaguang/DCRNN)                                                               |
+| **DCRNN** (key)         | 2018 | **ICLR**    | Traffic as a **diffusion process** on a directed graph: bidirectional random-walk conv inside a GRU, seq2seq decoder, **scheduled sampling**. Defines the task, the datasets, and the 70/10/20 split.                                    | [arXiv 1707.01926](https://arxiv.org/abs/1707.01926)               | [liyaguang/DCRNN](https://github.com/liyaguang/DCRNN)                                                               |
 | **ASTGCN**           | 2019 | AAAI        | Spatial + temporal attention on top of ChebNet; three parallel branches for recent / daily / weekly periodicity. Introduces PEMS04 and PEMS08.                                                                                           | [AAAI 3881](https://ojs.aaai.org/index.php/AAAI/article/view/3881) | [Davidham3/ASTGCN](https://github.com/Davidham3/ASTGCN)                                                             |
-| **Graph WaveNet** ⭐ | 2019 | IJCAI       | Dilated causal TCN + diffusion conv, plus a **self-adaptive adjacency** `softmax(ReLU(E₁E₂ᵀ))` learned from node embeddings. Non-autoregressive: emits all 12 steps in one forward pass. Still competitive in 2024 (§5.2).               | [arXiv 1906.00121](https://arxiv.org/abs/1906.00121)               | [nnzhan/Graph-WaveNet](https://github.com/nnzhan/Graph-WaveNet)                                                     |
+| **Graph WaveNet** (key) | 2019 | IJCAI       | Dilated causal TCN + diffusion conv, plus a **self-adaptive adjacency** `softmax(ReLU(E₁E₂ᵀ))` learned from node embeddings. Non-autoregressive: emits all 12 steps in one forward pass. Still competitive in 2024 (§5.2).               | [arXiv 1906.00121](https://arxiv.org/abs/1906.00121)               | [nnzhan/Graph-WaveNet](https://github.com/nnzhan/Graph-WaveNet)                                                     |
 | **GMAN**             | 2020 | AAAI        | Encoder-decoder of spatial + temporal attention blocks with a transform-attention layer bridging history and horizon; targets long-horizon (60 min) error.                                                                               | [arXiv 1911.08415](https://arxiv.org/abs/1911.08415)               | [zhengchuanpan/GMAN](https://github.com/zhengchuanpan/GMAN)                                                         |
 | **STSGCN**           | 2020 | AAAI        | Localized _spatio-temporal_ graph: stitches three adjacent time-slice graphs into one and convolves over it, capturing heterogeneity. **Introduces PEMS03/07 and the 60/20/20 split.** Huber loss.                                       | [AAAI 5438](https://ojs.aaai.org/index.php/AAAI/article/view/5438) | [Davidham3/STSGCN](https://github.com/Davidham3/STSGCN)                                                             |
 | **AGCRN**            | 2020 | **NeurIPS** | Node-adaptive parameter learning (per-node weight factorization) + data-adaptive graph generation; needs **no predefined adjacency at all**.                                                                                             | [arXiv 2007.02842](https://arxiv.org/abs/2007.02842)               | [LeiBAI/AGCRN](https://github.com/LeiBAI/AGCRN)                                                                     |
 | **MTGNN**            | 2020 | KDD         | Generalizes Graph WaveNet to arbitrary multivariate TS: graph-learning layer + mix-hop propagation + dilated inception. Trains with a **node-subset curriculum**.                                                                        | [arXiv 2005.11650](https://arxiv.org/abs/2005.11650)               | [nnzhan/MTGNN](https://github.com/nnzhan/MTGNN)                                                                     |
 | **STGODE**           | 2021 | KDD         | Replaces stacked GCN layers with a **continuous-depth neural ODE** on the graph, so depth stops causing over-smoothing.                                                                                                                  | [arXiv 2106.12931](https://arxiv.org/abs/2106.12931)               | [square-coder/STGODE](https://github.com/square-coder/STGODE)                                                       |
-| **D2STGNN** ⭐       | 2022 | VLDB        | **Decouples the signal into a diffusion component and an inherent component** and models each with its own branch, plus a dynamic graph learner. SOTA for STF in the BasicTS+ re-benchmark.                                              | [arXiv 2206.09112](https://arxiv.org/abs/2206.09112)               | [zezhishao/D2STGNN](https://github.com/zezhishao/D2STGNN)                                                           |
-| **STID** ⭐          | 2022 | CIKM        | **An MLP plus three learned identity embeddings** (spatial, time-of-day, day-of-week). No graph convolution, no attention, no recurrence. Matches or beats most STGNNs at ~0.12M params. The field's most useful negative result — §4.2. | [arXiv 2208.05233](https://arxiv.org/abs/2208.05233)               | [zezhishao/STID](https://github.com/zezhishao/STID) · [GestaltCogTeam/STID](https://github.com/GestaltCogTeam/STID) |
+| **D2STGNN** (key)       | 2022 | VLDB        | **Decouples the signal into a diffusion component and an inherent component** and models each with its own branch, plus a dynamic graph learner. SOTA for STF in the BasicTS+ re-benchmark.                                              | [arXiv 2206.09112](https://arxiv.org/abs/2206.09112)               | [zezhishao/D2STGNN](https://github.com/zezhishao/D2STGNN)                                                           |
+| **STID** (key)          | 2022 | CIKM        | **An MLP plus three learned identity embeddings** (spatial, time-of-day, day-of-week). No graph convolution, no attention, no recurrence. Matches or beats most STGNNs at ~0.12M params. The field's most useful negative result — §4.2. | [arXiv 2208.05233](https://arxiv.org/abs/2208.05233)               | [zezhishao/STID](https://github.com/zezhishao/STID) · [GestaltCogTeam/STID](https://github.com/GestaltCogTeam/STID) |
 | **STJGCN**           | 2023 | TKDE        | Spatio-temporal **joint** graph: connects every node to every node at every other time step within a window, over multiple ranges, with dilated aggregation.                                                                             | [arXiv 2111.13684](https://arxiv.org/abs/2111.13684)               | [zhengchuanpan/STJGCN](https://github.com/zhengchuanpan/STJGCN)                                                     |
 | **PDFormer**         | 2023 | AAAI        | Transformer with a **propagation-delay-aware** attention: explicitly models that congestion takes time to travel between distant sensors, via a delay-matched key lookup.                                                                | [arXiv 2301.07945](https://arxiv.org/abs/2301.07945)               | [BUAABIGSCity/PDFormer](https://github.com/BUAABIGSCity/PDFormer)                                                   |
-| **STAEformer** ⭐    | 2023 | CIKM        | Vanilla transformer + a **spatio-temporal adaptive embedding**. The ablation is the contribution: the embedding, not the architecture, carries the performance. Same lesson as STID.                                                     | [arXiv 2308.10425](https://arxiv.org/abs/2308.10425)               | [XDZhelheim/STAEformer](https://github.com/XDZhelheim/STAEformer)                                                   |
+| **STAEformer** (key)    | 2023 | CIKM        | Vanilla transformer + a **spatio-temporal adaptive embedding**. The ablation is the contribution: the embedding, not the architecture, carries the performance. Same lesson as STID.                                                     | [arXiv 2308.10425](https://arxiv.org/abs/2308.10425)               | [XDZhelheim/STAEformer](https://github.com/XDZhelheim/STAEformer)                                                   |
 
-### 4.2 The "are GNNs even needed?" thread ⭐
+### 4.2 The "are GNNs even needed?" thread (key)
 
 The single most useful negative result in this field, and worth more to us than any leaderboard.
 
@@ -231,7 +231,7 @@ Distinct from traffic: here the **topology** evolves and the task is link predic
 | Method        | Year | Venue | Idea                                                                                                                                                                                                                                                                                                                  | Paper                                                | Code                                                            |
 | ------------- | ---- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------- |
 | **EvolveGCN** | 2020 | AAAI  | Instead of evolving node embeddings, **evolve the GCN weight matrices themselves** with an RNN (`-H` variant uses a GRU over the weights, `-O` an LSTM). Handles nodes appearing and disappearing, which embedding-RNN methods cannot.                                                                                | [arXiv 1902.10191](https://arxiv.org/abs/1902.10191) | [IBM/EvolveGCN](https://github.com/IBM/EvolveGCN)               |
-| **ROLAND** ⭐ | 2022 | KDD   | A _recipe_, not an architecture: treat node embeddings at each GNN layer as hierarchical states, update them across snapshots, and **repurpose any static GNN as a dynamic one**. Introduces the **live-update evaluation** setting and frames it as meta-learning; scales to 56M edges and 733 snapshots [verified]. | [arXiv 2208.07239](https://arxiv.org/abs/2208.07239) | [snap-stanford/roland](https://github.com/snap-stanford/roland) |
+| **ROLAND** (key) | 2022 | KDD   | A _recipe_, not an architecture: treat node embeddings at each GNN layer as hierarchical states, update them across snapshots, and **repurpose any static GNN as a dynamic one**. Introduces the **live-update evaluation** setting and frames it as meta-learning; scales to 56M edges and 733 snapshots [verified]. | [arXiv 2208.07239](https://arxiv.org/abs/2208.07239) | [snap-stanford/roland](https://github.com/snap-stanford/roland) |
 
 **Surveys.** Both are genuinely worth reading for the taxonomy, not the results:
 
@@ -240,7 +240,7 @@ Distinct from traffic: here the **topology** evolves and the task is link predic
 
 **ROLAND's live-update evaluation is the one idea in §4.4 with direct bearing on us.** It insists that at prediction time the model has only ever been trained on strictly earlier snapshots, then updates on the newly arrived snapshot — i.e. it enforces the same no-leakage discipline TGN's raw message store enforces, at snapshot granularity. If we ever train autoregressively on our own rollouts (§9), that discipline is the thing that stops us predicting the future from the future.
 
-### 4.5 Benchmark libraries ⭐
+### 4.5 Benchmark libraries (key)
 
 This is where the field is unusually mature, and the reason §5 has a re-benchmarking section at all.
 
@@ -249,13 +249,13 @@ This is where the field is unusually mature, and the reason §5 has a re-benchma
 | **PyTorch Geometric Temporal** | 2021    | CIKM       | PyG extension: discrete-time temporal GNN layers + iterators for static/dynamic signals; ships DCRNN, STGCN, EvolveGCN, A3T-GCN and others as layers. The easiest way to get these encoders.                           | [arXiv 2104.07788](https://arxiv.org/abs/2104.07788) | [benedekrozemberczki/pytorch_geometric_temporal](https://github.com/benedekrozemberczki/pytorch_geometric_temporal)                 |
 | **DL-Traff**                   | 2021    | CIKM       | Two paired benchmarks — grid-based (TaxiBJ, NYC-Bike/Taxi) and graph-based (METR-LA, PEMS-BAY, PEMSD7M) — under one codebase, to stop grid and graph papers being compared across incompatible setups.                 | [arXiv 2108.09091](https://arxiv.org/abs/2108.09091) | [DL-Traff-Graph](https://github.com/deepkashiwa20/DL-Traff-Graph) · [DL-Traff-Grid](https://github.com/deepkashiwa20/DL-Traff-Grid) |
 | **LibCity**                    | 2021/23 | SIGSPATIAL | The broadest: **65 models** across **9 tasks** on **55 datasets** [verified] converted to a unified "atomic file" storage format. Covers traffic-state prediction, trajectory, ETA, map matching, road representation. | [arXiv 2304.14343](https://arxiv.org/abs/2304.14343) | [LibCity/Bigscity-LibCity](https://github.com/LibCity/Bigscity-LibCity)                                                             |
-| **BasicTS / BasicTS+** ⭐      | 2023/24 | TKDE       | The one that matters: a unified training pipeline that **re-ran 45+ methods under a single fair protocol and overturned several published rankings**. §5.2 is its findings.                                            | [arXiv 2310.06119](https://arxiv.org/abs/2310.06119) | [GestaltCogTeam/BasicTS](https://github.com/GestaltCogTeam/BasicTS)                                                                 |
+| **BasicTS / BasicTS+** (key)      | 2023/24 | TKDE       | The one that matters: a unified training pipeline that **re-ran 45+ methods under a single fair protocol and overturned several published rankings**. §5.2 is its findings.                                            | [arXiv 2310.06119](https://arxiv.org/abs/2310.06119) | [GestaltCogTeam/BasicTS](https://github.com/GestaltCogTeam/BasicTS)                                                                 |
 
 ---
 
 ## 5. Published results
 
-One representative original table (§5.1), then the re-benchmark that supersedes it (§5.2). Given the ❌ verdict in §2, transcribing the full leaderboard would be wasted effort — the two negative results in §5.2 are the payload.
+One representative original table (§5.1), then the re-benchmark that supersedes it (§5.2). Given the no verdict in §2, transcribing the full leaderboard would be wasted effort — the two negative results in §5.2 are the payload.
 
 ### 5.1 DCRNN (ICLR 2018) — the canonical table
 
@@ -286,7 +286,7 @@ Protocol: `P = H = 12`, 5-min interval, **70/10/20** split, missing values exclu
 
 **Read the horizon axis, not the method axis.** DCRNN's METR-LA MAE goes 2.77 → 3.15 → 3.60 as the horizon goes 3 → 6 → 12: **+30% error over 12 autoregressive steps.** ARIMA-Kalman goes 3.99 → 6.90, **+73%**. HA is flat by construction (4.16 at every horizon) because it never rolls anything forward. That spread _is_ the error-accumulation problem, made legible by reporting per horizon instead of averaging. Our `rollout_ensemble` reports one aggregate `ens_count_bias`; this table is the argument for reporting ours per step. §8.
 
-### 5.2 BasicTS+ (TKDE 2024) ⭐ — the re-benchmark that overturned rankings
+### 5.2 BasicTS+ (TKDE 2024) (key) — the re-benchmark that overturned rankings
 
 This is the section worth reading. BasicTS+ built a unified training pipeline (unified dataloader, runner, and metric implementation) and re-ran 45+ methods. Three findings.
 
@@ -321,7 +321,7 @@ Both methods have public code. BasicTS+ attributes the spread to three "overlook
 | _Params (LA)_ | —     | 0.10   | 8.07    | 0.25  | 0.37  | 0.31      | 0.20   | 0.39      | 0.75  | 0.41  | 1.20    | 38.49 | 40.48     | 0.22     | **0.12** |
 | _Speed (LA)_  | —     | 24.48  | 11.36   | 21.01 | 94.87 | 27.70     | 128.84 | 152.33    | 28.22 | 24.37 | 16.19   | 52.23 | 497.26    | **7.50** | ?        |
 
-⚠️ **The `_Speed (LA)_` row was transcribed one cell short** and the missing value could not be recovered. Fifteen values were extracted for sixteen columns, so the cells are shown in their extracted order with a `?` appended. **This means the assignment of `**7.50**` to STNorm rather than STID is unverified** — the `?` may belong anywhere at or after the STNorm column. Do not quote a per-model speed from this row without re-reading BasicTS+ Table V. Every other row in this table has its full sixteen cells and is unaffected.
+Warning: **The `_Speed (LA)_` row was transcribed one cell short** and the missing value could not be recovered. Fifteen values were extracted for sixteen columns, so the cells are shown in their extracted order with a `?` appended. **This means the assignment of `**7.50**` to STNorm rather than STID is unverified** — the `?` may belong anywhere at or after the STNorm column. Do not quote a per-model speed from this row without re-reading BasicTS+ Table V. Every other row in this table has its full sixteen cells and is unaffected.
 
 BasicTS+'s own reading, in their words [verified]:
 
@@ -371,7 +371,7 @@ Node counts, spans and frame counts are consistent across all four sources. **Ed
 
 **Sources.** METR-LA and PEMS-BAY are Li et al.'s DCRNN release ([liyaguang/DCRNN](https://github.com/liyaguang/DCRNN) — README links a Google Drive / Baidu archive; the `.h5` + `adj_mx.pkl` pair is mirrored inside [DL-Traff-Graph/METRLA](https://github.com/deepkashiwa20/DL-Traff-Graph/tree/main/METRLA)). PEMS03/04/07/08 are Song et al.'s STSGCN release ([Davidham3/STSGCN](https://github.com/Davidham3/STSGCN)); PEMS04 and PEMS08 also ship directly in [Davidham3/ASTGCN/data](https://github.com/Davidham3/ASTGCN/tree/master/data). All six are pre-packaged by [BasicTS](https://github.com/GestaltCogTeam/BasicTS) and [LibCity](https://github.com/LibCity/Bigscity-LibCity). Upstream raw source for all of them is [Caltrans PeMS](https://pems.dot.ca.gov/) (registration required).
 
-### 6.3 ⚠️ The split is the comparability trap
+### 6.3 Warning: The split is the comparability trap
 
 **This is the single most important fact in §6.** The two conventions come from two different papers and are never reconciled:
 
@@ -408,19 +408,19 @@ All counts in this table are [verified] from LargeST Table 1 except the last thr
 
 ## 7. Which paper uses which
 
-✔ = the paper reports that dataset in its own main table. Note the clean split down the middle: the METR-LA/PEMS-BAY column block and the PEMS0X block are two sub-communities with two different splits (§6.3), and few papers span both.
+yes = the paper reports that dataset in its own main table. Note the clean split down the middle: the METR-LA/PEMS-BAY column block and the PEMS0X block are two sub-communities with two different splits (§6.3), and few papers span both.
 
 | Dataset                                    | STGCN'18 | DCRNN'18 | ASTGCN'19 | GWNet'19 | STSGCN'20 | AGCRN'20 | MTGNN'20 | GMAN'20 | STGODE'21 | D²STGNN'22 | STID'22 | STJGCN'23 | PDFormer'23 | STAEformer'23 | LargeST'23 | BasicTS+'24 |
 | ------------------------------------------ | -------- | -------- | --------- | -------- | --------- | -------- | -------- | ------- | --------- | ---------- | ------- | --------- | ----------- | ------------- | ---------- | ----------- |
-| METR-LA                                    |          | ✔        |           | ✔        |           |          | ✔        | ✔       |           | ✔          | ✔       | ✔         | ✔           | ✔             | ✔          | ✔           |
-| PEMS-BAY                                   |          | ✔        |           | ✔        |           |          | ✔        | ✔       |           | ✔          | ✔       | ✔         | ✔           | ✔             | ✔          | ✔           |
-| PEMS03                                     |          |          |           |          | ✔         |          |          |         | ✔         |            |         |           |             |               |            | ✔           |
-| PEMS04                                     |          |          | ✔         |          | ✔         | ✔        |          |         | ✔         | ✔          | ✔       |           | ✔           | ✔             |            | ✔           |
-| PEMS07                                     |          |          |           |          | ✔         |          |          |         | ✔         | ✔          | ✔       |           | ✔           | ✔             |            | ✔           |
-| PEMS08                                     |          |          | ✔         |          | ✔         | ✔        |          |         | ✔         | ✔          | ✔       |           | ✔           | ✔             |            | ✔           |
-| PeMSD7(M/L)                                | ✔        |          |           |          |           |          |          |         |           |            |         |           |             |               | ✔          |             |
-| LargeST (CA/GLA/GBA/SD)                    |          |          |           |          |           |          |          |         |           |            |         |           |             |               | ✔          |             |
-| ETT / Electricity / Weather / ExchangeRate |          |          |           |          |           |          | ✔        |         |           |            |         |           |             |               |            | ✔           |
+| METR-LA                                    |          | yes        |           | yes        |           |          | yes        | yes       |           | yes          | yes       | yes         | yes           | yes             | yes          | yes           |
+| PEMS-BAY                                   |          | yes        |           | yes        |           |          | yes        | yes       |           | yes          | yes       | yes         | yes           | yes             | yes          | yes           |
+| PEMS03                                     |          |          |           |          | yes         |          |          |         | yes         |            |         |           |             |               |            | yes           |
+| PEMS04                                     |          |          | yes         |          | yes         | yes        |          |         | yes         | yes          | yes       |           | yes           | yes             |            | yes           |
+| PEMS07                                     |          |          |           |          | yes         |          |          |         | yes         | yes          | yes       |           | yes           | yes             |            | yes           |
+| PEMS08                                     |          |          | yes         |          | yes         | yes        |          |         | yes         | yes          | yes       |           | yes           | yes             |            | yes           |
+| PeMSD7(M/L)                                | yes        |          |           |          |           |          |          |         |           |            |         |           |             |               | yes          |             |
+| LargeST (CA/GLA/GBA/SD)                    |          |          |           |          |           |          |          |         |           |            |         |           |             |               | yes          |             |
+| ETT / Electricity / Weather / ExchangeRate |          |          |           |          |           |          | yes        |         |           |            |         |           |             |               |            | yes           |
 
 **Two things to read off this matrix.** First, **BasicTS+ is the only row that spans everything** — which is exactly why it is the one paper that could detect the inconsistencies in §5.2. Second, the LTSF datasets (ETT, Electricity, ExchangeRate, Weather) appear in only two columns, and BasicTS+'s central heterogeneity claim is that they are _the wrong datasets_ for spatio-temporal methods because they have almost no spatial indistinguishability (§4.2, Table IV, the ↓ rows).
 
@@ -480,7 +480,7 @@ That history says the drift is **suppressed by architecture, not by training**. 
 
 **This literature's entire multi-step protocol is that same problem, attacked from the training side.** Their headline number is a 12-step rollout; every one of them had to answer "how do I train something that will be fed its own output". Four answers, in increasing order of how much they cost us.
 
-### 9.2 Technique 1 — scheduled sampling ⭐ cheapest, most direct
+### 9.2 Technique 1 — scheduled sampling (key) cheapest, most direct
 
 **DCRNN, ICLR 2018** [verified]:
 
@@ -539,12 +539,12 @@ Second, **HA's flat row is the analogue of our `persistence` baseline** — a me
 | #   | Action                                                                            | Cost                                                | What it buys                                                                                                                           |
 | --- | --------------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | **Report `ens_count_bias` (and `ens_marg_mae`) per rollout step**, not aggregated | ~an afternoon; reporting only                       | Makes drift legible. Distinguishes "calibrated" from "calibrated for 2 steps". Prerequisite for 2 and 3.                               |
-| 2   | **Scheduled sampling in `train_wm.py`** ⭐                                        | small; dataset/collate path, one annealing schedule | Trains the model on its own output distribution. Attacks the root cause the structured head only constrains. No extra simulator calls. |
+| 2   | **Scheduled sampling in `train_wm.py`** (key)                                        | small; dataset/collate path, one annealing schedule | Trains the model on its own output distribution. Attacks the root cause the structured head only constrains. No extra simulator calls. |
 | 3   | **Horizon curriculum** (1-step → k-step training rollout)                         | medium; unrolled loop + memory                      | Composes with 2. Lets early stopping key on a multi-step metric instead of one-step `delta_f1`.                                        |
 | 4   | **Identity-embedding ablation** (swap the GNN for per-node embedding + MLP)       | small                                               | The STID test (§4.2), applied to our BA-100 backbone tie. Decisive on whether our encoders do structural work.                         |
 | 5   | Non-autoregressive multi-step head                                                | large; changes the interface                        | Eliminates drift, **but breaks mid-rollout action injection.** Documented, not recommended.                                            |
 
-Items 1 and 2 are the whole reason this file exists. Item 5 is the reason it is filed under ❌ rather than ⚠️: the traffic field's best answer to our problem is one we cannot take, because taking it would mean giving up the action conditioning that is our contribution.
+Items 1 and 2 are the whole reason this file exists. Item 5 is the reason it is filed under no rather than Warning:: the traffic field's best answer to our problem is one we cannot take, because taking it would mean giving up the action conditioning that is our contribution.
 
 ---
 
@@ -579,7 +579,7 @@ Honest list of what this review could **not** establish.
 - **TaxiBJ, NYC-Bike/Taxi, Q-Traffic, and the loop-detector archives are [claim]-tier only.** No paper table was extracted for them, and their crops genuinely are not standardized — every paper picks its own window and grid resolution. A number quoted for "NYC-Taxi" is close to meaningless without the paper that produced it.
 - **Q-Traffic's query sub-dataset was not examined.** It is the one artifact in this literature that resembles an exogenous input (user route requests preceding traffic change) and is therefore the only plausible route to an action-conditioned variant of this task. Whether it can be made to look like any of our five ops is unestablished.
 - **The BasicTS+ reference numbers `[22]`, `[24]`, `[25]`, `[46]`, `[57]`, `[62]`, `[63]`, `[64]` in §5.2 Table I were not dereferenced.** Their bibliography was not extracted, so §5.2 reports "as reported in five papers" without naming which five. The _spread_ is [verified]; the attribution is not.
-- **STGODE, STJGCN, PDFormer, STAEformer, GMAN, UniST and UrbanGPT result cells were not transcribed.** They are catalogued with paper and code URLs in §4 but their tables are not in §5 — deliberately, per the ❌ verdict. If a number from them is ever needed, extract it from the PDF; do not take it from a summary.
+- **STGODE, STJGCN, PDFormer, STAEformer, GMAN, UniST and UrbanGPT result cells were not transcribed.** They are catalogued with paper and code URLs in §4 but their tables are not in §5 — deliberately, per the no verdict. If a number from them is ever needed, extract it from the PDF; do not take it from a summary.
 - **DL-Traff's own re-benchmark findings were not transcribed.** It is the other paper in this space that re-ran the field, and it may or may not agree with BasicTS+. Only BasicTS+ was extracted.
 - **No claim is made about whether scheduled sampling actually fixes our drift.** §9.2 argues it targets the right failure mode and is cheap; DCRNN demonstrates it works for continuous autoregressive decoding. Whether it helps a binary/probabilistic structured head is untested and is a genuine empirical question — our own `research_notes` records four plausible fixes that failed before the structural one worked.
 - **The LargeST-scale regime is unexplored on our side.** LargeST-CA is 8,600 nodes × 525,888 frames. Nothing in this review establishes whether the scalability lessons there (subsampling, sub-region splits) transfer to our NDlib rollout bottleneck, which is a simulator cost, not a model cost.

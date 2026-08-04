@@ -29,18 +29,18 @@ Every method is in exactly one of three states. **Some methods exist in both lay
 
 | Baseline        | Kind      | Our library?  | External folder                 | Status                        |
 | --------------- | --------- | ------------- | ------------------------------- | ----------------------------- |
-| **IMM**         | classical | ✅ simplified | `baselines/external/imm/`       | 📥 manual fetch (SourceForge) |
-| **TIM / TIM+**  | classical | ✅ simplified | `baselines/external/tim/`       | 📥 manual fetch (SourceForge) |
-| **OPIM-C**      | classical | ❌            | `baselines/external/opim/`      | ⚙️ setup (C++ `make`)         |
-| **SubSIM**      | classical | ❌            | `baselines/external/subsim/`    | ⚙️ setup (C++ `make`)         |
-| **SSA / D-SSA** | classical | ✅ simplified | `baselines/external/ssa/`       | ⚙️ setup (C++ `make`)         |
-| **MOEIM**       | learned   | ❌            | `baselines/external/moeim/`     | ⚙️ setup (pure Python)        |
-| **ToupleGDD**   | learned   | ❌            | `baselines/external/touplegdd/` | ⚙️ setup (pretrained ckpt)    |
-| **DeepIM**      | learned   | ❌            | `baselines/external/deepim/`    | ⚙️ setup + `deepim_data.py`   |
-| **GCOMB**       | learned   | ❌            | —                               | ⛔ blocked — Python 2.7       |
-| **IMINFECTOR**  | learned   | ❌            | —                               | ⛔ blocked — needs cascades   |
-| **PIANO**       | learned   | ❌            | —                               | ⛔ blocked — no public code   |
-| **OIM**         | classical | ❌            | —                               | ⛔ blocked — no public code   |
+| **IMM**         | classical | yes simplified | `baselines/external/imm/`       | manual fetch (SourceForge) |
+| **TIM / TIM+**  | classical | yes simplified | `baselines/external/tim/`       | manual fetch (SourceForge) |
+| **OPIM-C**      | classical | no            | `baselines/external/opim/`      | setup (C++ `make`)         |
+| **SubSIM**      | classical | no            | `baselines/external/subsim/`    | setup (C++ `make`)         |
+| **SSA / D-SSA** | classical | yes simplified | `baselines/external/ssa/`       | setup (C++ `make`)         |
+| **MOEIM**       | learned   | no            | `baselines/external/moeim/`     | setup (pure Python)        |
+| **ToupleGDD**   | learned   | no            | `baselines/external/touplegdd/` | setup (pretrained ckpt)    |
+| **DeepIM**      | learned   | no            | `baselines/external/deepim/`    | setup + `deepim_data.py`   |
+| **GCOMB**       | learned   | no            | —                               | blocked — Python 2.7       |
+| **IMINFECTOR**  | learned   | no            | —                               | blocked — needs cascades   |
+| **PIANO**       | learned   | no            | —                               | blocked — no public code   |
+| **OIM**         | classical | no            | —                               | blocked — no public code   |
 
 Also in our Python library only (no external counterpart needed or available): CELF, CELF++, degree-discount, PMIA/MIA, LDAG, SIMPATH-style SP1M, IRIE, StaticGreedy, SKIM, RIS, community-IM, CoFIM, VoteRank, k-shell, collective influence, and the metaheuristics (simulated annealing, hill climbing, GA) — 36 in total, listed by `python -m pipeline.run --help` under `--baselines`.
 
@@ -87,17 +87,29 @@ All five appear in DeepIM's published tables, which are transcribed in [`../rese
 | `influence_maximization` | 15 | 7 |
 | `adaptive_online_im` | 5 (`adaptiveim`, `mrim`, `rl4im`, `oim_lt`, `timlinucb`) | 0 |
 | `critical_node_detection` | 12 (`finder`, `gdm`, `mind`, `spr`, `nirm`, `dcrs`, `gnd`, `decycler`, `collective_influence`, `explosive_immunization`, `dismantling_review`, `selinda`) | 0 |
-| `source_localization` | 7 (`graphsl`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`, `cosasi`) | 0 |
+| `source_localization` | 12 (six `graphsl_*` arms, plus `graphsl`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`, `cosasi`) | 6 |
 
-**For source localization, wire `graphsl` first**, and by a wide margin: one adapter buys LPSI, NETSLEUTH, OJC, GCNSI, IVGD **and** SL-VAE behind a single API returning accuracy / precision / recall / F1 / AUC — two of the three seed papers included — and it packages the six benchmark graphs, five of which we load. It also packages *our* Network Science (1,589 / 2,742), which [`../research/source_localization.md`](../research/source_localization.md) §6.4.1 shows is the version IVGD, SIDSL and Network Repository agree on and SL-VAE does not.
+**Six wired arms, one install.** `graphsl_lpsi`, `graphsl_netsleuth`, `graphsl_ojc`, `graphsl_gcnsi`, `graphsl_ivgd` and `graphsl_slvae` are six published methods inside one pip package (JOSS 9(99):6796), so they share a clone and a venv through `install_name` rather than pulling six copies of torch. Installing any one installs all six:
 
-⚠️ **Wiring one of these is not just an `export`/`command`/`parse_seeds` triple — the harness itself does not support the contract yet.** Three things have to change first, and they are ours rather than the third-party repos':
+```bash
+python -m baselines.setup_baselines --only graphsl_lpsi
+python -m pipeline.run --dataset jazz --task source_localization \
+    --baselines external:graphsl_slvae external:graphsl_ivgd external:graphsl_lpsi
+```
 
-1. **`run_external_baseline` has no observation parameter.** Its signature is `(name, graph, budget, diffusion_model, ...)`, which is the IM contract `G -> S`. A source localizer maps `(G, y) -> x̂` and there is nowhere to pass `y`.
-2. **`seed_script` emits `plan_horizon`.** On a recover task the executor requires `localize`, so a returned source set would be rejected by the contract check even if the subprocess produced one.
-3. **The loop shape is per-arm, not per-instance.** The pipeline invokes an external repo once per `(budget, arm)`; source localization scores over `--sl-instances` labelled episodes and needs one source set per episode — so the adapter needs N invocations or one batched call, and which of the two is right depends on the repo.
+That single package covers two of the three seed papers (SL-VAE, IVGD) plus GCNSI and the three classical references, and it packages *our* Network Science (1,589 / 2,742), which [`../research/source_localization.md`](../research/source_localization.md) §6.4.1 shows is the version IVGD, SIDSL and Network Repository agree on and SL-VAE does not.
 
-None of that is hard, but it is deliberately not built ahead of a real adapter: the serialization format, and whether a batch call is possible, are decided by whichever repo gets wired first, and guessing them now would mean rewriting them. Everything AFTER those three is already shared — the output crosses back and our own referee scores it, exactly as on the IM side. Two more traps apply to every entry (§8.4): the **source fraction is not standardized** (10% uniform-random in SL-VAE, first 5% by infection time in SL-Diff, top 10% by influence time in SIDSL), and **nothing in that literature evaluates under IC or LT**, which §11 calls the single biggest comparability gap in the file.
+### The inverse contract
+
+Source localization is the one task whose external contract is not `G -> S`. The repo is handed a graph AND a batch of observed diffusion states and returns one source set PER OBSERVATION, so three things differ from the IM path:
+
+1. **`run_external_baseline` takes `instances`.** Passing it selects the localization signatures of `export` (which takes the instance list where the intervention one takes a budget) and `parse_seeds` (which returns a dict keyed by episode id). A split rather than a widened signature, so the seven wired IM adapters are untouched.
+2. **`localize_script` replaces `seed_script`.** The canned Strategy implements `localize`, and it finds its row by `observation_key` — the thresholded infected set — because `localize(graph, observation, budget)` is handed no episode id and the arm makes two passes over different pools.
+3. **One batched invocation, not N.** Every one of these repos is a library that loops internally, so N subprocess launches would dominate the runtime we are trying to measure. Both instance pools go over together, flagged `is_train`.
+
+**Labels cross the boundary, and that is not a leak.** These methods tune a threshold or fit weights on labelled data exactly as our outer loop selects a program on labelled episodes, so the driver gives `train()` the SELECTION split and runs a label-free prediction pass on everything. What it never calls is their `test()`/`infer()`: those score against labels internally and return only an aggregate `Metric`, so no per-instance prediction escapes them. The prediction lines are reproduced in `drivers/graphsl_driver.py` from each method's own `test` body.
+
+**Two deviations to know before quoting a number.** GraphSL cuts its score vector at a tuned threshold; we take the TOP-K of the same vector, because our table compares every arm at matched `k`. And the driver defaults to `graphsl_epochs = 50` for the three learned methods, far below the papers' regime — raise it before treating a GCNSI/IVGD/SL-VAE row as anything but a smoke result. Two more traps apply to every entry (§8.4): the **source fraction is not standardized** (10% uniform-random in SL-VAE, first 5% by infection time in SL-Diff, top 10% by influence time in SIDSL), and **nothing in that literature evaluates under IC or LT**, which §11 calls the single biggest comparability gap in the file.
 
 **For critical node detection, wire `dismantling_review` first.** It is the Artime et al. survey's harness rather than a method, and it already drives CI, CoreHD, GND, EI, MinSum, FINDER and GDM behind one interface — so it is one adapter instead of seven, and it is the only practical route to a FINDER number at all, since [`../research/critical_node_detection.md`](../research/critical_node_detection.md) §11 records that FINDER publishes its real-network results as heatmaps only, has no arXiv version, and the `results/` directory its README advertises does not exist in `master`.
 

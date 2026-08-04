@@ -9,7 +9,7 @@ Source: https://snap.stanford.edu/data/gemsec-Deezer.html
     - No inherent node features — uses log(1 + degree) as synthetic features
     - No node labels (the archive ships genre lists we do not densify)
 
-⚠️ **"Deezer" in this literature is the HUNGARY subgraph, not the whole release.**
+Warning: **"Deezer" in this literature is the HUNGARY subgraph, not the whole release.**
 `research/source_localization.md` §6.2 quotes IVGD's Deezer as 47,538 / 222,887
 without saying which file that is, and the archive ships three separate country
 graphs with overlapping 0-based ids. Counted from the downloaded files [derived]:

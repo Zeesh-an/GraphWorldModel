@@ -1,10 +1,31 @@
 """
-Run one external published baseline on our graph and return its seed set.
+Run one external published baseline on our graph and return what it produced.
 
 The external repo runs in its own subprocess and its own virtualenv (created by
 setup_baselines.py), so its dependency pins never touch ours. All we take back
-across the boundary is a list of node ids — which the caller then scores with our
-Monte Carlo referee, exactly like every other arm.
+across the boundary is node ids, which the caller then scores with our own
+referee, exactly like every other arm.
+
+Two shapes, because two kinds of task:
+
+  * **Intervention tasks** (influence maximization, critical node detection) hand
+    the repo a GRAPH and take back one seed or removal set:
+    `(G, k) -> S`. `seed_script` wraps it as a canned `plan_horizon`.
+
+  * **Inverse tasks** (source localization) hand it a graph AND a batch of
+    observed diffusion states, and take back one SOURCE SET PER OBSERVATION:
+    `(G, {y_i}, k) -> {x_i}`. `localize_script` wraps that as a canned
+    `localize`. The batch is deliberate: every one of these repos is a library
+    that loops internally, and N subprocess launches would dominate the runtime
+    of the thing we are trying to measure.
+
+    Warning: The inverse batch carries LABELS for the selection split, and that is not
+    a leak: these repos tune hyperparameters on labelled data exactly as our own
+    outer loop selects a program on labelled episodes. What must never happen is
+    a label reaching the EVALUATION split's prediction, which is why the driver
+    scripts call each repo's `train` on the selection pool and its label-free
+    `predict` on the evaluation pool, and never its `test` (which scores against
+    labels internally and returns no per-instance prediction anyway).
 
     python -m baselines.run_baseline --name moeim \
         --data-dir results/ba40/data --budget 5 --diffusion-model IC
@@ -12,6 +33,7 @@ Monte Carlo referee, exactly like every other arm.
 
 import argparse
 import json
+import numpy as np
 import os
 import subprocess
 import sys
@@ -108,6 +130,9 @@ def _interpreter(spec) -> str:
     return str(venv_python) if venv_python.exists() else sys.executable
 
 
+schedule_filename = "round_schedule.json"
+
+
 def run_external_baseline(
     name: str,
     graph: GraphInfo,
@@ -115,7 +140,24 @@ def run_external_baseline(
     diffusion_model: str = "IC",
     work_dir: Path | None = None,
     timeout: int = default_timeout_seconds,
+    batches: list[int] | None = None,
+    instances: list | None = None,
 ) -> dict:
+    """
+    Run one external repo and return the seed set it produced.
+
+    `instances` switches this to the INVERSE contract: the repo is handed a batch
+    of observed diffusion states and returns one source set per observation,
+    returned under `"sources"` instead of `"seeds"`. Passing it also selects the
+    localization signatures of `export` and `parse_seeds`, which take the instance
+    list where the intervention ones take a budget — a split rather than a widened
+    signature, so the seven already-wired IM adapters are untouched.
+
+    `batches` is the round schedule for an adaptive task. It is written into
+    work_dir as JSON rather than added to the export()/command() signatures,
+    which would churn seven already-wired IM adapters for a field none of them
+    read. A rounds-aware adapter loads it; everything else ignores the file.
+    """
     if name not in external_baselines:
         raise BaselineError(
             f"unknown external baseline {name!r}; registered: "
@@ -143,6 +185,17 @@ def run_external_baseline(
     work_dir = Path(work_dir or spec.directory / "_runs" / f"k{budget}")
     os.makedirs(work_dir, exist_ok=True)
 
+    if spec.rounds_aware:
+        if not batches:
+            raise BaselineError(
+                f"baseline {name!r} is rounds-aware but no round schedule was "
+                f"passed. It selects seeds in batches, and running it at one "
+                f"batch of k would silently turn an adaptive method into a "
+                f"static one."
+            )
+
+        (work_dir / schedule_filename).write_text(json.dumps(batches))
+
     start = time.perf_counter()
 
     # Everything below is third-party code and third-party file formats. ANY
@@ -150,7 +203,11 @@ def run_external_baseline(
     # exception the pipeline catches — anything else aborts the whole sweep and
     # loses the arms that already succeeded.
     try:
-        extras = spec.export(graph, work_dir, budget, diffusion_model)
+        extras = (
+            spec.export(graph, work_dir, instances, diffusion_model)
+            if instances is not None
+            else spec.export(graph, work_dir, budget, diffusion_model)
+        )
         argv = spec.command(work_dir, budget, diffusion_model, extras, graph)
         argv[0] = _interpreter(spec) if argv[0] == "python" else argv[0]
 
@@ -187,6 +244,11 @@ def run_external_baseline(
         raise BaselineError(
             f"baseline {name!r} exited {completed.returncode}. Logs in {work_dir}. "
             f"output tail:\n{completed.stdout[-1500:]}"
+        )
+
+    if instances is not None:
+        return _collect_sources(
+            spec, name, graph, work_dir, completed, instances, elapsed
         )
 
     try:
@@ -237,6 +299,9 @@ def run_external_baseline(
     return {
         "name": name,
         "seeds": seeds,
+        # Selection order is meaningful for a rounds-aware baseline: slicing by
+        # the schedule recovers which batch each seed belonged to
+        "batches": batches if spec.rounds_aware else None,
         "seconds": round(elapsed, 2),
         "work_dir": str(work_dir),
         # Persisted so an under-spent budget stays visible in the results JSON,
@@ -244,6 +309,169 @@ def run_external_baseline(
         "budget": budget,
         "seeds_returned": len(seeds),
     }
+
+
+def round_seed_script(
+    seeds: list[int], batches: list[int], round_gap: int, budget_op: str = "add_node"
+) -> str:
+    """
+    Wrap a rounds-aware repo's seed set as a canned per-round policy.
+
+    The seeds arrive in SELECTION order, so slicing by the schedule recovers the
+    batch each one belonged to, and act() hands back batch i at round i. That
+    keeps the arm on the adaptive side of the gap table instead of collapsing it
+    to a single t=0 plan, which is what seed_script would do.
+
+    Be precise about what this measures. The batches were chosen against the
+    repo's OWN realizations, not against the state our simulator goes on to
+    produce, so the arm is the repo's SCHEDULE replayed under our referee, not
+    the repo adapting inside our environment. True cross-process adaptivity
+    would need the repo to accept an already-active set each round, which none
+    of them expose.
+    """
+    plan = {}
+    start = 0
+    for index, size in enumerate(batches):
+        plan[index * round_gap] = seeds[start : start + size]
+        start += size
+
+    return f"""\
+class ExternalAdaptiveBaseline(Strategy):
+    def act(self, state, graph, timestep):
+        active = set(state.infected) | set(state.frontier)
+        picks = [n for n in {plan!r}.get(timestep, []) if n not in active]
+        return [ActionOp({budget_op!r}, node) for node in picks]
+"""
+
+
+def _collect_sources(
+    spec, name: str, graph, work_dir: Path, completed, instances: list, elapsed: float
+) -> dict:
+    """
+    Read one source set per instance back across the boundary and validate it.
+
+    The same three guards the seed path applies, restated per instance because a
+    batch fails one row at a time: ids inside the graph, no duplicates, and no
+    more than that instance's own `k`. An over-length set would buy recall for
+    free, and out-of-range ids mean the repo was run on a different graph.
+    """
+    try:
+        returned = spec.parse_seeds(work_dir, completed.stdout, instances)
+    except Exception as error:
+        raise BaselineError(
+            f"baseline {name!r} ran but its per-instance source output could not "
+            f"be parsed ({type(error).__name__}: {error}). Logs in {work_dir} — "
+            f"check stdout.log and fix parse_seeds in baselines/registry.py."
+        ) from error
+
+    sources = {}
+    short = 0
+
+    for instance in instances:
+        key = observation_key(instance.observation)
+        predicted = [int(node) for node in returned.get(instance.episode_id, [])]
+        budget = max(1, instance.source_count)
+
+        outside = [node for node in predicted if not 0 <= node < graph.num_nodes]
+        if outside:
+            raise BaselineError(
+                f"baseline {name!r} returned node ids {outside[:5]} outside "
+                f"[0, {graph.num_nodes}) for episode {instance.episode_id} — it "
+                f"was run on a different graph than the one being scored (stale "
+                f"cached input?). Logs in {work_dir}."
+            )
+
+        deduplicated = list(dict.fromkeys(predicted))[:budget]
+        if len(deduplicated) < budget:
+            short += 1
+
+        sources[key] = deduplicated
+
+    if not any(sources.values()):
+        raise BaselineError(
+            f"baseline {name!r} returned no sources for any of the "
+            f"{len(instances)} instances. Logs in {work_dir}."
+        )
+
+    if short:
+        print(
+            f"[baseline:{name}] WARNING: {short}/{len(instances)} instances got "
+            f"fewer sources than their k — those rows are scored on a shorter "
+            f"prediction than every other arm, which reads as low recall"
+        )
+
+    print(
+        f"[baseline:{name}] {len(sources)} source sets in {elapsed:.1f}s "
+        f"({len(instances)} instances)"
+    )
+
+    return {
+        "name": name,
+        # Keyed by observation, not by episode id: the canned localize() is handed
+        # an observation and nothing else (see localize_script)
+        "sources": sources,
+        "seconds": round(elapsed, 2),
+        "work_dir": str(work_dir),
+        "instances": len(instances),
+        "instances_short": short,
+    }
+
+
+def observation_key(observation) -> str:
+    """
+    Canonical identity of one observed diffusion state: its infected node ids.
+
+    `localize(graph, observation, budget)` is handed no episode id, so a canned
+    external result has to find its own row by the observation itself. Keying on
+    the thresholded infected SET rather than on call order is what makes that
+    correct across the two passes an inverse arm makes (the selection pool, then
+    the held-out pool), which visit different instances in a different order.
+
+    Two episodes with an identical infected set collapse to one key, and that is
+    the right behaviour rather than a collision to defend against: a localizer is
+    a function of the observation, so identical observations must produce
+    identical predictions.
+    """
+    infected = np.flatnonzero(np.asarray(observation, dtype=float) >= 0.5)
+
+    return ",".join(str(int(node)) for node in infected)
+
+
+def localize_script(sources: dict[str, list[int]]) -> str:
+    """
+    Wrap one source set per observation as a canned Strategy for an inverse task.
+
+    The mapping is embedded in the script rather than read from a file because a
+    generated script may not `open()` (`executor.forbidden_builtins`), and it is
+    keyed by `observation_key` rather than by index for the reason that function
+    documents.
+
+    A missing key RAISES instead of falling back to a guess. It means the repo was
+    handed a different instance pool than the one being scored, and a silent empty
+    prediction would surface as a weak method rather than as the wiring bug it is.
+    """
+    return f"""\
+import numpy as np
+
+class ExternalLocalizer(Strategy):
+    sources = {sources!r}
+
+    def localize(self, graph, observation, budget):
+        infected = np.flatnonzero(np.asarray(observation, dtype=float) >= 0.5)
+        key = ",".join(str(int(node)) for node in infected)
+        found = self.sources.get(key)
+
+        if found is None:
+            raise KeyError(
+                "the external baseline returned no prediction for this "
+                "observation (" + str(len(infected)) + " infected nodes). It was "
+                "run on a different instance pool than the one being scored — "
+                "check that --sl-instances, --sl-observation and --seed match "
+                "between the export and the evaluation."
+            )
+
+        return [int(node) for node in found[:budget]]
+"""
 
 
 def seed_script(seeds: list[int], budget_op: str = "add_node") -> str:
