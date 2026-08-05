@@ -289,6 +289,29 @@
 #   SL_STEPS        arm A only: Adam steps per instance
 #   SL_TRANSFER_FROM  run ANOTHER run's winning program here, unmodified — the
 #                   graph axis of the amortization claim
+#
+# CASCADE RECONSTRUCTION (--task cascade_reconstruction). Every one is inert for
+# every other task, exactly like the SL block above.
+#   CR_SETTING      which of the four observation regimes is masked:
+#                   partial_times (a subsample of the infected set WITH
+#                   activation times — the ordered-Steiner regime),
+#                   partial_nodes (the same subsample, times withheld),
+#                   final_snapshot (the terminal state only — DITTO's DASH, the
+#                   hardest published formulation), or hidden_nodes (nodes
+#                   DELETED from the graph, not merely unobserved). These are
+#                   four separate protocols and their rows are never pooled
+#   CR_OBSERVATION_RATE  probability an infected node IS REPORTED. Stated in that
+#                   direction because this literature uses the symbol sigma for
+#                   both the report rate and its complement
+#   CR_HIDDEN_RATE  fraction of non-source nodes deleted under hidden_nodes
+#   CR_INSTANCES    masked cascades per split; every candidate decoder pays this
+#                   many executions
+#   CR_SELECT_SPLIT / CR_EVAL_SPLIT  the two disjoint pools, same reason as SL's
+#   CR_TREE_WEIGHT  lambda in lambda * PathPrecision + (1 - lambda) * EventF1.
+#                   At least 0.5 is a REQUIREMENT: recovering the node set is
+#                   nearly free, so a search rewarded mostly on Event F1
+#                   converges on decoders that never attempt the tree
+#   CR_MCMC_PROPOSALS / CR_MCMC_BURN_IN  arm A only (decode_*)
 #   EVALUATOR       fallback for arms written without an @evaluator suffix
 #   BUDGET_PCTS     seed budgets as % of N, one run per value. UNSET = the task
 #                   registry's own sweep, which is a single 10% point for source
@@ -524,6 +547,20 @@ SL_PRIOR_WEIGHT="${SL_PRIOR_WEIGHT:-}"
 SL_PRIOR_EPOCHS="${SL_PRIOR_EPOCHS:-}"
 SL_TRANSFER_FROM="${SL_TRANSFER_FROM:-}"
 
+# Cascade reconstruction. `CR_SETTING` is the load-bearing one: the four settings
+# are four PROTOCOLS rather than four knobs, and a decoder selected under
+# final_snapshot is solving a different problem from one selected under
+# partial_times (research/cascade_reconstruction.md §8.3).
+CR_SETTING="${CR_SETTING:-}"
+CR_OBSERVATION_RATE="${CR_OBSERVATION_RATE:-}"
+CR_HIDDEN_RATE="${CR_HIDDEN_RATE:-}"
+CR_INSTANCES="${CR_INSTANCES:-}"
+CR_SELECT_SPLIT="${CR_SELECT_SPLIT:-}"
+CR_EVAL_SPLIT="${CR_EVAL_SPLIT:-}"
+CR_TREE_WEIGHT="${CR_TREE_WEIGHT:-}"
+CR_MCMC_PROPOSALS="${CR_MCMC_PROPOSALS:-}"
+CR_MCMC_BURN_IN="${CR_MCMC_BURN_IN:-}"
+
 # Dataset class drives the settings that genuinely cannot share a default:
 # graph population, seed selectors, encoder width, and memory.
 case "$DATASET" in
@@ -741,6 +778,15 @@ fi
 [ -n "$SL_PRIOR_WEIGHT" ]      && flags+=(--sl-prior-weight "$SL_PRIOR_WEIGHT")
 [ -n "$SL_PRIOR_EPOCHS" ]      && flags+=(--sl-prior-epochs "$SL_PRIOR_EPOCHS")
 [ -n "$SL_TRANSFER_FROM" ]     && flags+=(--sl-transfer-from "$SL_TRANSFER_FROM")
+[ -n "$CR_SETTING" ]           && flags+=(--cr-setting "$CR_SETTING")
+[ -n "$CR_OBSERVATION_RATE" ]  && flags+=(--cr-observation-rate "$CR_OBSERVATION_RATE")
+[ -n "$CR_HIDDEN_RATE" ]       && flags+=(--cr-hidden-rate "$CR_HIDDEN_RATE")
+[ -n "$CR_INSTANCES" ]         && flags+=(--cr-instances "$CR_INSTANCES")
+[ -n "$CR_SELECT_SPLIT" ]      && flags+=(--cr-select-split "$CR_SELECT_SPLIT")
+[ -n "$CR_EVAL_SPLIT" ]        && flags+=(--cr-eval-split "$CR_EVAL_SPLIT")
+[ -n "$CR_TREE_WEIGHT" ]       && flags+=(--cr-tree-weight "$CR_TREE_WEIGHT")
+[ -n "$CR_MCMC_PROPOSALS" ]    && flags+=(--cr-mcmc-proposals "$CR_MCMC_PROPOSALS")
+[ -n "$CR_MCMC_BURN_IN" ]      && flags+=(--cr-mcmc-burn-in "$CR_MCMC_BURN_IN")
 [ "$HIDE_EDGE_WEIGHTS" = "1" ] && flags+=(--hide-edge-weights)
 
 # ---------------------------------------------------------------------------

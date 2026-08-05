@@ -170,6 +170,24 @@ Warning: The continuous form is the marginal of the **last step**, conditioned o
 
 `branch = "cf_i"` rows are **skipped**: a counterfactual fork changes the action mid-episode, so its terminal state was not produced by the `t = 0` seed set alone. For the same reason the task registry pins `default_gen_action_ops = ()` for any `recover` task and asserts it — an episode carrying a mid-cascade injection has an observation its seed set did not cause, and its `(x, y)` pair would be a lie. With empty action ops `sample_injection` always returns `NULL` and `counterfactual_actions` produces nothing, so `--inject-p` and `--cf-prob` are inert rather than needing to be zeroed.
 
+### ...and as whole HISTORIES (`--task cascade_reconstruction`)
+
+Cascade reconstruction reads the same rows one level up: not the two ends of an episode but every step in between, regrouped by `world_model/wm_data.py::load_episode_trajectories`. The activation time of a node is the `t` at which it first appears in a main record's `next_state.frontier`, which needs no extra bookkeeping — the `frontier` channel has been on disk all along.
+
+What it DOES need is a field nothing else reads. **`--trace-parents` records who infected whom**, and it exists because NDlib does not produce that at all: `IndependentCascadesModel.iteration` sets `actual_status[v] = 1` on a successful coin flip without recording the responsible `u`. `data/wm_simulator.py` therefore ships `TracedICModel` and `TracedThresholdModel`, built by re-classing a base instance rather than by subclassing (NDlib's own `__init__` calls `super(self.__class__, self)`, which recurses forever from a subclass), and every record then carries:
+
+```json
+"parents": {"16": [45], "28": [35], "47": [46]}
+```
+
+Three rules, and each one is load-bearing:
+
+- **an EMPTY list marks a source.** An `add_node` is an injection, not a transmission, so the seeds of the `t = 0` bag are recorded with no cause at all — that is what makes `parent = None` mean "source" in the decoder's own contract.
+- **under IC there is exactly one parent, and it is biased.** NDlib iterates spreaders in NODE ORDER and skips any `v` already flipped this step, so the recorded parent is *the first successful `u` in node order* rather than a uniformly random one among the successes. Real, documentable, and stated wherever a tree number is.
+- **under LT the value is a SET.** Activation there is a threshold crossing over the whole active in-neighbourhood, so there is no single transmitting edge; the whole active neighbourhood is recorded and a predicted parent counts as correct if it is a member. That makes LT's path precision structurally easier than IC's, and the two are never compared.
+
+Tracing is off by default because it costs an append per successful flip and only one task scores it. `pipeline.run` turns it on from the task registry, so `--task cascade_reconstruction` gets it without a flag; `data.generate_wm_data --task cascade_reconstruction` does the same for a standalone invocation. A dataset generated without it makes `PathPrecision` unscoreable, and `coding_agent/reconstruction.py::load_cascades` **raises** rather than silently falling back to the node half — which is the exact failure the tree-weighted reward exists to prevent.
+
 ---
 
 ## The 5 action ops (identical set for every dataset)

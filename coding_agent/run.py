@@ -89,7 +89,20 @@ from coding_agent.localization import (
     valid_budget_modes,
     valid_observations,
 )
+from coding_agent.reconstruction import (
+    default_hidden_rate,
+    default_observation_rate,
+    evaluate_reconstructor,
+    load_cascades,
+    partial_times,
+    valid_settings,
+)
+from coding_agent.reconstruction import (
+    referee_resimulation_error as referee_reconstruction_error,
+)
+from coding_agent.reconstruction import trivial_decoder_reward
 from coding_agent.methods.base import OuterLoopMethod, summarize
+from coding_agent.methods.decode import BarycenterDecoding
 from coding_agent.methods.evolve import EvolveSearch
 from coding_agent.methods.gradient import GradientInversion
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm
@@ -120,8 +133,10 @@ from coding_agent.tools.library_api import (
     blocking_names,
     dismantling_names,
     localization_names,
+    reconstruction_names,
 )
 from coding_agent.tools.localization_algorithms import localization_algorithms
+from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
 from coding_agent.types import GraphInfo, TaskSpec, full_adoption, valid_feedback_models
 from data.wm_competitive import (
     CompetitiveConfig,
@@ -230,6 +245,27 @@ class ExperimentConfig:
     # transfer. Points at another arm's results JSON; its `script` field is run as
     # a canned strategy here.
     sl_transfer_from: str | None = None
+    # Cascade reconstruction. `cr_setting` is the load-bearing one
+    # (research/cascade_reconstruction.md §8.3): the four settings of §2.7 are four
+    # PROTOCOLS, not four knobs, and a decoder selected under `final_snapshot` is
+    # solving a different problem from one selected under `partial_times`. The
+    # masking DIRECTION is stated explicitly because §8.2 trap 1 records that two
+    # papers in this literature use the symbol sigma for opposite quantities:
+    # `cr_observation_rate` is the probability a node IS reported.
+    cr_setting: str = partial_times
+    cr_observation_rate: float = default_observation_rate
+    cr_hidden_rate: float = default_hidden_rate
+    cr_instances: int = 20
+    cr_select_split: str = "train"
+    cr_eval_split: str = "test"
+    # lambda in `lambda * PathPrecision + (1 - lambda) * EventF1`. >= 0.5 is a
+    # REQUIREMENT rather than a taste (§2.6): the node set is nearly free, so a
+    # search rewarded mostly on Event F1 discovers the tree contributes nothing to
+    # its score and converges on decoders that never attempt it.
+    cr_tree_weight: float = 0.6
+    # Arm A knobs; read only by method="decode"
+    cr_mcmc_proposals: int = 400
+    cr_mcmc_burn_in: float = 0.3
     # True when this arm is the @native condition. The evaluator has already been
     # resolved to monte_carlo with one episode by then, so the arm identity cannot
     # be recovered from `evaluator` — and it decides whether `predict_marginals`
@@ -323,6 +359,19 @@ def build_method(
     refinement loop take a checkpoint — per_step and windowed have nothing to
     resume, and `gradient` is a single deterministic pass.
     """
+    if config.method == "decode":
+        # Arm A for cascade reconstruction. No agent, no population, no
+        # refinement: Metropolis-Hastings over histories against the frozen
+        # kernel, reporting DITTO's posterior-mean barycenter rather than the MAP
+        # sample — the component swap §2.3 warns against, hence a CONTROL.
+        return BarycenterDecoding(
+            instances=instances or [],
+            proposals=config.cr_mcmc_proposals,
+            burn_in=config.cr_mcmc_burn_in,
+            tree_weight=config.cr_tree_weight,
+            seed=config.seed,
+        )
+
     if config.method == "gradient":
         # Arm A. No agent, no population, no refinement: Adam on a relaxed source
         # vector against a frozen f_theta, which is SL-VAE's own procedure with our
@@ -390,7 +439,7 @@ def build_method(
 
     raise ValueError(
         f"unknown method {config.method!r}; "
-        f"choose one_shot|per_step|windowed|evolve|adaptive|gradient"
+        f"choose one_shot|per_step|windowed|evolve|adaptive|gradient|decode"
     )
 
 
@@ -600,7 +649,37 @@ def run_experiment(
     # first and badly on the second.
     select_instances, evaluate_instances, training_sources = [], [], []
 
-    if registry.recovers:
+    if registry.reconstructs:
+        # The same two-pool split, and for the same reason: a decoder that
+        # memorized specific cascades is indistinguishable from an algorithm until
+        # it meets episodes the search never saw. `require_parents` RAISES on a
+        # dataset generated without --trace-parents rather than silently collapsing
+        # the reward onto Event F1, which is the failure §2.6 exists to prevent.
+        common = dict(
+            graph_id=graph_id,
+            setting=config.cr_setting,
+            observation_rate=config.cr_observation_rate,
+            hidden_rate=config.cr_hidden_rate,
+            limit=config.cr_instances,
+            seed=config.seed,
+            require_parents=config.cr_tree_weight > 0.0,
+        )
+        select_instances = load_cascades(
+            config.data_dir, config.diffusion_model, config.cr_select_split, **common
+        )
+        evaluate_instances = load_cascades(
+            config.data_dir, config.diffusion_model, config.cr_eval_split, **common
+        )
+
+        print(
+            f"[run] cascade reconstruction: selecting on {len(select_instances)} "
+            f"{config.cr_select_split} episodes, held out on "
+            f"{len(evaluate_instances)} {config.cr_eval_split} episodes "
+            f"(setting={config.cr_setting}, reported at "
+            f"{config.cr_observation_rate:.0%}, "
+            f"lambda={config.cr_tree_weight} on PathPrecision)"
+        )
+    elif registry.recovers:
         select_instances = load_instances(
             config.data_dir,
             config.diffusion_model,
@@ -661,6 +740,11 @@ def run_experiment(
         objective_kind=registry.objective or maximize,
         instances=tuple(select_instances),
         source_budget_mode=config.sl_budget_mode,
+        # Cascade reconstruction; inert for every task that does not decode, so
+        # one code path serves all six runnable tasks
+        reconstructs=registry.reconstructs,
+        tree_weight=config.cr_tree_weight,
+        observation_setting=config.cr_setting,
         # False is the @native condition: no forward model in the search loop at
         # all, which is the arm that answers whether one is worth anything
         forward_model=not config.native_arm,
@@ -730,7 +814,9 @@ def run_experiment(
         )
         # A containment task's menu is the DISMANTLING pool; routing into the IM
         # pool would return a seed set the executor then rejects
-        if task.recovers:
+        if task.decodes:
+            menu = reconstruction_names
+        elif task.recovers:
             menu = localization_names
         elif task.blocks:
             # Only the members whose OUTPUT this lever can emit: routing into the
@@ -783,13 +869,15 @@ def run_experiment(
             + blocking_names
             + dismantling_names
             + localization_names
+            + reconstruction_names
         ):
             raise ValueError(
                 f"unknown baseline {config.baseline!r}; choose a static algorithm "
                 f"from {algorithm_names}, an adaptive policy from "
                 f"{sorted(adaptive_algorithms)}, a blocker from {blocking_names}, a "
-                f"dismantler from {dismantling_names}, or a source localizer from "
-                f"{localization_names}"
+                f"dismantler from {dismantling_names}, a source localizer from "
+                f"{localization_names}, or a trajectory decoder from "
+                f"{reconstruction_names}"
             )
 
         provider_label = (
@@ -830,6 +918,22 @@ class AdaptiveBaseline(Strategy):
                 total_budget={config.budget},
             )
         ]
+"""
+        elif config.baseline in reconstruction_algorithms:
+            # A published decoder is a whole-TRAJECTORY inference: it is handed the
+            # masked observation and returns `{node: (time, parent)}`. `predict` is
+            # the metered kernel, which the kernel-using members read and the
+            # structural ones ignore through **kw.
+            canned_script = f"""\
+class ReconstructionBaseline(Strategy):
+    def reconstruct(self, graph, observation, horizon):
+        return reconstruction_algorithms.{config.baseline}(
+            graph,
+            observation,
+            horizon,
+            diffusion_model="{config.diffusion_model}",
+            predict=getattr(self, "step_marginals", None),
+        )
 """
         elif config.baseline in localization_algorithms:
             # A published localizer is a source-set INFERENCE, not a plan: it is
@@ -975,7 +1079,12 @@ class Baseline(Strategy):
     print(f"[run] optimizing with {config.method} (provider {provider_label})...")
     strategy, trajectory = method.optimize(agent, environment, task, graph)
 
-    if task.recovers:
+    if task.decodes:
+        print(
+            f"[run] winner: score={trajectory.reward:.4f} on the "
+            f"{config.cr_select_split} split (selection score, higher is better)"
+        )
+    elif task.recovers:
         print(
             f"[run] winner: F1={trajectory.reward:.4f} on the "
             f"{config.sl_select_split} split (selection score, higher is better)"
@@ -992,7 +1101,25 @@ class Baseline(Strategy):
     # memorized specific cascades is indistinguishable from an algorithm until it
     # meets episodes the search never saw (research/source_localization.md §8.5.1).
     heldout = None
-    if task.recovers and evaluate_instances:
+    if task.decodes and evaluate_instances:
+        print(
+            f"[run] re-running the winner on {len(evaluate_instances)} held-out "
+            f"{config.cr_eval_split} cascades..."
+        )
+        heldout, _ = evaluate_reconstructor(
+            strategy,
+            environment,
+            task,
+            graph,
+            evaluate_instances,
+            config.cr_tree_weight,
+        )
+        print(
+            f"[run] held-out score={heldout.reward:.4f} "
+            f"(selection {trajectory.reward:.4f}, "
+            f"generalization gap {heldout.reward - trajectory.reward:+.4f})"
+        )
+    elif task.recovers and evaluate_instances:
         print(
             f"[run] re-running the winner on {len(evaluate_instances)} held-out "
             f"{config.sl_eval_split} episodes..."
@@ -1127,7 +1254,61 @@ class Baseline(Strategy):
     # the per-arm JSON is read standalone by plots/report/summary
     result["objective"] = task.sense
 
-    if task.recovers:
+    if task.decodes:
+        # Same reasoning as the localization block below: the score is measured
+        # against a history we stored, so it carries no evaluator noise and is
+        # already comparable across conditions. `mc_reward` is filled from the
+        # held-out score so every reader that asks for "the number comparable
+        # across arms" gets the right one unchanged.
+        selection = trajectory.cost.get("metrics", {})
+        reported = heldout if heldout is not None else trajectory
+        metrics = reported.cost.get("metrics", {})
+
+        result["reconstruction"] = True
+        result["metrics"] = metrics
+        result["selection_metrics"] = selection
+        result["select_split"] = config.cr_select_split
+        result["eval_split"] = config.cr_eval_split
+        result["n_select_instances"] = len(select_instances)
+        result["n_eval_instances"] = len(evaluate_instances)
+        result["observation_setting"] = config.cr_setting
+        result["observation_rate"] = config.cr_observation_rate
+        result["hidden_rate"] = (
+            config.cr_hidden_rate if config.cr_setting == "hidden_nodes" else None
+        )
+        result["tree_weight"] = config.cr_tree_weight
+        result["has_tree_truth"] = bool(
+            select_instances and select_instances[0].true_parents is not None
+        )
+        result["kernel_calls"] = reported.cost.get("kernel_calls")
+        result["kernel_calls_per_instance"] = reported.cost.get(
+            "kernel_calls_per_instance"
+        )
+        result["mcmc_proposals_per_instance"] = trajectory.cost.get(
+            "mcmc_proposals_per_instance"
+        )
+        result["mcmc_acceptance_rate"] = trajectory.cost.get("mcmc_acceptance_rate")
+        result["generalization_gap"] = (
+            round(reported.reward - trajectory.reward, 6)
+            if heldout is not None
+            else None
+        )
+        result["mc_reward"] = reported.reward
+        result["reward"] = reported.reward
+        result["mc_reward_se"] = reported.cost.get("reward_se")
+        result["spread_pct"] = None
+        result["per_instance"] = reported.cost.get("per_instance")
+        result["summary"] = summarize(reported, graph, task)
+        # §2.11 risk 1 makes this a REQUIRED check rather than a diagnostic: a
+        # trivial decoder (everyone reachable, parents by BFS) must score badly
+        # under the chosen reward, or the reward is wrong. Reported into the same
+        # file as the result, because a reader cannot interpret a program-search
+        # number without it.
+        result |= trivial_decoder_reward(
+            evaluate_instances or select_instances, graph, config.cr_tree_weight
+        )
+
+    if task.recovers and not task.decodes:
         # The F1 an inverse task reports needs NO ground-truth referee to be
         # comparable across conditions: it is measured against a source set we
         # know, so it carries no evaluator noise at all. That is unusual for this
@@ -1270,7 +1451,37 @@ class Baseline(Strategy):
     # single ground-truth referee that makes rewards comparable ACROSS conditions.
     # A native arm's own reward is one noisy episode; a monte_carlo arm's carries
     # the winner's curse from being the max over outer iterations.
-    if config.compare and task.recovers:
+    if config.compare and task.decodes:
+        # A decoder's score is already ground truth (it is measured against a
+        # history we stored), so the referee measures the other thing: re-simulate
+        # each decode's RECOVERED SOURCES on NDlib and compare against what the
+        # cascade actually did. Reported beside the TRUE source set's own error,
+        # because on an ill-posed problem a recovered set can reproduce the
+        # observation better than the truth did.
+        referee_runs = config.referee_mc_runs or config.mc_runs
+        result["referee_mc_runs"] = referee_runs
+        print(f"[run] re-simulation referee ({referee_runs} NDlib runs per set)...")
+
+        referee = MonteCarloEnvironment(
+            graph,
+            config.diffusion_model,
+            mc_runs=referee_runs,
+            base_seed=config.seed,
+            remove_semantics=config.remove_semantics,
+        )
+        reported = heldout if heldout is not None else trajectory
+        result |= referee_reconstruction_error(
+            referee,
+            task,
+            evaluate_instances or list(task.instances),
+            reported.cost.get("per_instance", []),
+        )
+        print(
+            f"[run] resim_error={result.get('resim_error', float('nan')):.5f} "
+            f"(true sources score "
+            f"{result.get('resim_error_true_sources', float('nan')):.5f})"
+        )
+    elif config.compare and task.recovers:
         # An inverse task's F1 is already ground truth, so the referee measures the
         # OTHER thing §8.5.5 asks for: re-simulate the recovered sources on NDlib
         # and compare against what was observed. Reported beside the TRUE source
@@ -1513,11 +1724,13 @@ if __name__ == "__main__":
             + blocking_names
             + dismantling_names
             + localization_names
+            + reconstruction_names
         ),
         metavar="NAME",
         help="evaluate this classical library algorithm instead of an LLM strategy: "
         "a static IM algorithm, a per-round adaptive policy, an influence blocker, a "
-        "network dismantler, or a source localizer (default: None).",
+        "network dismantler, a source localizer, or a trajectory decoder "
+        "(default: None).",
     )
     parser.add_argument(
         "--routing",
@@ -1528,12 +1741,21 @@ if __name__ == "__main__":
         "--method",
         type=str,
         default="one_shot",
-        choices=["one_shot", "per_step", "windowed", "evolve", "adaptive", "gradient"],
+        choices=[
+            "one_shot",
+            "per_step",
+            "windowed",
+            "evolve",
+            "adaptive",
+            "gradient",
+            "decode",
+        ],
         help="outer-loop method; evolve = population edits with refine/restructure "
         "operators; adaptive = the same search over a per-round policy for adaptive "
         "IM; gradient = arm A for source localization, per-instance Adam on a "
-        "relaxed source vector against a frozen world model, no LLM "
-        "(default: one_shot).",
+        "relaxed source vector against a frozen world model, no LLM; decode = arm A "
+        "for cascade reconstruction, Metropolis-Hastings over histories against the "
+        "same frozen model, also no LLM (default: one_shot).",
     )
     parser.add_argument(
         "--native-arm",
@@ -1735,6 +1957,87 @@ if __name__ == "__main__":
         "amortization claim, and a comparison no per-instance method can enter "
         "(default: None).",
     )
+    # Cascade reconstruction
+    parser.add_argument(
+        "--cr-setting",
+        type=str,
+        default=partial_times,
+        choices=list(valid_settings),
+        help="cascade reconstruction: WHICH of the four observation regimes is "
+        "masked. partial_times = a subsample of the infected set with activation "
+        "times (the ordered-Steiner regime); partial_nodes = the same subsample "
+        "with times withheld; final_snapshot = the terminal state only (DITTO's "
+        "DASH, the hardest published formulation); hidden_nodes = partial_times "
+        "plus nodes deleted from the graph. These are four PROTOCOLS and their "
+        f"rows are never pooled (default: {partial_times}).",
+    )
+    parser.add_argument(
+        "--cr-observation-rate",
+        type=float,
+        default=default_observation_rate,
+        help="cascade reconstruction: probability an infected node IS REPORTED. "
+        "Stated in that direction on purpose — this literature uses the symbol "
+        "sigma for both the report rate and its complement, so a curve read "
+        f"backwards is a real hazard (default: {default_observation_rate}).",
+    )
+    parser.add_argument(
+        "--cr-hidden-rate",
+        type=float,
+        default=default_hidden_rate,
+        help="cascade reconstruction: fraction of non-source nodes DELETED from "
+        "the graph under --cr-setting hidden_nodes. Distinct from the observation "
+        "rate: an unobserved node can still be inferred, a hidden one is not there "
+        f"(default: {default_hidden_rate}).",
+    )
+    parser.add_argument(
+        "--cr-instances",
+        type=int,
+        default=20,
+        help="cascade reconstruction: masked cascades per split. Every candidate "
+        "decoder pays this many executions (default: 20).",
+    )
+    parser.add_argument(
+        "--cr-select-split",
+        type=str,
+        default="train",
+        choices=["train", "val", "test"],
+        help="cascade reconstruction: episodes the outer loop's reward is computed "
+        "on (default: train).",
+    )
+    parser.add_argument(
+        "--cr-eval-split",
+        type=str,
+        default="test",
+        choices=["train", "val", "test"],
+        help="cascade reconstruction: HELD-OUT episodes the winning decoder is "
+        "re-run on unmodified, and the number every table reports (default: test).",
+    )
+    parser.add_argument(
+        "--cr-tree-weight",
+        type=float,
+        default=0.6,
+        help="cascade reconstruction: lambda in "
+        "lambda * PathPrecision + (1 - lambda) * EventF1. At least 0.5 is a "
+        "REQUIREMENT: the node set is nearly free, so a search rewarded mostly on "
+        "Event F1 discovers the tree contributes nothing and converges on decoders "
+        "that never attempt it. 0 acknowledges a node-only protocol explicitly and "
+        "is the only value that runs without a transmission edge in the data "
+        "(default: 0.6).",
+    )
+    parser.add_argument(
+        "--cr-mcmc-proposals",
+        type=int,
+        default=400,
+        help="arm A only: Metropolis-Hastings proposals per cascade. This is the "
+        "first number to raise before quoting arm A as DITTO-parity (default: 400).",
+    )
+    parser.add_argument(
+        "--cr-mcmc-burn-in",
+        type=float,
+        default=0.3,
+        help="arm A only: fraction of the chain discarded before the barycenter "
+        "starts accumulating (default: 0.3).",
+    )
     parser.add_argument(
         "--strategy-mode",
         type=str,
@@ -1919,6 +2222,15 @@ if __name__ == "__main__":
         sl_prior_weight=args.sl_prior_weight,
         sl_prior_epochs=args.sl_prior_epochs,
         sl_transfer_from=args.sl_transfer_from,
+        cr_setting=args.cr_setting,
+        cr_observation_rate=args.cr_observation_rate,
+        cr_hidden_rate=args.cr_hidden_rate,
+        cr_instances=args.cr_instances,
+        cr_select_split=args.cr_select_split,
+        cr_eval_split=args.cr_eval_split,
+        cr_tree_weight=args.cr_tree_weight,
+        cr_mcmc_proposals=args.cr_mcmc_proposals,
+        cr_mcmc_burn_in=args.cr_mcmc_burn_in,
         native_arm=args.native_arm,
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,

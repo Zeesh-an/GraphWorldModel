@@ -50,6 +50,44 @@ class MonteCarloEnvironment:
         self.rollout_calls = 0
         self.evaluator_seconds = 0.0
 
+    def step_marginals(
+        self, state: State, seed: int | None = None
+    ) -> np.ndarray:
+        """
+        `P(v newly infected at t + 1 | s_t)` by sampling the real simulator.
+
+        The transition kernel evaluated at an ARBITRARY proposed state, which is
+        what a trajectory decoder needs and a rollout cannot give
+        (research/cascade_reconstruction.md §2.5.2). `Simulator.set_state` writes
+        the hypothesis in and `advance_marginal([], mc_runs)` averages `mc_runs`
+        draws of one diffusion step out of it.
+
+        The episodes are charged to `episodes_used` like any other, which is the
+        whole point of the @monte_carlo binding: §2.4.2 puts a decoder at ~10^4
+        kernel evaluations per instance, and whether that arm completes at all is
+        the finding this column exists to report.
+        """
+        start = time.perf_counter()
+        seed = self.base_seed if seed is None else seed
+        simulator = build_simulator(
+            self.graph,
+            self.diffusion_model,
+            seed=seed,
+            remove_semantics=self.remove_semantics,
+        )
+        simulator.set_state(state.infected, state.frontier)
+
+        _, _, frontier_marginal = simulator.advance_marginal([], self.mc_runs)
+        marginal = np.zeros(self.graph.num_nodes, dtype=np.float64)
+        for node, probability in frontier_marginal.items():
+            marginal[int(node)] = probability
+
+        self.episodes_used += self.mc_runs
+        self.rollout_calls += 1
+        self.evaluator_seconds += time.perf_counter() - start
+
+        return marginal
+
     def rollout(
         self, action_fn: ActionFn, horizon: int, budget: int, seed: int | None = None
     ) -> Trajectory:

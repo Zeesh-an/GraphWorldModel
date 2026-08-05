@@ -5,6 +5,7 @@ Reuses the canonical ActionOp/State value types from the data simulator so the
 strategies, environments, and the trained world model all speak the same action vocabulary.
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Protocol
 import numpy as np
@@ -198,6 +199,22 @@ class TaskSpec:
     # is the arm that answers "is a forward model in the search loop worth
     # anything at all". Ignored by every task that does not invert.
     forward_model: bool = True
+    # Cascade reconstruction: the recovered object is a whole TRAJECTORY rather
+    # than a set, so the contract is `reconstruct()` and the reward is
+    # `lambda * PathPrecision + (1 - lambda) * EventF1` instead of source F1. Set
+    # from the task registry's `reconstructs` flag, and read by every path that has
+    # to pick the decoder contract, the masked-episode pool or the tree metrics.
+    # Narrows `recovers` exactly as `blocks` narrows `contains`.
+    reconstructs: bool = False
+    # Weight on PathPrecision in that reward. >= 0.5 is a REQUIREMENT rather than a
+    # taste (research/cascade_reconstruction.md §2.6): the node set is nearly free,
+    # so a search rewarded mostly on Event F1 discovers the tree contributes
+    # nothing to its score and converges on decoders that never attempt it.
+    tree_weight: float = 0.6
+    # Which of §2.7's four settings this run masks under. Four PROTOCOLS, not four
+    # knobs: a decoder selected under final_snapshot is solving a different problem
+    # from one selected under partial_times, so the rows are never pooled (§8.3).
+    observation_setting: str = "partial_times"
     # Influence blocking: TWO cascades. The planner fights a rumour seeded from
     # `outbreak` (which is S_N here) and its own counter-cascade is the instrument
     # rather than the score. Set from the task registry's `competitive` flag, and
@@ -251,6 +268,20 @@ class TaskSpec:
         cascade, scored on F1 against the truth.
         """
         return self.objective_kind == recover
+
+    @property
+    def decodes(self) -> bool:
+        """
+        True for cascade reconstruction specifically, not for the recover family.
+
+        Both members of that family invert something and neither emits an action;
+        the difference is WHAT is recovered. A localizer names a set of `|V|`
+        candidates and is scored on F1; a decoder produces a coherent `T x |V|`
+        trajectory and is scored on a tree, which needs a different contract, a
+        different reward and a transmission edge in the data that NDlib does not
+        otherwise produce. Same relationship `blocks` has to `contains`.
+        """
+        return self.reconstructs
 
     @property
     def streaming(self) -> bool:
@@ -307,6 +338,18 @@ class Strategy(Protocol):
         self, graph: GraphInfo, observation: np.ndarray, budget: int
     ) -> list[int]: ...
 
+    # Cascade reconstruction. Also not an intervention: given the graph and a
+    # partial `Observation` of a diffusion that already happened, return
+    # `{node: (activation timestep, inferred parent)}` for every node believed
+    # infected, with `parent = None` marking a source and uninfected nodes simply
+    # absent. The harness binds `self.step_marginals(infected, frontier)` — the
+    # transition kernel, evaluated at an ARBITRARY proposed state — before calling
+    # this; under @native that attribute raises instead
+    # (research/cascade_reconstruction.md §2.5).
+    def reconstruct(
+        self, graph: GraphInfo, observation: object, horizon: int
+    ) -> dict[int, tuple[int, int | None]]: ...
+
     # Optional companion to localize(). F1 scores the SET, AUC scores the RANKING,
     # so a program that exposes a per-node score vector gets a true AUC; one that
     # does not gets an AUC derived from the ORDER of the list localize() returned,
@@ -331,12 +374,13 @@ class ScoredStrategy:
     functions over the observed state.
     """
 
-    # All three are stamped by methods.base.attach_context before the harness runs.
+    # All four are stamped by methods.base.attach_context before the harness runs.
     # Defaulted here so the class is usable standalone (tests, a bare harness) and
     # so a seeding task needs no context at all.
     budget_op: str = "add_node"
     outbreak: tuple = ()
     predict_marginals: Callable | None = None
+    step_marginals: Callable | None = None
 
     def score(self, node: int, selected: tuple, graph: GraphInfo) -> float:
         return float(graph.degree(node))
@@ -451,3 +495,101 @@ class ScoredStrategy:
             selected.append(best_node)
 
         return selected
+
+    def edge_cost(
+        self, source: int, target: int, probability: float, graph: GraphInfo,
+        observation: object
+    ) -> float:
+        """
+        How implausible the transmission `source -> target` is. LOWER = more likely.
+
+        Scored mode for cascade reconstruction, and the tightest fit of the three:
+        every ordered-Steiner method in `research/cascade_reconstruction.md` §3 IS
+        exactly a shortest-path computation under an arc cost, so the constrained
+        search space is directly comparable to the classical methods rather than a
+        subset of them. The default is the likelihood metric they all use — a
+        most-likely path is a shortest path under `-log p`.
+
+        `observation.reported` is the observed report set, so a rule may make an
+        arc into an already-reported node cheap, or penalize one leaving the
+        observed region.
+        """
+        return -math.log(max(float(probability), 1e-9))
+
+    def reconstruct(
+        self, graph: GraphInfo, observation: object, horizon: int
+    ) -> dict[int, tuple[int, int | None]]:
+        """
+        Fixed ordered-Steiner harness over edge_cost; not overridable in scored mode.
+
+        Grow a tree out of the estimated roots by cheapest-arc-first under
+        `edge_cost`, respecting any observed activation time, then hand the time
+        assignment to the shared `finalize` so the parent rule is identical to
+        every library decoder's and a score difference is a difference in the cost
+        function alone.
+        """
+        import heapq
+
+        from coding_agent.tools.reconstruction_algorithms import (
+            _merge_observed,
+            _probability_map,
+            estimate_roots,
+            finalize,
+            reported_nodes,
+        )
+
+        members = set(reported_nodes(observation))
+        if not members:
+            return {}
+
+        probabilities = _probability_map(graph)
+        known = observation.times
+        roots = estimate_roots(graph, sorted(members), observation)
+
+        times = {int(root): int(known.get(root, 0)) for root in roots}
+        costs = {int(root): 0.0 for root in roots}
+        queue = [(0.0, int(root)) for root in roots]
+        heapq.heapify(queue)
+
+        while queue:
+            cost, node = heapq.heappop(queue)
+            if cost > costs.get(node, float("inf")):
+                continue
+
+            step = times[node] + 1
+            if step > horizon:
+                continue
+
+            for neighbour in graph.out_neighbors(node):
+                observed = known.get(int(neighbour))
+                if observed is not None and step > observed:
+                    continue
+
+                candidate = cost + float(
+                    self.edge_cost(
+                        int(node),
+                        int(neighbour),
+                        probabilities.get((int(node), int(neighbour)), 0.0),
+                        graph,
+                        observation,
+                    )
+                )
+                if candidate < costs.get(int(neighbour), float("inf")):
+                    costs[int(neighbour)] = candidate
+                    times[int(neighbour)] = max(
+                        0, min(int(observed if observed is not None else step), horizon)
+                    )
+                    heapq.heappush(queue, (candidate, int(neighbour)))
+
+        for node in members:
+            times.setdefault(int(node), int(known.get(node, horizon)))
+
+        kept = {
+            node: time
+            for node, time in times.items()
+            if node in members or time < horizon
+        }
+
+        return finalize(
+            graph, _merge_observed(kept, observation, horizon), observation, horizon
+        )

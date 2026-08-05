@@ -80,7 +80,7 @@ All five appear in DeepIM's published tables, which are transcribed in [`../rese
 
 ### Per-task registration
 
-`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. Four tasks have entries today:
+`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. Six tasks have entries today:
 
 | task | registered | wired |
 | --- | --- | --- |
@@ -88,6 +88,34 @@ All five appear in DeepIM's published tables, which are transcribed in [`../rese
 | `adaptive_online_im` | 5 (`adaptiveim`, `mrim`, `rl4im`, `oim_lt`, `timlinucb`) | 0 |
 | `critical_node_detection` | 12 (`finder`, `gdm`, `mind`, `spr`, `nirm`, `dcrs`, `gnd`, `decycler`, `collective_influence`, `explosive_immunization`, `dismantling_review`, `selinda`) | 0 |
 | `source_localization` | 12 (six `graphsl_*` arms, plus `graphsl`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`, `cosasi`) | 6 |
+| `influence_blocking` | 4 (`sandimin`, `imin_joc`, `diffim`, `stratlearner`) | 3 |
+| `cascade_reconstruction` | 13 (three `ditto*` arms, plus `grin`, `spin`, `deep_demixing`, `reconstructing_cascade`, `cascade_tree_samples`, `cult`, `active_cascade_reconstruction`, `brits`, `dipt`, `netrate`) | 6 |
+
+**Three wired arms, one install, for cascade reconstruction.** `ditto`, `ditto_dhrec` and `ditto_cri` are three entry points inside DITTO's single clone, sharing a venv through `install_name`. `ditto.py` is the KDD'23 method; `dhrec.py` and `cri.py` are that paper's own implementations of DHREC-PCDSVC and CRI — the first because the original code covers only SEIRS, the second because CRI's authors published none — so those two arms are **cross-checks on our own reimplementations** rather than new coverage:
+
+```bash
+python -m baselines.setup_baselines --only ditto
+python -m pipeline.run --dataset oregon2 --task cascade_reconstruction \
+    --cr-setting final_snapshot --baselines external:ditto external:ditto_dhrec
+```
+
+Warning: **`--cr-setting final_snapshot` is not optional for these three.** Verified by reading every `data.*` access in `ditto.py` and `inc/diffus.py`: DITTO conditions on the observed terminal state (`data.y[:, -1]`) and the source COUNT (`(data.y[:, 0] == 1).sum()`) and nothing else. It therefore always solves the DASH problem whatever the sweep runs, and under `partial_times` it is answering a strictly harder instance than every other arm — a row that has to say so rather than be read as a loss.
+
+**Three more wired arms, three separate installs: the SUPERVISED imputers.** `grin`, `spin` and `deep_demixing` all fit a model on labelled histories before predicting, which is a setting none of our own arms have — so their rows are not comparable to an unsupervised decoder's without saying so, and the report has to label them:
+
+```bash
+python -m baselines.setup_baselines --only grin
+python -m pipeline.run --dataset jazz --task cascade_reconstruction \
+    --baselines external:grin external:spin --compare
+```
+
+`grin` is the one to run first: DITTO uses it as the **ideal upper bound** and every `Gap` column in its Tables 4–5 is measured against it, which makes it the single most useful reference number in this literature.
+
+All three are driven through the repo's MODEL rather than its training harness, and that trade is stated on every row: GRIN's own entry point pins `tensorflow==2.5.0` / `pytorch-lightning==1.4` / `torch==1.8` (none of which resolves today, and none of which `GRINet` needs — tracing every import in `lib/nn/layers/` gives `torch` + `einops`), SPIN's is a `tsl` Lightning experiment over hardcoded benchmarks, and Deep Demixing's `GCVAE_Trainer` wants its own pickle layout. So these are **the authors' architecture, our optimizer**, and `GWM_IMPUTE_EPOCHS` is the first number to raise before quoting any of them as parity. `baselines/drivers/imputation_common.py` holds the loading, the masked-BCE loop and the decoding all three share.
+
+Two install hazards found by actually running them, not inferred. **SPIN needs `torch-scatter` even though nothing in SPIN imports it** — `tsl.nn.functional` does, at module load, so `from spin.models import SPINModel` dies without it; it has no universal wheel and builds from source. **Deep Demixing needs a torch built with MKL**: `CVAE_UNET_Batch` is built from torch_geometric's `GraphUNet`, whose `augment_adj` does a sparse-CSR matmul that CPU-without-MKL cannot do, which is the stock Apple Silicon wheel. It runs on Linux and on CUDA; the driver catches that specific error and says so rather than surfacing a traceback into torch_geometric. And **a SPIN OOM is a reportable result**, not a failed arm — it OOMs on Oregon2, Prost and Pol in its own published table, and our graphs sit on both sides of that ceiling.
+
+Four repos in that set are blocked with verified reasons rather than left to fail at the first budget. Both Xiao repos (`reconstructing_cascade`, `cascade_tree_samples`) import `graph_tool`, a Boost/C++ extension distributed through conda or apt and **not pip-installable**, so it cannot go into a per-baseline venv; `cascade_tree_samples` additionally needs an unpublished Cython package. `cult` is **Python 2** (`print` statements throughout `experiments/`) and consumes a temporal interaction stream our episodes are not. `dipt` — the only method in this literature that outputs explicit propagation-tree edges — has **no public code at all**; the anonymous link in its paper is the simulator, not the model. All four are reimplemented in `coding_agent/tools/reconstruction_algorithms.py`, so the coverage survives even where the authors' code does not.
 
 **Six wired arms, one install.** `graphsl_lpsi`, `graphsl_netsleuth`, `graphsl_ojc`, `graphsl_gcnsi`, `graphsl_ivgd` and `graphsl_slvae` are six published methods inside one pip package (JOSS 9(99):6796), so they share a clone and a venv through `install_name` rather than pulling six copies of torch. Installing any one installs all six:
 
@@ -101,11 +129,15 @@ That single package covers two of the three seed papers (SL-VAE, IVGD) plus GCNS
 
 ### The inverse contract
 
-Source localization is the one task whose external contract is not `G -> S`. The repo is handed a graph AND a batch of observed diffusion states and returns one source set PER OBSERVATION, so three things differ from the IM path:
+Source localization and cascade reconstruction are the two tasks whose external contract is not `G -> S`. The repo is handed a graph AND a batch of observed diffusion states and returns one source set PER OBSERVATION, so three things differ from the IM path:
 
 1. **`run_external_baseline` takes `instances`.** Passing it selects the localization signatures of `export` (which takes the instance list where the intervention one takes a budget) and `parse_seeds` (which returns a dict keyed by episode id). A split rather than a widened signature, so the seven wired IM adapters are untouched.
 2. **`localize_script` replaces `seed_script`.** The canned Strategy implements `localize`, and it finds its row by `observation_key` — the thresholded infected set — because `localize(graph, observation, budget)` is handed no episode id and the arm makes two passes over different pools.
 3. **One batched invocation, not N.** Every one of these repos is a library that loops internally, so N subprocess launches would dominate the runtime we are trying to measure. Both instance pools go over together, flagged `is_train`.
+
+Cascade reconstruction is the same shape one level up, with two additions. A decoder is handed whole MASKED HISTORIES and returns a whole trajectory per cascade, so `_collect_trajectories` replaces `_collect_sources` and `reconstruct_script` replaces `localize_script`, keyed by the nodes the decoder was actually SHOWN (`observation.infected`) because that is the only identity available on both sides of the boundary. The addition is that **the returned parents may be null**, and usually are: only DIPT emits explicit tree edges and DIPT has no public code, so every runnable repo produces per-step node STATES and the tree is built afterwards by the same `finalize` rule the library decoders use. That is deliberate — a Path Precision difference between two rows should be a difference in their inferred TIMES, not in whichever tree-building trick one of them happened to ship.
+
+The second addition is `supervised=True` on the export, which ships the selection split's true histories so a trained imputer has something to fit. Two invariants keep that from being a leak and **both are asserted rather than trusted**: `is_train` marks the selection pool only, and every evaluation row's trajectory is exactly zero — the export raises if it is ever not. The rule is a SPLIT comparison (`registry.training_rows`) rather than a first-occurrence one, and that distinction is load-bearing: the two pools come from disjoint splits so no episode id ever repeats, and a first-occurrence rule silently marks every row trainable. The same rule now backs `graphsl`'s export, where it had been marking the evaluation episodes trainable and letting GCNSI, IVGD and SL-VAE fit on the rows they were then scored against.
 
 **Labels cross the boundary, and that is not a leak.** These methods tune a threshold or fit weights on labelled data exactly as our outer loop selects a program on labelled episodes, so the driver gives `train()` the SELECTION split and runs a label-free prediction pass on everything. What it never calls is their `test()`/`infer()`: those score against labels internally and return only an aggregate `Metric`, so no per-instance prediction escapes them. The prediction lines are reproduced in `drivers/graphsl_driver.py` from each method's own `test` body.
 

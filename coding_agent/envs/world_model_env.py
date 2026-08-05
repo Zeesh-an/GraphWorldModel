@@ -218,6 +218,63 @@ class WorldModelEnvironment:
         )
 
     @torch.inference_mode()
+    def step_marginals(self, state: State, seed: int | None = None) -> np.ndarray:
+        """
+        `P(v newly infected at t + 1 | s_t)` in ONE forward pass of f_theta.
+
+        The world-model binding of research/cascade_reconstruction.md §2.5.2, and
+        the reason that file calls this the task where the model most clearly earns
+        its place: the sampling bindings pay `mc_runs` real episodes per call and
+        this pays one batched matmul, at ~10^4 calls per decoded instance (§2.4.2).
+
+        Column 1 of the head is `next_frontier` — the nodes that activate on THIS
+        step — which is exactly the kernel a decoder proposes against. Column 0
+        (`next_infected`) is the accumulated set and would double-count everything
+        already infected.
+
+        Under the `oracle` head `q` is pinned to the true edge weight, so this is
+        the analytic IC form `1 - prod(1 - p_uv * frontier_u)` evaluated exactly,
+        with no sampling error at all.
+        """
+        start = time.perf_counter()
+        num_nodes = self.graph.num_nodes
+        edge_index, edge_weight = edges_to_arrays(self.base_edges)
+
+        record = {
+            "state": {
+                "infected": sorted(int(node) for node in state.infected),
+                "frontier": sorted(int(node) for node in state.frontier),
+                "pos_infected": sorted(int(node) for node in state.pos_infected),
+                "pos_frontier": sorted(int(node) for node in state.pos_frontier),
+            },
+            "action": [],
+            "next_state": {"infected": [], "frontier": []},
+            "next_marginal_infected": {},
+            "next_marginal_frontier": {},
+            "next_marginal_pos_infected": {},
+            "next_marginal_pos_frontier": {},
+        }
+
+        if self.competitive:
+            X, _ = build_competitive_features(record, edge_index, num_nodes)
+        else:
+            X, _, _ = build_features(record, edge_index, num_nodes)
+
+        graph_input = build_graph_input(
+            edge_index, edge_weight, num_nodes, self.diffusion_model, self.device
+        )
+        logits = self.model(
+            torch.from_numpy(X).to(self.device), graph_input
+        )  # shape: (N, 2 or 4)
+        marginal = torch.sigmoid(logits[:, 1]).cpu().numpy().astype(np.float64)
+
+        self.forward_passes += 1
+        self.rollout_calls += 1
+        self.evaluator_seconds += time.perf_counter() - start
+
+        return marginal
+
+    @torch.inference_mode()
     def rollout(
         self, action_fn: ActionFn, horizon: int, budget: int, seed: int | None = None
     ) -> Trajectory:

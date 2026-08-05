@@ -93,6 +93,13 @@ class SourceInstance:
     horizon: int
     infected_count: int
     algorithm: str | None = None
+    # Which split this episode came from. Carried for the same reason
+    # `CascadeInstance.split` is: a supervised external baseline (GCNSI, IVGD,
+    # SL-VAE inside GraphSL) has to be told which rows it may FIT on, and the two
+    # pools cross the process boundary concatenated. Episode ids are disjoint
+    # between splits, so a "first occurrence" rule marks every row trainable and
+    # leaks the evaluation labels into the model that is then scored on them.
+    split: str = ""
     # The whole observed path, shape (T, N), one binary row per step. NOT given to
     # a generated program — its contract is a single snapshot, which is the
     # setting every comparable published number uses (§8.3). It is carried for the
@@ -249,6 +256,7 @@ def load_instances(
             infected_count=record["infected_count"],
             algorithm=record.get("algorithm"),
             trajectory=record.get("trajectory"),
+            split=split,
         )
         for record in episodes
     ]

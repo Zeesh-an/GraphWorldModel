@@ -259,6 +259,15 @@ def run_external_baseline(
         )
 
     if instances is not None:
+        # A DECODER's instances carry whole masked histories rather than endpoints,
+        # and what comes back is a trajectory per instance rather than a source
+        # set. `CascadeInstance` is the only thing with an `observation` object, so
+        # that is what selects the collector.
+        if hasattr(instances[0], "observation"):
+            return _collect_trajectories(
+                spec, name, graph, work_dir, completed, instances, elapsed
+            )
+
         return _collect_sources(
             spec, name, graph, work_dir, completed, instances, elapsed
         )
@@ -433,6 +442,165 @@ def _collect_sources(
         "instances": len(instances),
         "instances_short": short,
     }
+
+
+def _collect_trajectories(
+    spec, name: str, graph, work_dir: Path, completed, instances: list, elapsed: float
+) -> dict:
+    """
+    Read one whole TRAJECTORY per instance back across the boundary and validate it.
+
+    The decoding counterpart of `_collect_sources`, and it has more to check
+    because a trajectory is a richer object than a set: ids inside the graph, times
+    inside the horizon, and — the one that matters — every named parent an actual
+    in-neighbour. A repo that returns a plausible-looking tree over edges the graph
+    does not have would post a Path Precision of zero that reads as a weak method
+    rather than as the export bug it is.
+
+    Invalid entries are DROPPED with a warning rather than raising, because a
+    third-party decoder legitimately disagrees with our edge set on a symmetrized
+    graph and losing one edge is better than losing the arm; out-of-range node ids
+    still raise, since those mean the repo was run on a different graph.
+    """
+    try:
+        returned = spec.parse_seeds(work_dir, completed.stdout, instances)
+    except Exception as error:
+        raise BaselineError(
+            f"baseline {name!r} ran but its per-instance trajectory output could "
+            f"not be parsed ({type(error).__name__}: {error}). Logs in {work_dir} — "
+            f"check stdout.log and fix parse_seeds in baselines/registry.py."
+        ) from error
+
+    trajectories = {}
+    dropped = 0
+
+    for instance in instances:
+        key = ",".join(str(node) for node in instance.observation.infected)
+        decoded = returned.get(instance.episode_id, {})
+        cleaned = {}
+
+        for node, value in decoded.items():
+            node = int(node)
+            time, parent = int(value[0]), value[1]
+
+            if not 0 <= node < graph.num_nodes:
+                raise BaselineError(
+                    f"baseline {name!r} returned node id {node} outside "
+                    f"[0, {graph.num_nodes}) for episode {instance.episode_id} — it "
+                    f"was run on a different graph than the one being scored "
+                    f"(stale cached input?). Logs in {work_dir}."
+                )
+
+            if not 0 <= time <= instance.horizon or not instance.observation.is_visible(
+                node
+            ):
+                dropped += 1
+                continue
+
+            if parent is None:
+                # A time with no tree — see `needs_tree` below
+                cleaned[node] = (time, None)
+                continue
+
+            parent = int(parent)
+
+            if time == 0 or parent not in graph.in_neighbors(node):
+                dropped += 1
+                continue
+
+            cleaned[node] = (time, parent)
+
+        # ONLY DIPT emits explicit who-infected-whom edges, and DIPT has no public
+        # code, so every runnable repo here returns a time assignment and no tree.
+        # Building it with the same `finalize` rule the library decoders use is
+        # what makes a Path Precision difference between two rows a difference in
+        # their inferred TIMES rather than in whichever tree-construction trick one
+        # of them happened to ship. A repo that DOES supply parents keeps them.
+        needs_tree = any(
+            parent is None and time > 0 for time, parent in cleaned.values()
+        )
+        if needs_tree:
+            from coding_agent.tools.reconstruction_algorithms import finalize
+
+            cleaned = finalize(
+                graph,
+                {node: time for node, (time, _) in cleaned.items()},
+                instance.observation,
+                instance.horizon,
+            )
+
+        trajectories[key] = {
+            str(node): [time, parent] for node, (time, parent) in cleaned.items()
+        }
+
+    if not any(trajectories.values()):
+        raise BaselineError(
+            f"baseline {name!r} returned no usable trajectory for any of the "
+            f"{len(instances)} cascades. Logs in {work_dir}."
+        )
+
+    if dropped:
+        print(
+            f"[baseline:{name}] WARNING: dropped {dropped} decoded entries that "
+            f"named a non-existent arc, a hidden node or an out-of-range timestep — "
+            f"those cost this arm recall it would otherwise have had"
+        )
+
+    print(
+        f"[baseline:{name}] {len(trajectories)} trajectories in {elapsed:.1f}s "
+        f"({len(instances)} cascades)"
+    )
+
+    return {
+        "name": name,
+        "trajectories": trajectories,
+        "seconds": round(elapsed, 2),
+        "work_dir": str(work_dir),
+        "instances": len(instances),
+        "instances_short": dropped,
+    }
+
+
+def reconstruct_script(trajectories: dict[str, dict]) -> str:
+    """
+    Wrap one trajectory per observation as a canned Strategy for a decoding task.
+
+    Keyed by `observation.infected` — the nodes the decoder was actually SHOWN,
+    which is the report set under three settings and the terminal state under the
+    fourth. That is the only identity available on both sides of the boundary: the
+    canned script is handed an `Observation` and nothing else, so it cannot key on
+    an episode id it never sees.
+
+    A missing key RAISES instead of falling back to a guess, for the same reason
+    `localize_script`'s does: it means the repo was handed a different instance
+    pool than the one being scored, and a silent empty decode would surface as a
+    weak method rather than as the wiring bug it is.
+    """
+    return f"""\
+import numpy as np
+
+class ExternalDecoder(Strategy):
+    trajectories = {trajectories!r}
+
+    def reconstruct(self, graph, observation, horizon):
+        shown = list(observation.infected)
+        key = ",".join(str(int(node)) for node in shown)
+        found = self.trajectories.get(key)
+
+        if found is None:
+            raise KeyError(
+                "the external baseline returned no decode for this cascade ("
+                + str(len(shown)) + " observed nodes). It was run on a "
+                "different instance pool than the one being scored — check that "
+                "--cr-instances, --cr-setting, --cr-observation-rate and --seed "
+                "match between the export and the evaluation."
+            )
+
+        return {{
+            int(node): (int(value[0]), None if value[1] is None else int(value[1]))
+            for node, value in found.items()
+        }}
+"""
 
 
 def observation_key(observation) -> str:

@@ -13,6 +13,7 @@ from pipeline.conditions import (
     condition_names,
     ground_truth_reward,
     is_ground_truth,
+    is_reconstruct,
     is_recover,
     result_sense,
 )
@@ -78,8 +79,15 @@ def _reward_label(results: list[dict], normalize: bool = False) -> str:
     with an unlabelled y-axis is read as a win for the highest curve, which is
     exactly backwards.
     """
-    # An inverse task's reward is an F1 in [0, 1], not a node count, and it needs
-    # no referee to be comparable: it is measured against a source set we know
+    # A decoder's reward is a tree-weighted score in [0, 1] and an inverse task's
+    # is an F1 in the same range; neither is a node count and neither needs a
+    # referee, since both are measured against something we stored
+    if is_reconstruct(results):
+        return (
+            "tree-weighted reconstruction score — higher is better "
+            "(held-out cascades)"
+        )
+
     if is_recover(results):
         return "F1 against the true sources — higher is better (held-out episodes)"
 
@@ -928,7 +936,11 @@ def plot_localization_metrics(
     precision carry F1, which is the signature of a thresholded relaxation
     over-predicting (research/source_localization.md §5.2).
     """
-    scored = [result for result in results if result.get("metrics")]
+    scored = [
+        result
+        for result in results
+        if result.get("metrics") and not result.get("reconstruction")
+    ]
     if not scored:
         return None
 
@@ -1025,7 +1037,9 @@ def plot_localization_cost(
     scored = [
         result
         for result in results
-        if result.get("metrics") and result.get("evaluator_seconds") is not None
+        if result.get("metrics")
+        and not result.get("reconstruction")
+        and result.get("evaluator_seconds") is not None
     ]
     if len(scored) < 2:
         return None
@@ -1088,10 +1102,18 @@ def plot_generalization_gap(
     axes.plot([0, 1], [0, 1], color="#888888", linestyle="--", linewidth=1.0,
               label="perfect transfer")
 
+    # A decoder is selected on the tree-weighted score and a localizer on F1;
+    # both live in [0, 1] and both are stored the same way, so one figure serves
+    # them once it reads the right key
+    decodes = is_reconstruct(paired)
+    key = "reward" if decodes else "f1"
+
     for arm in _sorted_arms(paired):
         run = _by_arm(paired, arm)[0]
-        selection = float(run["selection_metrics"].get("f1") or 0.0)
-        heldout = float(run["metrics"].get("f1") or 0.0)
+        selection = float(run["selection_metrics"].get(key) or 0.0)
+        heldout = float(
+            (run.get("mc_reward") if decodes else run["metrics"].get(key)) or 0.0
+        )
         axes.scatter(
             selection,
             heldout,
@@ -1106,13 +1128,195 @@ def plot_generalization_gap(
             textcoords="offset points",
         )
 
-    axes.set_xlabel("F1 on the episodes the search optimized against")
-    axes.set_ylabel("F1 on held-out episodes")
+    unit = "score" if decodes else "F1"
+    noun = "cascades" if decodes else "episodes"
+    axes.set_xlabel(f"{unit} on the {noun} the search optimized against")
+    axes.set_ylabel(f"{unit} on held-out {noun}")
     axes.set_xlim(0, 1.02)
     axes.set_ylim(0, 1.02)
-    axes.set_title(f"{title_prefix}: generalization across episodes")
+    axes.set_title(f"{title_prefix}: generalization across {noun}")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=7, loc="lower right")
+
+    return _save(figure, out_path)
+
+
+reconstruction_metric_keys = (
+    "path_precision",
+    "path_recall",
+    "jaccard",
+    "event_f1",
+    "node_f1",
+)
+
+
+def plot_reconstruction_metrics(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    The tree half and the node half per arm, on held-out cascades.
+
+    None for every sweep that does not decode. Five bars per arm rather than one,
+    because the whole point of this task is the GAP between them: Zong ICDM'12
+    reports 100% node precision alongside 78% edge precision and DIPT's best path
+    precision thirteen years later is 0.680, so a figure showing only the score
+    would hide the finding it exists to show
+    (research/cascade_reconstruction.md §5.2, §8.1).
+
+    `path_recall` and `jaccard` are drawn beside `path_precision` on purpose: an
+    arm that names few edges scores well on precision alone, which is the
+    under-prediction corner a program search would otherwise find.
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("reconstruction") and result.get("metrics")
+    ]
+    if not scored:
+        return None
+
+    arms = _sorted_arms(scored)
+    figure, axes = plt.subplots(figsize=(max(7.5, 1.0 * len(arms)), 4.8))
+
+    positions = np.arange(len(arms))
+    width = 0.8 / len(reconstruction_metric_keys)
+    hatches = ("", "///", "...", "xxx", "\\\\\\")
+
+    for index, key in enumerate(reconstruction_metric_keys):
+        values = [
+            float(_by_arm(scored, arm)[0]["metrics"].get(key) or 0.0) for arm in arms
+        ]
+        axes.bar(
+            positions + index * width - 0.4 + width / 2,
+            values,
+            width=width,
+            color=[
+                condition_colors.get(_condition_of(scored, arm), "#4C72B0")
+                for arm in arms
+            ],
+            edgecolor="white",
+            linewidth=0.6,
+            hatch=hatches[index % len(hatches)],
+        )
+
+    # Proxy patches: each bar carries a LIST of colours (one per arm), so
+    # matplotlib would draw the legend swatch in whichever arm came first
+    legend_handles = [
+        plt.Rectangle(
+            (0, 0), 1, 1, facecolor="white", edgecolor="#444444",
+            hatch=hatches[index % len(hatches)],
+        )
+        for index in range(len(reconstruction_metric_keys))
+    ]
+
+    # The reward-sanity line §2.11 risk 1 requires: if an arm sits near it, the
+    # reward is wrong rather than the arm good
+    trivial = next(
+        (
+            result["trivial_decoder_reward"]
+            for result in scored
+            if result.get("trivial_decoder_reward") is not None
+        ),
+        None,
+    )
+    if trivial is not None:
+        axes.axhline(
+            trivial,
+            color="#B03030",
+            linestyle="--",
+            linewidth=1.0,
+            label="trivial decoder",
+        )
+        axes.text(
+            len(arms) - 0.5,
+            trivial + 0.01,
+            f"trivial decoder ({trivial:.3f})",
+            fontsize=6,
+            color="#B03030",
+            ha="right",
+        )
+
+    axes.set_xticks(positions)
+    axes.set_xticklabels(arms, rotation=30, ha="right", fontsize=7)
+    axes.set_ylabel("score on held-out cascades — HIGHER IS BETTER")
+    axes.set_ylim(0, 1.02)
+    axes.set_title(
+        f"{title_prefix}: trajectory recovery — the tree half against the node half",
+        fontsize=10,
+    )
+    axes.grid(alpha=0.3, axis="y")
+    axes.legend(
+        legend_handles,
+        [key.replace("_", " ") for key in reconstruction_metric_keys],
+        fontsize=7,
+        ncol=5,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.42),
+        title="hatch = metric; colour = condition",
+        title_fontsize=7,
+    )
+
+    return _save(figure, out_path)
+
+
+def plot_tree_vs_node(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Every arm as one point: how well it recovers the NODES against the TREE.
+
+    The figure that makes this task's central asymmetry visible in one look. The
+    diagonal is where an arm recovers both equally well; every published method
+    sits far BELOW it, because the node set is nearly free and the edges are not.
+    An arm hugging the right wall with nothing above the floor has solved the easy
+    half and reported it as a reconstruction, which is the failure §2.6 weights the
+    reward to prevent.
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("reconstruction")
+        and (result.get("metrics") or {}).get("path_precision") is not None
+        and np.isfinite(result["metrics"]["path_precision"])
+    ]
+    if len(scored) < 2:
+        return None
+
+    figure, axes = plt.subplots(figsize=figure_size)
+
+    for index, arm in enumerate(_sorted_arms(scored)):
+        result = _by_arm(scored, arm)[0]
+        metrics = result["metrics"]
+        axes.scatter(
+            metrics.get("node_f1", 0.0),
+            metrics.get("path_precision", 0.0),
+            s=110,
+            marker=_arm_style(index)["marker"],
+            color=condition_colors.get(_condition_of(scored, arm), "#4C72B0"),
+            edgecolor="white",
+            linewidth=0.8,
+            zorder=3,
+        )
+        axes.annotate(
+            arm,
+            (metrics.get("node_f1", 0.0), metrics.get("path_precision", 0.0)),
+            textcoords="offset points",
+            xytext=(6, 4),
+            fontsize=7,
+        )
+
+    axes.plot([0, 1], [0, 1], color="#888888", linestyle=":", linewidth=0.9)
+    axes.text(
+        0.62, 0.66, "equal difficulty", fontsize=7, color="#888888", rotation=45
+    )
+    axes.set_xlabel("node F1 — WHICH nodes were infected (the easy half)")
+    axes.set_ylabel("path precision — WHO infected whom (the hard half)")
+    axes.set_xlim(0, 1.02)
+    axes.set_ylim(0, 1.02)
+    axes.set_title(
+        f"{title_prefix}: the node set is easy, the tree is hard", fontsize=10
+    )
+    axes.grid(alpha=0.3)
 
     return _save(figure, out_path)
 
@@ -1199,6 +1403,13 @@ def build_plots(
         ),
         plot_generalization_gap(
             agent_results, plots_dir / "generalization_gap.png", title_prefix
+        ),
+        # Both return None on a sweep that decodes nothing, same as every pair above
+        plot_reconstruction_metrics(
+            agent_results, plots_dir / "reconstruction_metrics.png", title_prefix
+        ),
+        plot_tree_vs_node(
+            agent_results, plots_dir / "tree_vs_node.png", title_prefix
         ),
     ]
 

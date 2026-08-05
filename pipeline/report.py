@@ -10,6 +10,7 @@ from pipeline.conditions import (
     condition_names,
     ground_truth_reward,
     is_ground_truth,
+    is_reconstruct,
     is_recover,
     result_sense,
     reward_direction,
@@ -51,6 +52,14 @@ reported_config_keys = (
     "sl_prior",
     "sl_steps",
     "sl_transfer_from",
+    "cr_setting",
+    "cr_observation_rate",
+    "cr_hidden_rate",
+    "cr_instances",
+    "cr_select_split",
+    "cr_eval_split",
+    "cr_tree_weight",
+    "cr_mcmc_proposals",
     "wm_model",
     "head",
     "hide_edge_weights",
@@ -107,7 +116,7 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
         5: "ceiling of model-based guidance — a perfect internal model",
         6: "does the *learned* model recover the true dynamics?",
         7: "the original authors' code, seeds scored by our referee",
-        8: "what program *search* buys over per-instance descent on the same likelihood",
+        8: "what program *search* buys over per-instance inversion of the same model",
     }
 
     lines = [
@@ -271,6 +280,158 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
     return lines + [""]
 
 
+def _reconstruction_table(agent_results: list[dict]) -> list[str]:
+    """
+    The tree half and the node half side by side, on HELD-OUT cascades.
+
+    The decoding task's results table, and the one thing it must never do is print
+    only the easy half. Zong ICDM'12 reports `prec_v = 100%` alongside
+    `prec_e = 78-86%` and DIPT's best path precision thirteen years later is
+    `0.680` against source-localization F1 of `0.518-0.839` on the same graphs
+    ([`research/cascade_reconstruction.md`](../../../../research/cascade_reconstruction.md)
+    §5.2, §8.1) — the node set is easy and the tree is hard, and a table that led
+    with `node F1` would look excellent and say nothing.
+    """
+    first = agent_results[0]
+    tree_weight = first.get("tree_weight", 0.6)
+    trivial = next(
+        (
+            result["trivial_decoder_reward"]
+            for result in agent_results
+            if result.get("trivial_decoder_reward") is not None
+        ),
+        None,
+    )
+    lines = [
+        f"**The score is `{tree_weight:.2f} * PathPrecision + "
+        f"{1.0 - tree_weight:.2f} * EventF1`, and the weighting is the "
+        f"specification rather than a presentation choice.** §2.6: recovering "
+        f"WHICH nodes were infected is nearly free, so an outer loop rewarded on "
+        f"Event F1 alone discovers the tree contributes nothing to its score and "
+        f"converges on decoders that never attempt the hard half. The two "
+        f"components are printed separately because the gap between them is the "
+        f"result.",
+        "",
+        f"Every row is scored on the **held-out** `{first.get('eval_split', '?')}` "
+        f"cascades by re-running that arm's winning decoder unmodified; `selection` "
+        f"is what it scored on the `{first.get('select_split', '?')}` cascades the "
+        f"outer loop optimized against, and `gap` is the difference.",
+        "",
+        f"Masking: **`{first.get('observation_setting', '?')}`**, with each infected "
+        f"node reported at probability "
+        f"`{_format_number(first.get('observation_rate'), 2)}`. The direction is "
+        f"stated because this literature uses the symbol `sigma` for both the "
+        f"report rate and its complement (§8.2 trap 1). The four settings are four "
+        f"separate protocols and their rows are never pooled (§8.3).",
+        "",
+    ]
+
+    if trivial is not None:
+        lines += [
+            f"**Reward sanity check (§2.11 risk 1): a trivial decoder — everyone "
+            f"reachable, parents by BFS — scores `{trivial:.4f}` under this reward.** "
+            f"If that number were competitive with the arms below, the reward would "
+            f"be wrong rather than the arms good.",
+            "",
+        ]
+
+    lines += [
+        "Warning: **`path precision` is a PRECISION.** An arm that names three "
+        "transmission edges and gets them right scores 1.0 on the half the reward "
+        "is weighted toward, so read `path recall`, `jaccard` and `tree edges` "
+        "beside it — under-predicting is the second gaming corner and it is not one "
+        "this literature names, because no published method has a search that could "
+        "find it.",
+        "",
+        "| # | arm | evaluator | score | path prec | path rec | jaccard | order acc "
+        "| event F1 | node F1 | MCC | NRMSE↓ | src F1 | tree edges | selection | gap "
+        "| kernel calls / cascade | eval s |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | "
+        "--- | --- | --- | --- | --- | --- |",
+    ]
+
+    ordered = sorted(
+        agent_results,
+        key=lambda result: (result.get("condition", 99), result["arm"]),
+    )
+
+    for result in ordered:
+        metrics = result.get("metrics") or {}
+        gap = result.get("generalization_gap")
+        score = ground_truth_reward(result)
+        # Arm A pays MCMC proposals rather than free-form kernel calls, and both
+        # are the cost axis §2.4.2 exists to measure
+        per_instance = result.get("kernel_calls_per_instance")
+        if result.get("mcmc_proposals_per_instance"):
+            per_instance = (
+                f"{result['kernel_calls_per_instance']} "
+                f"({result['mcmc_proposals_per_instance']} MH proposals)"
+            )
+
+        lines.append(
+            f"| {result.get('condition', '—')} | `{result['arm']}` "
+            f"| `{result.get('evaluator', '—')}` "
+            f"| {_format_number(score, 4)} "
+            f"| {_format_number(metrics.get('path_precision'), 4)} "
+            f"| {_format_number(metrics.get('path_recall'), 4)} "
+            f"| {_format_number(metrics.get('jaccard'), 4)} "
+            f"| {_format_number(metrics.get('order_accuracy'), 4)} "
+            f"| {_format_number(metrics.get('event_f1'), 4)} "
+            f"| {_format_number(metrics.get('node_f1'), 4)} "
+            f"| {_format_number(metrics.get('mcc'), 4)} "
+            f"| {_format_number(metrics.get('time_nrmse'), 4)} "
+            f"| {_format_number(metrics.get('source_f1'), 4)} "
+            f"| {_format_number(metrics.get('n_tree_edges'), 1)} "
+            f"| {_format_number(score - gap, 4) if gap is not None else '—'} "
+            f"| {'—' if gap is None else f'{gap:+.4f}'} "
+            f"| {per_instance if per_instance is not None else '—'} "
+            f"| {_format_number(result.get('evaluator_seconds'), 1)} |"
+        )
+
+    if not first.get("has_tree_truth", True):
+        lines += [
+            "",
+            "Warning: **this dataset carries no transmission edge**, so every tree "
+            "column above is empty and the score collapsed onto Event F1. That is "
+            "the exact failure §2.6 describes — regenerate with "
+            "`--trace-parents` (the pipeline sets it automatically for "
+            "`--task cascade_reconstruction`) before reading any of these numbers "
+            "as a reconstruction result.",
+        ]
+
+    if any(result.get("resim_error") is not None for result in ordered):
+        lines += [
+            "",
+            "### Re-simulated error",
+            "",
+            "Re-run the ground-truth simulator from each decode's RECOVERED SOURCES "
+            "— the nodes it gave no parent — and compare against what the cascade "
+            "actually did. The score above is already exact (it is measured against "
+            "a history we stored), so this measures something else: whether the "
+            "recovered ROOTS reproduce the observation. Reported beside the true "
+            "source set's own error, because on an ill-posed problem a recovered "
+            "set can reproduce it better than the truth did.",
+            "",
+            "| arm | resim error (recovered) | resim error (true sources) | ratio |",
+            "| --- | --- | --- | --- |",
+        ]
+
+        for result in ordered:
+            recovered = result.get("resim_error")
+            truth = result.get("resim_error_true_sources")
+            if recovered is None:
+                continue
+
+            ratio = recovered / truth if truth else None
+            lines.append(
+                f"| `{result['arm']}` | {_format_number(recovered, 5)} "
+                f"| {_format_number(truth, 5)} "
+                f"| {'—' if ratio is None else f'{ratio:.3f}'} |"
+            )
+
+    return lines + [""]
+
+
 def _results_table(agent_results: list[dict]) -> list[str]:
     if not agent_results:
         return []
@@ -279,6 +440,9 @@ def _results_table(agent_results: list[dict]) -> list[str]:
     sense = result_sense(agent_results)
     recover = is_recover(agent_results)
     lines = ["## Results", ""]
+
+    if is_reconstruct(agent_results):
+        return lines + _reconstruction_table(agent_results)
 
     if recover:
         return lines + _localization_table(agent_results)
@@ -607,7 +771,19 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
     winner = best_by(at_largest, ground_truth_reward, sense)
     spread = ground_truth_reward(winner)
 
-    if is_recover(at_largest):
+    if is_reconstruct(at_largest):
+        metrics = winner.get("metrics") or {}
+        headline = (
+            f"held-out score {_format_number(spread, 4)} "
+            f"(path precision {_format_number(metrics.get('path_precision'), 4)}, "
+            f"event F1 {_format_number(metrics.get('event_f1'), 4)}) over "
+            f"{winner.get('n_eval_instances', '?')} "
+            f"`{winner.get('eval_split', '?')}` cascades"
+        )
+        title = (
+            f"## Winning arm ({winner.get('observation_setting', '?')} observation)"
+        )
+    elif is_recover(at_largest):
         headline = (
             f"held-out {reward_name(at_largest)} {_format_number(spread, 4)} "
             f"over {winner.get('n_eval_instances', '?')} "

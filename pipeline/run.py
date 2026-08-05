@@ -63,6 +63,7 @@ from baselines.run_baseline import (
     BaselineError,
     edge_script,
     localize_script,
+    reconstruct_script,
     round_seed_script,
     run_external_baseline,
     seed_script,
@@ -88,6 +89,9 @@ from coding_agent.tools.blocking_algorithms import (
 )
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithm_names
 from coding_agent.tools.localization_algorithms import localization_algorithm_names
+from coding_agent.tools.reconstruction_algorithms import (
+    reconstruction_algorithm_names,
+)
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.blocking import counter_seed, resolve_lever, valid_levers
 from coding_agent.containment import outbreak_selectors, select_outbreak
@@ -96,6 +100,13 @@ from coding_agent.localization import (
     load_instances,
     valid_budget_modes,
     valid_observations,
+)
+from coding_agent.reconstruction import (
+    default_hidden_rate,
+    default_observation_rate,
+    load_cascades,
+    partial_times,
+    valid_settings,
 )
 from coding_agent.rounds import round_batches
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
@@ -246,6 +257,17 @@ class PipelineConfig:
     sl_prior_weight: float = 1.0
     sl_prior_epochs: int = 300
     sl_transfer_from: str | None = None
+    # Cascade reconstruction; every field is inert unless the task decodes, so one
+    # sweep configuration serves all six runnable tasks
+    cr_setting: str = partial_times
+    cr_observation_rate: float = default_observation_rate
+    cr_hidden_rate: float = default_hidden_rate
+    cr_instances: int = 20
+    cr_select_split: str = "train"
+    cr_eval_split: str = "test"
+    cr_tree_weight: float = 0.6
+    cr_mcmc_proposals: int = 400
+    cr_mcmc_burn_in: float = 0.3
     allow_mc_algorithms: bool = False
     strategy_timeout: float = executor.strategy_timeout_seconds
     # USD per 1M tokens for the cost line; None -> tokens counted, cost null
@@ -529,6 +551,12 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         # dataset cannot be generated single-cascade by forgetting one. The three
         # dynamics parameters land in metadata.json and train_wm reads them back.
         competitive=get_task(config.task).competitive,
+        # From the registry rather than a flag, for the same reason `competitive`
+        # is: NDlib emits no transmission edge, and cascade reconstruction's
+        # tree-weighted reward is not computable without one — a dataset generated
+        # by forgetting the flag would silently collapse the reward onto its easy
+        # half (research/cascade_reconstruction.md §2.6).
+        trace_parents=get_task(config.task).reconstructs,
         tie_break=config.tie_break,
         positive_prob=config.positive_prob,
         negative_pct=(
@@ -639,6 +667,11 @@ def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
     round at a time. Using the flat script for those would deal every batch at
     t=0 and put an adaptive method on the non-adaptive side of the gap table.
     """
+    # A DECODER's repo returns one whole TRAJECTORY per observation, so its canned
+    # script is a reconstruct() keyed by the observed report set
+    if "trajectories" in external_seeds:
+        return reconstruct_script(external_seeds["trajectories"])
+
     # An inverse task's repo returns one SOURCE SET PER OBSERVATION rather than
     # one seed set, so the canned script is a localize() keyed by observation
     if "sources" in external_seeds:
@@ -711,6 +744,33 @@ def _external_instances(config: PipelineConfig, layout: Layout, budget: int) -> 
         str(layout.data_dir), config.diffusion_model, config.sl_select_split, **common
     ) + load_instances(
         str(layout.data_dir), config.diffusion_model, config.sl_eval_split, **common
+    )
+
+
+def _external_cascades(config: PipelineConfig, layout: Layout) -> list:
+    """
+    Both cascade pools an external DECODER has to reconstruct.
+
+    Same shape and same reason as `_external_instances`: the arm makes two passes
+    and a repo invoked once has to cover both. The masking is reproduced exactly —
+    `load_cascades` is a pure function of the config — and the canned script keys
+    by the observed report set, so a disagreement surfaces as a loud KeyError
+    rather than a silently wrong row.
+    """
+    common = dict(
+        graph_id=config.graph_id,
+        setting=config.cr_setting,
+        observation_rate=config.cr_observation_rate,
+        hidden_rate=config.cr_hidden_rate,
+        limit=config.cr_instances,
+        seed=config.seed,
+        require_parents=config.cr_tree_weight > 0.0,
+    )
+
+    return load_cascades(
+        str(layout.data_dir), config.diffusion_model, config.cr_select_split, **common
+    ) + load_cascades(
+        str(layout.data_dir), config.diffusion_model, config.cr_eval_split, **common
     )
 
 
@@ -798,12 +858,15 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 )
 
                 # An inverse task's repo predicts per OBSERVATION, so it is handed
-                # both instance pools at once rather than a budget
-                external_instances = (
-                    _external_instances(config, layout, resolved)
-                    if get_task(config.task).recovers
-                    else None
-                )
+                # both instance pools at once rather than a budget. A DECODER's
+                # pools carry whole masked histories rather than endpoints, which
+                # is the only difference.
+                if get_task(config.task).reconstructs:
+                    external_instances = _external_cascades(config, layout)
+                elif get_task(config.task).recovers:
+                    external_instances = _external_instances(config, layout, resolved)
+                else:
+                    external_instances = None
 
                 # A blocking repo has to be told which rumour it is answering: two of
                 # the three would otherwise draw their own from a fixed seed and
@@ -877,6 +940,16 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 sl_prior_weight=config.sl_prior_weight,
                 sl_prior_epochs=config.sl_prior_epochs,
                 sl_transfer_from=config.sl_transfer_from,
+                # ...and inert unless the task decodes
+                cr_setting=config.cr_setting,
+                cr_observation_rate=config.cr_observation_rate,
+                cr_hidden_rate=config.cr_hidden_rate,
+                cr_instances=config.cr_instances,
+                cr_select_split=config.cr_select_split,
+                cr_eval_split=config.cr_eval_split,
+                cr_tree_weight=config.cr_tree_weight,
+                cr_mcmc_proposals=config.cr_mcmc_proposals,
+                cr_mcmc_burn_in=config.cr_mcmc_burn_in,
                 native_arm=arm.evaluator == native,
                 budget=budget or 5,
                 budget_pct=budget_pct,
@@ -946,6 +1019,11 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     # intervention task, per-instance source sets for an inverse one
                     "seeds": external_seeds.get("seeds"),
                     "instances": external_seeds.get("instances"),
+                    "trajectories": (
+                        len(external_seeds["trajectories"])
+                        if external_seeds.get("trajectories")
+                        else None
+                    ),
                     "instances_short": external_seeds.get("instances_short"),
                     # Time the external repo itself spent selecting; our scoring
                     # time is in elapsed_seconds as for every other arm
@@ -972,7 +1050,9 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             )
             score = ground_truth_reward(result)
             score_text = (
-                f"held-out F1 {score:.4f}"
+                f"held-out score {score:.4f}"
+                if result.get("reconstruction")
+                else f"held-out F1 {score:.4f}"
                 if result.get("localization")
                 else (
                     f"spread {score:.2f} "
@@ -1645,12 +1725,14 @@ if __name__ == "__main__":
             + list(blocking_algorithm_names)
             + list(dismantling_algorithm_names)
             + list(localization_algorithm_names)
+            + list(reconstruction_algorithm_names)
             + [f"external:{name}" for name in external_baselines]
             + ["all", "all-classical", "all-external"]
         ),
         metavar="NAME",
         help="baselines to run: a static IM algorithm, a per-round adaptive "
-        "policy, an influence blocker, a network dismantler, a source localizer "
+        "policy, an influence blocker, a network dismantler, a source localizer, "
+        "a trajectory decoder "
         "(all condition 1), 'external:<name>' for a published repo (condition 7), or "
         "the aliases 'all' / 'all-classical' / 'all-external'. 'all' includes only "
         "external baselines already installed. Unset = the task registry's own pool "
@@ -1790,6 +1872,87 @@ if __name__ == "__main__":
         "results JSON, unmodified, on this dataset. This is the graph axis of the "
         "amortization claim, and a comparison no per-instance method can enter — "
         "SL-VAE has no artifact to transfer (default: None).",
+    )
+    parser.add_argument(
+        "--cr-setting",
+        type=str,
+        default=partial_times,
+        choices=list(valid_settings),
+        help="cascade reconstruction: which of the four observation regimes is "
+        "masked. partial_times = a subsample of the infected set WITH activation "
+        "times (the ordered-Steiner regime); partial_nodes = the same subsample "
+        "with times withheld; final_snapshot = the terminal state only (DITTO's "
+        "DASH, the hardest published formulation and the one worth leading with); "
+        "hidden_nodes = partial_times plus nodes deleted from the graph. These are "
+        "four separate PROTOCOLS and their rows are never pooled "
+        f"(default: {partial_times}).",
+    )
+    parser.add_argument(
+        "--cr-observation-rate",
+        type=float,
+        default=default_observation_rate,
+        help="cascade reconstruction: probability an infected node IS REPORTED. "
+        "Stated in that direction on purpose — this literature uses the symbol "
+        "sigma for both the report rate and its complement, so a curve read "
+        f"backwards is a real hazard (default: {default_observation_rate}).",
+    )
+    parser.add_argument(
+        "--cr-hidden-rate",
+        type=float,
+        default=default_hidden_rate,
+        help="cascade reconstruction: fraction of non-source nodes DELETED from the "
+        "graph under --cr-setting hidden_nodes (default: "
+        f"{default_hidden_rate}).",
+    )
+    parser.add_argument(
+        "--cr-instances",
+        type=int,
+        default=20,
+        help="cascade reconstruction: masked cascades per split. Every candidate "
+        "decoder pays this many executions (default: 20).",
+    )
+    parser.add_argument(
+        "--cr-select-split",
+        type=str,
+        default="train",
+        choices=["train", "val", "test"],
+        help="cascade reconstruction: episodes the outer loop's reward is computed "
+        "on (default: train).",
+    )
+    parser.add_argument(
+        "--cr-eval-split",
+        type=str,
+        default="test",
+        choices=["train", "val", "test"],
+        help="cascade reconstruction: HELD-OUT episodes the winning decoder is "
+        "re-run on unmodified, and the number every table reports (default: test).",
+    )
+    parser.add_argument(
+        "--cr-tree-weight",
+        type=float,
+        default=0.6,
+        help="cascade reconstruction: lambda in "
+        "lambda * PathPrecision + (1 - lambda) * EventF1. At least 0.5 is a "
+        "REQUIREMENT rather than a taste: the node set is nearly free, so a search "
+        "rewarded mostly on Event F1 discovers the tree contributes nothing to its "
+        "score and converges on decoders that never attempt it. 0 acknowledges a "
+        "node-only protocol explicitly and is the only value that runs on data "
+        "without a transmission edge (default: 0.6).",
+    )
+    parser.add_argument(
+        "--cr-mcmc-proposals",
+        type=int,
+        default=400,
+        help="arm A only (decode_*): Metropolis-Hastings proposals per cascade. "
+        "The first number to raise before quoting arm A as DITTO-parity "
+        "(default: 400).",
+    )
+    parser.add_argument(
+        "--cr-mcmc-burn-in",
+        type=float,
+        default=0.3,
+        help="arm A only: fraction of the chain discarded before the barycenter "
+        "starts accumulating (default: 0.3).",
     )
     parser.add_argument(
         "--budgets",
@@ -2020,6 +2183,15 @@ if __name__ == "__main__":
         sl_prior_weight=args.sl_prior_weight,
         sl_prior_epochs=args.sl_prior_epochs,
         sl_transfer_from=args.sl_transfer_from,
+        cr_setting=args.cr_setting,
+        cr_observation_rate=args.cr_observation_rate,
+        cr_hidden_rate=args.cr_hidden_rate,
+        cr_instances=args.cr_instances,
+        cr_select_split=args.cr_select_split,
+        cr_eval_split=args.cr_eval_split,
+        cr_tree_weight=args.cr_tree_weight,
+        cr_mcmc_proposals=args.cr_mcmc_proposals,
+        cr_mcmc_burn_in=args.cr_mcmc_burn_in,
         allow_mc_algorithms=args.allow_mc_algorithms,
         strategy_timeout=args.strategy_timeout,
         llm_price_in=args.llm_price_in,

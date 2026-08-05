@@ -22,6 +22,7 @@ from coding_agent.tools import (
     dismantling_algorithms,
     localization_algorithms,
     primitives,
+    reconstruction_algorithms,
 )
 from coding_agent.types import ActionOp, GraphInfo, ScoredStrategy, State, Strategy
 from data.wm_simulator import valid_action_ops
@@ -149,6 +150,23 @@ if _unknown_blocked:
         f"in blocking_algorithms; fix the list or the rename"
     )
 
+# ...and on the cascade-reconstruction side. `mcmc_decode` and `forward_backward`
+# evaluate the transition kernel `proposals x horizon` times per instance, and a
+# generated program already HAS the metered kernel (`self.step_marginals`) — so
+# blocking them costs nothing and is the only way that cost lands in the arm's
+# own `kernel_calls`, which is the number research/cascade_reconstruction.md §11
+# says nobody has published.
+mc_blocked_reconstruction = reconstruction_algorithms.mc_reconstruction_algorithms
+
+_unknown_blocked = set(mc_blocked_reconstruction) - set(
+    reconstruction_algorithms.reconstruction_algorithms
+)
+if _unknown_blocked:
+    raise ValueError(
+        f"mc_reconstruction_algorithms names {sorted(_unknown_blocked)}, which are "
+        f"not in reconstruction_algorithms; fix the list or the rename"
+    )
+
 
 class StrategyError(RuntimeError):
     """A generated script failed to parse, execute, or expose a valid Strategy."""
@@ -270,6 +288,18 @@ def _blocked_localizer(name: str, *_args, **_kwargs) -> None:
     )
 
 
+def _blocked_decoder(name: str, *_args, **_kwargs) -> None:
+    raise StrategyError(
+        f"reconstruction_algorithms.{name} is not available: it evaluates the "
+        f"transition kernel proposals x horizon times per instance, which "
+        f"dominates wall clock. Blocked: {', '.join(mc_blocked_reconstruction)}. "
+        f"You already have the metered kernel — call "
+        f"`self.step_marginals(infected, frontier)` and write the search around it "
+        f"yourself, which is also the only way its cost lands in this arm's "
+        f"kernel-call count."
+    )
+
+
 def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -> dict:
     if strategy_mode == "scored":
         # No algorithms module: the agent must write its own scoring logic
@@ -373,6 +403,19 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         "localization_scorers": SimpleNamespace(
             **localization_algorithms.localization_scorers
         ),
+        # TRAJECTORY decoders for cascade reconstruction, on the same terms again.
+        # These are the published methods a reconstruct() program is compared
+        # against, so hiding them would ask the model to reinvent delayed-BFS.
+        "reconstruction_algorithms": SimpleNamespace(
+            **{
+                name: (
+                    function
+                    if allow_mc_algorithms or name not in mc_blocked_reconstruction
+                    else partial(_blocked_decoder, name)
+                )
+                for name, function in reconstruction_algorithms.reconstruction_algorithms.items()
+            }
+        ),
         "primitives": primitives,
         # Containment helpers a canned dismantling baseline needs (removal_plan
         # filters the outbreak's sources out of a published algorithm's output).
@@ -430,27 +473,30 @@ def build_strategy(
                 hasattr(value, "plan_horizon")
                 or hasattr(value, "act")
                 or hasattr(value, "localize")
+                or hasattr(value, "reconstruct")
             )
         ]
 
         if not candidates:
             raise StrategyError(
-                "No Strategy subclass with plan_horizon()/act()/localize() found "
-                "in the script."
+                "No Strategy subclass with plan_horizon()/act()/localize()/"
+                "reconstruct() found in the script."
             )
 
     strategy_class = candidates[-1]
 
-    # Both harnesses are fixed in scored mode: plan_horizon for the intervention
-    # tasks, localize for the inverse one. Overriding either turns scored mode back
-    # into free mode, which is the one thing the condition exists to prevent.
-    for fixed in ("plan_horizon", "localize"):
+    # All three harnesses are fixed in scored mode: plan_horizon for the
+    # intervention tasks, localize for source localization, reconstruct for
+    # cascade reconstruction. Overriding one turns scored mode back into free
+    # mode, which is the one thing the condition exists to prevent.
+    for fixed in ("plan_horizon", "localize", "reconstruct"):
         if strategy_mode == "scored" and getattr(strategy_class, fixed) is not getattr(
             ScoredStrategy, fixed
         ):
             raise StrategyError(
                 f"scored mode: {fixed} is the fixed harness and may not be "
-                f"overridden — override only score(), schedule() or source_score()."
+                f"overridden — override only score(), schedule(), source_score() "
+                f"or edge_cost()."
             )
     try:
         strategy = strategy_class()

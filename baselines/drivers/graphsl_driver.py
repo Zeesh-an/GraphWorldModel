@@ -275,9 +275,8 @@ def predict_ivgd(adjacency, train_dataset, all_datasets, _payload, epochs, seed)
 
 
 def predict_slvae(adjacency, train_dataset, all_datasets, _payload, epochs, seed):
-    from torch.optim import Adam
-
     from GraphSL.GNN.SLVAE.main import SLVAE
+    from torch.optim import Adam
 
     model = SLVAE()
     slvae_model, seed_vae_train, threshold, _, _, _ = model.train(

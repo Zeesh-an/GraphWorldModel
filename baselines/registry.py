@@ -1694,6 +1694,35 @@ graphsl_methods = ("lpsi", "netsleuth", "ojc", "gcnsi", "ivgd", "slvae")
 graphsl_epochs = 50
 
 
+def training_rows(instances: list):
+    """
+    Which rows a SUPERVISED external baseline may fit on: the selection pool only.
+
+    Both pools cross the boundary concatenated (`select + evaluate`), because the
+    arm makes two passes and a repo invoked once has to cover both. The rule is
+    "same split as the first row", and it is a split comparison rather than a
+    first-occurrence one for a reason worth stating: the two pools come from
+    DISJOINT splits, so no episode id ever repeats, and a first-occurrence rule
+    marks every row trainable — which silently fits a learned method on the
+    evaluation cascades it is then scored against.
+
+    That is the one thing `run_baseline`'s module docstring says must never
+    happen: a label may reach a repo's `train`, never its evaluation-split
+    prediction.
+    """
+    import numpy as np
+
+    if not instances:
+        return np.zeros(0, dtype=bool)
+
+    first = getattr(instances[0], "split", "")
+
+    return np.array(
+        [getattr(instance, "split", "") == first for instance in instances],
+        dtype=bool,
+    )
+
+
 def _graphsl_export(graph, work_dir: Path, instances: list, diffusion_model: str) -> dict:
     """
     Our episodes as GraphSL's own two arrays: a CSR adjacency and per-instance
@@ -1733,20 +1762,13 @@ def _graphsl_export(graph, work_dir: Path, instances: list, diffusion_model: str
         # silently empty its infected set
         observations[row] = (np.asarray(instance.observation) >= 0.5).astype(np.float32)
 
-    # An episode appears in only one pool, so the first occurrence decides
-    seen = set()
-    is_train = np.zeros(len(instances), dtype=bool)
-    for row, instance in enumerate(instances):
-        is_train[row] = instance.episode_id not in seen
-        seen.add(instance.episode_id)
-
     np.savez(
         work_dir / "instances.npz",
         seeds=seeds,
         observations=observations,
         episode_ids=np.array([instance.episode_id for instance in instances]),
         budgets=np.array([max(1, instance.source_count) for instance in instances]),
-        is_train=is_train,
+        is_train=training_rows(instances),
     )
 
     driver = baselines_root / "drivers" / "graphsl_driver.py"
@@ -1821,12 +1843,6 @@ def _localization_export(
         trajectories[row, : path.shape[0]] = path
         trajectories[row, path.shape[0] :] = path[-1]
 
-    seen = set()
-    is_train = np.zeros(len(instances), dtype=bool)
-    for row, instance in enumerate(instances):
-        is_train[row] = instance.episode_id not in seen
-        seen.add(instance.episode_id)
-
     np.savez(
         work_dir / "instances.npz",
         seeds=seeds,
@@ -1835,7 +1851,7 @@ def _localization_export(
         episode_ids=np.array([instance.episode_id for instance in instances]),
         budgets=np.array([max(1, instance.source_count) for instance in instances]),
         horizons=np.array([instance.horizon for instance in instances]),
-        is_train=is_train,
+        is_train=training_rows(instances),
     )
 
     shutil.copy(baselines_root / "drivers" / driver, work_dir / driver)
@@ -1851,6 +1867,180 @@ def _localization_command(
 
 def _localization_parse(work_dir: Path, stdout: str, instances: list) -> dict:
     return json.loads((work_dir / "predictions.json").read_text())["sources"]
+
+
+# Cascade reconstruction -----------------------------------------------------
+#
+# The inverse export one level up: a decoder is handed whole MASKED HISTORIES
+# rather than endpoints, and hands back one time assignment per cascade. The tree
+# is then built by our own shared `finalize` rule in `run_baseline`, deliberately:
+# only DIPT outputs explicit who-infected-whom edges and it has no public code, so
+# every runnable repo here produces per-step node STATES (DITTO's `y_pred`) and a
+# Path Precision comparison between two of them would otherwise be a comparison of
+# two different tree-building tricks rather than of two decoders.
+
+# DITTO's own hyperparameters, read from `scripts/ditto-ba-si.sh` rather than from
+# the paper. Its MCMC is `t_steps` Hastings rounds over `t_samples` parallel
+# chains, and `q_steps` is the proposal network's training budget — which is the
+# expensive half and the first thing to cut for a smoke run.
+ditto_defaults = {
+    "b_pI0": "1e-6",
+    "b_pR0": "1e-6",
+    "b_steps": "500",
+    "b_lr": "0.003",
+    "q_steps": "500",
+    "q_lr": "0.001",
+    "q_hid": "16",
+    "q_gnn": "3",
+    "q_mlp": "2",
+    "q_samples": "10",
+    "q_zlim": "16",
+    "p_coef": "1.0",
+    "t_samples": "100",
+    "t_steps": "10",
+    "t_keep": "0.5",
+}
+
+
+def _reconstruction_export(
+    graph, work_dir: Path, instances: list, diffusion_model: str, driver: str,
+    supervised: bool = False
+) -> dict:
+    """
+    Our masked cascades as a graph file plus one row per instance.
+
+    Everything a decoder needs and nothing it may not see. The SOURCE SET is
+    deliberately absent: only the source COUNT crosses, because DITTO reads `I0`
+    off `y[:, 0]` in its own pipeline and our own protocol hands every inverse
+    method its `k` (research/source_localization.md §2.4.1).
+
+    `reported` / `reported_times` are the mask, `final_state` the terminal
+    snapshot, and `visible` the hidden-node mask. A repo that only consumes the
+    snapshot (DITTO) ignores the first two; one that consumes reports ignores the
+    third.
+
+    `supervised` adds the two arrays a TRAINED imputer needs — GRIN, SPIN and
+    Deep Demixing all fit a model on labelled histories before predicting, which
+    is a setting none of our own arms have and which every row produced this way
+    has to be labelled with. Two invariants make that safe rather than a leak, and
+    both are ASSERTED here rather than trusted:
+
+      * `is_train` is True for the SELECTION pool only, decided by `training_rows`
+        on the instance's own split. Both pools cross together (the arm makes two
+        passes and a repo invoked once has to cover both) and their episode ids are
+        disjoint, which is exactly why the rule is a split comparison rather than a
+        first-occurrence one.
+      * `trajectories` is the true per-step history for training rows and EXACTLY
+        ZERO for evaluation rows. A driver bug can then only ever read zeros for a
+        row it must not see the answer to, instead of reading the answer.
+
+    That is the same rule `run_baseline`'s module docstring states for the
+    inverse batch: labels may reach a repo's `train`, never its evaluation-split
+    prediction.
+    """
+    import numpy as np
+
+    os.makedirs(work_dir, exist_ok=True)
+    num_nodes = graph.num_nodes
+    view = _undirected_view(graph)
+
+    np.savez(
+        work_dir / "graph.npz",
+        edges=np.array(list(view.edges()), dtype=np.int64).reshape(-1, 2),
+        num_nodes=np.array(num_nodes),
+    )
+
+    count = len(instances)
+    reported = np.zeros((count, num_nodes), dtype=np.float32)
+    # -1 = "reported but the time is withheld", -2 = "not reported at all"
+    reported_times = np.full((count, num_nodes), -2, dtype=np.int64)
+    final_state = np.zeros((count, num_nodes), dtype=np.float32)
+    visible = np.ones((count, num_nodes), dtype=bool)
+
+    for row, instance in enumerate(instances):
+        for node, time in instance.observation.reported.items():
+            reported[row, int(node)] = 1.0
+            reported_times[row, int(node)] = -1 if time is None else int(time)
+
+        final_state[row] = np.asarray(instance.final_state, dtype=np.float32)
+
+        if instance.observation.visible is not None:
+            visible[row] = np.asarray(instance.observation.visible, dtype=bool)
+
+    payload = dict(
+        reported=reported,
+        reported_times=reported_times,
+        final_state=final_state,
+        visible=visible,
+        episode_ids=np.array([instance.episode_id for instance in instances]),
+        horizons=np.array([instance.horizon for instance in instances]),
+        # The number of sources, never which ones: DITTO's own pipeline reads this
+        # off y[:, 0] and every inverse arm here is given its k
+        source_counts=np.array([len(instance.sources) for instance in instances]),
+        settings=np.array(
+            [instance.observation.setting for instance in instances]
+        ),
+    )
+
+    if supervised:
+        is_train = training_rows(instances)
+
+        # Padded to one array; holding the last step is exact for a monotone
+        # cascade, and a training row's own horizon is in `horizons` anyway
+        depth = max(instance.horizon for instance in instances) + 1
+        trajectories = np.zeros((count, depth, num_nodes), dtype=np.float32)
+
+        for row, instance in enumerate(instances):
+            if not is_train[row]:
+                continue
+
+            for node, time in instance.true_times.items():
+                trajectories[row, min(int(time), depth - 1) :, int(node)] = 1.0
+
+        if trajectories[~is_train].any():
+            raise ValueError(
+                "an EVALUATION row carries a ground-truth trajectory; that is the "
+                "one thing this export must never do. A label may reach a repo's "
+                "train() and never its evaluation-split prediction."
+            )
+
+        payload |= dict(trajectories=trajectories, is_train=is_train)
+        # The three supervised drivers share their loading, training and decoding,
+        # so the helper travels with them. It is copied NEXT TO the driver rather
+        # than imported from our tree because the subprocess runs in the repo's own
+        # venv and cannot see ours; Python puts the script's own directory on
+        # `sys.path[0]`, so `import imputation_common` resolves from work_dir while
+        # each driver's `sys.path.insert(0, os.getcwd())` reaches the repo itself.
+        shutil.copy(
+            baselines_root / "drivers" / "imputation_common.py",
+            work_dir / "imputation_common.py",
+        )
+
+    np.savez(work_dir / "instances.npz", **payload)
+    shutil.copy(baselines_root / "drivers" / driver, work_dir / driver)
+
+    return {"driver": str(work_dir / driver)}
+
+
+def _reconstruction_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    return ["python", extras["driver"], str(work_dir)]
+
+
+def _reconstruction_parse(work_dir: Path, stdout: str, instances: list) -> dict:
+    """
+    `{episode_id: {node: [time, parent or null]}}` from the driver's own artifact.
+
+    A `null` parent at `t > 0` is not an error here: it means the repo produced a
+    time assignment and no tree, which is what every runnable one in this file
+    does. `run_baseline._collect_trajectories` then builds the tree with the same
+    `finalize` rule the library decoders use, so a Path Precision difference
+    between rows is a difference in TIMES rather than in tree construction.
+    """
+    payload = json.loads((Path(work_dir) / "predictions.json").read_text())
+
+    return payload["trajectories"]
 
 
 # Influence blocking ---------------------------------------------------------
@@ -2206,6 +2396,60 @@ def _diffim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
     ]
 
     return [node for arc in arcs[:budget] for node in arc]
+
+
+def _ditto_entry(
+    name: str, entry: str, function: str, title: str, venue: str, notes: str
+) -> ExternalBaseline:
+    """
+    One arm per entry point in DITTO's clone, all three sharing its single install.
+
+    DITTO ships three drivable methods and two of them are the paper's own MLE
+    baselines: `dhrec.py` is its implementation of DHREC-PCDSVC for SI and SIR
+    (the original code covers only SEIRS) and `cri.py` is its implementation of
+    CRI, whose authors published none. Both also exist in our own pool, so these
+    two arms are a CROSS-CHECK on our reimplementations rather than new coverage —
+    and a valuable one, because §5.1's Tables 4-5 report DHREC and CRI only as
+    DITTO reports them.
+    """
+    return ExternalBaseline(
+        name=name,
+        kind=learned if entry == "ditto.py" else classical,
+        title=title,
+        venue=venue,
+        repo="https://github.com/q-rz/KDD23-DITTO",
+        paper="https://arxiv.org/abs/2306.00488",
+        entry=entry,
+        task="cascade_reconstruction",
+        status="needs_setup",
+        # The repo pins CUDA 11.4 / torch 1.7 and ships no requirements file. The
+        # deps are listed unpinned here for the same reason cosasi's are: resolving
+        # 2021 wheels on a current Python fails outright. Warning: torch-scatter has
+        # no universal wheel and builds from source against the installed torch,
+        # which is the slow half of this install and the one that fails first on a
+        # machine with no compiler.
+        requirements=None,
+        pip_packages=(
+            "torch",
+            "torch-geometric",
+            "torch-scatter",
+            "ndlib",
+            "class-resolver",
+            "networkx",
+            "numpy",
+            "pandas",
+            "scikit-learn",
+            "matplotlib",
+            "seaborn",
+            "tqdm",
+        ),
+        install_name="ditto",
+        export=partial(_reconstruction_export, driver="ditto_driver.py"),
+        command=_reconstruction_command,
+        parse_seeds=_reconstruction_parse,
+        extra_env={"GWM_DITTO_ENTRY": entry, "GWM_DITTO_FN": function},
+        notes=notes,
+    )
 
 
 def _cosasi_entry(method: str, title: str, venue: str, notes: str) -> ExternalBaseline:
@@ -3922,6 +4166,416 @@ external_baselines: dict[str, ExternalBaseline] = {
         "and cosasi's is an independent reading of the same text. Warning: "
         "SINGLE-SOURCE: under a multi-source protocol at k = 10% of N it scores "
         "near zero by construction (§8.2), so compare it at `--budgets 1`.",
+    ),
+    # Cascade reconstruction (research/cascade_reconstruction.md §3, §4).
+    # Three arms, one install: DITTO's clone is the only public code in the group
+    # of §4.2 (the methods that invert a LEARNED forward operator) and it ships the
+    # paper's two MLE baselines beside it.
+    "ditto": _ditto_entry(
+        "ditto",
+        "ditto.py",
+        "main",
+        "DITTO: reconstructing graph diffusion history from a single snapshot",
+        "KDD 2023",
+        "(key) THE reference point for this task, and the method arm A reimplements "
+        "against our own kernel. §2.3's whole argument is that swapping the forward "
+        "model is a second-order result inside DITTO's frame, and the way to show "
+        "that rather than assert it is to run both. Its Tables 4-5 are the "
+        "comparable ones (§5.1) and TWO of its four synthetic rows are graphs we "
+        "generate natively (`--dataset ba --ba-m 4` and `--dataset er --er-p 0.008` "
+        "at n=1,000). Warning: DITTO always solves the DASH (final-snapshot) problem "
+        "whatever --cr-setting the sweep runs, because `ditto.py` conditions on "
+        "`data.y[:, -1]` and nothing else — verified by reading every `data.*` "
+        "access. Under --cr-setting partial_times it is therefore answering a "
+        "strictly harder instance than every other arm and its row must say so. It "
+        "outputs per-step node STATES and no propagation tree, so its Path "
+        "Precision is measured on a tree derived by our shared `finalize` rule; "
+        "§5.8 records that DIPT is the only method in this literature that emits "
+        "edges, and DIPT has no public code. §2.11 risk 6 is why this arm matters: "
+        "DITTO beats a supervised model trained with the TRUE beta on BA-SIR and "
+        "ER-SIR, so it is genuinely hard to beat and a weak version of it makes "
+        "6-vs-A meaningless.",
+    ),
+    "ditto_dhrec": _ditto_entry(
+        "ditto_dhrec",
+        "dhrec.py",
+        "pcdsvc_run",
+        "DHREC-PCDSVC, as implemented by DITTO's authors",
+        "ICDM 2014 / KAIS 2016",
+        "A CROSS-CHECK on our own `dhrec`, not new coverage. Sefer & Kingsford's "
+        "original code is specially for SEIRS, so DITTO's authors reimplemented "
+        "PCDSVC for SI and SIR — which means this arm and ours are two independent "
+        "readings of one paper's prose, and their spread bounds how much of a DHREC "
+        "number is the method and how much is the harness. DITTO's Table 5 puts it "
+        "at F1 .50-.66, i.e. 10-35% behind the supervised ideal [verified, §5.1], "
+        "which is the bar an interesting result has to clear rather than the one it "
+        "has to beat.",
+    ),
+    "ditto_cri": _ditto_entry(
+        "ditto_cri",
+        "cri.py",
+        "cri_run",
+        "CRI (clustering + reverse infection), as implemented by DITTO's authors",
+        "TNSE 2016",
+        "The second cross-check, and the more valuable of the two: the CRI paper "
+        "published NO source code at all, so our `cri` and this one are both "
+        "reimplementations from prose and neither is authoritative. DITTO's Tables "
+        "4-5 report it at F1 .42-.82 [verified]. Same caveat as its sibling — it "
+        "conditions on the final snapshot only.",
+    ),
+    "reconstructing_cascade": ExternalBaseline(
+        name="reconstructing_cascade",
+        kind=classical,
+        title="Reconstructing a cascade from temporal observations (OrderedSteinerTree)",
+        venue="SDM 2018",
+        repo="https://github.com/xiaohan2012/reconstructing-cascade",
+        paper="https://arxiv.org/abs/1801.08586",
+        entry="paper_experiment.py",
+        task="cascade_reconstruction",
+        status="blocked",
+        blocker=(
+            "hard dependency on `graph_tool`, which is NOT pip-installable — it is "
+            "a Boost/C++ extension distributed through conda, apt or a source "
+            "build, so it cannot go into a per-baseline venv the way every other "
+            "entry here does. Verified by reading the repo at HEAD: `steiner_tree.py` "
+            "opens with `from graph_tool import Graph, GraphView` and `gt_utils.py`, "
+            "`core.py`, `tbfs.py` and `utils.py` all do the same. All four of its "
+            "methods are reimplemented in `coding_agent/tools/"
+            "reconstruction_algorithms.py` (`delayed_bfs`, `ordered_steiner_closure`, "
+            "`greedy_ordered`, `steiner_tree`), so the coverage is not lost — only "
+            "the authors' own code is. TO UNBLOCK: a conda-based install path for "
+            "one baseline, which the setup script does not have and which would be "
+            "the first of its kind here."
+        ),
+        notes=(
+            "The source of `delayed_bfs`, the row that actually has to be beaten. "
+            "Its `closure` gives O(sqrt(k)) and `delayed-bfs` a k-approximation in "
+            "O(m + k log k) [verified, §5.6]. Warning: it publishes ZERO result "
+            "tables — everything in §5.6 is [figure] — so running it would produce "
+            "the per-cell baselines this literature does not have, which is exactly "
+            "why the blocker above is worth revisiting. Three of its four graphs "
+            "(email-Eu-core, ca-GrQc, facebook) are ones we load."
+        ),
+    ),
+    "cascade_tree_samples": ExternalBaseline(
+        name="cascade_tree_samples",
+        kind=classical,
+        title="Robust cascade reconstruction by Steiner tree sampling",
+        venue="ICDM 2018",
+        repo="https://github.com/xiaohan2012/cascade-reconstruction-by-tree-samples",
+        paper="https://arxiv.org/abs/1809.05812",
+        entry="inference.py",
+        task="cascade_reconstruction",
+        status="blocked",
+        blocker=(
+            "the same `graph_tool` blocker as `reconstructing_cascade`, PLUS a "
+            "second one: it needs the author's separate Cython package "
+            "`xiaohan2012/random_steiner_tree` (loop-erased random walk / "
+            "cycle-popping), which is not on PyPI and builds against graph_tool's "
+            "own headers. `tree_sampling` in our pool implements the method with "
+            "randomized-cost shortest-path trees instead of cycle-popping, which is "
+            "a documented approximation of the sampler rather than of the method."
+        ),
+        notes=(
+            "The only classical method in §3 that outputs calibrated per-node "
+            "PROBABILITIES rather than a binary set. It is also the source of §8.2 "
+            "trap 4, the most specific warning in that file: on `grqc` "
+            "(assortativity 0.164) a Personalized PageRank baseline BEATS this "
+            "method, and loses elsewhere [verified]. We load that graph as "
+            "`ca_grqc`, `personalized_pagerank` is in the default pool for exactly "
+            "this reason, and the comparison is runnable today without this repo."
+        ),
+    ),
+    "cult": ExternalBaseline(
+        name="cult",
+        kind=classical,
+        title="CulT: reconstructing an epidemic over time",
+        venue="KDD 2016",
+        repo="https://github.com/polinapolina/reconstructing-an-epidemic-over-time",
+        paper="https://www.kdd.org/kdd2016/papers/files/rpp0920-rozenshteinAT3.pdf",
+        entry="experiments/demo.py",
+        task="cascade_reconstruction",
+        status="blocked",
+        blocker=(
+            "PYTHON 2, and a different input object. Verified by reading "
+            "`experiments/demo.py` at HEAD: it uses py2 print STATEMENTS "
+            "(`print len(TS), ...`) throughout, as does every module under "
+            "`experiments/utils/`, so it does not parse under Python 3 at all. The "
+            "deeper problem is the contract rather than the syntax: CulT consumes a "
+            "temporal INTERACTION STREAM `TS` (§5.5 — 'works on interaction "
+            "streams, not a static G') and our episodes are diffusion states on a "
+            "static graph, so `readFile(..., mode='general')` has nothing to read. "
+            "TO WIRE: a 2to3 pass over `experiments/` plus a synthetic interaction "
+            "stream built from our per-step frontiers, which would be a different "
+            "experiment rather than this one. `cult` in our own pool implements the "
+            "alpha-TempSteinerTree objective on the static graph instead."
+        ),
+        notes=(
+            "The honest ceiling for 'what can you do without a kernel' (§5.5): the "
+            "only method in §3 that assumes NO propagation model at all, which "
+            "makes it the right thing for a learned kernel to beat. Warning: it "
+            "publishes zero tables — `grep -c \"Table\"` on the KDD'16 text returns "
+            "0 [verified] — so its MCC 0.60-0.90 is [figure] and no per-cell "
+            "comparison exists in either direction."
+        ),
+    ),
+    "active_cascade_reconstruction": ExternalBaseline(
+        name="active_cascade_reconstruction",
+        kind=classical,
+        title="Active cascade reconstruction (query selection)",
+        venue="Xiao et al., follow-up to ICDM 2018",
+        repo="https://github.com/xiaohan2012/active-cascade-reconstruction",
+        paper="https://arxiv.org/abs/1809.05812",
+        entry="query_selection.py",
+        task="cascade_reconstruction",
+        status="blocked",
+        blocker=(
+            "the SETTING is one we deliberately do not run. Active reconstruction "
+            "lets the decoder CHOOSE which nodes to query, which turns the "
+            "observation mask into an action — §2.11 risk 7 records that as the fix "
+            "for this task exercising none of the five action ops, and recommends "
+            "deferring it for the same reason source localization defers its "
+            "analogue. Wiring it before we run the passive setting would put an "
+            "arm with a different information budget in the same column. It also "
+            "inherits both of `cascade_tree_samples`' dependency blockers."
+        ),
+        notes=(
+            "The one entry here that is registered for a FUTURE experiment rather "
+            "than a current one. If the active variant is ever run, this is the "
+            "published comparison for it and the query-selection strategies are the "
+            "baselines."
+        ),
+    ),
+    "deep_demixing": ExternalBaseline(
+        name="deep_demixing",
+        kind=learned,
+        title="DDMIX / Deep Demixing: a conditional-VAE GNN over aggregated snapshots",
+        venue="EUSIPCO 2021 / TSIPN 2023",
+        repo="https://github.com/gojkoc54/Deep_demixing",
+        paper="https://arxiv.org/abs/2306.07938",
+        entry="models.py (CVAE_UNET_Batch)",
+        task="cascade_reconstruction",
+        status="needs_setup",
+        # Its environment.yml is a conda spec pinned to 2021 and does not resolve
+        # through pip; the model itself needs only torch + torch-geometric, whose
+        # GraphUNet and GCNConv are what `models.py` imports.
+        # Warning: `CVAE_UNET_Batch` is built from torch_geometric's `GraphUNet`,
+        # whose `augment_adj` does a sparse-CSR @ sparse-CSR matmul that a torch
+        # built WITHOUT MKL cannot do on CPU — the stock Apple Silicon wheel is the
+        # common case, and the same four lines fail with GraphUNet alone. It runs
+        # on Linux (whose torch ships with MKL) and on CUDA; the driver catches
+        # that specific RuntimeError and says so rather than surfacing a traceback
+        # that points into torch_geometric and reads like a wiring bug.
+        requirements=None,
+        pip_packages=("torch", "torch-geometric", "networkx", "numpy", "scipy"),
+        export=partial(
+            _reconstruction_export,
+            driver="deep_demixing_driver.py",
+            supervised=True,
+        ),
+        command=_reconstruction_command,
+        parse_seeds=_reconstruction_parse,
+        extra_env={},
+        notes=(
+            "The learned method closest to our own output shape: it demixes ONE "
+            "aggregated snapshot into node states at ALL T steps, which is exactly "
+            "the object `reconstruct()` returns. DIPT reports it at Path Precision "
+            "0.062-0.327 and Jaccard 0.031-0.195 across five graphs — the WEAKEST "
+            "row of §5.2's table [verified] — and its own paper says accuracy "
+            "degrades as T grows because the solution space blows up, so a low "
+            "number here is the expected outcome rather than a wiring failure. "
+            "Warning: SUPERVISED. It fits on the selection split's labelled "
+            "histories, which no other arm on the table does, so its row is not "
+            "comparable to an unsupervised decoder's without saying so. Driven "
+            "through `CVAE_UNET_Batch` directly rather than through "
+            "`scripts/exp0-minimal.py`, which reads the repo's own pickle layout "
+            "and trains four models at once: the authors' MODEL, our optimizer. "
+            "At prediction time the driver passes ZEROS for `y` — the model takes "
+            "its prior path at eval and never uses the posterior, so the output is "
+            "unchanged and an evaluation row's history never enters the forward "
+            "pass at all."
+        ),
+    ),
+    "grin": ExternalBaseline(
+        name="grin",
+        kind=learned,
+        title="GRIN: graph recurrent imputation network",
+        venue="ICLR 2022",
+        repo="https://github.com/Graph-Machine-Learning-Group/grin",
+        paper="https://arxiv.org/abs/2108.00298",
+        entry="lib/nn/models/grin.py (GRINet)",
+        task="cascade_reconstruction",
+        status="needs_setup",
+        # Its requirements.txt pins tensorflow==2.5.0, tensorflow-gpu==2.4.0,
+        # pytorch-lightning==1.4 and torch==1.8, none of which resolves on a
+        # current Python and none of which GRINet needs: tracing every import in
+        # lib/nn/layers/{rits,gril,gcrnn,spatial_conv,spatial_attention}.py gives
+        # torch + einops and nothing else.
+        requirements=None,
+        pip_packages=("torch", "einops", "numpy"),
+        export=partial(
+            _reconstruction_export, driver="grin_driver.py", supervised=True
+        ),
+        command=_reconstruction_command,
+        parse_seeds=_reconstruction_parse,
+        extra_env={},
+        notes=(
+            "(key) DITTO's STRONGEST supervised baseline, and the one it uses as the "
+            "IDEAL upper bound when trained with the true beta [verified, §5.1] — "
+            "every `Gap` column in its Tables 4-5 is measured against this row, "
+            "which makes it the single most useful reference number in this "
+            "literature. Warning: SUPERVISED, and that is the caveat its row must "
+            "carry: it fits on the selection split's labelled histories while every "
+            "other arm on the table never sees one. §5.1.2 is why that matters "
+            "concretely rather than pedantically — the supervised family collapses "
+            "from F1 ~ 0.80 on simulated diffusion to F1 ~ 0.32 on real, which is "
+            "§2.11 risk 4 in one table. Driven through `GRINet` directly rather "
+            "than through `scripts/run_imputation.py`, a Lightning experiment over "
+            "four hardcoded traffic and air-quality datasets: the authors' MODEL, "
+            "our optimizer, so GWM_IMPUTE_EPOCHS is the first number to raise "
+            "before quoting it as parity. `impute_only_holes` is left ON, its own "
+            "default, so an observed entry is pinned back exactly as our shared "
+            "decoder does."
+        ),
+    ),
+    "spin": ExternalBaseline(
+        name="spin",
+        kind=learned,
+        title="SPIN: sparse spatiotemporal attention for imputation",
+        venue="NeurIPS 2022",
+        repo="https://github.com/Graph-Machine-Learning-Group/spin",
+        paper="https://arxiv.org/abs/2205.13479",
+        entry="spin/models/spin.py (SPINModel)",
+        task="cascade_reconstruction",
+        status="needs_setup",
+        # Its conda_env.yml wants conda channels; the model needs torch,
+        # torch-geometric and three tsl.nn pieces (StaticGraphEmbedding, MLP, and
+        # the repo's own spin/layers/), and `torch-spatiotemporal` is on PyPI.
+        #
+        # Warning: `torch-scatter` is NOT optional here even though nothing in SPIN
+        # imports it directly — `tsl.nn.functional` does, at module load, so
+        # `from spin.models import SPINModel` dies with ModuleNotFoundError without
+        # it. It has no universal wheel and builds from source against the
+        # installed torch, which is the slow half of this install and the one that
+        # fails first on a machine with no compiler. Same hazard `ditto` carries.
+        requirements=None,
+        pip_packages=(
+            "torch",
+            "torch-geometric",
+            "torch-scatter",
+            "torch-spatiotemporal",
+            "einops",
+            "numpy",
+        ),
+        export=partial(
+            _reconstruction_export, driver="spin_driver.py", supervised=True
+        ),
+        command=_reconstruction_command,
+        parse_seeds=_reconstruction_parse,
+        extra_env={},
+        notes=(
+            "GRIN's attention-based successor, and the one method in §5.1.2 that "
+            "BEATS DITTO outright on a real-diffusion row (BrFarmers, F1 .8268 "
+            "against .8206) while running OUT OF MEMORY on Oregon2, Prost and Pol "
+            "[verified]. That OOM pattern is the useful half: it is the clearest "
+            "published statement of the scale ceiling on attention-based "
+            "reconstruction, and our own graphs sit on both sides of it — `jazz` "
+            "and `infectious` well below, `oregon2` and `rt_pol` at or above. **An "
+            "OOM here is a REPORTABLE RESULT**, not a failed arm; the driver "
+            "catches it and exits with the reason, which `run_baseline` records as "
+            "a skip. Same SUPERVISED caveat and same model-not-recipe wiring as "
+            "`grin`. Its `u` argument takes time-of-day encodings in the authors' "
+            "own experiments; a cascade has no calendar, so the driver passes the "
+            "normalized step index, which is the same information in the form its "
+            "positional encoder expects."
+        ),
+    ),
+    "brits": ExternalBaseline(
+        name="brits",
+        kind=learned,
+        title="BRITS: bidirectional recurrent imputation for time series",
+        venue="NeurIPS 2018",
+        repo="https://github.com/caow13/BRITS",
+        paper="https://arxiv.org/abs/1805.10572",
+        entry="PyTorch",
+        task="cascade_reconstruction",
+        status="blocked",
+        blocker=(
+            "GRAPH-AGNOSTIC, which makes it the wrong control here. It imputes a "
+            "multivariate time series with no adjacency at all, so it cannot use "
+            "the one input this whole task is conditioned on and its row would "
+            "measure the difficulty of the imputation rather than of the "
+            "reconstruction. DITTO includes it as the weakest supervised baseline "
+            "and it OOMs on Pol [verified, §5.1.2]. Registered because it is in "
+            "that table, not because it belongs in ours; run it only if a "
+            "'does the graph help at all' ablation is wanted, and label it as one."
+        ),
+        notes=(
+            "The floor of DITTO's supervised group: F1 .31-.52 on real diffusion "
+            "against GRIN's .54-.80 [verified]. Its value here is as the published "
+            "statement of how much the GRAPH is worth, which is a question our own "
+            "arm 3 (@native, no kernel) answers differently and better."
+        ),
+    ),
+    "dipt": ExternalBaseline(
+        name="dipt",
+        kind=learned,
+        title="DIPT: deep identification of propagation trees",
+        venue="preprint 2025 (Emory)",
+        repo="https://arxiv.org/abs/2503.00646",
+        paper="https://arxiv.org/abs/2503.00646",
+        entry="none published",
+        task="cascade_reconstruction",
+        status="blocked",
+        blocker=(
+            "NO PUBLIC CODE. §4.1 records that the anonymous 4open.science link in "
+            "the paper is the compartmental-disease SIMULATOR, not the model, and "
+            "no other release was found. Registered rather than omitted because it "
+            "is the only method in this literature that outputs explicit "
+            "who-infected-whom EDGES — i.e. the only published Path Precision "
+            "comparison that exists — and because §9 item 12 notes it is an Emory "
+            "paper (Memon, Ling, Kong, Seshagiri, Zufle, Liang Zhao) using two of "
+            "our graphs, which makes it a collaboration surface rather than only a "
+            "citation."
+        ),
+        notes=(
+            "(key) The ONLY published propagation-TREE table (§5.2): Path Precision "
+            "0.421-0.680 and Jaccard 0.266-0.515 across five graphs, against DDMSL "
+            "at 0.119-0.412 and DDMIX at 0.062-0.327 [verified, Table 1]. Two of "
+            "its five graphs are ours (`cora_ml`, `power_grid`) and its protocol is "
+            "reproducible from flags we already have — 10% of nodes as sources, SI "
+            "to convergence. Its Table 3 is also the argument for why "
+            "`--trace-parents` was worth a day of simulator work: 30% tree "
+            "supervision alone is worth +0.079 Path Precision over none."
+        ),
+    ),
+    "netrate": ExternalBaseline(
+        name="netrate",
+        kind=classical,
+        title="NETRATE: uncovering the temporal dynamics of diffusion networks",
+        venue="ICML 2011",
+        repo="https://github.com/Networks-Learning/netrate",
+        paper="https://arxiv.org/abs/1105.0697",
+        entry="MATLAB + CVX",
+        task="cascade_reconstruction",
+        status="blocked",
+        blocker=(
+            "MATLAB and CVX, neither of which this harness can drive, and the wrong "
+            "TASK besides: NETRATE recovers the transmission RATES of a latent "
+            "network from many cascades, which is network inference "
+            "(research/network_inference.md), not trajectory decoding. It is "
+            "registered here only because Farajtabar's 'Back to the Past' fits it "
+            "FIRST and then inverts the result, so it is a component of a §3 method "
+            "rather than a method of its own."
+        ),
+        notes=(
+            "Supplies the `p(y | x, G)` that Farajtabar AISTATS'15 inverts. "
+            "Farajtabar itself has no public code and publishes no tables, so that "
+            "whole row of §5.7 is [figure] and [verified] prose — its headline "
+            "number is a ~1% absolute success probability on MemeTracker, which is "
+            "the sober reminder that retrospective reconstruction on real data is "
+            "very hard."
+        ),
     ),
     "cosasi": ExternalBaseline(
         name="cosasi",

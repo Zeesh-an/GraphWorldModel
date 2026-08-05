@@ -32,6 +32,7 @@ from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.tools.blocking_algorithms import all_blocking_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
 from coding_agent.tools.localization_algorithms import localization_algorithms
+from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
 from coding_agent.types import improves
 from pipeline.tasks import get_task, maximize, minimize, tasks
 
@@ -53,9 +54,27 @@ valid_evaluators = (native, monte_carlo, oracle, world_model)
 # GAT / MONSTOR / DeepIS forward models, so that swap is a no-op it already
 # published — which makes this the CONTROL program search is measured against
 # rather than a competing method.
-valid_methods = ("one_shot", "per_step", "windowed", "evolve", "adaptive", "gradient")
+# `decode` is arm A of research/cascade_reconstruction.md §2.9, and the same kind
+# of object `gradient` is: a fixed numerical procedure with no LLM in it. It runs
+# DITTO's Metropolis-Hastings sampler over histories with our learned kernel in
+# place of DITTO's mean-field beta-hat, which §2.3 argues is the component swap the
+# tempting move would make — so it is the CONTROL decoder search is measured
+# against rather than a competing method.
+valid_methods = (
+    "one_shot",
+    "per_step",
+    "windowed",
+    "evolve",
+    "adaptive",
+    "gradient",
+    "decode",
+)
 adaptive_method = "adaptive"
 gradient_method = "gradient"
+decode_method = "decode"
+# The two ablation methods: fixed numerical procedures with no model in the loop,
+# so neither is charged --outer-iters LLM turns and neither joins the 3-6 ladder
+ablation_methods = (gradient_method, decode_method)
 # The non-adaptive counterpart an adaptive arm is divided by
 non_adaptive_method = "evolve"
 valid_modes = ("free", "scored")
@@ -74,7 +93,12 @@ condition_names = {
     5: "Agent + oracle dynamics",
     6: "Ours: agent + learned GWM",
     7: "Published baseline (external repo)",
-    8: "Ablation: per-instance descent on a frozen GWM",
+    # Two tasks fill this cell with their own control, and both are the same KIND
+    # of object: a fixed numerical procedure that inverts a frozen world model with
+    # no LLM anywhere. Source localization's is Adam on a relaxed source vector
+    # (SL-VAE's own procedure); cascade reconstruction's is Metropolis-Hastings
+    # over histories (DITTO's). The name is generic because the cell is.
+    8: "Ablation: per-instance inversion of a frozen GWM",
 }
 
 # Conditions 1 and 2 have no refinement loop, so their evaluator only decides how
@@ -103,6 +127,7 @@ _pools = {
     "blocking": set(all_blocking_algorithms),
     "dismantling": set(dismantling_algorithms),
     "localization": set(localization_algorithms),
+    "reconstruction": set(reconstruction_algorithms),
 }
 for _first, _members in _pools.items():
     for _second, _others in _pools.items():
@@ -152,16 +177,17 @@ class Arm:
         """
         True when an LLM actually synthesises code (conditions 3-6).
 
-        `gradient` is excluded even though it names an evaluator: it is a fixed
-        numerical procedure (Adam on a relaxed source vector against a frozen
-        world model) with no model in the loop, so giving it --outer-iters LLM
+        `gradient` and `decode` are excluded even though they name an evaluator:
+        both are fixed numerical procedures with no model in the loop — Adam on a
+        relaxed source vector against a frozen world model, and Metropolis-Hastings
+        over histories against the same one — so giving either --outer-iters LLM
         turns would charge it for calls it never makes.
         """
         return (
             self.baseline is None
             and not self.routing
             and self.external is None
-            and self.method != gradient_method
+            and self.method not in ablation_methods
         )
 
 
@@ -269,7 +295,7 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
         # ablation they exist to be
         condition=(
             ablation_condition
-            if method == gradient_method
+            if method in ablation_methods
             else evaluator_conditions[evaluator]
         ),
     )
@@ -328,6 +354,23 @@ def reward_direction(sense: str) -> str:
     return "lower is better" if sense == minimize else "higher is better"
 
 
+def is_reconstruct(results: list[dict]) -> bool:
+    """
+    True when these results score a whole TRAJECTORY rather than a set or a spread.
+
+    Narrows `is_recover` the way `TaskSpec.decodes` narrows `TaskSpec.recovers`:
+    the shared comparable column is a tree-weighted score in [0, 1], the metric
+    table is Event F1 / Path Precision / NRMSE rather than PR / RE / F1 / AUC, and
+    a reader that printed either of the other two headers would name the wrong
+    quantity.
+    """
+    return any(result.get("reconstruction") for result in results) or any(
+        result.get("task") in tasks and get_task(result["task"]).reconstructs
+        for result in results
+        if result.get("task")
+    )
+
+
 def is_recover(results: list[dict]) -> bool:
     """
     True when these results score an INVERSE prediction rather than a cascade.
@@ -345,6 +388,9 @@ def is_recover(results: list[dict]) -> bool:
 
 def reward_name(results: list[dict]) -> str:
     """What the shared comparable column actually measures, for a table header."""
+    if is_reconstruct(results):
+        return "score"
+
     if is_recover(results):
         return "F1"
 

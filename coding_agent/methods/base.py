@@ -29,6 +29,13 @@ from coding_agent.localization import (
     evaluate_localizer,
     summarize_localization,
 )
+from coding_agent.reconstruction import (
+    ReconstructAnchor,
+    bind_step_marginals,
+    evaluate_reconstructor,
+    summarize_reconstruction,
+    transition_logprob,
+)
 from coding_agent.rounds import adaptive_action_fn, round_batches, round_schedule
 from coding_agent.stream import build_stream
 from coding_agent.tools import algorithms, primitives
@@ -39,6 +46,7 @@ from coding_agent.tools.localization_algorithms import (
     localization_algorithms,
     localization_scorers,
 )
+from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
 from coding_agent.types import (
     ActionOp,
     GraphInfo,
@@ -108,6 +116,28 @@ localization_anchor_algorithms = (
     "dmp_localize",
     "infected_degree",
     "random_sources",
+)
+
+# The leaderboard for a CASCADE RECONSTRUCTION task. `delayed_bfs` heads it
+# because it is the row that actually has to be beaten
+# (research/cascade_reconstruction.md §5.6): Xiao SDM'18's methods reach node
+# precision > 0.8 from an O(m + k log k) BFS variant, and it sits inside the
+# agent's own expressible space. `personalized_pagerank` is second for the
+# opposite reason — §8.2 trap 4 records that it BEATS tree sampling on `ca_grqc`
+# specifically, so an arm that does not clear it there has demonstrated nothing.
+# `observed_only` is Rozenshtein's `Reports` control and the concrete answer to
+# §2.11 risk 1: a trivial decoder has to score badly under the chosen reward.
+# `mcmc_decode` and `forward_backward` are deliberately absent for the same reason
+# `resim_greedy` and `adapt_greedy` are — they call the kernel thousands of times
+# per instance and would dominate startup for a table that exists to set a bar.
+reconstruction_anchor_algorithms = (
+    "delayed_bfs",
+    "personalized_pagerank",
+    "consistent_tree_wpct",
+    "cult",
+    "dhrec",
+    "observed_only",
+    "random_reconstruction",
 )
 
 # The leaderboard for an INFLUENCE BLOCKING task, per lever. `proximity` heads the
@@ -436,6 +466,11 @@ def summarize(
     # counts, residual gain, community reach — describes something that did not
     # happen. Its own summary answers the question that was actually asked: which
     # sources were recovered, which were missed, and what the misses have in common.
+    # A DECODER's is different again: the split that matters there is the node half
+    # against the tree half, which is the failure the reward is weighted to prevent.
+    if task is not None and task.decodes and graph is not None:
+        return summarize_reconstruction(trajectory, graph, task)
+
     if task is not None and task.recovers and graph is not None:
         return summarize_localization(trajectory, graph, task)
 
@@ -576,9 +611,9 @@ def paired_delta(
         verdict = "a real regression — undo what caused it"
 
     direction = "fewer is better" if sense == "minimize" else "more is better"
-    # F1 lives in [0, 1] and a 0.02 move is large there, so a fixed 2-decimal
-    # format would print every real change as +0.00
-    digits = 4 if unit == "F1" else 2
+    # F1 and the reconstruction score both live in [0, 1] and a 0.02 move is large
+    # there, so a fixed 2-decimal format would print every real change as +0.00
+    digits = 4 if unit in ("F1", "score") else 2
 
     return (
         f"CHANGE vs {incumbent_label} ({incumbent.reward:.{digits}f}): "
@@ -669,6 +704,14 @@ def attach_context(
 
     if environment is not None:
         strategy.predict_marginals = bind_predict_marginals(environment, task)
+        # ...and the TRANSITION kernel, the one new primitive of cascade
+        # reconstruction (research/cascade_reconstruction.md §2.5.2). Same four
+        # bindings and the same reason: the generated decoder is byte-identical
+        # across arms 3-6 and only its oracle changes. `transition_logprob`
+        # derives from it rather than being a second oracle, so one kernel call is
+        # behind both and the cost accounting stays honest.
+        strategy.step_marginals = bind_step_marginals(environment, task)
+        strategy.transition_logprob = transition_logprob
 
     return strategy
 
@@ -730,6 +773,22 @@ def evaluate_strategy(
     """
     start = time.perf_counter()
     attach_context(strategy, task, environment)
+
+    if task.decodes:
+        if not task.instances:
+            raise StrategyError(
+                "no labelled episodes were loaded for this decoding task; the data "
+                "stage must have run for this (dataset, dynamics, split)"
+            )
+
+        return evaluate_reconstructor(
+            strategy,
+            environment,
+            task,
+            graph,
+            list(task.instances),
+            task.tree_weight,
+        )
 
     if task.recovers:
         if not task.instances:
@@ -890,6 +949,44 @@ def baseline_anchor(
     The trajectory rides along because its per-node marginals are what
     reference_diff() compares against, which costs no further rollouts.
     """
+    if task.decodes:
+        # A decoding task's floor is the classical TRAJECTORY-DECODER library.
+        # These go through `evaluate_strategy` like everything else, which routes
+        # them into the reconstruction path — same episodes, same mask, same
+        # setting as the arm they are setting a bar for.
+        scored = []
+
+        for name in reconstruction_anchor_algorithms:
+            decoder = ReconstructAnchor(name, reconstruction_algorithms[name], task)
+            trajectory, _ = evaluate_strategy(decoder, environment, task, graph)
+            scored.append((name, trajectory))
+
+        scored = rank_by(scored, lambda entry: entry[1].reward, task.sense)
+        best_name, best_trajectory = scored[0]
+
+        lines = [
+            f"REFERENCE SCORES: classical cascade-reconstruction baselines run on "
+            f"THESE episodes, under the same mask and the same setting. The score "
+            f"is {task.tree_weight:.2f} * PathPrecision + "
+            f"{1.0 - task.tree_weight:.2f} * EventF1, HIGHER is better, and beating "
+            f"the top row is the bar. Read the two component columns, not just the "
+            f"score: `delayed_bfs` is the row that matters, and "
+            f"`personalized_pagerank` is on this list because the published finding "
+            f"is that it BEATS tree sampling on assortative graphs like ca_grqc. "
+            f"`observed_only` reports exactly what it was shown and infers nothing — "
+            f"if it is competitive, the reward is wrong, not the arm:",
+        ]
+        lines += [
+            f"  {name:<24} score {trajectory.reward:7.4f} "
+            f"(path_prec {trajectory.cost['metrics']['path_precision']:.4f}  "
+            f"event_f1 {trajectory.cost['metrics']['event_f1']:.4f}  "
+            f"node_f1 {trajectory.cost['metrics']['node_f1']:.4f}  "
+            f"NRMSE {trajectory.cost['metrics']['time_nrmse']:.4f})"
+            for name, trajectory in scored
+        ]
+
+        return "\n".join(lines), best_trajectory, best_name
+
     if task.recovers:
         # An inverse task's floor is the classical SOURCE-LOCALIZATION library.
         # These go through `evaluate_strategy` like everything else, which routes

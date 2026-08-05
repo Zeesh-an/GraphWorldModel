@@ -13,12 +13,16 @@ from coding_agent.tools import (
     dismantling_algorithms,
     localization_algorithms,
     primitives,
+    reconstruction_algorithms,
 )
 
 algorithm_names = list(algorithms.algorithms.keys())
 adaptive_names = list(adaptive_algorithms.adaptive_algorithms.keys())
 dismantling_names = list(dismantling_algorithms.dismantling_algorithms.keys())
 localization_names = list(localization_algorithms.localization_algorithms.keys())
+reconstruction_names = list(
+    reconstruction_algorithms.reconstruction_algorithms.keys()
+)
 blocking_names = list(blocking_algorithms.all_blocking_algorithms.keys())
 
 # Which library members a given lever can actually spend its budget on. Showing an
@@ -258,6 +262,51 @@ def build_localization_reference(exclude: tuple = ()) -> str:
         "your AUC is measured on the real ranking instead of a rank-derived\n"
         "stand-in:\n  "
         + ", ".join(f"localization_scorers.{name}" for name in localization_names)
+    )
+
+
+def build_reconstruction_menu() -> str:
+    """Return one `- name: summary` line per decoder (routing prompt)."""
+    lines = []
+    for name in reconstruction_names:
+        doc_lines = (
+            reconstruction_algorithms.reconstruction_algorithms[name].__doc__ or ""
+        ).strip().splitlines()
+        lines.append(f"- {name}: {doc_lines[0] if doc_lines else ''}")
+
+    return "\n".join(lines)
+
+
+def build_reconstruction_reference(exclude: tuple = ()) -> str:
+    """The TRAJECTORY-decoder surface, shown only to a reconstruction task's prompt."""
+    lines = [
+        _signature_line(reconstruction_algorithms.reconstruction_algorithms[name])
+        for name in reconstruction_names
+        if name not in exclude
+    ]
+
+    blocked_note = (
+        "\n  NOT AVAILABLE (calling one raises): "
+        + ", ".join(name for name in reconstruction_names if name in exclude)
+        + " — each evaluates the transition kernel thousands of times per\n"
+        "  instance. You already have the metered kernel:\n"
+        "  `self.step_marginals(infected, frontier)`."
+        if any(name in exclude for name in reconstruction_names)
+        else ""
+    )
+
+    return (
+        "CASCADE-RECONSTRUCTION DECODERS  (from\n"
+        "coding_agent.tools.reconstruction_algorithms, imported as\n"
+        "`reconstruction_algorithms`). Each returns "
+        "`{node: (activation timestep, parent)}`\n"
+        "for the nodes it believes were infected. These are the published "
+        "baselines\nyou are being compared against: call one, beat one, or take its "
+        "idea and\nimprove on it. `delayed_bfs` is the one that actually has to be "
+        "beaten — it is\nan O(m + k log k) ordered-Steiner heuristic with no learning "
+        "in it —\nand `personalized_pagerank` is on the list because the published "
+        "finding is\nthat a plain random walker BEATS tree sampling on assortative "
+        "graphs:\n" + "\n".join(lines) + blocked_note
     )
 
 

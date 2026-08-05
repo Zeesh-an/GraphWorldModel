@@ -143,9 +143,9 @@ Undirected rows quote undirected edges; directed rows quote arcs. `cora_ml` is l
 
 The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what the current NDlib rollout + selector pipeline can simulate in reasonable time — they are targets for a future scalable-simulation pass, not day-one datasets.
 
-The table above is the IM core; `CLAUDE.md` lists every loader, including the twelve network-dismantling benchmarks `critical_node_detection` uses. `dolphins` and `deezer` were added for `source_localization`: Dolphins (62 / 159, in IVGD, GraphSL and the 2026 GNN benchmark) is the only graph that literature uses which no other task needed, and `deezer` is IVGD's scalability column — **the HUNGARY subgraph**, not the union, which is a version distinction its own paper does not make and the SNAP release does not force (see the loader docstring).
+The table above is the IM core; `CLAUDE.md` lists every loader, including the twelve network-dismantling benchmarks `critical_node_detection` uses and the seven `cascade_reconstruction` added — five of which (`infectious`, `email_univ`, `uci_students`, `oregon2`, `rt_pol`) reproduce Xiao's and DITTO's published counts digit for digit, while `citeseer` deliberately does not and says so. `dolphins` and `deezer` were added for `source_localization`: Dolphins (62 / 159, in IVGD, GraphSL and the 2026 GNN benchmark) is the only graph that literature uses which no other task needed, and `deezer` is IVGD's scalability column — **the HUNGARY subgraph**, not the union, which is a version distinction its own paper does not make and the SNAP release does not force (see the loader docstring).
 
-**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one. [`research/critical_node_detection.md`](research/critical_node_detection.md) §6, [`research/source_localization.md`](research/source_localization.md) §6 and [`research/influence_blocking.md`](research/influence_blocking.md) §6 are the counterparts for the other three literatures, each with its own set of name collisions — blocking contributes thirteen loaders and two of the sharpest collisions in the repo, `epinions1` (75,879, SNAP's soc-Epinions1) against `epinions` (131,828, the signed graph) and three different Gnutella snapshots published under one name.
+**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one. [`research/critical_node_detection.md`](research/critical_node_detection.md) §6, [`research/source_localization.md`](research/source_localization.md) §6, [`research/influence_blocking.md`](research/influence_blocking.md) §6 and [`research/cascade_reconstruction.md`](research/cascade_reconstruction.md) §6 are the counterparts for the other four literatures, each with its own set of name collisions — blocking contributes thirteen loaders and two of the sharpest collisions in the repo, `epinions1` (75,879, SNAP's soc-Epinions1) against `epinions` (131,828, the signed graph) and three different Gnutella snapshots published under one name.
 
 ---
 
@@ -283,12 +283,14 @@ python -m pipeline.run --dataset ppi_yeast \
     --task critical_node_detection --compare                   # contain an outbreak
 python -m pipeline.run --dataset jazz \
     --task source_localization --compare                       # recover the sources
+python -m pipeline.run --dataset ca_grqc \
+    --task cascade_reconstruction --compare                    # recover the whole history
 python -m pipeline.run --dataset jazz --run gcnii_ablation \
     --wm-model gcnii --n-layers 8                              # a second variant
 python -c "from pipeline.tasks import runnable_task_names; print(runnable_task_names())"
 ```
 
-**Five run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, and `influence_blocking`. The other eight are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
+**Six run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, `influence_blocking`, and `cascade_reconstruction`. The other seven are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
 
 ```
 $ python -m pipeline.run --dataset ba --task epidemic_control
@@ -297,13 +299,27 @@ NDlib already ships SIR/SIS/SEIR, so the simulator is ~60 lines - but
 ICTransmissionHead composes `y_inf = infected + (1-infected) * p_new`, which is
 monotone by construction and cannot represent recovery or re-infection. See
 research/epidemic_control.md for the full analysis. Runnable today:
-['adaptive_online_im', 'critical_node_detection', 'influence_blocking',
-'influence_maximization', 'source_localization']
+['adaptive_online_im', 'cascade_reconstruction', 'critical_node_detection',
+'influence_blocking', 'influence_maximization', 'source_localization']
 ```
 
 The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, the budget sweep, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it — it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
 
 The runnable **problem families** are further apart than a sign flip. A `maximize` task seeds a cascade, a `minimize` task fights one it did not start, and a **`recover`** task emits no action at all: `source_localization` hands the agent a graph and an observed diffusion state and asks which seed set produced it. That changes the CONTRACT, not just the objective — the generated program implements `localize(graph, observation, budget)` instead of `plan_horizon`, it is scored on F1 against the true sources, and the world model stops being the thing optimized against and becomes a subroutine the program calls through `self.predict_marginals(seeds)`. The four bindings of that one name ARE conditions 3–6. See [`research/source_localization.md`](research/source_localization.md) §2.3 for why the inversion and not the likelihood is the contribution, and `coding_agent/check_source_localization.py` for the runnable contract.
+
+`cascade_reconstruction` splits the `recover` family in two, and it is the task [`research/cascade_reconstruction.md`](research/cascade_reconstruction.md) §9 calls the best both-loops fit in the folder. Source localization recovers `s_0`; this recovers the **whole hidden trajectory** — which nodes were infected, *when* each activated, and *who infected whom* — from a partial observation of a diffusion that already happened. The contract is `reconstruct(graph, observation, horizon)` returning `{node: (activation timestep, inferred parent)}`, and the recovered sources fall out for free as the nodes with no parent, which is why source localization is the *projection* of this task rather than a sibling of it.
+
+Two things make it different in kind. **The inner loop runs two orders of magnitude hotter**: a localizer tests `~10²` candidate source sets per instance and a decoder tests candidate *histories* at `~10⁴` kernel evaluations, so 4-vs-6 stops being "which scores higher" and becomes "how much search fits" — and whether the sampling arm completes at all is itself a reportable finding. **And the reward is the specification.** Thirteen years of published work says the node set is easy and the tree is hard (100% node precision against 78% edge precision in 2012; a best path precision of 0.680 in 2025), so an outer loop scored on node-level F1 discovers the tree contributes nothing and converges on decoders that never attempt it. The reward is therefore `λ·PathPrecision + (1−λ)·EventF1` with `λ ≥ 0.5`, and every results JSON carries what a *trivial* decoder scores under it — because a reward a trivial decoder can reach is a wrong reward, not a good arm.
+
+That reward needs a ground-truth parent, and **NDlib never produces one**: its IC model flips a node without recording which neighbour caused it. `--trace-parents` swaps in traced IC/LT subclasses that log the transmission edge, and the registry turns it on for this task automatically. Under LT there is no transmission edge at all — activation is a threshold crossing over the whole active neighbourhood — so its ground truth is a parent *set* and the two dynamics are never compared.
+
+```bash
+python -m pipeline.run --dataset ca_grqc --task cascade_reconstruction --compare
+python -m pipeline.run --dataset oregon2 --task cascade_reconstruction \
+    --cr-setting final_snapshot --baselines all --compare      # DITTO's own regime
+```
+
+`--cr-setting` is a protocol rather than a knob, and its four values are four separate experiments whose rows are never pooled: reports with times, reports without, the terminal snapshot alone (DITTO's DASH, the hardest published formulation), and hidden nodes deleted from the graph. `--cr-observation-rate` is the probability a node **is reported**, spelled out in that direction because two papers in this literature use the symbol `σ` for opposite quantities. See §2.4 for why the decoder and not the kernel is the contribution, and `coding_agent/check_cascade_reconstruction.py` for the runnable contract.
 
 `influence_blocking` splits the `minimize` family in two. It is the only **two-cascade** task: a rumour is committed at `t=0` and is already spreading, and the budget buys an answer to it — which may itself be a cascade. Its literature is organized by *what the blocker is allowed to do*, and those four levers are our four ops, so `--blocking-lever` picks between counter-seeding (`add_node`, the founding sub-literature), node blocking (`remove_node`, SandIMIN and Xie), link blocking (`remove_edge`, Kimura) and weight reduction (`set_edge_weight`, which is literally DiffIM's continuous relaxation). This is the task the five-op action space was built for, and the one that makes the last three load-bearing rather than idle.
 

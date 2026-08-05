@@ -258,6 +258,49 @@ The one task family where the outer loop writes an **inference algorithm** inste
 
 **`rumor_centrality` and `jordan_center` are single-source estimators** evaluated under a multi-source protocol, so they score near zero at `k = 10%` of `N` **by construction** — a property of the protocol, not of the method (§8.2: the two literatures never mix their numbers). They are registered because they founded the field and because a `--budgets 1` run makes them admissible.
 
+### Decoding: `cascade_reconstruction` (the same family, a bigger object)
+
+The second `recover` task, and the one that splits the family the way `influence_blocking` splits containment: both invert something and neither emits an action, but a localizer names a SET of `|V|` candidates while a decoder produces a coherent `T × |V|` trajectory. Five things differ from the localization path above, and `TaskSpec.decodes` routes all of them.
+
+1. **The contract is `reconstruct`.** `def reconstruct(self, graph, observation, horizon) -> dict[int, tuple[int, int | None]]`, mapping each node believed infected to `(activation timestep, inferred parent)` with `parent = None` marking a source and uninfected nodes simply absent. `methods.base.evaluate_strategy` checks `decodes` before `recovers` and calls `reconstruction.evaluate_reconstructor`. **The recovered sources fall out for free** — the subset with no parent IS the seed-set estimate — so source localization is the projection of this task rather than a sibling of it, and `source_f1` is reported on every row without extra machinery.
+
+2. **The primitive is the raw KERNEL, not a seed-set forward pass.** `self.step_marginals(infected, frontier)` returns `P(v activates next step)` for an ARBITRARY proposed state, which a rollout cannot give: NDlib only ever advances forward from what it holds, so the sampling binding goes through a new `Simulator.set_state` that writes a hypothesis the simulator never visited. `self.transition_logprob(marginal, infected, next_frontier)` derives from the same call rather than being a second oracle. Four bindings, same as localization's, same ablation.
+
+3. **The inner loop runs two orders of magnitude hotter.** ~10⁴ kernel calls per instance against ~10², so `kernel_calls_per_instance` is a first-class column and 4-vs-6 is the sharpest cost comparison in the repo. "Arm 4 does not complete at a useful proposal count" is a reportable finding here, not a missing row.
+
+4. **The reward is weighted toward the half that is hard, and that is a correctness requirement.** `λ·PathPrecision + (1−λ)·EventF1` with `--cr-tree-weight ≥ 0.5`. Recovering WHICH nodes were infected is nearly free — 100% node precision against 78% edge precision in Zong ICDM'12, a best path precision of 0.680 in DIPT 2025 — so a search scored on the node half discovers the tree contributes nothing and stops attempting it. Every results JSON therefore carries `trivial_decoder_reward` (everyone reachable, parents by BFS): a reward a trivial decoder can reach is a wrong reward. A second corner the literature does not name: **PathPrecision is a precision**, so naming three edges and getting them right scores 1.0 — `path_recall`, `jaccard` and `n_tree_edges` are reported beside it and `summarize_reconstruction` prints a diagnostic when an arm names fewer than half the real edges.
+
+5. **It needed a simulator change nothing else does.** NDlib emits no transmission edge at all, so `--trace-parents` swaps in `TracedICModel` / `TracedThresholdModel` and every record gains a `parents` field. Under IC that is one parent and it is *the first successful `u` in node order*, which is a real and documented bias; under LT there is no transmission edge at all and the value is the whole active in-neighbourhood, which makes LT's path precision structurally easier and means the two dynamics are never compared. `load_cascades` RAISES on a dataset generated without it rather than silently falling back to the node half.
+
+`--cr-setting` is a protocol rather than a knob and its four values are four experiments whose rows are never pooled: `partial_times`, `partial_nodes`, `final_snapshot` (DITTO's DASH) and `hidden_nodes`. `--cr-observation-rate` is the probability a node **is reported**, spelled out because two papers in this literature use `σ` for opposite quantities. `coding_agent/check_cascade_reconstruction.py` asserts all of it in 23 checks, including that the traced models match the untraced ones in distribution — a traced model that changed the dynamics would invalidate every episode.
+
+### Baselines for `cascade_reconstruction` (condition 1)
+
+`tools/reconstruction_algorithms.py`, signature `(graph, observation, horizon, **kw) -> dict[int, tuple[int, int | None]]`, returning a whole **trajectory**.
+
+| name | what it is |
+| --- | --- |
+| `delayed_bfs` | **Xiao SDM'18**: attach terminals in increasing observed time along the cheapest path from the tree so far, delaying the interior nodes to land between the endpoints. `O(m + k log k)`. **The row that has to be beaten** — no learning in it, node precision above 0.8 in its own paper, and inside the agent's expressible space |
+| `ordered_steiner_closure` | Xiao's `closure`: metric closure over the terminals, MST, expand. `O(√k)` |
+| `greedy_ordered` | Xiao's `greedy`: nearest-first attachment rather than earliest-first |
+| `steiner_tree` | plain minimum Steiner tree, ignoring the observed ORDER — the control the three above beat on order accuracy |
+| `tree_sampling` | **Xiao ICDM'18**: sample Steiner trees, read off per-node marginals. The only classical method here that outputs calibrated probabilities |
+| `personalized_pagerank` | the assortativity trap. Xiao ICDM'18 found a plain random walker BEATS tree sampling on `grqc` (assortativity 0.164) and loses elsewhere — **run it on `ca_grqc` specifically**; if the search cannot clear it there the result is not real |
+| `consistent_tree_wpct` / `consistent_tree_wbct` | **Zong ICDM'12**'s pair. WPCT constrains every node on a rooted path, WBCT only bounds the endpoint, and the gap between them is why both are here |
+| `cult` | **Rozenshtein KDD'16**'s `α`-TempSteinerTree: a forest with `α` trading tree cost against root count. The only method that assumes NO propagation model, and therefore the honest ceiling for "what can you do without a kernel" |
+| `dhrec` | **Sefer & Kingsford ICDM'14**: prize-collecting dominating-set vertex cover, greedily. DITTO's own MLE baseline |
+| `cri` | **Chen TNSE'16**: cluster the infected subgraph, reverse-infect from each centre. DITTO's second |
+| `netfill` | **Sundareisan SDM'15**: fill in a missing node when enough of its neighbourhood is infected, to convergence |
+| `jordan_backward` | greedy forward decode from the Jordan centres — the cheap first cut |
+| `observed_only` | **Rozenshtein's `Reports`**: report what you saw, infer nothing. Node precision 1.0 by construction, and the concrete answer to "is this reward gameable" |
+| `one_hop` | Rozenshtein's second control: the reports plus their one-hop neighbourhood |
+| `random_reconstruction` | the floor |
+| `mcmc_decode` / `forward_backward` | the kernel-using pair: Metropolis-Hastings over histories, and forward-filter/backward-sample smoothing |
+
+Every decoder shares one parent rule (`finalize`), deliberately: most published methods output a node set and a time rather than a tree, so a Path Precision difference between two rows is a difference in their **times** rather than in a tree-building trick one of them happens to have. A consequence worth knowing before reading the column: `order_accuracy` is 1.0 for the whole library pool by construction, because `finalize` only ever attaches an earlier-activating parent. It is a validity check on SYNTHESIS, not a quality measure across the classical pool.
+
+`mcmc_decode` and `forward_backward` are in `mc_reconstruction_algorithms` and blocked from generated scripts unless `--allow-mc-algorithms`, for the `celf` reason plus one more: they cost `proposals × horizon` kernel evaluations per instance, and a generated program already HAS the metered kernel — writing the search around it itself is the only way that cost lands in the arm's own `kernel_calls`.
+
 ### Streaming graphs and multi-round campaigns
 
 Two more §1 branches of the adaptive-IM literature, both of which apply to **every** arm rather than only the adaptive ones. An arm whose graph moved compared against one whose graph did not, or a union compared against a single campaign, measures the setting instead of the method.

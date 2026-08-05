@@ -473,6 +473,141 @@ def load_episode_endpoints(
     return sorted(episodes, key=lambda episode: episode["episode_id"])
 
 
+def load_episode_trajectories(
+    out_dir: Path, diffusion_model: str, split: str
+) -> list[dict]:
+    """
+    Regroup `transitions_<dm>_<split>.jsonl` by episode into whole HISTORIES.
+
+    The labelled data cascade reconstruction needs, recovered from transitions that
+    already exist (research/cascade_reconstruction.md §2.2). `load_episode_endpoints`
+    keeps only the two ends of an episode because a localizer inverts a snapshot;
+    a trajectory decoder is scored on every step in between, so this keeps all of
+    them. Per episode:
+
+      * **activation time `t(v)`** — the step at which `v` first appears in
+        `next_state.frontier`. §2.2's central asset: the `frontier` channel IS the
+        quantity DITTO's NRMSE scores and Rozenshtein's `FR` scheme samples, and
+        the generator has been writing it every step all along.
+      * **the transmission edge** — `parents`, which only exists under
+        `--trace-parents`. Absent means the tree half cannot be scored and the
+        caller must say so rather than silently reporting the easy half (§2.6).
+      * **`states` / `frontiers`** — `(T + 1, N)` binary, one row per step, so a
+        decoder's whole output can be compared against the whole truth.
+
+    Sources are the `t = 0` bag's `add_node` targets, exactly as in
+    `load_episode_endpoints`; under a diffusion-only generation they are the only
+    action in the episode, which is what makes `parent = None` mean "source"
+    rather than "a step the log lost".
+
+    Counterfactual branches are skipped: they fork the ACTION mid-episode, so their
+    history is not one trajectory of one cascade.
+    """
+    path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
+    store = load_graph_store(out_dir)
+
+    groups = defaultdict(list)
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+
+        record = json.loads(line)
+        if record["branch"] != "main":
+            continue
+
+        groups[(record["graph_id"], record["episode_id"])].append(record)
+
+    episodes = []
+
+    for (graph_id, episode_id), records in groups.items():
+        records.sort(key=lambda record: record["t"])
+        num_nodes = store[graph_id]["num_nodes"]
+
+        if records[0]["t"] != 0:
+            continue
+
+        sources = sorted(
+            {
+                int(action["target"])
+                for action in records[0]["action"]
+                if action["op"] == "add_node"
+            }
+        )
+        if not sources:
+            continue
+
+        steps = len(records)
+        states = np.zeros((steps + 1, num_nodes), dtype=np.float32)
+        frontiers = np.zeros((steps + 1, num_nodes), dtype=np.float32)
+        states[0, records[0]["state"]["infected"]] = 1.0
+        frontiers[0, records[0]["state"]["frontier"]] = 1.0
+
+        # -1 = never activated, which is what every metric here treats as absent
+        activation_time = np.full(num_nodes, -1, dtype=np.int64)
+        parents = {}
+        has_parents = True
+
+        for step, record in enumerate(records, start=1):
+            states[step, record["next_state"]["infected"]] = 1.0
+            frontiers[step, record["next_state"]["frontier"]] = 1.0
+
+            # The step index of `next_state` is t + 1 in trajectory terms, but the
+            # ACTIVATION time the literature reports is the record's own `t`: a
+            # node seeded in the t=0 bag activated at 0, and one carried by the
+            # wave that record 0 produced activated at 1... which is `step`.
+            for node in record["next_state"]["frontier"]:
+                if activation_time[int(node)] < 0:
+                    activation_time[int(node)] = step
+
+            step_parents = record.get("parents")
+            if step_parents is None:
+                has_parents = False
+            else:
+                for node, causes in step_parents.items():
+                    parents.setdefault(int(node), [int(cause) for cause in causes])
+
+        # Sources activate at t = 0 and have no parent at all; the t=0 action bag
+        # is an injection, not a transmission
+        for node in sources:
+            activation_time[node] = 0
+            parents.setdefault(node, [])
+
+        terminal = records[-1]
+        marginal = np.zeros(num_nodes, dtype=np.float32)
+        for node, probability in (terminal.get("next_marginal_infected") or {}).items():
+            marginal[int(node)] = probability
+
+        episodes.append(
+            {
+                "graph_id": graph_id,
+                "episode_id": episode_id,
+                "algorithm": records[0].get("algorithm"),
+                "num_nodes": num_nodes,
+                "sources": sources,
+                "states": states,
+                "frontiers": frontiers,
+                "activation_time": activation_time,
+                "parents": parents if has_parents else None,
+                "marginal": marginal,
+                "final_state": states[-1],
+                "horizon": steps,
+                "infected_count": int(states[-1].sum()),
+            }
+        )
+
+    return sorted(episodes, key=lambda episode: episode["episode_id"])
+
+
+def dataset_has_parents(out_dir: Path) -> bool:
+    """Whether this dataset carries the transmission edge, from its own metadata."""
+    metadata_path = Path(out_dir) / "metadata.json"
+
+    if not metadata_path.exists():
+        return False
+
+    return bool(json.loads(metadata_path.read_text())["config"].get("trace_parents"))
+
+
 def dataset_is_competitive(out_dir: Path) -> bool:
     """
     Whether this dataset holds TWO-cascade transitions, from its own metadata.

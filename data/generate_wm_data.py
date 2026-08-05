@@ -79,6 +79,7 @@ def build_record(
     next_marginal_pos_infected: dict[int, float] | None = None,
     next_marginal_pos_frontier: dict[int, float] | None = None,
     negative_seeds: list[int] | None = None,
+    parents: dict[int, list[int]] | None = None,
 ) -> dict:
     """Build one transition record for the JSONL storage."""
     record = {
@@ -123,6 +124,16 @@ def build_record(
     # a seeding task's seed set is
     if negative_seeds is not None:
         record["negative_seeds"] = [int(node) for node in negative_seeds]
+
+    # Who infected whom, for the nodes that activated at this step. Present only
+    # under --trace-parents (cascade reconstruction), so every other task's JSONL
+    # is byte-identical to what it was. An EMPTY list marks a node the ACTION
+    # activated, i.e. a source: an add_node is an injection, not a transmission.
+    if parents is not None:
+        record["parents"] = {
+            str(node): [int(source) for source in sources]
+            for node, sources in sorted(parents.items())
+        }
 
     return record
 
@@ -223,6 +234,12 @@ class GenConfig:
     # What remove_node means in this dataset; see data/wm_simulator.py. Recorded
     # in metadata.json so a checkpoint can never be trained on the wrong reading.
     remove_semantics: str = spent
+    # Record the transmission edge (`parents`) on every record. Off by default
+    # because NDlib never produces it and only cascade reconstruction scores it,
+    # but it is a HARD PRECONDITION there: the outer-loop reward is tree-weighted
+    # and a tree-weighted reward is not computable without a ground-truth parent
+    # (research/cascade_reconstruction.md §2.6, §2.10 item 1).
+    trace_parents: bool = False
     # Two-cascade (influence blocking) generation. `competitive` swaps the NDlib
     # Simulator for data.wm_competitive.CompetitiveSimulator and doubles the state
     # and the targets; the three below are the dynamics parameters
@@ -326,6 +343,7 @@ def _episode_transitions(
         ic_prob_map=bundle.ic_prob_map,
         seed=simulator_seed,
         remove_semantics=config.remove_semantics,
+        trace_parents=config.trace_parents,
     )
     simulator.reset(model)
 
@@ -384,6 +402,9 @@ def _episode_transitions(
                         reward=float(len(s_cf.infected) - len(s_t.infected)),
                         next_marginal_infected=cf_infected_marginal,
                         next_marginal_frontier=cf_frontier_marginal,
+                        parents=(
+                            simulator.last_parents if config.trace_parents else None
+                        ),
                     ),
                     model=model,
                     split=split,
@@ -411,6 +432,7 @@ def _episode_transitions(
                 reward=float(len(s_next.infected) - len(s_t.infected)),
                 next_marginal_infected=infected_marginal,
                 next_marginal_frontier=frontier_marginal,
+                parents=simulator.last_parents if config.trace_parents else None,
             ),
             model=model,
             split=split,
@@ -877,6 +899,14 @@ def parse_args() -> GenConfig:
         "cannot transmit or be infected (containment) (default: spent).",
     )
     parser.add_argument(
+        "--trace-parents",
+        action="store_true",
+        help="record the transmission edge (which u infected v) on every record. "
+        "NDlib never produces it, so this swaps in a traced IC/LT model; needed by "
+        "cascade reconstruction, where the tree-weighted reward is not computable "
+        "without it (default: False).",
+    )
+    parser.add_argument(
         "--competitive",
         action="store_true",
         help="generate TWO-cascade (influence blocking) episodes: a negative seed "
@@ -1012,6 +1042,12 @@ def parse_args() -> GenConfig:
         args.action_ops = list(valid_action_ops)
         args.mc_marginals = 4
 
+    # Tree-level metrics need a transmission edge and the parents field is where
+    # it lands; this is the standalone counterpart of the registry-driven default
+    # `pipeline.run` applies
+    if args.task == "cascade_reconstruction":
+        args.trace_parents = True
+
     return GenConfig(
         dataset=args.dataset,
         num_graphs=args.num_graphs,
@@ -1048,6 +1084,7 @@ def parse_args() -> GenConfig:
         seed=args.seed,
         mc_marginals=args.mc_marginals,
         out_dir=args.out_dir,
+        trace_parents=args.trace_parents,
         competitive=args.competitive,
         tie_break=args.tie_break,
         positive_prob=args.positive_prob,

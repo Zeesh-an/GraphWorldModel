@@ -66,7 +66,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         # node count on the intervention tasks and meaningless on the inverse one,
         # where the number is an F1 in [0, 1].
         objective_label = (
-            "F1 against the true source set"
+            "the tree-weighted reconstruction score"
+            if task.decodes
+            else "F1 against the true source set"
             if task.recovers
             else ("final infected count" if task.contains else "final spread")
         )
@@ -297,7 +299,13 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                         trajectory,
                         previous_best[1],
                         sense=task.sense,
-                        unit="F1" if task.recovers else "nodes",
+                        unit=(
+                            "score"
+                            if task.decodes
+                            else "F1"
+                            if task.recovers
+                            else "nodes"
+                        ),
                     )
                     if previous_best is not None
                     else None

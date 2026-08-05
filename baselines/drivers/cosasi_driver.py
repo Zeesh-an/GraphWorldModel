@@ -123,7 +123,7 @@ def sources_from_result(result, budget, num_nodes):
         return [int(node) for node in best][:budget]
 
     scores = np.full(num_nodes, -np.inf, dtype=np.float64)
-    for key, mapping in payload.items():
+    for mapping in payload.values():
         if not isinstance(mapping, dict):
             continue
 

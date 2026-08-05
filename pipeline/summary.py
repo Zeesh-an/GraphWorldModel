@@ -146,6 +146,44 @@ summary_columns = (
     "sl_transfer_from",
     "sl_resim_error",
     "sl_resim_error_true_sources",
+    # Cascade reconstruction: the decoding task's own metric set. Empty for every
+    # other arm, so one table still holds all six runnable tasks. `cr_score` is the
+    # held-out tree-weighted score and duplicates `spread_ground_truth` on purpose,
+    # for the same reason `sl_f1` does — the shared column keeps cross-task readers
+    # working and the named one keeps a spreadsheet from calling a score a spread.
+    "reconstruction",
+    "cr_score",
+    "cr_path_precision",
+    "cr_path_recall",
+    "cr_jaccard",
+    "cr_order_accuracy",
+    "cr_event_f1",
+    "cr_event_precision",
+    "cr_event_recall",
+    "cr_node_f1",
+    "cr_mcc",
+    "cr_time_mae",
+    "cr_time_nrmse",
+    "cr_source_f1",
+    "cr_n_tree_edges",
+    "cr_score_selection",
+    "cr_generalization_gap",
+    "cr_setting",
+    "cr_observation_rate",
+    "cr_hidden_rate",
+    "cr_tree_weight",
+    "cr_has_tree_truth",
+    "cr_trivial_decoder_reward",
+    "cr_select_split",
+    "cr_eval_split",
+    "cr_select_instances",
+    "cr_eval_instances",
+    "cr_kernel_calls",
+    "cr_kernel_calls_per_instance",
+    "cr_mcmc_proposals_per_instance",
+    "cr_mcmc_acceptance_rate",
+    "cr_resim_error",
+    "cr_resim_error_true_sources",
 )
 
 
@@ -317,8 +355,74 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "sl_gradient_steps_per_instance": result.get("gradient_steps_per_instance"),
         "sl_prior": result.get("sl_prior"),
         "sl_transfer_from": result.get("transfer_from"),
-        "sl_resim_error": result.get("resim_error"),
-        "sl_resim_error_true_sources": result.get("resim_error_true_sources"),
+        "sl_resim_error": (
+            result.get("resim_error") if not result.get("reconstruction") else None
+        ),
+        "sl_resim_error_true_sources": (
+            result.get("resim_error_true_sources")
+            if not result.get("reconstruction")
+            else None
+        ),
+        # Cascade reconstruction. Empty for every other arm. The tree columns are
+        # the ones to read: `cr_path_precision` is what DIPT publishes and
+        # `cr_event_f1` what DITTO does, and the reward is a weighted sum of the two
+        # (research/cascade_reconstruction.md §2.6). `cr_path_recall` and
+        # `cr_jaccard` ride along because PathPrecision alone rewards naming FEW
+        # edges, which is the under-prediction corner a search would otherwise find.
+        "reconstruction": result.get("reconstruction"),
+        "cr_score": spread if result.get("reconstruction") else None,
+        "cr_path_precision": metrics.get("path_precision"),
+        "cr_path_recall": metrics.get("path_recall"),
+        "cr_jaccard": metrics.get("jaccard"),
+        "cr_order_accuracy": metrics.get("order_accuracy"),
+        "cr_event_f1": metrics.get("event_f1"),
+        "cr_event_precision": metrics.get("event_precision"),
+        "cr_event_recall": metrics.get("event_recall"),
+        "cr_node_f1": metrics.get("node_f1"),
+        "cr_mcc": metrics.get("mcc"),
+        "cr_time_mae": metrics.get("time_mae"),
+        "cr_time_nrmse": metrics.get("time_nrmse"),
+        "cr_source_f1": metrics.get("source_f1"),
+        "cr_n_tree_edges": metrics.get("n_tree_edges"),
+        "cr_score_selection": (
+            selection_metrics.get("reward") if result.get("reconstruction") else None
+        ),
+        "cr_generalization_gap": (
+            result.get("generalization_gap") if result.get("reconstruction") else None
+        ),
+        "cr_setting": result.get("observation_setting"),
+        "cr_observation_rate": result.get("observation_rate"),
+        "cr_hidden_rate": result.get("hidden_rate"),
+        "cr_tree_weight": result.get("tree_weight"),
+        "cr_has_tree_truth": result.get("has_tree_truth"),
+        # §2.11 risk 1's required check, in the same row as the result it
+        # qualifies: a trivial decoder has to score badly or the reward is wrong
+        "cr_trivial_decoder_reward": result.get("trivial_decoder_reward"),
+        "cr_select_split": (
+            result.get("select_split") if result.get("reconstruction") else None
+        ),
+        "cr_eval_split": (
+            result.get("eval_split") if result.get("reconstruction") else None
+        ),
+        "cr_select_instances": (
+            result.get("n_select_instances") if result.get("reconstruction") else None
+        ),
+        "cr_eval_instances": (
+            result.get("n_eval_instances") if result.get("reconstruction") else None
+        ),
+        # The cost axis §2.4.2 exists to measure and §11 says nobody has published
+        "cr_kernel_calls": result.get("kernel_calls"),
+        "cr_kernel_calls_per_instance": result.get("kernel_calls_per_instance"),
+        "cr_mcmc_proposals_per_instance": result.get("mcmc_proposals_per_instance"),
+        "cr_mcmc_acceptance_rate": result.get("mcmc_acceptance_rate"),
+        "cr_resim_error": (
+            result.get("resim_error") if result.get("reconstruction") else None
+        ),
+        "cr_resim_error_true_sources": (
+            result.get("resim_error_true_sources")
+            if result.get("reconstruction")
+            else None
+        ),
     }
 
 

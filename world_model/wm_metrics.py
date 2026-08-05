@@ -218,6 +218,245 @@ def resimulation_error(predicted_marginal: np.ndarray, observation: np.ndarray) 
     return float(np.mean((predicted_marginal - observation) ** 2))
 
 
+def matthews_corrcoef(predicted: np.ndarray, truth: np.ndarray) -> float:
+    """
+    MCC over a binary node labelling — Rozenshtein KDD'16's ONLY reported measure.
+
+    Kept beside F1 rather than instead of it: MCC uses the true negatives, so on a
+    cascade that reached 5% of the graph it is far less flattering than accuracy
+    and far more stable than F1 when the predicted set is nearly empty
+    (research/cascade_reconstruction.md §8.1).
+    """
+    predicted = np.asarray(predicted).astype(bool)
+    truth = np.asarray(truth).astype(bool)
+
+    tp = float(np.logical_and(predicted, truth).sum())
+    tn = float(np.logical_and(~predicted, ~truth).sum())
+    fp = float(np.logical_and(predicted, ~truth).sum())
+    fn = float(np.logical_and(~predicted, truth).sum())
+
+    denominator = np.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
+
+    return float((tp * tn - fp * fn) / denominator) if denominator > 0 else 0.0
+
+
+def _prf(true_positive: int, predicted: int, actual: int) -> tuple[float, float, float]:
+    precision = true_positive / predicted if predicted else 0.0
+    recall = true_positive / actual if actual else 0.0
+    f1 = (
+        2.0 * precision * recall / (precision + recall)
+        if precision + recall > 0
+        else 0.0
+    )
+
+    return float(precision), float(recall), float(f1)
+
+
+def reconstruction_metrics(
+    predicted: dict[int, tuple[int, int | None]],
+    true_times: dict[int, int],
+    true_parents: dict[int, list[int]] | None,
+    num_nodes: int,
+    horizon: int,
+) -> dict[str, float]:
+    """
+    The metric suite for one reconstructed trajectory — §8.1's whole table.
+
+    `predicted` and the two truth maps are `node -> activation step` and
+    `node -> (activation step, inferred parent)`; a node absent from either was
+    never infected. Three blocks, and confusing them is how a paper reports the
+    easy half under the hard half's name:
+
+      * **NODE level** (`node_f1`, `mcc`) — the infected SET, ignoring time. Zong
+        ICDM'12 reports `prec_v = 100%` here [verified] and DIPT's best path
+        precision thirteen years later is `0.680`, which is the same message twice:
+        THE NODE SET IS EASY.
+      * **EVENT level** (`event_f1`) — the `(node, t)` pairs, so a node recovered
+        at the wrong step is a miss. DITTO's `F1` column.
+      * **TREE level** (`path_precision`, `jaccard`, `order_accuracy`) — the
+        who-infected-whom edges. DIPT's `Path Precision` + `Jaccard Index`. This is
+        the hard half, and §2.6 is why it must carry the outer loop's reward:
+        rewarded on the node set alone, a program SEARCH discovers the tree
+        contributes nothing to its score and converges on decoders that never
+        attempt it.
+
+    `true_parents` is None when the dataset was generated without `--trace-parents`
+    — NDlib does not emit a transmission edge — and every tree column is then NaN
+    rather than 0.0, so a missing capability never reads as a failed one.
+
+    A parent set (LT, where activation is a threshold crossing over the whole
+    active neighbourhood and there is no single transmitting edge, §2.6) counts a
+    predicted parent as correct if it is IN the set. That is the honest reading and
+    it makes LT's path precision structurally easier than IC's; the two are never
+    compared.
+    """
+    truth_infected = np.zeros(num_nodes, dtype=bool)
+    truth_infected[list(true_times)] = True
+    predicted_infected = np.zeros(num_nodes, dtype=bool)
+    predicted_infected[list(predicted)] = True
+
+    node_tp = int(np.logical_and(predicted_infected, truth_infected).sum())
+    node_precision, node_recall, node_f1 = _prf(
+        node_tp, int(predicted_infected.sum()), int(truth_infected.sum())
+    )
+
+    # An EVENT is a (node, step) pair, so a node recovered one step late is a
+    # false positive AND a false negative rather than a hit
+    event_tp = sum(
+        1
+        for node, (time, _) in predicted.items()
+        if node in true_times and int(time) == int(true_times[node])
+    )
+    event_precision, event_recall, event_f1 = _prf(
+        event_tp, len(predicted), len(true_times)
+    )
+
+    # Hitting times, with an un-infected node's time pinned at the horizon: that
+    # is DITTO's own convention and it is what makes the normalizer 2n(T+1)^2
+    horizon = max(int(horizon), 1)
+    predicted_hitting = np.full(num_nodes, float(horizon), dtype=np.float64)
+    true_hitting = np.full(num_nodes, float(horizon), dtype=np.float64)
+
+    for node, (time, _) in predicted.items():
+        predicted_hitting[int(node)] = min(float(time), float(horizon))
+
+    for node, time in true_times.items():
+        true_hitting[int(node)] = min(float(time), float(horizon))
+
+    squared_error = float(np.sum((predicted_hitting - true_hitting) ** 2))
+    metrics = {
+        "node_precision": node_precision,
+        "node_recall": node_recall,
+        "node_f1": node_f1,
+        "event_precision": event_precision,
+        "event_recall": event_recall,
+        "event_f1": event_f1,
+        "mcc": matthews_corrcoef(predicted_infected, truth_infected),
+        "time_mae": float(np.mean(np.abs(predicted_hitting - true_hitting))),
+        # DITTO normalizes by 2n(T+1)^2 under the root [verified, §5.1]
+        "time_nrmse": float(
+            np.sqrt(squared_error / (2.0 * num_nodes * (horizon + 1) ** 2))
+        ),
+        "n_predicted": float(len(predicted)),
+        "n_true": float(len(true_times)),
+    }
+
+    # The recovered SOURCES fall out for free: the nodes a decoder gave no parent
+    # ARE its seed-set estimate, which is why §2.5.1 calls source localization the
+    # projection of this task rather than a sibling of it
+    predicted_sources = {node for node, (_, parent) in predicted.items() if parent is None}
+    true_sources = {node for node, time in true_times.items() if int(time) == 0}
+    source_precision, source_recall, source_f1 = _prf(
+        len(predicted_sources & true_sources),
+        len(predicted_sources),
+        len(true_sources),
+    )
+    metrics |= {
+        "source_precision": source_precision,
+        "source_recall": source_recall,
+        "source_f1": source_f1,
+    }
+
+    if true_parents is None:
+        metrics |= {
+            "path_precision": float("nan"),
+            "path_recall": float("nan"),
+            "jaccard": float("nan"),
+            "order_accuracy": float("nan"),
+            "n_tree_edges": 0.0,
+        }
+
+        return metrics
+
+    predicted_edges = {
+        (int(parent), int(node))
+        for node, (_, parent) in predicted.items()
+        if parent is not None
+    }
+    # One entry per non-source node in the truth. Under LT the value is a SET and
+    # membership is what `correct` tests, so the unit counted is the node.
+    true_causes = {
+        int(node): {int(cause) for cause in causes}
+        for node, causes in true_parents.items()
+        if causes
+    }
+    correct = sum(
+        1 for parent, node in predicted_edges if parent in true_causes.get(node, ())
+    )
+    path_precision, path_recall, _ = _prf(
+        correct, len(predicted_edges), len(true_causes)
+    )
+    union = len(predicted_edges) + len(true_causes) - correct
+
+    # Xiao SDM'18's order accuracy: does each inferred edge respect the times the
+    # decoder itself assigned? It checks ORDERING only and is blind to absolute
+    # times, which is why it is reported beside NRMSE rather than instead of it.
+    #
+    # Warning: it reads 1.0 for every LIBRARY decoder by construction, because
+    # `reconstruction_algorithms.finalize` only ever attaches a parent that
+    # activated earlier. That is not a bug and not a strong result — it is the
+    # column doing its job on a GENERATED decoder, which assigns its own parents
+    # and can produce an incoherent tree. Read it as a validity check on synthesis,
+    # not as a quality measure across the classical pool.
+    ordered = sum(
+        1
+        for node, (time, parent) in predicted.items()
+        if parent is not None
+        and parent in predicted
+        and predicted[parent][0] <= time
+    )
+
+    metrics |= {
+        "path_precision": path_precision,
+        "path_recall": path_recall,
+        "jaccard": float(correct / union) if union else 0.0,
+        "order_accuracy": (
+            float(ordered / len(predicted_edges)) if predicted_edges else 0.0
+        ),
+        "n_tree_edges": float(len(predicted_edges)),
+    }
+
+    return metrics
+
+
+# Weight on Path Precision in the outer loop's reward. >= 0.5 is a REQUIREMENT
+# rather than a taste (research/cascade_reconstruction.md §2.6): the node set is
+# nearly free, so a search rewarded mostly on Event F1 discovers that the tree
+# contributes nothing to its score and converges on decoders that do not attempt
+# the hard half. The reward is the specification.
+default_tree_weight = 0.6
+
+
+def reconstruction_reward(metrics: dict[str, float], tree_weight: float) -> float:
+    """
+    `lambda * PathPrecision + (1 - lambda) * EventF1` — §2.6's Score, verbatim.
+
+    Falls back to Event F1 alone when the dataset carries no transmission edge
+    (LT-set-valued truth still has one; a dataset generated without
+    `--trace-parents` does not). That fallback is the failure mode §2.6 describes,
+    so every caller records `tree_weight` alongside the number and the harness
+    refuses to run the full search without parents.
+
+    Warning: PathPrecision is a PRECISION, and §2.6 does not say so because no
+    published method has a search that could exploit it. A decoder that names three
+    transmission edges and gets them right scores 1.0 on the half the reward is
+    weighted toward, so UNDER-PREDICTING is a second gaming corner beside the one
+    §2.6 names. `path_recall` and `jaccard` are computed for exactly this, and
+    `reconstruction.summarize_reconstruction` prints a diagnostic whenever an arm
+    names fewer than half the real edges. Keeping the published column as the
+    reward and surfacing the hazard beats silently switching to a tree F1 the
+    literature does not report.
+    """
+    path_precision = metrics.get("path_precision", float("nan"))
+
+    if not np.isfinite(path_precision):
+        return float(metrics["event_f1"])
+
+    return float(
+        tree_weight * path_precision + (1.0 - tree_weight) * metrics["event_f1"]
+    )
+
+
 # Fraction of N the giant component must fall below for the graph to count as
 # dismantled. 0.01 is the Min-Sum / CoreHD / GND convention; the set size is
 # steeply sensitive to it near the percolation transition, so it is stated with

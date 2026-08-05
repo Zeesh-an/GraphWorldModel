@@ -83,6 +83,23 @@ real_directed = {
     # `youtube`, and each loader's docstring says so
     "higgs_twitter": True,
     "pokec": True,
+    # Cascade-reconstruction benchmarks (research/cascade_reconstruction.md §6).
+    # All undirected: like the dismantling literature, this one is undirected end
+    # to end — every Steiner-tree method in §3 is defined on the symmetric contact
+    # graph, and DITTO's own loaders call `nx.read_edgelist` without `create_using`.
+    #
+    # `oregon2` and `rt_pol` are DITTO's two graphs we did not already have;
+    # `ca_hepth`, `email_univ`, `uci_students` and `infectious` are the rest of
+    # Xiao's two tables; `citeseer` is DIPT's third graph. Warning: `ca_hepth` is
+    # the CO-AUTHORSHIP network and `cit_hepth` the CITATION one — same arXiv
+    # section, different graphs, and each loader's docstring says which.
+    "oregon2": False,
+    "rt_pol": False,
+    "ca_hepth": False,
+    "email_univ": False,
+    "uci_students": False,
+    "infectious": False,
+    "citeseer": False,
 }
 
 

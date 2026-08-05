@@ -9,6 +9,7 @@ from coding_agent.executor import (
     mc_blocked_blocking,
     mc_blocked_dismantling,
     mc_blocked_localization,
+    mc_blocked_reconstruction,
     scored_blocked_primitives,
 )
 from coding_agent.tools.graph_profile import build_graph_profile
@@ -24,6 +25,8 @@ from coding_agent.tools.library_api import (
     build_localization_menu,
     build_localization_reference,
     build_primitives_reference,
+    build_reconstruction_menu,
+    build_reconstruction_reference,
 )
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
@@ -195,6 +198,130 @@ WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
 """
 
 
+reconstruction_brief = """\
+You are designing a Cascade Reconstruction algorithm as an executable Python script.
+
+YOUR GOAL: a diffusion already happened on this graph and you only saw part of it.
+Recover the WHOLE HISTORY — which nodes were infected, at which timestep each one
+activated, and WHO INFECTED WHOM. You are not intervening in anything; you are
+reconstructing the past. HIGHER IS BETTER.
+
+YOUR SCORE IS DELIBERATELY WEIGHTED TOWARD THE HARD HALF:
+
+    score = LAMBDA * PathPrecision + (1 - LAMBDA) * EventF1
+
+`EventF1` scores the `(node, timestep)` pairs. `PathPrecision` scores the
+who-infected-whom EDGES. The exact LAMBDA is in the task block below and it is at
+least 0.5, on purpose: recovering WHICH nodes were infected is nearly free, and a
+decoder that stops there is the standard failure of this problem. Thirteen years
+of published work says the same thing twice — one paper reports 100% node
+precision alongside 78% edge precision, and the best modern method reaches 0.68
+path precision. **Spend your effort on the parents.**
+
+WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
+- The observation is a SUBSET. Nodes the cascade infected but nobody reported are
+  yours to infer, and a report set that looks disconnected is usually one cascade
+  with the connecting nodes missing — filling them in is most of the recall.
+- TIME IS THE STRUCTURE. If you were given activation times, they constrain the
+  tree completely: an edge `u -> v` is only possible when `t(u) < t(v)`. If you
+  were not, you have to infer an ordering before you can infer any parent.
+- The classical bar is an ORDERED STEINER TREE: connect the reported nodes with
+  the cheapest tree whose rooted paths respect the observed order, treating an arc
+  as costing `-log p(u -> v)` so the cheapest tree is the most likely one. That is
+  `delayed_bfs`, it runs in near-linear time, and it has no learning in it.
+- A PLAIN RANDOM WALKER IS COMPETITIVE and sometimes wins. On an assortative graph
+  the infected region is densely interconnected and personalized PageRank from the
+  reports beats principled tree sampling. Check what the graph profile says about
+  assortativity before assuming a clever method is better.
+- Do not predict the whole graph. Recall is cheap and precision is not; a decoder
+  that names every reachable node scores near zero on the tree half because almost
+  none of its edges are real.
+"""
+
+
+def _reconstruction_rules(task: TaskSpec) -> str:
+    """The decoding preamble: no actions, one method, and the transition kernel."""
+    if task.forward_model:
+        oracle_block = """\
+
+THE TRANSITION KERNEL — `self.step_marginals(infected, frontier)`:
+    Returns a numpy array of length num_nodes: P(node activates on the NEXT step)
+    given that `infected` is the set active now and `frontier` is the wave that
+    just activated. This is the one-step dynamics the cascade you are inverting
+    actually ran under, and it is the thing a purely structural decoder does not
+    have.
+
+    Use it to SCORE a hypothesis. Given a proposed history you can unroll it:
+
+        p = self.step_marginals(infected_so_far, wave_at_t)
+        logp = self.transition_logprob(p, infected_so_far, wave_at_t_plus_1)
+
+    `transition_logprob(marginal, infected, next_frontier)` is already bound for
+    you and derives from the same call, so summing it over the steps of a proposed
+    trajectory gives that trajectory's log-likelihood — a score you can compute
+    WITHOUT any labels, and the natural objective for a local search.
+
+    It is not free. Every call is one evaluation of the kernel and the calls are
+    counted. Get a decode first with a cheap structural method, THEN spend calls
+    improving it — a search that calls the kernel inside a loop over all nodes
+    will not finish. You are also free to never call it at all; if structure alone
+    wins, that is a result."""
+    else:
+        oracle_block = """\
+
+NO TRANSITION KERNEL IN THIS CONDITION. `self.step_marginals` raises if you call
+it. This arm exists to measure what pure structure and timing achieve, so your
+decoder must work from the graph, the reports and their times alone — Steiner
+trees, BFS/shortest-path orderings, centralities on the observed subgraph."""
+
+    return f"""\
+{reconstruction_brief}
+OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
+no prose before or after. The block contains import lines (if you need any) and
+then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
+example usage, no test code.
+
+IMPORTS: you MAY import any of {", ".join(allowed_imports)}. Use numpy for
+anything you would otherwise write as a Python loop over all nodes.
+Importing anything else is rejected.
+
+AVAILABLE NAMES (already in your script's namespace — do NOT import these):
+- `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node),
+  .degree(node), .edge_index (2, E), .ic_probs (E,).
+- `reconstruction_algorithms` : the published decoders (API below).
+- `primitives` : structural helpers (API below).
+- `ActionOp` and `State` exist but you will not need them — this task emits no
+  actions.
+
+THE OBSERVATION OBJECT you are handed:
+- `observation.reported` : `{{node: activation timestep or None}}`. A node in here
+  WAS infected — that is ground truth. `None` means "infected, time unknown".
+- `observation.times`    : just the entries whose time is known, as `{{node: t}}`.
+- `observation.infected` : the observed infected node ids, sorted.
+- `observation.final_state` : an (N,) 0/1 array, or None. Under the
+  final-snapshot setting this is ALL you get and `reported` is empty.
+- `observation.visible`  : an (N,) bool mask, or None. Under the hidden-node
+  setting a False entry is a node that is NOT IN THE GRAPH — naming one is
+  rejected.
+
+WHAT YOU IMPLEMENT:
+    def reconstruct(self, graph, observation, horizon) -> dict[int, tuple[int, int | None]]
+        `{{node: (activation timestep, the node that infected it)}}` for every node
+        you believe was infected. Nodes you believe were never infected are simply
+        ABSENT from the dict.
+
+        RULES, all enforced:
+        - `parent = None` means SOURCE, and a source activates at timestep 0.
+          A node at t > 0 must name a parent; a node at t = 0 must not.
+        - a parent must be an actual in-neighbour: `parent in
+          graph.in_neighbors(node)`. A transmission travels along an edge.
+        - every timestep is in `[0, horizon]`, every node id in `[0, num_nodes)`.
+        - returning an empty dict is rejected. At minimum the nodes the observation
+          REPORTS were infected.
+{oracle_block}
+"""
+
+
 def _localization_rules(task: TaskSpec) -> str:
     """The inverse-task preamble: no actions, one method, and the forward oracle."""
     if task.forward_model:
@@ -304,6 +431,9 @@ def _blocking_rules(task: TaskSpec) -> tuple[str, str, str]:
 
 def _common_rules(task: TaskSpec | None) -> str:
     """The preamble, with the problem family and the budgeted op filled in."""
+    if task is not None and task.decodes:
+        return _reconstruction_rules(task)
+
     if task is not None and task.recovers:
         return _localization_rules(task)
 
@@ -870,6 +1000,139 @@ Beat both. Combining their ideas, or replacing them, are both fair game — and 
 the forward oracle turns out not to help, say so with a program that does not use it.
 """
 
+# The decoding counterpart. Neither the intervention exemplars nor the
+# localization ones work here: the first two emit action bags and the third
+# returns a node list, while this contract returns a whole trajectory and is
+# scored on the who-infected-whom edges. Showing the wrong set would cost the
+# search its first iteration on a repair turn for a contract nobody asked for.
+reconstruction_exemplars = """\
+EXAMPLES — two decoders at the level you should START from, not finish at.
+
+Example 1, an ordered Steiner tree by likelihood-weighted BFS (pure structure, no
+kernel — this is roughly the classical bar):
+```python
+import heapq
+import math
+
+class LikelihoodTree(Strategy):
+    def reconstruct(self, graph, observation, horizon):
+        reports = list(observation.reported)
+        if not reports:
+            return {}
+
+        known = observation.times
+        probability = {}
+        for edge in range(graph.edge_index.shape[1]):
+            u = int(graph.edge_index[0, edge])
+            v = int(graph.edge_index[1, edge])
+            probability[(u, v)] = float(graph.ic_probs[edge])
+
+        # Root at the earliest report; if no times were given, the highest-degree
+        # one is a serviceable stand-in for the centre of the observed region
+        root = min(reports, key=lambda n: (known.get(n, 10**9), -graph.degree(n)))
+
+        # Dijkstra over -log p: the cheapest path is the MOST LIKELY chain of
+        # transmissions, which is what makes this a likelihood tree and not a BFS
+        times = {root: known.get(root, 0)}
+        parent = {root: None}
+        cost = {root: 0.0}
+        queue = [(0.0, root)]
+
+        while queue:
+            spent, node = heapq.heappop(queue)
+            if spent > cost.get(node, float("inf")):
+                continue
+            step = times[node] + 1
+            if step > horizon:
+                continue
+
+            for other in graph.out_neighbors(node):
+                seen_at = known.get(other)
+                if seen_at is not None and step > seen_at:
+                    continue          # cannot arrive after it was observed to fire
+                arc = -math.log(max(probability.get((node, other), 1e-9), 1e-9))
+                if spent + arc < cost.get(other, float("inf")):
+                    cost[other] = spent + arc
+                    times[other] = seen_at if seen_at is not None else step
+                    parent[other] = node
+                    heapq.heappush(queue, (cost[other], other))
+
+        # Keep the reports plus whatever the tree had to pass through to reach them
+        keep = set(reports) | {n for n in times if cost.get(n, 1e9) < 8.0}
+        decoded = {}
+        for node in keep:
+            if node not in times or not observation.is_visible(node):
+                continue
+            step = max(0, min(int(times[node]), horizon))
+            up = parent.get(node)
+            if step == 0 or up is None or up not in keep:
+                decoded[node] = (0, None)
+            else:
+                decoded[node] = (step, int(up))
+
+        return decoded
+```
+
+Example 2, refine a structural decode with the kernel: start from the library's
+`delayed_bfs`, then move activation times one step at a time and keep a move only
+when the trajectory's log-likelihood under the transition kernel goes up:
+```python
+class KernelRefined(Strategy):
+    def reconstruct(self, graph, observation, horizon):
+        decoded = reconstruction_algorithms.delayed_bfs(graph, observation, horizon)
+        times = {node: value[0] for node, value in decoded.items()}
+        # An OBSERVED time is ground truth; only the inferred ones may move
+        movable = [n for n in times if n not in observation.times]
+
+        def score(assignment):
+            waves = {}
+            for node, step in assignment.items():
+                waves.setdefault(step, []).append(node)
+            total = 0.0
+            infected = list(waves.get(0, []))
+            for step in range(1, horizon + 1):
+                wave = waves.get(step - 1, [])
+                if not wave:
+                    break
+                marginal = self.step_marginals(infected, wave)
+                total += self.transition_logprob(marginal, infected, waves.get(step, []))
+                infected = infected + waves.get(step, [])
+            return total
+
+        best = score(times)
+        for node in movable[:40]:            # bounded: every call costs a kernel evaluation
+            for shift in (-1, 1):
+                proposed = max(1, min(times[node] + shift, horizon))
+                if proposed == times[node]:
+                    continue
+                original = times[node]
+                times[node] = proposed
+                candidate = score(times)
+                if candidate > best:
+                    best = candidate
+                else:
+                    times[node] = original
+
+        # Re-attach parents against the updated times: a node's parent must now be
+        # an in-neighbour that activated strictly earlier
+        decoded = {}
+        for node, step in times.items():
+            if step == 0:
+                decoded[node] = (0, None)
+                continue
+            earlier = [u for u in graph.in_neighbors(node) if times.get(u, 10**9) < step]
+            if not earlier:
+                decoded[node] = (0, None)
+            else:
+                decoded[node] = (step, int(max(earlier, key=lambda u: times[u])))
+
+        return decoded
+```
+Beat both. Note what example 2 does NOT do: it never calls the kernel inside a
+loop over all nodes, because that does not finish. Narrow to a short candidate
+list first, then spend calls on it.
+"""
+
 # Only shown when the task actually allows edge ops. Under add_node-only IC the
 # cascade is progressive and monotone, so delaying a seed is weakly worse and
 # every schedule is dominated by "all seeds at t=0" — telling the model to
@@ -901,6 +1164,19 @@ scheduled. `horizon` appears in the task block only because it is how long the
 cascade you are inverting ran for — a longer cascade means a more saturated
 observation and therefore LESS information about where it started, which is worth
 knowing when you decide how much to trust the observed state.
+"""
+
+# The decoding counterpart, and the opposite of every other one: `horizon` here is
+# not a budget of steps to plan across, it is the LENGTH OF THE OBJECT you are
+# recovering, so it appears in the answer rather than constraining it.
+reconstruction_timing_note = """\
+
+THE HORIZON IS PART OF YOUR ANSWER. You schedule nothing and emit nothing, but
+every node you name carries a timestep in `[0, horizon]`, and those timesteps are
+half of what you are scored on: `EventF1` counts a `(node, t)` pair only when `t`
+is exactly right, and the reported infection-time NRMSE reads them too. A longer
+horizon means a more saturated cascade and therefore a harder inversion, because
+a cascade that ran to convergence retains almost no trace of the order it went in.
 """
 
 # The containment counterpart of seed_timing_note, and its mirror image: the
@@ -1017,6 +1293,23 @@ class MyStrategy(Strategy):
         return [ActionOp("add_node", node) for _, node in scored[:batch]]
 ```
 """,
+    "reconstruct": """\
+
+METHOD: TRAJECTORY DECODING.
+Implement `reconstruct(self, graph, observation, horizon) -> dict`.
+
+You are called ONCE PER MASKED CASCADE, with that cascade's own partial
+observation. Your score is the mean across all of them, so a decoder that nails
+one episode and collapses on the rest loses to one that is uniformly decent. Write
+an ALGORITHM, not a fit to one cascade: hardcoded node ids will score zero on
+every other episode.
+
+The masking protocol is stated in the task block below and it changes the problem.
+Read it: with activation times you are solving an ordering-constrained tree
+problem, without them you are solving the ordering too, and from a final snapshot
+alone you are solving both plus the source set.
+
+""",
     "localize": """\
 
 METHOD: SOURCE-SET INFERENCE.
@@ -1123,6 +1416,94 @@ def build_outbreak_block(task: TaskSpec) -> str:
 max_listed_episodes = 6
 
 
+setting_notes = {
+    "partial_times": (
+        "PARTIAL TIMESTAMPS. Each infected node was reported independently with "
+        "probability {rate}, and every report carries the exact timestep it "
+        "activated. Those times are ground truth and constrain the tree "
+        "completely: an edge u -> v is only possible when t(u) < t(v). This is the "
+        "setting the ordered-Steiner literature is defined on."
+    ),
+    "partial_nodes": (
+        "PARTIAL NODES, NO TIMES. Each infected node was reported independently "
+        "with probability {rate}, but every report's timestep is withheld — "
+        "`observation.reported[v]` is None and `observation.times` is empty. You "
+        "have to infer the ORDER before you can infer any parent."
+    ),
+    "final_snapshot": (
+        "FINAL SNAPSHOT ONLY. There are no reports at all: `observation.reported` "
+        "is empty and `observation.final_state` is a 0/1 vector of who was "
+        "infected when the cascade ended. No times, no sources, no parameters. "
+        "This is the hardest published formulation of this problem and the one "
+        "where a transition kernel should be worth the most."
+    ),
+    "hidden_nodes": (
+        "HIDDEN NODES. Reports arrive with times at rate {rate}, AND a fraction of "
+        "the graph's nodes are absent entirely — `observation.visible` is False "
+        "for them. A hidden node is not merely unobserved: it is not in the graph, "
+        "naming one is rejected, and the cascade appears to jump across the gap it "
+        "leaves."
+    ),
+}
+
+
+def build_mask_block(task: TaskSpec) -> str:
+    """
+    Which of the four settings is running, and what the episodes look like.
+
+    Spelled out because the setting is a PROTOCOL rather than a knob
+    (research/cascade_reconstruction.md §8.3): a decoder selected under
+    `final_snapshot` is solving a different problem from one selected under
+    `partial_times`, and a model told the wrong one writes for an input it will not
+    get. The masking DIRECTION is stated explicitly for the reason §8.2 trap 1
+    gives — two papers in this literature use the symbol sigma for opposite
+    quantities, so "reported with probability q" is written out rather than named.
+    """
+    if not task.decodes:
+        return ""
+
+    instances = list(task.instances)
+    if not instances:
+        return ""
+
+    observed = [instance.observed_count for instance in instances]
+    infected = [instance.infected_count for instance in instances]
+    sources = [len(instance.sources) for instance in instances]
+    num_nodes = instances[0].num_nodes
+    rate = (
+        f"{np.mean([o / max(i, 1) for o, i in zip(observed, infected, strict=True)]):.0%}"
+    )
+    setting = instances[0].observation.setting
+    has_parents = instances[0].true_parents is not None
+
+    lines = [
+        "",
+        f"OBSERVATION PROTOCOL: {setting_notes.get(setting, setting).format(rate=rate)}",
+        "",
+        f"THE CASCADES YOU ARE SCORED ON ({len(instances)} masked episodes, mean "
+        f"score across all of them):",
+        f"  actually infected: {min(infected)}-{max(infected)} nodes "
+        f"({100.0 * np.mean(infected) / num_nodes:.1f}% of N on average)",
+        f"  you are shown: {min(observed)}-{max(observed)} of them "
+        f"({rate} on average) — the rest are yours to infer",
+        f"  true sources per cascade: {min(sources)}-{max(sources)}, all committed "
+        f"at timestep 0",
+        f"  cascades ran for up to "
+        f"{max(instance.horizon for instance in instances)} timesteps",
+        f"  SCORE = {task.tree_weight:.2f} * PathPrecision + "
+        f"{1.0 - task.tree_weight:.2f} * EventF1"
+        + (
+            ""
+            if has_parents
+            else "  Warning: this dataset carries NO transmission edge, so "
+            "PathPrecision is unscoreable and the score is EventF1 alone"
+        ),
+        "",
+    ]
+
+    return "\n".join(lines)
+
+
 def build_observation_block(task: TaskSpec) -> str:
     """
     What `y` actually is, and how many episodes the score averages over.
@@ -1133,7 +1514,7 @@ def build_observation_block(task: TaskSpec) -> str:
     (research/source_localization.md §2.9 risk 5), so a model told the wrong one
     calibrates its threshold against a distribution it will not see.
     """
-    if not task.recovers:
+    if not task.recovers or task.decodes:
         return ""
 
     instances = list(task.instances)
@@ -1202,7 +1583,9 @@ def build_user_prompt(
     if strategy_mode == "scored":
         # Library source is inspiration, not callable — ideas must be written
         # out inside score()/schedule()/source_score(), where they can be mutated
-        if task.recovers:
+        if task.decodes:
+            menu = build_reconstruction_menu()
+        elif task.recovers:
             menu = build_localization_menu()
         elif task.blocks:
             menu = build_blocking_menu(task.budget_op)
@@ -1211,15 +1594,36 @@ def build_user_prompt(
         else:
             menu = build_algorithm_menu()
 
+        hook = (
+            "edge_cost()"
+            if task.decodes
+            else "source_score()"
+            if task.recovers
+            else "score()"
+        )
         reference = (
             "PRIMITIVES API (available as `primitives`; spread-simulation "
             "functions are NOT available):\n"
             f"{build_primitives_reference(exclude=scored_blocked_primitives)}\n\n"
             "ALGORITHM IDEAS (NOT callable — steal the ideas into your "
-            f"{'source_score()' if task.recovers else 'score()'}):\n"
+            f"{hook}):\n"
             f"{menu}"
         )
         final_line = "Write the ScoredStrategy subclass now."
+    elif task.decodes:
+        # A decoding task's library is the TRAJECTORY-decoder pool. A seed set, a
+        # removal set and a source set are all node lists; a trajectory is not, so
+        # showing any of the other three invites a program that returns the wrong
+        # object entirely.
+        reference = (
+            build_reconstruction_reference(
+                exclude=() if allow_mc_algorithms else mc_blocked_reconstruction
+            )
+            + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as "
+            "`primitives`)\n"
+            + build_primitives_reference(exclude=scored_blocked_primitives)
+        )
+        final_line = f"Write the Strategy now (method = {method})."
     elif task.recovers:
         # An inverse task's library is the localization pool. The IM algorithms
         # return seed sets to maximize with and the dismantlers return deletions;
@@ -1275,7 +1679,15 @@ def build_user_prompt(
         )
         final_line = f"Write the Strategy now (method = {method})."
 
-    if task.recovers:
+    if task.decodes:
+        budget_unit = "UNUSED — a decoder spends no budget on anything"
+        objective_line = (
+            "recover the hidden trajectory that produced the observation — "
+            f"MAXIMIZE {task.tree_weight:.2f} * PathPrecision + "
+            f"{1.0 - task.tree_weight:.2f} * EventF1 (higher is better)"
+        )
+        ops_line = "allowed_ops = none — this task emits no actions\n"
+    elif task.recovers:
         budget_unit = "max sources to name per episode"
         objective_line = (
             "recover the seed set that produced the observation — MAXIMIZE F1 "
@@ -1300,7 +1712,7 @@ TASK: {task.task} — {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
-{ops_line}{build_outbreak_block(task)}{build_round_block(task)}{build_observation_block(task)}
+{ops_line}{build_outbreak_block(task)}{build_round_block(task)}{build_observation_block(task)}{build_mask_block(task)}
 {build_graph_profile(graph)}
 
 {reference}
@@ -1376,7 +1788,72 @@ class MyLocalizer(ScoredStrategy):
 """
 
 
+def _scored_reconstruction_system(task: TaskSpec) -> str:
+    """
+    Scored mode for the decoding task, and the tightest of the three fits.
+
+    Every ordered-Steiner method in research/cascade_reconstruction.md §3 IS
+    exactly a shortest-path computation under an arc cost — `delayed-bfs`,
+    `closure`, `greedy`, WPCT and CulT differ in their constraints and their
+    attachment order, not in the shape of the object they optimize. Fixing the
+    harness and exposing only the cost therefore leaves a search space that
+    CONTAINS the classical methods rather than a subset of them, which is more
+    than can be said for the scored harness on either intervention task.
+    """
+    return f"""\
+You are designing the ARC-COST FUNCTION of a Cascade Reconstruction algorithm —
+not a whole program.
+
+A diffusion already happened on this graph and you only saw part of it. The task
+is to recover the whole history: which nodes were infected, when each activated,
+and who infected whom. Your score is
+{task.tree_weight:.2f} * PathPrecision + {1.0 - task.tree_weight:.2f} * EventF1,
+averaged over many masked cascades. HIGHER IS BETTER, and the weighting is toward
+the who-infected-whom EDGES on purpose — recovering the node set is nearly free.
+
+A fixed harness (ScoredStrategy.reconstruct) grows a tree out of the observed
+region, cheapest arc first under your cost, respecting every observed activation
+time, and then attaches parents. You may override ONLY:
+
+- edge_cost(self, source, target, probability, graph, observation) -> float
+    How IMPLAUSIBLE the transmission `source -> target` is. LOWER means the
+    harness prefers it, so a most-likely path is a cheapest path. `probability` is
+    the arc's own transmission probability p(source -> target); the default is
+    -log(p), which is the likelihood metric every published method here uses.
+    `observation.reported` is the report set and `observation.times` the known
+    activation times, so a rule can make an arc into an already-reported node
+    cheap, or penalize one that leaves the observed region.
+
+RULES:
+- Overriding reconstruct (or plan_horizon, or localize) is REJECTED by the executor.
+- `reconstruction_algorithms.*` does NOT exist here. Write the cost from graph
+  structure, the arc probability, the observation and `primitives`.
+- Reply with exactly ONE fenced ```python block containing ONE class subclassing
+  ScoredStrategy. No imports, no module-level code, no prose.
+- `GraphInfo` has .num_nodes, .out_neighbors(node), .in_neighbors(node),
+  .degree(node), .edge_index, .ic_probs.
+
+REPLY SHAPE (adapt the logic — improve on it, do not return it unchanged):
+```python
+class MyDecoder(ScoredStrategy):
+    def edge_cost(self, source, target, probability, graph, observation):
+        # -log p, without importing math: the harness only needs a monotone cost
+        likelihood = max(float(probability), 1e-9)
+        cost = 1.0 / likelihood
+        # An arc into a node we actually SAW is far more likely to be real than one
+        # into a node we are only guessing at
+        if target in observation.reported:
+            cost *= 0.5
+        # A hub absorbs every path through it; discount arcs that leave one
+        return cost * (1.0 + 0.01 * graph.degree(target))
+```
+"""
+
+
 def _scored_system(task: TaskSpec | None) -> str:
+    if task is not None and task.decodes:
+        return _scored_reconstruction_system(task)
+
     if task is not None and task.recovers:
         return _scored_localization_system(task)
 
@@ -1459,11 +1936,14 @@ def build_system_prompt(
     remove_note = remove_semantics_notes[spent]
     contains = task is not None and task.contains
     recovers = task is not None and task.recovers
+    decodes = task is not None and task.decodes
 
     blocks = task is not None and task.blocks
 
     if task is not None:
-        if recovers:
+        if decodes:
+            horizon_note = reconstruction_timing_note
+        elif recovers:
             horizon_note = localization_timing_note
         elif task.adaptive:
             horizon_note = adaptive_timing_note
@@ -1496,7 +1976,9 @@ def build_system_prompt(
     # population search over programs, and what those programs implement is
     # plan_horizon on an intervention task and localize on an inverse one. `method`
     # only picks which body describes the outer loop.
-    if recovers:
+    if decodes:
+        resolved = "reconstruct"
+    elif recovers:
         resolved = "localize"
     else:
         # evolve generates plan_horizon strategies under the same contract as one_shot
@@ -1508,7 +1990,9 @@ def build_system_prompt(
     # which a containment task REJECTS and an inverse task has no use for at all,
     # so showing the wrong set would cost the search its first iteration on a
     # repair turn for a contract nobody asked for
-    if resolved == "localize":
+    if resolved == "reconstruct":
+        base += reconstruction_exemplars
+    elif resolved == "localize":
         base += localization_exemplars
     elif resolved == "one_shot":
         if blocks:
@@ -1520,7 +2004,11 @@ def build_system_prompt(
         else:
             base += one_shot_exemplars
 
-    if resolved == "localize" or method in ("one_shot", "evolve", "adaptive"):
+    if resolved in ("localize", "reconstruct") or method in (
+        "one_shot",
+        "evolve",
+        "adaptive",
+    ):
         return base + remove_note + horizon_note
 
     return base + remove_note
@@ -1621,7 +2109,22 @@ Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
 no explanation."""
 
 
+reconstruction_routing_system = """\
+You are an algorithm-selection router for Cascade Reconstruction.
+You will be given a task, a graph description, a summary of the masked cascades to
+recover, and a menu of classical trajectory decoders. Each takes the partial
+observation and returns the whole history — which nodes were infected, when, and
+who infected whom. Pick the single one most likely to MAXIMIZE the tree-weighted
+score on these instances.
+
+Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+no explanation."""
+
+
 def build_routing_system(task: TaskSpec | None = None) -> str:
+    if task is not None and task.decodes:
+        return reconstruction_routing_system
+
     if task is not None and task.recovers:
         return localization_routing_system
 
@@ -1636,7 +2139,14 @@ def build_routing_system(task: TaskSpec | None = None) -> str:
 
 
 def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
-    if task.recovers:
+    if task.decodes:
+        budget_unit = "UNUSED — a decoder spends no budget"
+        objective_line = (
+            f"MAXIMIZE {task.tree_weight:.2f} * PathPrecision + "
+            f"{1.0 - task.tree_weight:.2f} * EventF1 (higher is better)"
+        )
+        menu = build_reconstruction_menu()
+    elif task.recovers:
         budget_unit = "max sources to name per episode"
         objective_line = "MAXIMIZE F1 against the true source set (higher is better)"
         menu = build_localization_menu()
@@ -1661,7 +2171,7 @@ TASK: {task.task} — {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
-{build_outbreak_block(task)}{build_observation_block(task)}
+{build_outbreak_block(task)}{build_observation_block(task)}{build_mask_block(task)}
 {build_graph_profile(graph)}
 
 ALGORITHM MENU:

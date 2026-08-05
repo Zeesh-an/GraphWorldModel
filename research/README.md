@@ -24,7 +24,7 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | [`critical_node_detection.md`](critical_node_detection.md) | yes **implemented**      | 1,001 | (key) CoreHD/BPD Table I — "Grid" is our `power_grid` byte-for-byte        |
 | [`epidemic_control.md`](epidemic_control.md)               | yes direct               | 690   | partial — different dataset family (contact networks)                   |
 | [`influence_estimation.md`](influence_estimation.md)       | yes **already computed** | 553   | (key) GLIE + SIEA — `ca_grqc`, `nethept`, `netphy`, `youtube` match        |
-| [`cascade_reconstruction.md`](cascade_reconstruction.md)   | yes direct               | 763   | DIPT 2025 — Cora-ML and Power Grid                                      |
+| [`cascade_reconstruction.md`](cascade_reconstruction.md)   | yes **implemented**      | 763   | (key) DITTO KDD'23 Tables 4–5 — BA, ER, Oregon2 and rt-pol are all ours    |
 | [`adaptive_online_im.md`](adaptive_online_im.md)           | yes **implemented**      | 572   | only DeepIM's re-run OIM row; the rest are figures                      |
 | [`network_inference.md`](network_inference.md)             | Warning: moderate             | 782   | no — Kronecker synthetics, not our graphs                               |
 | [`cascade_prediction.md`](cascade_prediction.md)           | Warning: moderate             | 567   | no — real cascade corpora only                                          |
@@ -66,6 +66,8 @@ Things that emerged from more than one file, or that change what we should do.
    | `influence_estimation`, `cascade_prediction` | no | yes | n/a | n/a | world model only; forecasting has no algorithm to search |
 
    Two consequences worth carrying. **Network inference is the folder's only inverted case**: everywhere else that fails, it fails on the agent side. And **the reward is the specification**: `cascade_reconstruction.md` §2.6 shows that scoring a program search on the easy half of a metric pair (node set rather than tree) does not merely under-report, it makes the search discard the capability. Check that a trivial baseline scores badly under the chosen reward before running any search.
+
+   **Both inverse tasks are now built on that basis, and the second one is the sharper test.** Cascade reconstruction ships as `--task cascade_reconstruction`: the agent writes `reconstruct(graph, observation, horizon)`, `self.step_marginals(infected, frontier)` is the one new primitive and its four bindings ARE conditions 3–6, and the component-swap framing ships as **arm A** (`decode_free@world_model`, condition 8) — DITTO's Metropolis-Hastings sampler with our learned kernel in place of its mean-field `β̂`, so `6 vs A` is measured rather than argued. Three differences from source localization are worth naming. The inner loop runs at ~10⁴ kernel calls per instance against ~10², which is what makes the cost axis load-bearing rather than a footnote. The reward is `λ·PathPrecision + (1−λ)·EventF1` rather than a single metric, and `trivial_decoder_reward` is computed into every results JSON because the check above is a requirement here, not advice. And it needed one thing source localization did not: a **ground-truth parent**, which NDlib does not emit at all — `--trace-parents` swaps in traced IC/LT models that record the transmission edge, and without it the tree-weighted reward is not computable and the harness refuses to run.
 
 ---
 

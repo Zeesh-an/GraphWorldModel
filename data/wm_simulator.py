@@ -11,6 +11,7 @@ default) or `blocked` (the containment reading). See the constants below.
 
 from dataclasses import dataclass, field
 
+import future.utils
 import networkx as nx
 import numpy as np
 import ndlib.models.ModelConfig as model_config_module
@@ -109,6 +110,170 @@ class State:
         return state
 
 
+class TracedICModel(epidemics.IndependentCascadesModel):
+    """
+    IC that records WHICH `u` caused each successful flip.
+
+    NDlib never produces the transmission edge: its `iteration` sets
+    `actual_status[v] = 1` on a successful coin flip without recording the
+    responsible `u`, so every tree-level cascade-reconstruction metric is
+    unscoreable without this (research/cascade_reconstruction.md §9 item 9). The
+    body below is NDlib's own, line for line, plus one append.
+
+    Two properties of the ground truth it produces, both of which must be
+    documented wherever a tree number is:
+
+      * NDlib iterates spreaders in NODE ORDER and skips any `v` already flipped
+        this step, so the recorded parent is *the first successful `u` in node
+        order*, not a uniformly random one among the successes. That is a real
+        and documentable bias, not an artifact of this subclass.
+      * A node can be reached by several spreaders in one step; only the first
+        one is credited, because only the first one actually changed the state.
+
+    `build` rather than a constructor: NDlib's own `__init__` calls
+    `super(self.__class__, self).__init__`, which recurses forever the moment the
+    class is subclassed. Building the base and re-classing the instance is a
+    well-defined operation and avoids copying its constructor body.
+    """
+
+    @classmethod
+    def build(cls, graph, seed=None) -> "TracedICModel":
+        model = epidemics.IndependentCascadesModel(graph, seed=seed)
+        model.__class__ = cls
+        model.transmissions = []
+
+        return model
+
+    def iteration(self, node_status=True):
+        self.clean_initial_status(list(self.available_statuses.values()))
+        actual_status = {
+            node: nstatus for node, nstatus in future.utils.iteritems(self.status)
+        }
+        self.transmissions = []
+
+        if self.actual_iteration == 0:
+            self.actual_iteration += 1
+            delta, node_count, status_delta = self.status_delta(actual_status)
+
+            return {
+                "iteration": 0,
+                "status": actual_status.copy() if node_status else {},
+                "node_count": node_count.copy(),
+                "status_delta": status_delta.copy(),
+            }
+
+        for u in self.graph.nodes:
+            if self.status[u] != 1:
+                continue
+
+            neighbors = list(self.graph.neighbors(u))
+
+            if len(neighbors) > 0:
+                threshold = 1.0 / len(neighbors)
+
+                for v in neighbors:
+                    if actual_status[v] == 0:
+                        key = (u, v)
+
+                        if "threshold" in self.params["edges"]:
+                            if key in self.params["edges"]["threshold"]:
+                                threshold = self.params["edges"]["threshold"][key]
+                            elif (
+                                v,
+                                u,
+                            ) in self.params["edges"]["threshold"] and not self.graph.directed:
+                                threshold = self.params["edges"]["threshold"][(v, u)]
+
+                        if np.random.random_sample() <= threshold:
+                            actual_status[v] = 1
+                            self.transmissions.append((int(u), int(v)))
+
+            actual_status[u] = 2
+
+        delta, node_count, status_delta = self.status_delta(actual_status)
+        self.status = actual_status
+        self.actual_iteration += 1
+
+        return {
+            "iteration": self.actual_iteration - 1,
+            "status": delta.copy() if node_status else {},
+            "node_count": node_count.copy(),
+            "status_delta": status_delta.copy(),
+        }
+
+
+class TracedThresholdModel(epidemics.ThresholdModel):
+    """
+    LT that records the active in-neighbourhood each newly activated node crossed on.
+
+    LT has NO transmission edge: activation is a threshold crossing over the whole
+    active neighbourhood, so the honest ground truth is a parent SET rather than a
+    parent (research/cascade_reconstruction.md §2.6). Every tree metric that wants
+    a single edge therefore reads LT as set-valued and says so.
+
+    Same `build` trick as `TracedICModel`, for the same NDlib constructor bug.
+    """
+
+    @classmethod
+    def build(cls, graph, seed=None) -> "TracedThresholdModel":
+        model = epidemics.ThresholdModel(graph, seed=seed)
+        model.__class__ = cls
+        model.transmissions = []
+
+        return model
+
+    def iteration(self, node_status=True):
+        self.clean_initial_status(list(self.available_statuses.values()))
+        actual_status = {
+            node: nstatus for node, nstatus in future.utils.iteritems(self.status)
+        }
+        self.transmissions = []
+
+        if self.actual_iteration == 0:
+            self.actual_iteration += 1
+            delta, node_count, status_delta = self.status_delta(actual_status)
+
+            return {
+                "iteration": 0,
+                "status": actual_status.copy() if node_status else {},
+                "node_count": node_count.copy(),
+                "status_delta": status_delta.copy(),
+            }
+
+        for u in self.graph.nodes:
+            if actual_status[u] == 1:
+                continue
+
+            neighbors = list(self.graph.neighbors(u))
+            if self.graph.directed:
+                neighbors = list(self.graph.predecessors(u))
+
+            infected = 0
+            for v in neighbors:
+                infected += self.status[v]
+
+            if len(neighbors) > 0:
+                infected_ratio = float(infected) / len(neighbors)
+                if infected_ratio >= self.params["nodes"]["threshold"][u]:
+                    actual_status[u] = 1
+                    # The whole active in-neighbourhood is the cause; naming one
+                    # of them would invent a transmission edge LT does not have
+                    self.transmissions += [
+                        (int(v), int(u)) for v in neighbors if self.status[v] == 1
+                    ]
+
+        delta, node_count, status_delta = self.status_delta(actual_status)
+        self.status = actual_status
+        self.actual_iteration += 1
+
+        return {
+            "iteration": self.actual_iteration - 1,
+            "status": delta.copy() if node_status else {},
+            "node_count": node_count.copy(),
+            "status_delta": status_delta.copy(),
+        }
+
+
 class Simulator:
     def __init__(
         self,
@@ -116,6 +281,7 @@ class Simulator:
         ic_prob_map: dict | None = None,
         seed: int = 0,
         remove_semantics: str = spent,
+        trace_parents: bool = False,
     ) -> None:
         if remove_semantics not in valid_remove_semantics:
             raise ValueError(
@@ -128,16 +294,23 @@ class Simulator:
         self.rng = np.random.default_rng(seed)
         self.seed = seed
         self.remove_semantics = remove_semantics
+        # Record who infected whom. Off by default because it is only meaningful
+        # to cascade reconstruction and costs a list append per successful flip.
+        self.trace_parents = trace_parents
         self.model_name = None
         self.model = None
         # Nodes deleted from the graph under `blocked`; empty under `spent`
         self.blocked = set()
+        # {v: [u, ...]} for the transitions of the most recent advance(); IC
+        # records exactly one parent per newly infected node, LT records the set
+        self.last_parents = {}
 
     def reset(
         self, model_name: str, lt_thresholds: dict[int, float] | None = None
     ) -> None:
         self.model_name = model_name
         self.blocked = set()
+        self.last_parents = {}
         config = model_config_module.Configuration()
 
         if model_name == "IC":
@@ -148,7 +321,12 @@ class Simulator:
             ic_graph.add_nodes_from(self.graph.nodes())
             ic_graph.add_edges_from(self.ic_prob_map.keys())
 
-            model = epidemics.IndependentCascadesModel(ic_graph, seed=self.seed)
+            build = (
+                TracedICModel.build
+                if self.trace_parents
+                else epidemics.IndependentCascadesModel
+            )
+            model = build(ic_graph, seed=self.seed)
             for (source, destination), probability in self.ic_prob_map.items():
                 config.add_edge_configuration(
                     "threshold", (source, destination), float(probability)
@@ -156,7 +334,12 @@ class Simulator:
         else:
             # Linear Threshold (LT)
             # Copy so edge actions mutate this episode's graph, not the shared bundle
-            model = epidemics.ThresholdModel(self.graph.copy(), seed=self.seed)
+            build = (
+                TracedThresholdModel.build
+                if self.trace_parents
+                else epidemics.ThresholdModel
+            )
+            model = build(self.graph.copy(), seed=self.seed)
 
             if lt_thresholds is None:
                 lt_thresholds = {
@@ -268,6 +451,28 @@ class Simulator:
         for node in self.blocked:
             self.model.status[node] = 2 if self.model_name == "IC" else 0
 
+    def _record_parents(self, bag: list[ActionOp]) -> None:
+        """
+        {v: [u, ...]} for the step that just ran, from the traced model's log.
+
+        A node the ACTION activated has no parent at all — an `add_node` is an
+        exogenous injection, not a transmission — so those are recorded with an
+        empty list, which is what marks a source in the reconstructed tree.
+        """
+        if not self.trace_parents:
+            return
+
+        parents = {}
+        for source, target in getattr(self.model, "transmissions", []):
+            if target not in self.blocked and source not in self.blocked:
+                parents.setdefault(target, []).append(source)
+
+        for action in bag:
+            if action.op == "add_node":
+                parents[int(action.target)] = []
+
+        self.last_parents = parents
+
     def advance(self, bag: list[ActionOp]) -> State:
         # s_{t + 1} = T_endo(T_exo(s_t, a_t))
         # Snapshot previous active nodes before actions
@@ -276,6 +481,7 @@ class Simulator:
         self.apply_actions(bag)  # Apply the actions (exogenous effect)
         self.model.iteration()  # Run one diffusion iteration (endogenous diffusion dynamics)
         self._enforce_blocked()
+        self._record_parents(bag)
 
         active = self.active_nodes()
 
@@ -334,6 +540,9 @@ class Simulator:
                 frontier_counts[node] = frontier_counts.get(node, 0) + 1
 
             last_state = State(infected=sorted(active), frontier=sorted(frontier))
+            # The LAST draw is the one whose state is returned, so the parents
+            # recorded here are the parents of the state actually written
+            self._record_parents(bag)
 
         # Averaging across Monte Carlo runs turns the target into the true probability
         infected_marginal = {
@@ -381,6 +590,36 @@ class Simulator:
                 )
 
         self.apply_actions(inverse)
+
+    def set_state(self, infected, frontier) -> None:
+        """
+        Force the model into an ARBITRARY mid-cascade state.
+
+        Evaluating the transition kernel at a proposed state is what a trajectory
+        decoder does thousands of times per instance
+        (research/cascade_reconstruction.md §2.5.2), and a fresh simulation cannot
+        reach one: NDlib only ever advances forward from what it already holds.
+        `snapshot`/`restore` rewind to a state this simulator VISITED; this writes
+        one it never did, which is the difference between replaying an episode and
+        scoring a hypothesis about it.
+
+        Under IC the frontier is status 1 (currently infectious) and the rest of
+        the infected set is status 2 (spent), which is exactly the invariant
+        `current_state` reads back. LT has no spent compartment, so everything
+        active is status 1 and the frontier is carried by the caller.
+        """
+        active = {int(node) for node in infected} | {int(node) for node in frontier}
+        wave = {int(node) for node in frontier}
+
+        for node in self.model.status:
+            if int(node) in wave:
+                self.model.status[node] = 1
+            elif int(node) in active:
+                self.model.status[node] = 2 if self.model_name == "IC" else 1
+            else:
+                self.model.status[node] = 0
+
+        self._enforce_blocked()
 
     def snapshot(self) -> tuple[dict, int, set]:
         # `blocked` belongs in here: a counterfactual fork that blocks a node

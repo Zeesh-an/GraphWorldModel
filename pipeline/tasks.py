@@ -83,6 +83,13 @@ class Task:
     # `TaskSpec.blocks` is built from — the difference from plain containment is that
     # the budget can buy something that SPREADS, not only something that deletes.
     competitive: bool = False
+    # The recovered object is a TRAJECTORY rather than a set, which changes the
+    # contract as much as `competitive` changes the simulator: `reconstruct()`
+    # instead of `localize()`, a tree-weighted reward instead of F1, and a
+    # transmission edge in the data that NDlib does not otherwise produce. It
+    # narrows `recovers` exactly as `blocks` narrows `contains` — both members of
+    # the family invert something, and only this one has to name an edge.
+    reconstructs: bool = False
     blocker: str | None = None
 
     @property
@@ -356,15 +363,73 @@ tasks = {
     "cascade_reconstruction": Task(
         name="cascade_reconstruction",
         title="Cascade Reconstruction",
-        status=planned,
+        status=implemented,
         objective=recover,
+        reconstructs=True,
         dynamics=("IC", "LT"),
-        action_ops=(),
+        # Named for the same reason source localization names it: nothing is ever
+        # emitted as an intervention — a reconstruct() program returns
+        # `{node: (time, parent)}` — but the recovered SOURCES (the nodes whose
+        # parent is None) are an `add_node` bag, which is what the --compare
+        # re-simulation referee replays. Naming the op keeps every arm speaking one
+        # action vocabulary (research/cascade_reconstruction.md §2.5.1).
+        action_ops=("add_node",),
         summary="Recover the hidden trajectory from partial observations.",
-        blocker="Node-level reconstruction needs only a masked-episode harness. "
-        "Tree-level metrics need the transmission edge, which NDlib never "
-        "emits — IndependentCascadesModel.iteration flips v without recording "
-        "which u caused it.",
+        # `budget` is NOT spent on anything here: a decoder emits no action and is
+        # handed no k. The single point exists because the sweep axis is the
+        # OBSERVATION RATE (--cr-observation-rate) and the SETTING (--cr-setting),
+        # and running the same experiment four times under four unused budgets
+        # would be four identical rows (§8.3).
+        default_budget_pcts=(10.0,),
+        # Diffusion-only episodes, for a stronger version of source localization's
+        # reason: actions are NULL throughout so T_exo = identity and the whole
+        # factorization collapses to s_{t+1} = T_endo(s_t) (§2.1). A mid-cascade
+        # injection would put a jump in the trajectory that no transition kernel
+        # can explain, and the decoder would be scored on inverting it.
+        default_gen_action_ops=(),
+        # §2.9 arm 1, one representative per family of §3, ordered by how dangerous
+        # each is. `delayed_bfs` heads the list because it is the row that actually
+        # has to be beaten: Xiao SDM'18 gets node precision > 0.8 from an
+        # O(m + k log k) BFS variant, and it sits INSIDE the agent's expressible
+        # space. `personalized_pagerank` is second because §8.2 trap 4 records that
+        # it BEATS tree sampling on `ca_grqc` specifically (assortativity 0.164) —
+        # if the search cannot clear it there, the result is not real.
+        # `observed_only` is Rozenshtein's `Reports` control: precision 1.0 by
+        # construction, and the row that proves the reward is not gameable.
+        # `mcmc_decode` and `forward_backward` are deliberately absent for the same
+        # reason `celf` and `resim_greedy` are — they call the transition kernel
+        # 10^4 times per instance and would dominate startup for a table that
+        # exists to set a bar. Run either as its own --baselines arm.
+        default_baselines=(
+            "delayed_bfs",
+            "personalized_pagerank",
+            "ordered_steiner_closure",
+            "greedy_ordered",
+            "tree_sampling",
+            "cult",
+            "consistent_tree_wpct",
+            "dhrec",
+            "cri",
+            "netfill",
+            "observed_only",
+            "random_reconstruction",
+        ),
+        # The six-condition ladder plus arm A (§2.9): DITTO's decoder with our
+        # kernel substituted for its mean-field beta-hat. That is §2.3's framing —
+        # the component swap the tempting move would make — so it is the CONTROL
+        # decoder SEARCH is measured against, not the method. 6 vs A is the
+        # methodological claim this task exists to make, and §2.11 risk 6 is why it
+        # is built well: DITTO beats a supervised model trained with the TRUE beta
+        # on two of eight rows, so a weak arm A makes the comparison meaningless.
+        default_arms=(
+            "routing",
+            "evolve_free@native",
+            "evolve_free@monte_carlo",
+            "evolve_free@oracle",
+            "evolve_free@world_model",
+            "decode_free@world_model",
+        ),
+        blocker=None,
     ),
     "adaptive_online_im": Task(
         name="adaptive_online_im",
@@ -528,6 +593,16 @@ for _task in tasks.values():
             f"task {_task.name!r} is competitive but seeds no negative cascade "
             f"(outbreak_pct=0); a blocker with no rumour to answer scores the same "
             f"as every other blocker"
+        )
+
+    # A trajectory decoder is scored on a TREE, and a tree needs a parent that only
+    # `recover`-family data carries; a reconstructs entry that did not invert would
+    # be asking the planner to steer a cascade and be graded on explaining it
+    if _task.reconstructs and not _task.recovers:
+        raise ValueError(
+            f"task {_task.name!r} sets reconstructs=True but its objective is "
+            f"{_task.objective!r}; recovering a hidden trajectory is a "
+            f"{recover!r} objective, not an intervention"
         )
 
     # ...and it cannot also fight an exogenous cascade: the sources ARE the unknown
