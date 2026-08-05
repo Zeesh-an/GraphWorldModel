@@ -86,10 +86,27 @@ All five appear in DeepIM's published tables, which are transcribed in [`../rese
 | --- | --- | --- |
 | `influence_maximization` | 15 | 7 |
 | `adaptive_online_im` | 5 (`adaptiveim`, `mrim`, `rl4im`, `oim_lt`, `timlinucb`) | 0 |
-| `critical_node_detection` | 12 (`finder`, `gdm`, `mind`, `spr`, `nirm`, `dcrs`, `gnd`, `decycler`, `collective_influence`, `explosive_immunization`, `dismantling_review`, `selinda`) | 0 |
+| `critical_node_detection` | 12 (`finder`, `gdm`, `mind`, `spr`, `nirm`, `dcrs`, `gnd`, `decycler`, `collective_influence`, `explosive_immunization`, `dismantling_review`, `selinda`) | 11 |
 | `source_localization` | 12 (six `graphsl_*` arms, plus `graphsl`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`, `cosasi`) | 6 |
 | `influence_blocking` | 4 (`sandimin`, `imin_joc`, `diffim`, `stratlearner`) | 3 |
 | `cascade_reconstruction` | 13 (three `ditto*` arms, plus `grin`, `spin`, `deep_demixing`, `reconstructing_cascade`, `cascade_tree_samples`, `cult`, `active_cascade_reconstruction`, `brits`, `dipt`, `netrate`) | 6 |
+| `epidemic_control` | 25 (six `netimm_*` arms, five shared `*_epi` dismantlers, plus `rlgn`, `idrleca`, `durleca`, `epilearn`, `covasim`, `pandemic_simulator`, `epimodel`, `greedywalk`, `netmelt`, `fractional_immunization`, `preciado`, `colagnn`, `stan`, `epignn`) | 11 |
+
+**Six wired arms, one install, for epidemic control — and it is the highest-value clone in this file.** `research/epidemic_control.md` §11 lists **NetShield, DAVA and DAVA-fast** among the methods with "no public release", and all three are in [`allogn/Network-Immunization`](https://github.com/allogn/Network-Immunization), along with NetShape (Khalil KDD'14), Degree and Random. Without it, every spectral and every data-aware number in our table is our own reimplementation and nobody else's:
+
+```bash
+python -m baselines.setup_baselines --only netimm_netshield
+python -m pipeline.run --dataset hospital_lh10 --task epidemic_control \
+    --baselines external:netimm_netshield external:netimm_dava netshield dava --compare
+```
+
+**Our reimplementations produce byte-identical node sets to theirs.** On `hospital_lh10` at `k=8`, our `netshield` and `external:netimm_netshield` both return `[0, 4, 6, 14, 16, 22, 28, 36]`, and our `dava` and `external:netimm_dava` both return `[7, 45, 58, 60, 61, 65, 66, 71]` [derived, 2026-08-05]. That is the cross-check §11 asks for and neither implementation is authoritative without.
+
+Five compatibility patches are applied at setup, each a 2016-era API that no longer exists: `nx.to_numpy_matrix` (removed in networkx 3.0), `scipy.linalg.eigh(eigvals=...)` (removed in SciPy 1.12, twice) and `np.warnings` (removed in NumPy 1.24). The driver skips the repo's own `run_solver.py` for two reasons: it unpickles a NetworkX graph (a version gamble across two environments for no gain) and it then runs 100 of its OWN IC simulations to score the answer, which is work the shared referee already does.
+
+Warning: **`epilearn` is registered as blocked because it ships NO intervention code at all.** §3.2 and §11 of the research doc both claim a `NetShield` implementation ships in it; verified by listing the whole repository tree and grepping every module, that is wrong — EpiLearn is forecasting, detection, a `NetworkSIR` forward simulator and graph transforms. The correction is recorded in §0.0 of that file rather than edited away, because every secondary source repeating the claim traces back to it.
+
+**Four more arms, no new installs.** `finder_epi`, `collective_influence_epi`, `explosive_immunization_epi` and `dismantling_review_epi` re-register already-wired node-removal repos under this task, sharing their critical-node twin's clone, venv, build and adapter. §2.5 maps vaccination onto `remove_node`, so a dismantler's output IS an allocation under the `vaccinate` lever, and §4.2 lists FINDER under this task explicitly. Running one under BOTH tasks and reading the two rows against each other is a comparison neither literature makes: §8.2 trap 1 says a method can win the connectivity metric and lose the epidemic one.
 
 **Three wired arms, one install, for cascade reconstruction.** `ditto`, `ditto_dhrec` and `ditto_cri` are three entry points inside DITTO's single clone, sharing a venv through `install_name`. `ditto.py` is the KDD'23 method; `dhrec.py` and `cri.py` are that paper's own implementations of DHREC-PCDSVC and CRI — the first because the original code covers only SEIRS, the second because CRI's authors published none — so those two arms are **cross-checks on our own reimplementations** rather than new coverage:
 

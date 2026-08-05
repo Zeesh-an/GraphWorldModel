@@ -11,6 +11,7 @@ from coding_agent.tools import (
     algorithms,
     blocking_algorithms,
     dismantling_algorithms,
+    immunization_algorithms,
     localization_algorithms,
     primitives,
     reconstruction_algorithms,
@@ -19,6 +20,9 @@ from coding_agent.tools import (
 algorithm_names = list(algorithms.algorithms.keys())
 adaptive_names = list(adaptive_algorithms.adaptive_algorithms.keys())
 dismantling_names = list(dismantling_algorithms.dismantling_algorithms.keys())
+immunization_names = list(
+    immunization_algorithms.immunization_algorithms.keys()
+)
 localization_names = list(localization_algorithms.localization_algorithms.keys())
 reconstruction_names = list(
     reconstruction_algorithms.reconstruction_algorithms.keys()
@@ -212,6 +216,71 @@ def build_blocking_reference(budget_op: str = "add_node", exclude: tuple = ()) -
         "out-neighbours' and it outscores every learned method except StratLearner on\n"
         "two of that paper's three graphs, while `degree_blocking` is on the list\n"
         "because the published finding is that plain degree FAILS at this task:\n"
+        + "\n".join(lines)
+        + blocked_note
+    )
+
+
+def immunization_names_for(lever: str = "vaccinate") -> list[str]:
+    """Library members whose output the given epidemic lever can emit."""
+    return [
+        name
+        for name in immunization_names
+        if immunization_algorithms.emittable(name, lever)
+    ]
+
+
+def build_immunization_menu(lever: str = "vaccinate") -> str:
+    """Return one `- name: summary` line per immunizer for this lever (routing prompt)."""
+    lines = []
+    for name in immunization_names_for(lever):
+        doc_lines = (
+            immunization_algorithms.immunization_algorithms[name].__doc__ or ""
+        ).strip().splitlines()
+        lines.append(f"- {name}: {doc_lines[0] if doc_lines else ''}")
+
+    return "\n".join(lines)
+
+
+def build_immunization_reference(
+    lever: str = "vaccinate", exclude: tuple = ()
+) -> str:
+    """The immunization surface for ONE lever, shown only to an epidemic prompt."""
+    names = immunization_names_for(lever)
+    lines = [
+        _signature_line(immunization_algorithms.immunization_algorithms[name])
+        for name in names
+        if name not in exclude
+    ]
+    returns = (
+        "a list of `(u, v)` ARCS"
+        if lever in ("edge_cut", "contact_reduce")
+        else "a list of node ids"
+    )
+    blocked_note = (
+        "\n  NOT AVAILABLE (calling one raises): "
+        + ", ".join(name for name in names if name in exclude)
+        + " — it simulates the whole compartmental outbreak for every candidate,\n"
+        "  which bypasses the metered evaluator."
+        if any(name in exclude for name in names)
+        else ""
+    )
+
+    return (
+        "IMMUNIZATION ALGORITHMS  (from coding_agent.tools.immunization_algorithms,\n"
+        "imported as `immunization_algorithms`). Each takes `outbreak=` — the index\n"
+        f"cases, which are also `self.outbreak` — and returns {returns} of length\n"
+        "`budget`. These are the published baselines you are being compared against:\n"
+        "call one, beat one, or take its idea and improve on it.\n"
+        "\n"
+        "Three things worth knowing before you pick one. `degree_immunization` is the\n"
+        "row that actually has to be beaten — a 2002 heuristic that ties learned\n"
+        "methods on real graphs. `netshield` minimizes the adjacency's leading\n"
+        "eigenvalue, which is a model-independent surrogate that does NOT know where\n"
+        "the outbreak currently is; `dava` conditions on exactly that, and on a small\n"
+        "localized outbreak it wins by a wide margin. And `acquaintance_immunization`\n"
+        "uses no global information at all and is the published embarrassment for\n"
+        "methods that read the whole graph:\n"
         + "\n".join(lines)
         + blocked_note
     )

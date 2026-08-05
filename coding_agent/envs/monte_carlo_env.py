@@ -8,8 +8,13 @@ import time
 import numpy as np
 
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
-from coding_agent.tools.primitives import build_competitive_simulator, build_simulator
+from coding_agent.tools.primitives import (
+    build_competitive_simulator,
+    build_epidemic_simulator,
+    build_simulator,
+)
 from data.wm_competitive import CompetitiveConfig
+from data.wm_epidemic import EpidemicConfig
 from data.wm_simulator import spent
 
 seed_upper_bound = 1 << 30
@@ -25,11 +30,19 @@ class MonteCarloEnvironment:
         remove_semantics: str = spent,
         negative_seeds: tuple = (),
         competitive_config: CompetitiveConfig | None = None,
+        epidemic_config: EpidemicConfig | None = None,
     ) -> None:
         self.graph = graph
         self.diffusion_model = diffusion_model
         self.mc_runs = mc_runs
         self.remove_semantics = remove_semantics
+        # Epidemic control: run the COMPARTMENTAL simulator instead of NDlib's
+        # IC/LT. `reward` stays `len(state.infected)` because State maps the attack
+        # set — the ever-infected nodes — onto that field, so nothing downstream has
+        # to know which simulator ran. What IS new is `prevalence_curve`: |I(t)| is
+        # a different curve from the cumulative one and is what §2.6's peak,
+        # time-to-peak and AUC are all functions of.
+        self.epidemic_config = epidemic_config
         # Influence blocking: run the TWO-cascade simulator with S_N committed at
         # t=0 by reset(), and score the negative cascade. `reward` stays
         # `len(state.infected)` because State maps the negative cascade onto those
@@ -97,6 +110,7 @@ class MonteCarloEnvironment:
 
         final_counts = []
         per_run_curves = []
+        per_run_prevalence = []
         final_infected_freq = np.zeros(self.graph.num_nodes)
         representative_states = []
         representative_actions = []
@@ -108,7 +122,15 @@ class MonteCarloEnvironment:
             # For each monte carlo run, build a fresh simulator with a child seed
             child_seed = int(rng.integers(seed_upper_bound))
 
-            if self.competitive_config is not None:
+            if self.epidemic_config is not None:
+                simulator = build_epidemic_simulator(
+                    self.graph,
+                    self.diffusion_model,
+                    seed=child_seed,
+                    config=self.epidemic_config,
+                )
+                state = simulator.current_state()
+            elif self.competitive_config is not None:
                 simulator = build_competitive_simulator(
                     self.graph,
                     self.diffusion_model,
@@ -145,13 +167,25 @@ class MonteCarloEnvironment:
                 # Terminate early once the cascade is dead (empty frontier) and the
                 # strategy is idle. Under competition BOTH cascades have to be dead:
                 # a live counter-cascade is still changing which nodes are protected.
-                alive = state.frontier or state.pos_frontier
+                # Under SEIR a latent node with nobody infectious left is still
+                # going to become infectious, so `exposed` counts as alive too.
+                alive = state.frontier or state.pos_frontier or state.exposed
                 if timestep > 0 and not alive and not bag:
                     break
 
             final_counts.append(float(len(state.infected)))
             per_run_curves.append(pad_counts(counts, horizon))
             final_infected_freq[list(state.infected)] += 1.0
+
+            if self.epidemic_config is not None:
+                # Zero-padded rather than held: a dead epidemic's prevalence IS
+                # zero, so holding the last value the way `pad_counts` does for the
+                # monotone attack set would report a standing infectious population
+                # that ended several steps ago
+                curve = list(simulator.prevalence)
+                per_run_prevalence.append(
+                    curve + [0.0] * (horizon + 2 - len(curve))
+                )
 
             # Keep the first run as the representative trajectory
             if run == 0:
@@ -191,4 +225,9 @@ class MonteCarloEnvironment:
             },
             final_marginals=(final_infected_freq / self.mc_runs).round(3).tolist(),
             spread_curve=np.mean(per_run_curves, axis=0).round(4).tolist(),
+            prevalence_curve=(
+                np.mean(per_run_prevalence, axis=0).round(4).tolist()
+                if per_run_prevalence
+                else None
+            ),
         )

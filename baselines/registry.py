@@ -31,7 +31,7 @@ import re
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 import networkx as nx
 
@@ -2452,6 +2452,247 @@ def _ditto_entry(
     )
 
 
+def _forecasting_entry(
+    name: str, title: str, venue: str, repo: str, paper: str
+) -> ExternalBaseline:
+    """
+    One of §4.3's forecasting GNNs, registered BLOCKED for a reason they all share.
+
+    All three have live, maintained public code — which is exactly why they are
+    registered rather than omitted: a reader who sees "Cola-GNN, code available" in
+    §4.3 will reasonably ask why it is not a baseline, and the answer has to be on
+    the row rather than in someone's memory.
+
+    They predict CASE COUNTS per region on a metapopulation and never intervene.
+    §4.3 says so outright — "these predict case counts; none of them intervene" —
+    so there is no k-node set, no arc set and no allocation of any kind to score.
+    They matter to this file only because they define the benchmark suite the
+    2024-2026 GNN-for-epidemics surveys use, and because EpiLearn packages them.
+    """
+    return ExternalBaseline(
+        name=name,
+        kind=learned,
+        title=title,
+        venue=venue,
+        repo=repo,
+        paper=paper,
+        entry="forecasting model (see repo)",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "IT FORECASTS, IT DOES NOT INTERVENE. The code is live [verified, "
+            "2026-08-05], but the model maps a history of regional case counts to "
+            "future case counts — there is no action space, no budget and no node "
+            "set to read back, so there is nothing for our referee to score. "
+            "research/epidemic_control.md §4.3 lists this whole family under "
+            "'not control, but the source of the datasets'. TO UNBLOCK: nothing; "
+            "this is a category difference, not a missing adapter."
+        ),
+        notes=(
+            "Relevant to this repo as a FORWARD model rather than a baseline: it is "
+            "a learned transition on a metapopulation, which is the same object "
+            "`data/wm_epidemic.py` is on a contact graph. A future comparison of "
+            "one-step accuracy, not of allocations."
+        ),
+    )
+
+
+def _netimm_export(
+    graph, work_dir: Path, budget: int, diffusion_model: str
+) -> dict:
+    """
+    Our graph as a weighted arc list plus the outbreak the solvers condition on.
+
+    Warning: THE OUTBREAK CROSSES THE BOUNDARY, and it is not derivable from
+    `(graph, budget)`. Two of the five solvers are DATA-AWARE — `Dom` is DAVA and
+    `NetShape` is Khalil's hazard-matrix program, and both are defined as "given the
+    OBSERVED infected set, choose k" — so a run without it answers a different
+    question. `run_external_baseline` writes `negative_seeds.json` for a blocking
+    task through the same channel; this reads the epidemic outbreak from the same
+    file, because the harness's `--outbreak-*` machinery produces both.
+
+    Written as a plain `u v w` arc list rather than the repo's own pickled NetworkX
+    graph: a pickle written by our networkx and read by theirs is a version gamble
+    that buys nothing, and the driver rebuilds the DiGraph in three lines.
+
+    BOTH ORIENTATIONS of an undirected edge are written, because `DomSolver` needs a
+    DiGraph (`immediate_dominators` is undefined on anything else) and a one-way
+    export would give it a reachability the graph does not have.
+    """
+    probabilities = {}
+    for column in range(graph.edge_index.shape[1]):
+        source = int(graph.edge_index[0, column])
+        target = int(graph.edge_index[1, column])
+
+        if source != target:
+            probabilities[(source, target)] = float(graph.ic_probs[column])
+
+    network = work_dir / "graph.txt"
+    with open(network, "w") as handle:
+        for (source, target), probability in sorted(probabilities.items()):
+            handle.write(f"{source} {target} {probability:.8f}\n")
+
+    outbreak_path = work_dir / negative_seeds_filename
+    outbreak = (
+        json.loads(outbreak_path.read_text()) if outbreak_path.exists() else []
+    )
+
+    if not outbreak:
+        # `Solver.__init__` raises outright on an empty seed set, and the two
+        # data-aware solvers have nothing to condition on without one. Naming the
+        # flag is more useful than the repo's own "Seeds can not be empty".
+        raise ValueError(
+            "no outbreak was written for this run, but every Network-Immunization "
+            "solver takes the observed infected set as an input (Dom/DAVA and "
+            "NetShape are DEFINED on it). Run with --outbreak-pct > 0."
+        )
+
+    _write_fallback(graph, work_dir)
+    (work_dir / "outbreak.json").write_text(
+        json.dumps(
+            {
+                "num_nodes": int(graph.num_nodes),
+                "outbreak": [int(node) for node in outbreak],
+                # `Solver.__init__` raises when k > |V| - |seeds|, which our budget
+                # sweep can reach on a tiny graph
+                "budget": int(
+                    max(1, min(budget, graph.num_nodes - len(outbreak) - 1))
+                ),
+            }
+        )
+    )
+
+    driver = "network_immunization_driver.py"
+    shutil.copy(baselines_root / "drivers" / driver, work_dir / driver)
+
+    return {"driver": str(work_dir / driver)}
+
+
+def _netimm_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    return ["python", extras["driver"], str(work_dir)]
+
+
+def _netimm_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
+    """`blocked.json` is the solver's own node set; top it up by degree if short."""
+    output = work_dir / "blocked.json"
+
+    if not output.exists():
+        raise FileNotFoundError(
+            f"network-immunization produced no blocked.json in {work_dir}\n{stdout}"
+        )
+
+    return _pad_removals(
+        [int(node) for node in json.loads(output.read_text())["blocked"]],
+        work_dir,
+        budget,
+    )
+
+
+def _netimm_entry(
+    name: str, solver: str, title: str, venue: str, notes: str, fast: bool = False
+) -> ExternalBaseline:
+    """
+    One arm per solver in `allogn/Network-Immunization`, all sharing its single install.
+
+    Six arms from one clone, and three of them are methods
+    `research/epidemic_control.md` §11 lists as having NO public release:
+    **NetShield** (Tong ICDM'10), **DAVA** and **DAVA-fast** (Zhang & Prakash
+    SDM'14). §3.2's claim that EpiLearn ships a NetShield is wrong — that repo's
+    tree has no shield, immunization or intervention code at all [derived,
+    2026-08-05] — so this clone is the only third-party NetShield or DAVA anywhere,
+    and each of these arms is the cross-check on our own reimplementation in
+    `coding_agent/tools/immunization_algorithms.py`.
+    """
+    return ExternalBaseline(
+        name=name,
+        kind=classical,
+        title=title,
+        venue=venue,
+        repo="https://github.com/allogn/Network-Immunization",
+        paper="https://faculty.cc.gatech.edu/~badityap/papers/netshield-icdm10.pdf",
+        entry=f"run_solver.py ({solver})",
+        task="epidemic_control",
+        status="needs_setup",
+        # The repo ships a Pipfile pinned to python 3.7 and nothing else; the three
+        # packages it lists are already ours, so they are named unpinned here
+        requirements=None,
+        pip_packages=("networkx", "numpy", "scipy"),
+        install_name="network_immunization",
+        # Three 2016-era APIs that no longer exist. Each `new` carries a /*gwm*/-style
+        # marker or is a strict superset of its `old`, so `setup_baselines.patch()`
+        # can tell "already applied" from "not applied yet".
+        patches=[
+            # networkx 3.0 removed to_numpy_matrix outright
+            (
+                "NetShieldSolver.py",
+                "A = nx.to_numpy_matrix(G, nodelist=nodelist, weight=None)",
+                "A = np.asarray(nx.to_numpy_array(G, nodelist=nodelist, weight=None))",
+            ),
+            (
+                "NetShapeSolver.py",
+                "F = nx.to_numpy_matrix(self.G, nodelist=self.nodelist, weight='weight')",
+                "F = np.asarray(nx.to_numpy_array(self.G, nodelist=self.nodelist, weight='weight'))",
+            ),
+            # scipy 1.12 removed eigh's `eigvals` in favour of `subset_by_index`
+            (
+                "NetShieldSolver.py",
+                "W, V = eigh(A, eigvals=(M-1, M-1), type=1, overwrite_a=True)",
+                "W, V = eigh(A, subset_by_index=[M-1, M-1], type=1, overwrite_a=True)",
+            ),
+            (
+                "NetShapeSolver.py",
+                "W, V = eigh(M2, eigvals=(N-1, N-1), type=1, overwrite_a=True)",
+                "W, V = eigh(M2, subset_by_index=[N-1, N-1], type=1, overwrite_a=True)",
+            ),
+            # numpy 1.24 removed the np.warnings alias
+            (
+                "NetShapeSolver.py",
+                "np.warnings.filterwarnings('ignore')",
+                "import warnings; warnings.filterwarnings('ignore')",
+            ),
+        ],
+        export=_netimm_export,
+        command=_netimm_command,
+        parse_seeds=_netimm_parse,
+        extra_env=(
+            {"GWM_NETIMM_SOLVER": solver, "GWM_NETIMM_FAST": "1"}
+            if fast
+            else {"GWM_NETIMM_SOLVER": solver}
+        ),
+        notes=notes,
+    )
+
+
+def _shared_dismantler_entry(
+    name: str, source: str, title: str, notes: str
+) -> ExternalBaseline:
+    """
+    Re-register one already-wired NODE-REMOVAL repo under `epidemic_control`.
+
+    The registry's `task` field exists so one task's baselines never join another's
+    sweep, and re-registering under a second task with a SHARED install is the
+    sanctioned way to say "this method answers both". It genuinely does here:
+    `research/epidemic_control.md` §2.5 maps vaccination onto `remove_node`, so a
+    dismantler's output IS an allocation under the `vaccinate` lever, and §4.2 lists
+    FINDER under this task explicitly.
+
+    Everything but `name`, `task` and `notes` is inherited from the critical-node
+    entry, so the two arms share a clone, a venv, a build and an adapter, and a fix
+    to one is a fix to both.
+    """
+    origin = external_baselines[source]
+
+    return replace(
+        origin,
+        name=name,
+        task="epidemic_control",
+        install_name=origin.install_name or source,
+        notes=notes,
+    )
+
+
 def _cosasi_entry(method: str, title: str, venue: str, notes: str) -> ExternalBaseline:
     """One arm per cosasi estimator, all sharing its single install."""
     return ExternalBaseline(
@@ -4604,6 +4845,489 @@ external_baselines: dict[str, ExternalBaseline] = {
             "cite a `qwertyjl/cosasi` URL that 404s; the repo above is the one its "
             "JOSS paper names."
         ),
+    ),
+    # Epidemic control (research/epidemic_control.md §3, §4). SIX arms from ONE
+    # clone, and three of them are methods §11 lists as having no public release at
+    # all — NetShield, DAVA and DAVA-fast. `allogn/Network-Immunization` is the only
+    # third-party implementation of any of them, which makes this clone the single
+    # highest-value install in the file: without it every spectral and every
+    # data-aware number in our table is our own reimplementation and nobody else's.
+    "netimm_netshield": _netimm_entry(
+        "netimm_netshield",
+        "NetShield",
+        "NetShield: node immunization on large graphs",
+        "ICDM 2010 / TKDE 2015",
+        "(key) THE canonical node baseline of the spectral line, and the reference for "
+        "our own `netshield`. Its Shield-value is submodular, so its greedy is "
+        "(1 - 1/e)-optimal against it, and the paper's own Table 3 measures that "
+        "surrogate against the TRUE eigendrop at 0.977-1.000 across four "
+        "co-authorship graphs [verified, §5.3]. Warning: the authors published NO "
+        "code, and §3.2's widely-repeated claim that EpiLearn ships a NetShield "
+        "implementation is WRONG — that repo's tree has no shield, immunization or "
+        "intervention code at all [derived, 2026-08-05]. This clone is therefore "
+        "the only third-party NetShield anywhere and the only cross-check our own "
+        "reimplementation can have. Its immunization comparison is [figure]-only "
+        "(Fig 1), so running it produces the per-cell numbers that figure does not.",
+    ),
+    "netimm_dava": _netimm_entry(
+        "netimm_dava",
+        "Dom",
+        "DAVA: data-aware vaccine allocation",
+        "SDM 2014 / ACM TKDD 2015",
+        "(key) THE ROW THIS TASK IS POSITIONED AGAINST (§9.4). NetShield optimizes "
+        "lambda_1, needs no simulator and runs in milliseconds — we cannot beat it "
+        "on its own metric and should not try. DAVA makes exactly OUR argument, that "
+        "conditioning on the observed infection state changes the optimal "
+        "allocation, and does it with a dominator-tree heuristic on a single "
+        "snapshot; a learned action-conditioned model is the natural generalization. "
+        "No public code by the authors (§11), so this is the only third-party "
+        "implementation and the cross-check on our own `dava`. Its results are "
+        "[figure]-only (expected saved nodes vs budget), so per-cell numbers do not "
+        "exist upstream either.",
+    ),
+    "netimm_dava_fast": _netimm_entry(
+        "netimm_dava_fast",
+        "Dom",
+        "DAVA-fast: one dominator tree, top-k children",
+        "SDM 2014",
+        "The near-linear variant of the entry above: ONE dominator tree and the top "
+        "`k` of its root's children, rather than rebuilding after each dose. A "
+        "separate arm rather than a flag for the reason §8.2 trap 2 of the "
+        "dismantling review gives about reinsertion variants — `X` and `X-fast` get "
+        "cited under one name and are not the same method, and the gap between these "
+        "two rows is exactly what the rebuild buys.",
+        fast=True,
+    ),
+    "netimm_netshape": _netimm_entry(
+        "netimm_netshape",
+        "NetShape",
+        "NetShape: convex optimization of a hazard matrix",
+        "KDD 2014",
+        "Khalil, Dilkina & Song's continuous relaxation: minimize the spectral "
+        "radius of the hazard matrix by projected subgradient, then threshold. The "
+        "third line of §3 — neither a centrality nor a simulation — and the only "
+        "convex method in the pool. Warning: it runs `ceil((R/eps)^2)` iterations, "
+        "each a DENSE N x N eigendecomposition, so it is the arm most likely to hit "
+        "--baseline-timeout on anything past a few thousand nodes; raise "
+        "GWM_NETIMM_EPSILON to trade quality for iterations.",
+    ),
+    "netimm_degree": _netimm_entry(
+        "netimm_degree",
+        "Degree",
+        "Targeted degree immunization, as implemented in Network-Immunization",
+        "PRE 65:036104, 2002",
+        "A CROSS-CHECK on our `degree_immunization`, not new coverage — and worth "
+        "one arm precisely because it is the row §9.4 says has to be beaten. Two "
+        "independent implementations of a five-line heuristic agreeing is the "
+        "cheapest possible confirmation that our outbreak, budget and referee are "
+        "wired the way this repo's are.",
+    ),
+    "netimm_random": _netimm_entry(
+        "netimm_random",
+        "Random",
+        "Uniform random immunization, as implemented in Network-Immunization",
+        "PRL 86:3200, 2001",
+        "The control Pastor-Satorras & Vespignani's whole line exists to beat, and "
+        "not a throwaway floor: their 2002 result is that on a power-law graph this "
+        "needs an immunized fraction approaching 1 to halt spread, so the GAP "
+        "between this row and `netimm_degree` is the finding that founded the field.",
+    ),
+    # Registered and BLOCKED, each with a verified reason. Every one of these is
+    # named in research/epidemic_control.md §4 as a candidate; listing them with the
+    # reason is what stops the same investigation being repeated.
+    "rlgn": ExternalBaseline(
+        name="rlgn",
+        kind=learned,
+        title="RLGN: controlling graph dynamics with RL and GNNs",
+        venue="ICML 2021",
+        repo="https://proceedings.mlr.press/v139/meirom21a.html",
+        paper="https://arxiv.org/abs/2010.05313",
+        entry="none published",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "NO PUBLIC CODE. Checked arXiv, the PMLR proceedings page, the NVIDIA "
+            "Research project page and a GitHub search for the method name and the "
+            "authors [verified, 2026-08-05, and independently in §4.1 and §11]. "
+            "Reproducing it means reimplementing two GNNs, a PPO loop and its "
+            "temporal contact-graph environment from the paper's prose. TO UNBLOCK: "
+            "reimplement it, or write to the authors."
+        ),
+        notes=(
+            "(key) THE most comparable published table to what this task produces "
+            "(§5.1): a per-step test budget of 1% of N over 20 steps, SIR-style "
+            "dynamics with a latent period, and % healthy at the horizon. Two of its "
+            "five graphs are ours to the digit — `ca_grqc` at 5,242 / 14,496 and "
+            "`deezer_ro`, whose row we load at its own true edge count (its Table S4 "
+            "pairs Romania's node count with Hungary's edge count). Warning: its "
+            "budget convention is PER STEP and ours is a one-shot k, which §8.2 trap "
+            "3 records as non-comparable — cite its numbers as context, not as a "
+            "run. Its own Table 2 also has Degree and Eigenvector tying to within "
+            "0.1 on two of five graphs, which is the heuristic-collapse signature "
+            "§9.4 predicts for us."
+        ),
+    ),
+    "durleca": ExternalBaseline(
+        name="durleca",
+        kind=learned,
+        title="DURLECA: dual-objective RL epidemic control agent",
+        venue="KDD 2020",
+        repo="https://github.com/AnyLeoPeace/DURLECA",
+        paper="https://arxiv.org/abs/2008.01257",
+        entry="Flow-GNN + RL (see repo)",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "TWO blockers, and the second is the real one. (1) Its Beijing mobility "
+            "dataset is withheld for privacy and is available only on request with "
+            "the provider's authorization — the README says so [verified]. (2) More "
+            "fundamentally, its state is an hourly ORIGIN-DESTINATION FLOW TENSOR "
+            "over city regions and its action is a per-edge mobility multiplier on "
+            "that tensor; it has no interface that takes a contact graph and an "
+            "index case. Feeding it our graph would need a metapopulation model we "
+            "do not have, not an adapter."
+        ),
+        notes=(
+            "Its intervention IS our `contact_reduce` lever — a continuous per-edge "
+            "multiplier — which is the branch §2.2 says NDlib's compartmental models "
+            "cannot express at all and the reason we wrote our own stepper. So the "
+            "lever is comparable in KIND even though the instance is not, and that "
+            "is worth saying in a table rather than leaving the row absent."
+        ),
+    ),
+    "epilearn": ExternalBaseline(
+        name="epilearn",
+        kind=learned,
+        title="EpiLearn: ML toolkit for epidemic modelling",
+        venue="arXiv 2406.06016, 2024",
+        repo="https://github.com/Emory-Melody/EpiLearn",
+        paper="https://arxiv.org/abs/2406.06016",
+        entry="epilearn package",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "IT HAS NO INTERVENTION CODE. Warning: §3.2 and §11 both state that a "
+            "`NetShield` implementation ships in EpiLearn, and that is WRONG — "
+            "verified by listing the repo's whole tree and grepping every module "
+            "[derived, 2026-08-05]. What it ships is FORECASTING (`STGCN`, `EpiGNN`, "
+            "`ColaGNN`, `DCRNN`, `STAN`, `CausalGNN`-adjacent models), DETECTION, a "
+            "`NetworkSIR` forward simulator, `DMP`, and graph transforms. There is "
+            "no shield value, no immunization selector, no intervention API and no "
+            "`tasks/intervention.py`. It cannot choose k nodes, so there is nothing "
+            "to adapt. TO UNBLOCK: nothing — this is a correction to the review, not "
+            "a missing adapter. `external:netimm_netshield` is the runnable "
+            "NetShield."
+        ),
+        notes=(
+            "From the Emory Melody lab and the nearest thing this space has to a "
+            "shared harness, so the mis-attribution is worth recording rather than "
+            "silently dropping: every secondary source that says 'NetShield ships in "
+            "EpiLearn' traces back to §3.2 of our own review. Its FORWARD models "
+            "(NetworkSIR, DMP) are a legitimate future cross-check on "
+            "`data/wm_epidemic.py`, which is a different use than a baseline."
+        ),
+    ),
+    "covasim": ExternalBaseline(
+        name="covasim",
+        kind=classical,
+        title="Covasim: agent-based COVID model with an intervention API",
+        venue="PLOS Comp Biol 17(7), 2021",
+        repo="https://github.com/InstituteforDiseaseModeling/covasim",
+        paper="https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1009149",
+        entry="covasim package",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "ITS INTERVENTIONS ARE POPULATION-LEVEL, NOT TOPOLOGICAL. It has a rich "
+            "intervention API (`test_num`, `contact_tracing`, `vaccinate_num`, "
+            "`change_beta`) and it CAN be handed a custom contact layer, so the "
+            "input side is not the blocker — the output side is. Its allocations are "
+            "by priority, age band or probability, never 'these k node ids', so it "
+            "produces no set for our referee to score. Adapting it would mean "
+            "writing the selector ourselves, at which point the baseline is ours "
+            "rather than theirs."
+        ),
+        notes=(
+            "§4.4 lists it as a software baseline rather than a method, and that is "
+            "the right reading: its contribution is the SIMULATOR and its "
+            "household/school/work layer structure. Its `change_beta` intervention is "
+            "our `contact_reduce` lever by another name."
+        ),
+    ),
+    "pandemic_simulator": ExternalBaseline(
+        name="pandemic_simulator",
+        kind=learned,
+        title="PandemicSimulator: RL over an agent-based pandemic model",
+        venue="arXiv 2010.10560 / AAAI-21 workshop",
+        repo="https://github.com/SonyResearch/PandemicSimulator",
+        paper="https://arxiv.org/abs/2010.10560",
+        entry="python_scripts/ (see repo)",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "IT GENERATES ITS OWN POPULATION AND HAS NO GRAPH INPUT. Verified from "
+            "its README [2026-08-05]: it builds a synthetic age-distributed "
+            "population across homes, schools, stores, bars and restaurants, and its "
+            "actions are government REGULATION stages (stay-at-home orders, "
+            "closures) rather than per-node choices. There is no place to hand it a "
+            "contact graph and no k-node set to read back."
+        ),
+        notes=(
+            "§4.1 records that the simulator is the contribution as much as the "
+            "policy. Same category as Covasim: a forward model to compare "
+            "`data/wm_epidemic.py` against some day, not a selector to score."
+        ),
+    ),
+    # ...and the rest of §3 and §4, registered with a verified reason rather than
+    # left absent. The registry's own norm: a listed reason is what stops the same
+    # investigation being repeated, and every one of these is a method a reader of
+    # research/epidemic_control.md would reasonably ask about.
+    "idrleca": ExternalBaseline(
+        name="idrleca",
+        kind=learned,
+        title="IDRLECA: contact tracing and epidemic intervention via deep RL",
+        venue="arXiv 2102.08251 -> ACM TKDD 17(3), 2023",
+        repo="https://dl.acm.org/doi/10.1145/3546870",
+        paper="https://arxiv.org/abs/2102.08251",
+        entry="none published",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "NO PUBLIC CODE. Searched arXiv, the ACM DL entry, the authors' pages "
+            "and GitHub by method name and by all four authors [verified, "
+            "2026-08-05, and independently in §4.1]. Same Tsinghua group as "
+            "DURLECA, whose repo IS public — so the absence here is specific to "
+            "this paper rather than a group policy."
+        ),
+        notes=(
+            "Per-node isolate/test actions over an infection graph, which is the "
+            "closest ACTION SPACE in §4.1 to our `quarantine` lever — closer than "
+            "DURLECA's per-edge mobility multiplier. Warning: it models contact "
+            "TRACING as part of the policy, which §2.5 records is not an action in "
+            "our formulation at all: tracing changes the OBSERVATION, not the graph "
+            "or the state, and belongs in a POMDP observation model we do not have."
+        ),
+    ),
+    "epimodel": ExternalBaseline(
+        name="epimodel",
+        kind=classical,
+        title="EpiModel: stochastic network epidemic models",
+        venue="J Stat Software 84(8), 2018",
+        repo="https://github.com/EpiModel/EpiModel",
+        paper="https://www.jstatsoft.org/v84/i08/",
+        entry="R package",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "R, and the wrong object. The repo is live [verified, 2026-08-05] but "
+            "it is an R package, and `setup_baselines` builds Python venvs — an R "
+            "install path would be the first of its kind here. More decisive: its "
+            "networks are ERGM-GENERATED dynamic graphs rather than a supplied "
+            "adjacency, and its interventions are population-level rates, so there "
+            "is no k-node set to read back even with an R bridge."
+        ),
+        notes=(
+            "§4.4 lists it as a software baseline rather than a method, and that is "
+            "the right reading: it is the reference implementation of stochastic "
+            "network epidemic models. A future cross-check on `data/wm_epidemic.py`, "
+            "not a selector to score."
+        ),
+    ),
+    "colagnn": _forecasting_entry(
+        "colagnn",
+        "Cola-GNN: cross-location attention for ILI prediction",
+        "CIKM 2020",
+        "https://github.com/amy-deng/colagnn",
+        "https://yue-ning.github.io/docs/CIKM20-colagnn.pdf",
+    ),
+    "stan": _forecasting_entry(
+        "stan",
+        "STAN: spatio-temporal attention network with an SIR-consistency loss",
+        "JAMIA 28(4), 2021",
+        "https://github.com/v1xerunt/STAN",
+        "https://arxiv.org/abs/2008.04215",
+    ),
+    "epignn": _forecasting_entry(
+        "epignn",
+        "EpiGNN: region-aware transmission graph with a learned adjacency",
+        "ECML-PKDD 2022",
+        "https://github.com/Xiefeng69/EpiGNN",
+        "https://arxiv.org/abs/2208.11517",
+    ),
+    "netmelt": ExternalBaseline(
+        name="netmelt",
+        kind=classical,
+        title="NetMelt / NetGel (Gelling): edge immunization by eigendrop",
+        venue="CIKM 2012 (best paper)",
+        repo="https://faculty.cc.gatech.edu/~badityap/papers/netgel-cikm12.pdf",
+        paper="https://faculty.cc.gatech.edu/~badityap/papers/netgel-cikm12.pdf",
+        entry="none published",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "NO PUBLIC CODE FOUND (§3.2, §5.5). Unlike NetShield and DAVA — whose "
+            "third-party implementations turned up in "
+            "`allogn/Network-Immunization` (§0.0) — that repo has no EDGE solver at "
+            "all, so there is no third-party route either. Our `netmelt` scores an "
+            "arc by `u(i) * u(j)` per the paper's own rule and is a "
+            "reimplementation from prose."
+        ),
+        notes=(
+            "The canonical EDGE baseline of the spectral line and the row our "
+            "`edge_cut` and `contact_reduce` pools lead with. Its results are "
+            "[figure]-only (eigendrop vs k curves in both the melting and the "
+            "gelling direction), so per-cell numbers do not exist upstream either "
+            "and running it would produce the table that paper does not have."
+        ),
+    ),
+    "fractional_immunization": ExternalBaseline(
+        name="fractional_immunization",
+        kind=classical,
+        title="Fractional Immunization in Networks",
+        venue="SDM 2013",
+        repo="https://faculty.cc.gatech.edu/~badityap/papers/smartalloc-sdm13.pdf",
+        paper="https://faculty.cc.gatech.edu/~badityap/papers/smartalloc-sdm13.pdf",
+        entry="none published",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "NO PUBLIC CODE FOUND (§3.2, §5.5), and its instance is unobtainable "
+            "besides: the paper is motivated by hospital-transfer networks that "
+            "were never released. `allogn/Network-Immunization`'s `NetShape` solver "
+            "(Khalil KDD'14) is the nearest RUNNABLE convex relaxation and is wired "
+            "as `external:netimm_netshape`."
+        ),
+        notes=(
+            "The method our `contact_reduce` lever is closest to in kind: it drops "
+            "the all-or-nothing assumption and allocates a CONTINUOUS amount of "
+            "resource per node or edge under a budget. §2.2 records that this whole "
+            "branch is inexpressible against NDlib's compartmental models, which is "
+            "why `data/wm_epidemic.py` exists."
+        ),
+    ),
+    "preciado": ExternalBaseline(
+        name="preciado",
+        kind=classical,
+        title="Optimal resource allocation for network protection (geometric program)",
+        venue="IEEE TCNS 1(1), 2014",
+        repo="https://arxiv.org/abs/1309.6270",
+        paper="https://arxiv.org/abs/1309.6270",
+        entry="none published",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "NO PUBLIC CODE FOUND (§3.2), AND ITS INSTANCE CANNOT BE REBUILT. §6.5: "
+            "its 56-airport network was never published as a file, and while it is "
+            "reconstructable from OpenFlights with a >10 MPPY filter, the PASSENGER "
+            "WEIGHTS that make it a weighted digraph are not in OpenFlights. A "
+            "cardinality budget also mismatches its formulation, which allocates a "
+            "continuous per-node rate reduction."
+        ),
+        notes=(
+            "Convex and therefore globally optimal, which is unusual in this "
+            "literature — everything else here is greedy or heuristic. Our "
+            "`preciado_allocation` discretizes the GP's own first-order structure "
+            "to a top-k and is LABELLED a discretization rather than the method. "
+            "Its published results are [figure]-only."
+        ),
+    ),
+    "greedywalk": ExternalBaseline(
+        name="greedywalk",
+        kind=classical,
+        title="GreedyWalk / PrimalDual: approximation algorithms for spectral-radius minimization",
+        venue="SDM 2015",
+        repo="http://tinyurl.com/l3lgsq7",
+        paper="https://arxiv.org/abs/1501.06614",
+        entry="MATLAB (per the authors)",
+        task="epidemic_control",
+        status="blocked",
+        blocker=(
+            "MATLAB, AND THE LINK IS A TINYURL PRINTED IN THE PDF. §11 records the "
+            "URL as unverified; independently, `allogn/Network-Immunization`'s own "
+            "README states that its Walk8 solver 'is not available as the code was "
+            "provided by authors of Scalable Approximation Algorithm for Network "
+            "Immunization and the algorithm is implemented in MATLAB' [verified, "
+            "2026-08-05]. Two sources agree the artifact is MATLAB and not publicly "
+            "downloadable. Our `greedy_walk` / `greedy_walk_edge` are "
+            "reimplementations from the paper's prose and are labelled as such."
+        ),
+        notes=(
+            "(key) Its Table 2 is the SPECTRAL BENCHMARK DEFINITION (§5.2) and is why "
+            "`oregon1`, `oregon2_010331`, `brightkite`, `p2p_gnutella05` and "
+            "`p2p_gnutella06` are loaded: it publishes `lambda_1` per graph, so four "
+            "of those are checkable against somebody else's arithmetic. All four "
+            "reproduce to the decimal [derived, 2026-08-05] — Oregon-1 58.72, "
+            "Oregon-2 70.74, Brightkite 101.49, and the `youtube` we already load at "
+            "210.4. Its own RESULT cells are [figure]-only."
+        ),
+    ),
+}
+
+
+# Four already-wired NODE-REMOVAL repos re-registered under `epidemic_control`.
+# Applied AFTER the dict literal rather than inside it, because each one COPIES
+# its critical-node twin's entry and that twin has to exist first.
+# research/epidemic_control.md §2.5 maps vaccination onto `remove_node`, so a
+# dismantler's output IS an allocation under the `vaccinate` lever; §4.2 lists
+# FINDER under this task explicitly. Each shares its twin's clone, venv, build
+# and adapter, so one install serves both tasks and a fix to one is a fix to both.
+external_baselines |= {
+    "finder_epi": _shared_dismantler_entry(
+        "finder_epi",
+        "finder",
+        "FINDER, run as a vaccination allocation",
+        "The strongest LEARNED node-removal baseline, scored here on the simulated "
+        "attack rate rather than on the structural objective it was trained for. "
+        "That gap is the point: §4.2 lists FINDER under this task while noting its "
+        "objective is structural, and §8.2 trap 1 says a method can win the "
+        "connectivity metric and lose the epidemic one. Running it under BOTH tasks "
+        "and reading the two rows against each other is a comparison neither "
+        "literature currently makes.",
+    ),
+    "collective_influence_epi": _shared_dismantler_entry(
+        "collective_influence_epi",
+        "collective_influence",
+        "Collective Influence, run as a vaccination allocation",
+        "Morone & Makse's optimal percolation, which their own paper frames as "
+        "IMMUNIZATION rather than as dismantling — the Nature abstract is about "
+        "immunizing the minimal set that fragments a network. Registering it here "
+        "as well as under critical node detection is closer to the authors' own "
+        "framing than either task alone.",
+    ),
+    "explosive_immunization_epi": _shared_dismantler_entry(
+        "explosive_immunization_epi",
+        "explosive_immunization",
+        "Explosive Immunization, run as a vaccination allocation",
+        "Literally an immunization paper (Clusella et al., PRL 117:208301), and the "
+        "one physics method §9.4's prediction turns on: MIND's Table 5 puts EI at "
+        "80.6 on `eu-powergrid` against FINDER's 161.7, so a hand-built heuristic "
+        "beating a learned method by 2x on mesh graphs is the limitation we predict "
+        "and should confirm rather than discover. Warning: its output flag is "
+        "INVERTED relative to its README and it emits a SET at its own percolation "
+        "threshold rather than a removal order — see the critical-node entry.",
+    ),
+    "gdm_epi": _shared_dismantler_entry(
+        "gdm_epi",
+        "gdm",
+        "Graph Dismantling with Machine learning, run as a vaccination allocation",
+        "The second LEARNED allocation beside `finder_epi`, and the one "
+        "research/critical_node_detection.md §9.5's self-measurement was written "
+        "for: MIND found GDM's removal order correlates at 0.762 with a PCA of its "
+        "own handcrafted input features. We feed `log1p(degree)` as a channel, so "
+        "`degree_rank_spearman` near that value means a method re-derived the "
+        "degree heuristic with extra steps — which is exactly what §9.4 predicts "
+        "for this task too. Running it here as well as under critical node "
+        "detection is what makes the prediction checkable on both objectives.",
+    ),
+    "dismantling_review_epi": _shared_dismantler_entry(
+        "dismantling_review_epi",
+        "dismantling_review",
+        "NetworkDismantling review harness, run as a vaccination allocation",
+        "The Artime et al. survey harness, which already wires CI, CoreHD, GND, EI, "
+        "MinSum, FINDER and GDM behind one interface. Wiring THIS rather than the "
+        "seven repos separately is the right trade under either task, and it is also "
+        "the only practical route to a FINDER number given §11's note that FINDER "
+        "publishes no table.",
     ),
 }
 

@@ -287,3 +287,36 @@ python -m world_model.wm_sl \
 | `../coding_agent/check_source_localization.py` | runnable self-check for the inverse contract (localize, the four oracle bindings, label extraction, PR/RE/F1/AUC, the differentiable inversion) |
 | `model/*.py`                | the five backbone encoders + `model_utils.py` (each file also retains an unused legacy `*ForwardModel` class from the old seed→outcome pipeline) |
 | `checkpoints/`              | trained `.pt` weights, per-run results JSONs, and `RESULTS.md`                                                                                   |
+
+
+## Compartmental heads (`--task epidemic_control`)
+
+`CompartmentTransitionHead` is the one head here that is not a variation on the others, and `research/epidemic_control.md` §2.4 is why it had to be new rather than an edit.
+
+`ICTransmissionHead` composes
+
+```
+y_inf = infected + (1 - infected) * p_new
+```
+
+which is monotone non-decreasing in `infected` **by construction**: `p_new >= 0`, so `y_inf >= infected` for every assignment of encoder weights and every value of `q(u -> v)`. There is no way to make that expression predict a node LEAVING the infected set, and `LTThresholdHead` has the identical shape. That monotonicity is load-bearing — `checkpoints/RESULTS.md` records it as what fixed rollout saturation, `count_bias` +49 -> +0.27 — and it is exactly what `I -> R` under SIR/SEIR and `I -> S` under SIS violate.
+
+The replacement is a per-node row-stochastic **transition matrix**:
+
+```
+        S              E            I            R
+S   1 - p_inf(v)    p_inf(v)      .            .        <- infection is S's only exit
+E   .               1 - alpha(v)  alpha(v)     .        <- SEIR only
+I   .               .             1 - gamma(v) gamma(v) <- SIS sends this to S
+R   .               .             .            1        <- absorbing
+```
+
+Only `p_inf(v) = 1 - prod(1 - q_uv * infectious_u)` needs the graph, and it is `ICTransmissionHead`'s product form lifted verbatim; `gamma_hat(v)` and `alpha_hat(v)` are per-node scalars with no graph term, structurally identical to `LTThresholdHead`'s `theta_hat_v`. Rows are exact by closed-form composition rather than penalized, so `S + E + I + R = 1` holds identically and no simplex loss is needed.
+
+**Self-termination survives**, which matters more here than anywhere else: `p_inf = 0` with no infectious in-neighbour, and `I` decays geometrically at `gamma`, so a free-running SIS rollout cannot saturate even though nothing else would stop it.
+
+Input is `(N, 9)` and output `(N, 5)`. **Columns 0-1 are the attack set and the incidence**, which is what lets the rollout sampler, the one-step suite, the plots and the summary keep slicing `probs[:, 0]` and `probs[:, 1]` with no branch — the same discipline the competitive layout follows. Columns 2-4 are the current compartments and are what `sample_epidemic_step` draws from, coupled: one uniform per node against the cumulative `(E, I, R, S)` distribution, because four independent Bernoulli draws would put a node in two exclusive compartments at once.
+
+`--head structured_oracle` pins the matrix to the simulator's own rates and is therefore **exact rather than merely well-shaped** — `check_epidemic_control` measures all five columns against 4,000 simulator draws under all three dynamics. `--head structured_residual` anchors `q` on the arc's own `beta_uv` and exists only because we wrote our own stepper. There is deliberately **no `linear` compartmental head**: nothing would then keep the compartments on the simplex or the rollout self-terminating.
+
+The number to read first in the rollout block is `ens_prevalence_bias`, not `ens_count_bias`. The attack set is monotone and therefore forgiving; the prevalence is the non-monotone quantity, and a head that cannot shrink `I` shows up there first while the attack-set bias still looks fine.

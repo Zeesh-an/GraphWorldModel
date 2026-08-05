@@ -229,6 +229,30 @@ class TaskSpec:
     # Budak's detection delay r (§8.3): the rumour is detected r steps late and the
     # blocker emits nothing before then. 0 is every published table's setting.
     detection_delay: int = 0
+    # Epidemic control: the state is four EXCLUSIVE compartments rather than two
+    # overlapping indicators, and the transition is a per-node matrix rather than a
+    # probability. Set from the task registry's `epidemic` flag, and read by every
+    # path that has to pick the compartmental simulator, the 9-channel feature
+    # builder or the 5-target head. Narrows `contains` exactly as `blocks` does.
+    epidemic: bool = False
+    # Which of research/epidemic_control.md §2.5's four interventions the budget
+    # buys. Carried as a FIELD rather than derived from `budget_op`, because
+    # `vaccinate` and `quarantine` both spend `remove_node` and differ only in what
+    # the harness expands it into — the first deletes the node, the second isolates
+    # it and leaves it counted (§8.2 trap 7).
+    epi_lever: str = "vaccinate"
+    # Multiplier `set_edge_weight` writes under the `contact_reduce` lever. 0.0 is a
+    # full cut through the weight channel, so it is directly comparable to
+    # `edge_cut` at the same k; a value in (0, 1) is graded social distancing, which
+    # is expressible only because we wrote our own stepper (§2.2).
+    contact_reduction: float = 0.0
+    # The compartmental rates, RESOLVED, so the prompt can state what is being
+    # simulated. §8.2 trap 2: beta and gamma are free parameters nobody
+    # standardizes, and a table that fixes them without saying so is comparable
+    # only to itself. Inert unless `epidemic`.
+    epi_beta: float = 1.0
+    epi_gamma: float = 0.3
+    epi_alpha: float = 0.5
     # Drives the edit stream's schedule. Carried on the task rather than read
     # from the environment so the same seed produces the same graph history for
     # every arm, which is what makes a cross-arm comparison under a stream mean
@@ -256,6 +280,21 @@ class TaskSpec:
         head, so it needs a predicate of its own rather than riding on `contains`.
         """
         return self.competitive
+
+    @property
+    def immunizes(self) -> bool:
+        """
+        True for epidemic control specifically, not for containment in general.
+
+        Same relationship `blocks` has to `contains`, and the difference is what
+        the DYNAMICS are rather than what the budget buys: a critical-node arm
+        fights a monotone cascade, while this one fights a compartmental process in
+        which nodes RECOVER and — under SIS — become susceptible again. That
+        non-monotonicity is what needs a different simulator, a different feature
+        layout and a head that composes a transition matrix rather than a
+        probability (research/epidemic_control.md §2.4).
+        """
+        return self.epidemic
 
     @property
     def recovers(self) -> bool:
@@ -311,6 +350,15 @@ class Trajectory:
     # the rollout only breaks when the frontier AND the action bag are both
     # empty, which is a fixed point of monotone IC/LT.
     spread_curve: list[float] | None = None
+    # E|I(t)| after each timestep — the CURRENTLY-infectious count, not the
+    # cumulative one. Only a compartmental task fills it, and it is a separate
+    # field rather than a reinterpretation of `spread_curve` because the two are
+    # genuinely different curves there: the attack set is monotone and the
+    # prevalence is not, and §2.6's peak, time-to-peak and AUC are all functions of
+    # the second. Padding it by holding the last value would be WRONG for the same
+    # reason — a dead epidemic's prevalence is 0, not its last non-zero value — so
+    # it is padded with zeros instead.
+    prevalence_curve: list[float] | None = None
 
 
 class Strategy(Protocol):

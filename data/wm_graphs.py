@@ -100,6 +100,53 @@ real_directed = {
     "uci_students": False,
     "infectious": False,
     "citeseer": False,
+    # Epidemic-control benchmarks (research/epidemic_control.md §6). Two families.
+    #
+    # The SOCIOPATTERNS contact traces (§6.2) are the field's canonical EMPIRICAL
+    # networks — RFID proximity at 20-second resolution in a hospital, a school, a
+    # conference, an office, a village. All undirected, all aggregated from a `tij`
+    # stream by one parser (`data/datasets/sociopatterns.py`), and every count is
+    # [derived] because SocioPatterns publishes no statistics page at all. Warning:
+    # aggregating a contact trace DISCARDS the ordering that makes the epidemic
+    # non-trivial (§8.2 trap 5), and §7 records that no paper in the CS immunization
+    # line uses one — they buy realism and community structure, not a published
+    # baseline.
+    "hospital_lh10": False,
+    "primary_school": False,
+    "high_school_2013": False,
+    "high_school_2012": False,
+    "high_school_2011": False,
+    "sfhh": False,
+    "hypertext09": False,
+    "workplace_invs15": False,
+    "workplace_invs13": False,
+    "malawi_village": False,
+    "kenya_households": False,
+    "infectious_sociopatterns": False,
+    # ...and the SPECTRAL LINE's own benchmarks (§5.2, §6.3), which DO carry
+    # published numbers: GreedyWalk's Table 2 gives `lambda_1` per graph, so
+    # `wm_metrics.spectral_radius` is checkable against somebody else's arithmetic
+    # on `oregon1` (58.72), `oregon2_010331` (70.74), `brightkite` (101.49) and the
+    # `youtube` we already load (210.4).
+    #
+    # Warning: THREE name collisions, all recorded rather than renamed away (§6.4).
+    # `oregon2_010331` is the 2001-03-31 snapshot the spectral line reports while
+    # `oregon2` is `oregon2_010526`, DITTO's; `p2p_gnutella05`/`06` are GreedyWalk's
+    # while `p2p_gnutella08`/`24`/`p2p_gnutella` are three other snapshots; and
+    # `infectious_sociopatterns` is the full 10,972-node trace while `infectious` is
+    # Xiao ICDM'18's 410-node extraction of the same study.
+    "oregon1": False,
+    "oregon2_010331": False,
+    "brightkite": False,
+    "p2p_gnutella05": True,
+    "p2p_gnutella06": True,
+    # RLGN's GEMSEC-RO column. Warning: that paper's Table S4 pairs Romania's node
+    # count with Hungary's edge count; we load Romania at its own true count.
+    "deezer_ro": False,
+    # Girvan & Newman's football graph: 12 known conferences and near-regular
+    # degree, so it is the control that shows what happens when the heavy tail the
+    # degree heuristic feeds on is gone.
+    "football": False,
 }
 
 

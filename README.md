@@ -145,7 +145,9 @@ The four large graphs (Twitter, Digg, YouTube, Weibo) load fine but exceed what 
 
 The table above is the IM core; `CLAUDE.md` lists every loader, including the twelve network-dismantling benchmarks `critical_node_detection` uses and the seven `cascade_reconstruction` added — five of which (`infectious`, `email_univ`, `uci_students`, `oregon2`, `rt_pol`) reproduce Xiao's and DITTO's published counts digit for digit, while `citeseer` deliberately does not and says so. `dolphins` and `deezer` were added for `source_localization`: Dolphins (62 / 159, in IVGD, GraphSL and the 2026 GNN benchmark) is the only graph that literature uses which no other task needed, and `deezer` is IVGD's scalability column — **the HUNGARY subgraph**, not the union, which is a version distinction its own paper does not make and the SNAP release does not force (see the loader docstring).
 
-**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one. [`research/critical_node_detection.md`](research/critical_node_detection.md) §6, [`research/source_localization.md`](research/source_localization.md) §6, [`research/influence_blocking.md`](research/influence_blocking.md) §6 and [`research/cascade_reconstruction.md`](research/cascade_reconstruction.md) §6 are the counterparts for the other four literatures, each with its own set of name collisions — blocking contributes thirteen loaders and two of the sharpest collisions in the repo, `epinions1` (75,879, SNAP's soc-Epinions1) against `epinions` (131,828, the signed graph) and three different Gnutella snapshots published under one name.
+`epidemic_control` adds nineteen more, in two families. The twelve **SocioPatterns contact traces** (`hospital_lh10`, `primary_school`, `high_school_2011/12/13`, `sfhh`, `hypertext09`, `workplace_invs13/15`, `malawi_village`, `kenya_households`, `infectious_sociopatterns`) are the empirical networks that literature is actually about, and **every count reproduces its research doc's own derivation to the digit** — including the Kilifi household breakdown a public mirror gets wrong. Five ship ground-truth class labels. Warning: aggregating a contact trace discards the ordering that makes an epidemic non-trivial, every loader says so, and no paper in the CS immunization line uses one. The seven **spectral benchmarks** (`oregon1`, `oregon2_010331`, `brightkite`, `p2p_gnutella05/06`, `deezer_ro`, `football`) do carry published numbers, and **all four checkable `λ₁` values reproduce exactly** (58.72 / 70.74 / 101.49, plus YouTube's 210.4) — the first time this repo validates a spectral quantity against the literature.
+
+**[`research/influence_maximization.md`](research/influence_maximization.md) §6** is the full catalogue: every graph in the IM literature with source URLs and exact counts, which paper uses which, the seven dataset names that denote more than one graph, what to add next, and the loader contract for adding one. [`research/critical_node_detection.md`](research/critical_node_detection.md) §6, [`research/source_localization.md`](research/source_localization.md) §6, [`research/influence_blocking.md`](research/influence_blocking.md) §6, [`research/cascade_reconstruction.md`](research/cascade_reconstruction.md) §6 and [`research/epidemic_control.md`](research/epidemic_control.md) §6 are the counterparts for the other five literatures, each with its own set of name collisions — blocking contributes thirteen loaders and two of the sharpest collisions in the repo, `epinions1` (75,879, SNAP's soc-Epinions1) against `epinions` (131,828, the signed graph) and three different Gnutella snapshots published under one name.
 
 ---
 
@@ -285,22 +287,26 @@ python -m pipeline.run --dataset jazz \
     --task source_localization --compare                       # recover the sources
 python -m pipeline.run --dataset ca_grqc \
     --task cascade_reconstruction --compare                    # recover the whole history
+
+python -m pipeline.run --dataset hospital_lh10 \
+    --task epidemic_control --compare                         # vaccinate under SIR/SIS/SEIR
 python -m pipeline.run --dataset jazz --run gcnii_ablation \
     --wm-model gcnii --n-layers 8                              # a second variant
 python -c "from pipeline.tasks import runnable_task_names; print(runnable_task_names())"
 ```
 
-**Six run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, `influence_blocking`, and `cascade_reconstruction`. The other seven are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
+**Seven run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, `influence_blocking`, `cascade_reconstruction`, and `epidemic_control`. The other seven are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
 
 ```
-$ python -m pipeline.run --dataset ba --task epidemic_control
-ValueError: task 'epidemic_control' is planned, not runnable by this pipeline.
-NDlib already ships SIR/SIS/SEIR, so the simulator is ~60 lines - but
-ICTransmissionHead composes `y_inf = infected + (1-infected) * p_new`, which is
-monotone by construction and cannot represent recovery or re-infection. See
-research/epidemic_control.md for the full analysis. Runnable today:
+$ python -m pipeline.run --dataset ba --task cascading_failure
+ValueError: task 'cascading_failure' is planned, not runnable by this pipeline.
+T_endo is global load redistribution, not local edge-wise propagation, so a
+k-hop encoder structurally cannot see the next failure. Motter-Lai (betweenness
+load + tolerance alpha) is the entry point that needs no electrical data. See
+research/cascading_failure.md for the full analysis. Runnable today:
 ['adaptive_online_im', 'cascade_reconstruction', 'critical_node_detection',
-'influence_blocking', 'influence_maximization', 'source_localization']
+'epidemic_control', 'influence_blocking', 'influence_maximization',
+'source_localization']
 ```
 
 The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, the budget sweep, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it — it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
@@ -312,6 +318,10 @@ The runnable **problem families** are further apart than a sign flip. A `maximiz
 Two things make it different in kind. **The inner loop runs two orders of magnitude hotter**: a localizer tests `~10²` candidate source sets per instance and a decoder tests candidate *histories* at `~10⁴` kernel evaluations, so 4-vs-6 stops being "which scores higher" and becomes "how much search fits" — and whether the sampling arm completes at all is itself a reportable finding. **And the reward is the specification.** Thirteen years of published work says the node set is easy and the tree is hard (100% node precision against 78% edge precision in 2012; a best path precision of 0.680 in 2025), so an outer loop scored on node-level F1 discovers the tree contributes nothing and converges on decoders that never attempt it. The reward is therefore `λ·PathPrecision + (1−λ)·EventF1` with `λ ≥ 0.5`, and every results JSON carries what a *trivial* decoder scores under it — because a reward a trivial decoder can reach is a wrong reward, not a good arm.
 
 That reward needs a ground-truth parent, and **NDlib never produces one**: its IC model flips a node without recording which neighbour caused it. `--trace-parents` swaps in traced IC/LT subclasses that log the transmission edge, and the registry turns it on for this task automatically. Under LT there is no transmission edge at all — activation is a threshold crossing over the whole active neighbourhood — so its ground truth is a parent *set* and the two dynamics are never compared.
+
+`epidemic_control` is the one task whose **dynamics are not monotone**, and [`research/epidemic_control.md`](research/epidemic_control.md) §2.6 calls that the reason to build it: every other runnable task keeps the assumption the structured heads rest on, so this is the one that tests whether "structured head" generalizes past IC or whether we built an IC-specific trick. Under SIR, SIS and SEIR a node RECOVERS and stops transmitting, and under SIS becomes susceptible again — and `ICTransmissionHead` composes `y_inf = infected + (1 − infected)·p_new`, which is monotone *by construction*: no weight assignment makes it predict a node leaving the infected set. The replacement is a per-node row-stochastic **transition matrix**, `CompartmentTransitionHead`, and under its oracle form it reproduces the simulator's own one-step marginals exactly across all three dynamics.
+
+It also needed its own simulator. NDlib ships SIR/SIS/SEIR and reusing them would have been ~60 lines, but all three carry **no per-arc transmission probability at all** — which deletes `set_edge_weight` (and with it the entire graded contact-reduction branch of that literature) and makes `structured_residual` inexpressible. `data/wm_epidemic.py` is four lines of transition rule and recovers both; **SIR at `γ = 1.0` reproduces IC exactly**, which is the cheapest correctness check it has. `--epi-lever` then picks which of four published interventions the budget buys — `vaccinate` (immune, uncounted), `quarantine` (isolated but still counted), `edge_cut`, `contact_reduce` — and the vaccinate/quarantine pair is the same node set scored two ways, which is the "recovered is not removed" distinction that makes two papers' "nodes saved" columns differ by a constant.
 
 ```bash
 python -m pipeline.run --dataset ca_grqc --task cascade_reconstruction --compare

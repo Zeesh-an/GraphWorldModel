@@ -29,6 +29,15 @@ spine_algorithms = (
 # rumour — the sigma(S_N, empty) reference every prevented-influence number needs.
 blocking_selectors = ("none", "random", "proximity", "degree", "pagerank")
 
+# Epidemic control's t=0 dose allocation is the SAME shape as a blocker set —
+# "given the outbreak's own sources, choose k nodes that are not sources" — so the
+# five rules and `select_blockers` cover both tasks rather than each needing its
+# own. `proximity` is the ring the outbreak reaches first, which is the family DAVA
+# belongs to (research/epidemic_control.md §3.3), and `none` leaves the outbreak
+# unprotected and supplies the sigma(outbreak, empty) reference every
+# prevented-infections number divides by.
+immunizer_selectors = blocking_selectors
+
 seed_upper_bound = 2**31 - 1
 
 
@@ -259,6 +268,11 @@ def select_blockers(
     raise ValueError(
         f"unknown blocking selector {algorithm!r}; choose from {blocking_selectors}"
     )
+
+
+# Same function, task-appropriate name at the call site: an epidemic episode's t=0
+# dose allocation is a blocker set given the outbreak's sources
+select_immunizers = select_blockers
 
 
 def _random_edge(

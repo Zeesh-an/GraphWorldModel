@@ -12,6 +12,8 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from data.wm_simulator import weighted_dynamics
+
 # Per-node input channels
 in_channels = 6
 ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge = range(6)
@@ -44,9 +46,60 @@ competitive_in_channels = 8
 out_channels = 2
 competitive_out_channels = 4
 
+# ...and the COMPARTMENTAL layout (research/epidemic_control.md §2.3). §2.3's own
+# table gives 7 channels for SIR and 8 for SEIR; ONE 9-channel layout covers SIR,
+# SIS and SEIR together instead, and the two channels that buys are worth their
+# weight column: the unused compartment reads exactly zero under the models that do
+# not have it, so one head class, one dataset layout and one `channels_for` case
+# serve all three rather than three of each.
+#
+# `EVER` is not derivable from the other three and is why the count is 9 rather
+# than 8: under SIR ever = I + R, but under SIS there is no R at all and a node
+# that recovered to susceptible is ever-infected while sitting in none of E/I/R.
+# `SUSCEPTIBLE` IS derivable (1 - E - I - R) and is kept explicit anyway, because
+# it is the compartment the transition matrix's only graph-dependent row leaves
+# from and spelling it out costs one column.
+epidemic_in_channels = 9
+(
+    ch_epi_susceptible,
+    ch_epi_exposed,
+    ch_epi_infectious,
+    ch_epi_recovered,
+    ch_epi_ever,
+    ch_epi_degree,
+    ch_epi_add,
+    ch_epi_remove,
+    ch_epi_edge,
+) = range(9)
 
-def channels_for(competitive: bool) -> tuple[int, int]:
+# Output columns, and the first two are load-bearing rather than a choice. Every
+# reader in this pipeline slices `probs[:, 0]` as "the set being scored" and
+# `probs[:, 1]` as "who newly joined it" — the rollout sampler, the one-step suite,
+# the plots, the summary. Under this layout column 0 is the EVER-infected marginal
+# (the attack set, monotone) and column 1 the INCIDENCE (who left S this step), so
+# all of them keep working with no branch. Columns 2-4 are the current compartments
+# and are what the compartment sampler actually draws from.
+epidemic_out_channels = 5
+(
+    out_epi_ever,
+    out_epi_incidence,
+    out_epi_exposed,
+    out_epi_infectious,
+    out_epi_recovered,
+) = range(5)
+
+
+def channels_for(competitive: bool = False, epidemic: bool = False) -> tuple[int, int]:
     """(input channels, output channels) for one dataset's layout."""
+    if competitive and epidemic:
+        raise ValueError(
+            "a dataset is either two-CASCADE or four-COMPARTMENT, never both: the "
+            "two layouts disagree on what every column means and no head reads both"
+        )
+
+    if epidemic:
+        return epidemic_in_channels, epidemic_out_channels
+
     return (
         (competitive_in_channels, competitive_out_channels)
         if competitive
@@ -109,7 +162,12 @@ def build_graph_input(
     # true w as an input feature; see research/adaptive_online_im.md §2.4b, §9.3
     # item 7. The SIMULATOR still uses the true probabilities: this masks the
     # model's view of the world, not the world.
-    if diffusion_model == "IC" and not hide_edge_weights:
+    #
+    # SIR/SIS/SEIR belong on the IC side of this branch, and that is exactly why
+    # research/epidemic_control.md §2.2 says to write our own stepper: NDlib's
+    # compartmental models carry no per-arc parameter at all, so under them this
+    # would degenerate to ones and take `structured_residual` with it.
+    if diffusion_model in weighted_dynamics and not hide_edge_weights:
         weights = torch.as_tensor(edge_weight, dtype=torch.float32, device=device)
     else:
         weights = torch.ones(
@@ -326,6 +384,81 @@ def build_competitive_features(
         ],
         axis=1,
     )  # shape: (N, 4)
+
+    return X, Y
+
+
+def build_epidemic_features(
+    record: dict,
+    edge_index: np.ndarray,
+    num_nodes: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Return (X (N, 9) float32, Y (N, 5) float32) for one compartmental transition.
+
+    The compartmental twin of `build_features`, and structurally the same function:
+    four exclusive state channels instead of two overlapping ones, plus the
+    cumulative attack indicator, then the same degree and action channels.
+
+    `S` is derived rather than stored, because the record has no susceptible list —
+    a node is susceptible exactly when it is in none of E / I / R. A node VACCINATED
+    at an earlier step is in none of them either, and reads as susceptible here;
+    that is correct rather than a leak, because the deletion bag stripped its
+    incident arcs from `edge_index` on the step it was dosed, so its infection
+    probability is structurally zero for the rest of the episode and both its
+    targets are zero too. Critical node detection relies on the identical property.
+    """
+    X = np.zeros((num_nodes, epidemic_in_channels), dtype=np.float32)
+
+    state = record["state"]
+    exposed = np.asarray(state.get("exposed", []), dtype=np.int64)
+    infectious = np.asarray(state["frontier"], dtype=np.int64)
+    recovered = np.asarray(state.get("recovered", []), dtype=np.int64)
+
+    X[exposed, ch_epi_exposed] = 1.0
+    X[infectious, ch_epi_infectious] = 1.0
+    X[recovered, ch_epi_recovered] = 1.0
+    X[np.asarray(state["infected"], dtype=np.int64), ch_epi_ever] = 1.0
+    X[:, ch_epi_susceptible] = 1.0 - np.clip(
+        X[:, ch_epi_exposed] + X[:, ch_epi_infectious] + X[:, ch_epi_recovered],
+        0.0,
+        1.0,
+    )
+
+    degrees = np.zeros(num_nodes, dtype=np.float32)
+    if edge_index.size:
+        np.add.at(degrees, edge_index[0], 1.0)
+        np.add.at(degrees, edge_index[1], 1.0)
+
+    X[:, ch_epi_degree] = np.log1p(degrees)
+
+    for action_op in record["action"]:
+        if action_op["op"] == "add_node":
+            X[int(action_op["target"]), ch_epi_add] = 1.0
+        elif action_op["op"] == "remove_node":
+            X[int(action_op["target"]), ch_epi_remove] = 1.0
+        elif action_op["op"] in edge_ops:
+            X[int(action_op["target"]), ch_epi_edge] = 1.0
+            X[int(action_op["destination"]), ch_epi_edge] = 1.0
+
+    if record.get("next_marginal_incidence") is None:
+        raise KeyError(
+            "build_epidemic_features requires the compartmental soft targets "
+            "(next_marginal_incidence / _exposed / _infectious / _recovered). This "
+            "dataset was generated under IC or LT; regenerate with "
+            "data/generate_wm_data.py --models SIR (or SIS / SEIR)."
+        )
+
+    Y = np.stack(
+        [
+            _marginal_vector(record.get("next_marginal_infected"), num_nodes),
+            _marginal_vector(record.get("next_marginal_incidence"), num_nodes),
+            _marginal_vector(record.get("next_marginal_exposed"), num_nodes),
+            _marginal_vector(record.get("next_marginal_infectious"), num_nodes),
+            _marginal_vector(record.get("next_marginal_recovered"), num_nodes),
+        ],
+        axis=1,
+    )  # shape: (N, 5)
 
     return X, Y
 
@@ -625,6 +758,49 @@ def dataset_is_competitive(out_dir: Path) -> bool:
     return bool(json.loads(metadata_path.read_text())["config"].get("competitive"))
 
 
+def dataset_is_epidemic(out_dir: Path) -> bool:
+    """
+    Whether this dataset holds COMPARTMENTAL transitions, from its own metadata.
+
+    Read rather than passed, for the same reason `dataset_is_competitive` is: a
+    9-channel head fed 6-channel features fails loudly at the first matmul, but a
+    6-channel head fed a compartmental dataset would silently fit the ever-infected
+    marginal alone — losing recovery entirely, which is the exact failure mode
+    research/epidemic_control.md §2.4 says this task exists to expose.
+    """
+    metadata_path = Path(out_dir) / "metadata.json"
+
+    if not metadata_path.exists():
+        return False
+
+    return "epidemic" in json.loads(metadata_path.read_text())
+
+
+def epidemic_rates(out_dir: Path, diffusion_model: str) -> dict:
+    """
+    `{beta_scale, gamma, alpha, ...}` the dataset was simulated under.
+
+    Read back rather than taken from a flag, for the same reason the competitive
+    tie-break is: a head whose recovery rate disagrees with the simulator that made
+    the targets is fit against a transition that never happened, and nothing about
+    the loss curve would say so. §8.2 trap 2 is the other half — beta and gamma are
+    free parameters nobody standardizes, so a run that cannot state its own is
+    comparable to nothing.
+    """
+    metadata_path = Path(out_dir) / "metadata.json"
+    epidemic = json.loads(metadata_path.read_text()).get("epidemic", {})
+    resolved = epidemic.get(diffusion_model)
+
+    if resolved is None:
+        raise ValueError(
+            f"the dataset at {out_dir} carries no compartmental metadata for "
+            f"--diffusion-model {diffusion_model}; it was generated for "
+            f"{sorted(key for key in epidemic if key != 'outbreak_pct')}"
+        )
+
+    return resolved
+
+
 class TransitionDataset(Dataset):
     """One item per transition (main + cf). Resolves A_t per episode."""
 
@@ -634,10 +810,14 @@ class TransitionDataset(Dataset):
         diffusion_model: str,
         split: str,
         competitive: bool | None = None,
+        epidemic: bool | None = None,
     ) -> None:
         self.diffusion_model = diffusion_model
         self.competitive = (
             dataset_is_competitive(out_dir) if competitive is None else competitive
+        )
+        self.epidemic = (
+            dataset_is_epidemic(out_dir) if epidemic is None else epidemic
         )
 
         # Load the store and the JSONL for one (diffusion_model, split)
@@ -671,7 +851,9 @@ class TransitionDataset(Dataset):
         record, edge_index, weights = self.samples[index]
         num_nodes = self.store[record["graph_id"]]["num_nodes"]
 
-        if self.competitive:
+        if self.epidemic:
+            X, targets = build_epidemic_features(record, edge_index, num_nodes)
+        elif self.competitive:
             X, targets = build_competitive_features(record, edge_index, num_nodes)
         else:
             X, y_inf, y_fr = build_features(record, edge_index, num_nodes)
@@ -679,7 +861,8 @@ class TransitionDataset(Dataset):
 
         return {
             "X": torch.from_numpy(X),
-            # Columns 0 and 1 are the cascade being scored under BOTH layouts, so
+            # Columns 0 and 1 are the set being scored and who newly joined it under
+            # ALL THREE layouts (single cascade, negative cascade, attack set), so
             # every reader that wants "the next state" slices the same way
             "y": torch.from_numpy(targets),
             "y_inf": torch.from_numpy(targets[:, 0].copy()),
@@ -721,7 +904,7 @@ def collate_transitions(
         offset += num_nodes
 
     X = torch.cat(x_parts).to(device)
-    y = torch.cat(y_parts).to(device)  # shape: (sum N, 2) or (sum N, 4)
+    y = torch.cat(y_parts).to(device)  # shape: (sum N, 2 | 4 | 5)
     y_inf = torch.cat(y_inf_parts).to(device)
     y_fr = torch.cat(y_fr_parts).to(device)
 

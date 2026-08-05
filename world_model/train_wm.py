@@ -27,19 +27,24 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from data.wm_competitive import auto_dominance
-from data.wm_simulator import spent, valid_remove_semantics
+from data.wm_simulator import epidemic_dynamics, spent, valid_remove_semantics
 from world_model.wm_data import (
     TransitionDataset,
     channels_for,
     collate_transitions,
     dataset_is_competitive,
+    dataset_is_epidemic,
+    epidemic_rates,
 )
 from world_model.wm_model import WorldModel, backbones
 from data.wm_competitive import CompetitiveConfig, shared_positive_prob
+from data.wm_epidemic import EpidemicConfig, default_burn_in
 from world_model.wm_eval import (
     blocking_regret_multi,
     competitive_rollout_ensemble,
+    epidemic_rollout_ensemble,
     evaluate_one_step,
+    immunization_regret_multi,
     planning_regret_multi,
     rollout_ensemble,
 )
@@ -70,6 +75,18 @@ class TrainConfig:
     competitive: bool | None = None
     tie_break: str = auto_dominance
     positive_prob: float | None = None
+    # Compartmental (epidemic control) training: 9 input channels, 5 targets, and
+    # the compartment head. None = read from the dataset's own metadata, for the
+    # same reason `competitive` is: a 6-channel head fed compartmental features
+    # would silently fit the attack set alone and lose recovery entirely, which is
+    # the one thing this task exists to test. The three rates are likewise defaulted
+    # FROM the data, because a head whose gamma disagrees with the simulator that
+    # made the targets is fit against a transition that never happened.
+    epidemic: bool | None = None
+    beta_scale: float = 1.0
+    gamma: float | None = None
+    alpha: float | None = None
+    burn_in: float = default_burn_in
     # Feed ones instead of p(u->v) to the encoder and the head: the online/bandit
     # information state, and the ablation for "our IC heads see the true w"
     hide_edge_weights: bool = False
@@ -219,6 +236,44 @@ def resolve_competitive(config: TrainConfig) -> TrainConfig:
     return config
 
 
+def resolve_epidemic(config: TrainConfig) -> TrainConfig:
+    """
+    Fill `epidemic` / `beta_scale` / `gamma` / `alpha` from the dataset that made the targets.
+
+    Same rule and same reason as `resolve_competitive`: the rates are not a choice
+    at training time, they are a property of the transitions on disk. Getting them
+    from a flag would let `--head structured_oracle` pin its matrix to a recovery
+    rate the simulator never used and report a fidelity number that means nothing.
+    """
+    dataset_epidemic = dataset_is_epidemic(config.data_dir)
+
+    if config.epidemic is None:
+        config.epidemic = dataset_epidemic
+    elif config.epidemic != dataset_epidemic:
+        raise ValueError(
+            f"--epidemic {config.epidemic} does not match the dataset at "
+            f"{config.data_dir}, which is epidemic={dataset_epidemic}. A "
+            f"compartmental dataset carries 9 channels and 5 targets; regenerate "
+            f"with data/generate_wm_data.py --models SIR (or SIS / SEIR)."
+        )
+
+    if not config.epidemic:
+        return config
+
+    resolved = epidemic_rates(config.data_dir, config.diffusion_model)
+    config.beta_scale = float(resolved["beta_scale"])
+    config.gamma = float(resolved["gamma"])
+    config.alpha = None if resolved["alpha"] is None else float(resolved["alpha"])
+    config.burn_in = float(resolved["burn_in"])
+    print(
+        f"[train] compartmental: {'/'.join(resolved['compartments'])}, "
+        f"beta_scale={config.beta_scale}, gamma={config.gamma}, "
+        f"alpha={config.alpha}"
+    )
+
+    return config
+
+
 def check_hide_edge_weights(config: TrainConfig) -> None:
     """
     Both anchored heads read w directly, so masking it is not an ablation of them
@@ -242,6 +297,7 @@ def train_world_model(config: TrainConfig) -> dict:
     config = resolve_paths(config)
     check_remove_semantics(config)
     config = resolve_competitive(config)
+    config = resolve_epidemic(config)
     check_hide_edge_weights(config)
 
     torch.manual_seed(config.seed)
@@ -250,15 +306,14 @@ def train_world_model(config: TrainConfig) -> dict:
     device = torch.device(config.device)
     diffusion_model = config.diffusion_model
 
+    layout = dict(competitive=config.competitive, epidemic=config.epidemic)
     train_dataset = TransitionDataset(
-        config.data_dir, diffusion_model, "train", competitive=config.competitive
+        config.data_dir, diffusion_model, "train", **layout
     )
     validation_dataset = TransitionDataset(
-        config.data_dir, diffusion_model, "val", competitive=config.competitive
+        config.data_dir, diffusion_model, "val", **layout
     )
-    test_dataset = TransitionDataset(
-        config.data_dir, diffusion_model, "test", competitive=config.competitive
-    )
+    test_dataset = TransitionDataset(config.data_dir, diffusion_model, "test", **layout)
 
     collate_fn = partial(
         collate_transitions,
@@ -281,7 +336,9 @@ def train_world_model(config: TrainConfig) -> dict:
         "lamda": config.gcnii_lamda,
     }
 
-    model_in_channels, model_out_channels = channels_for(config.competitive)
+    model_in_channels, model_out_channels = channels_for(
+        config.competitive, config.epidemic
+    )
     model = WorldModel(
         config.model,
         in_channels=model_in_channels,
@@ -294,6 +351,10 @@ def train_world_model(config: TrainConfig) -> dict:
         competitive=config.competitive,
         tie_break=config.tie_break,
         positive_prob=config.positive_prob,
+        epidemic=config.epidemic,
+        epi_beta=config.beta_scale,
+        epi_gamma=config.gamma,
+        epi_alpha=config.alpha,
         **backbone_kwargs,
     ).to(device)
 
@@ -357,6 +418,7 @@ def train_world_model(config: TrainConfig) -> dict:
             device,
             hide_edge_weights=config.hide_edge_weights,
             competitive=config.competitive,
+            epidemic=config.epidemic,
         )
         history.append(
             {
@@ -404,6 +466,7 @@ def train_world_model(config: TrainConfig) -> dict:
             device,
             hide_edge_weights=config.hide_edge_weights,
             competitive=config.competitive,
+            epidemic=config.epidemic,
         ),
     }
 
@@ -424,7 +487,31 @@ def train_world_model(config: TrainConfig) -> dict:
         else None
     )
 
-    if config.competitive:
+    epidemic_config = (
+        EpidemicConfig(
+            beta_scale=config.beta_scale,
+            gamma=config.gamma,
+            alpha=config.alpha if config.alpha is not None else 0.5,
+            remove_semantics=config.remove_semantics,
+            burn_in=config.burn_in,
+        )
+        if config.epidemic
+        else None
+    )
+
+    if config.epidemic:
+        results["rollout"] = epidemic_rollout_ensemble(
+            model,
+            config.data_dir,
+            diffusion_model,
+            train_dataset.store,
+            device,
+            "test",
+            seed=config.seed,
+            hide_edge_weights=config.hide_edge_weights,
+            config=epidemic_config,
+        )
+    elif config.competitive:
         results["rollout"] = competitive_rollout_ensemble(
             model,
             config.data_dir,
@@ -450,8 +537,20 @@ def train_world_model(config: TrainConfig) -> dict:
         )
 
     if config.plan_demo:
-        planner = blocking_regret_multi if config.competitive else planning_regret_multi
-        extra = {"config": competitive_config} if config.competitive else {}
+        planner = (
+            immunization_regret_multi
+            if config.epidemic
+            else blocking_regret_multi
+            if config.competitive
+            else planning_regret_multi
+        )
+        extra = (
+            {"config": epidemic_config}
+            if config.epidemic
+            else {"config": competitive_config}
+            if config.competitive
+            else {}
+        )
         results["planning"] = planner(
             model,
             train_dataset.store,
@@ -485,8 +584,9 @@ if __name__ == "__main__":
         "--diffusion-model",
         type=str,
         default="IC",
-        choices=["IC", "LT"],
-        help="diffusion model to train on (default: IC).",
+        choices=["IC", "LT"] + list(epidemic_dynamics),
+        help="dynamics to train on. SIR/SIS/SEIR select the compartment head and "
+        "read their rates back from the dataset's metadata (default: IC).",
     )
     parser.add_argument(
         "--model",

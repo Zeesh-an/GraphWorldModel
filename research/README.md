@@ -22,9 +22,9 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | [`influence_blocking.md`](influence_blocking.md)           | yes **implemented**      | 782   | (key) SandIMIN PVLDB'24 Table 5 — email-Eu-core, YouTube, our exact metric |
 | [`source_localization.md`](source_localization.md)         | yes **implemented**      | 964   | (key) SL-VAE KDD'22 Tables 1–4 — 5 of its 7 graphs are ours                |
 | [`critical_node_detection.md`](critical_node_detection.md) | yes **implemented**      | 1,001 | (key) CoreHD/BPD Table I — "Grid" is our `power_grid` byte-for-byte        |
-| [`epidemic_control.md`](epidemic_control.md)               | yes direct               | 690   | partial — different dataset family (contact networks)                   |
 | [`influence_estimation.md`](influence_estimation.md)       | yes **already computed** | 553   | (key) GLIE + SIEA — `ca_grqc`, `nethept`, `netphy`, `youtube` match        |
 | [`cascade_reconstruction.md`](cascade_reconstruction.md)   | yes **implemented**      | 763   | (key) DITTO KDD'23 Tables 4–5 — BA, ER, Oregon2 and rt-pol are all ours    |
+| [`epidemic_control.md`](epidemic_control.md)               | yes **implemented**      | 745   | (key) GreedyWalk SDM'15 Table 2 — four published `λ₁` reproduce exactly    |
 | [`adaptive_online_im.md`](adaptive_online_im.md)           | yes **implemented**      | 572   | only DeepIM's re-run OIM row; the rest are figures                      |
 | [`network_inference.md`](network_inference.md)             | Warning: moderate             | 782   | no — Kronecker synthetics, not our graphs                               |
 | [`cascade_prediction.md`](cascade_prediction.md)           | Warning: moderate             | 567   | no — real cascade corpora only                                          |

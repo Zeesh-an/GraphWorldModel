@@ -11,7 +11,13 @@ add X" is answered here; why it is worth adding is answered in `research/<X>.md`
 
 from dataclasses import dataclass
 
-from data.wm_simulator import blocked, spent, valid_action_ops, valid_remove_semantics
+from data.wm_simulator import (
+    blocked,
+    epidemic_dynamics,
+    spent,
+    valid_action_ops,
+    valid_remove_semantics,
+)
 
 implemented = "implemented"
 planned = "planned"
@@ -90,6 +96,15 @@ class Task:
     # narrows `recovers` exactly as `blocks` narrows `contains` — both members of
     # the family invert something, and only this one has to name an edge.
     reconstructs: bool = False
+    # FOUR EXCLUSIVE COMPARTMENTS rather than two overlapping indicators, and the
+    # one task in this registry whose dynamics are not monotone: `I -> R` under
+    # SIR/SEIR and `I -> S` under SIS both SHRINK the infectious set. That is what
+    # `TaskSpec.immunizes` is built from, and it narrows `contains` exactly as
+    # `blocks` does — the difference from plain containment is not what the budget
+    # buys but what the process DOES, and it is why the structured heads' monotone
+    # composition had to be replaced by a per-node transition matrix rather than
+    # extended (research/epidemic_control.md §2.4).
+    epidemic: bool = False
     blocker: str | None = None
 
     @property
@@ -268,20 +283,52 @@ tasks = {
     "epidemic_control": Task(
         name="epidemic_control",
         title="Epidemic Control",
-        status=planned,
+        status=implemented,
         objective=minimize,
+        # The three COMPARTMENTAL dynamics, simulated by data/wm_epidemic.py rather
+        # than NDlib. research/epidemic_control.md §2.2 is the reason we wrote our
+        # own: NDlib's SIRModel/SISModel/SEIRModel all declare an EMPTY edge
+        # parameter dict and compare a draw against one scalar beta, which deletes
+        # `set_edge_weight`, degenerates `GraphInput.edge_weight` to ones, and makes
+        # `structured_residual` — defined as an anchor on logit(w) — inexpressible.
         dynamics=("SIR", "SIS", "SEIR"),
+        # §2.5's four levers, minus contact tracing (which changes the OBSERVATION,
+        # not the graph, and belongs in a POMDP observation model we do not have).
+        # Which one an arm spends its budget on is `--epi-lever`, which sets
+        # `budget_op` and `allowed_ops` together; `vaccinate` is the default because
+        # permanent immunization is what every published method in §3 does.
         action_ops=("remove_node", "remove_edge", "set_edge_weight"),
-        # Vaccination: immune, non-infectious, never counted in the outbreak.
-        # Note this collides with SIR's own Removed compartment, where a
-        # RECOVERED node must stay counted, so the compartment head has to carry
-        # that distinction, `blocked` only covers the intervention.
+        # Vaccination: immune, non-infectious, never counted in the outbreak. Note
+        # this is a DIFFERENT thing from SIR's own Removed compartment, where a
+        # recovered node must stay counted — §8.2 trap 7's "recovered is not
+        # removed" — so the simulator keeps `blocked` (the intervention) and `R`
+        # (the compartment) as separate sets and the head reads both.
         remove_semantics=blocked,
+        epidemic=True,
         summary="Vaccinate, quarantine, or reduce contact to minimize an outbreak.",
-        blocker="NDlib already ships SIR/SIS/SEIR, so the simulator is ~60 "
-        "lines — but ICTransmissionHead composes "
-        "`y_inf = infected + (1-infected) * p_new`, which is monotone by "
-        "construction and cannot represent recovery or re-infection.",
+        # A planner emits BARE lever ops. Under `vaccinate` the incident edge
+        # removals ride along inside the deletion bag `epidemic.expand_immunization`
+        # builds, exactly as they do for critical node detection, so charging the
+        # planner for them would make k mean deg(v) different things per node.
+        default_allowed_ops=("remove_node",),
+        # All three ops are GENERATED so one checkpoint serves every lever: the head
+        # has to have seen a dose, a cut and a reweight to predict any of them.
+        default_gen_action_ops=("remove_node", "remove_edge", "set_edge_weight"),
+        budget_op="remove_node",
+        # The outbreak is exogenous. 1% of N is the standard immunization setup and
+        # matches the smallest point of the --budget-pcts ladder, so the k=1% row is
+        # "one dose per index case".
+        outbreak_pct=1.0,
+        # Left None DELIBERATELY, like influence blocking's: condition 1's pool here
+        # depends on the LEVER, not the task, because a lever can only emit what its
+        # own members return — `netshield` hands back node ids and `netmelt` hands
+        # back arcs. `pipeline.run.resolve_baselines` reads
+        # `immunization_algorithms.default_immunization_baselines[lever]`, where each
+        # list leads with the row that actually has to be beaten
+        # (`degree_immunization`, `netmelt`) and carries `netshield` and `dava`
+        # together because §8.2 trap 1 is only visible when both are run.
+        default_baselines=None,
+        blocker=None,
     ),
     "source_localization": Task(
         name="source_localization",
@@ -603,6 +650,33 @@ for _task in tasks.values():
             f"task {_task.name!r} sets reconstructs=True but its objective is "
             f"{_task.objective!r}; recovering a hidden trajectory is a "
             f"{recover!r} objective, not an intervention"
+        )
+
+    # A compartmental task fights an outbreak it did not start, exactly as every
+    # other containment task does; an epidemic entry with no outbreak would leave
+    # every arm dosing a graph nothing ever spreads on and tied at zero
+    if _task.epidemic and not _task.outbreak_pct:
+        raise ValueError(
+            f"task {_task.name!r} is compartmental but seeds no outbreak "
+            f"(outbreak_pct=0); a dose allocation with no epidemic to stop scores "
+            f"the same as every other allocation"
+        )
+
+    # ...and its dynamics have to BE compartmental, or the compartment head would be
+    # built for a simulator that never produced its targets
+    if _task.epidemic and set(_task.dynamics) - set(epidemic_dynamics):
+        raise ValueError(
+            f"task {_task.name!r} is compartmental but declares dynamics "
+            f"{_task.dynamics}; only {epidemic_dynamics} produce the four exclusive "
+            f"compartments the head composes"
+        )
+
+    # ...and a compartmental task is never also two-cascade: the layouts disagree on
+    # what every column means and no head reads both
+    if _task.epidemic and _task.competitive:
+        raise ValueError(
+            f"task {_task.name!r} sets both epidemic and competitive; a dataset is "
+            f"either four-COMPARTMENT or two-CASCADE, never both"
         )
 
     # ...and it cannot also fight an exogenous cascade: the sources ARE the unknown

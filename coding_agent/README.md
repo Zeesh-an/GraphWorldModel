@@ -274,6 +274,52 @@ The second `recover` task, and the one that splits the family the way `influence
 
 `--cr-setting` is a protocol rather than a knob and its four values are four experiments whose rows are never pooled: `partial_times`, `partial_nodes`, `final_snapshot` (DITTO's DASH) and `hidden_nodes`. `--cr-observation-rate` is the probability a node **is reported**, spelled out because two papers in this literature use `σ` for opposite quantities. `coding_agent/check_cascade_reconstruction.py` asserts all of it in 23 checks, including that the traced models match the untraced ones in distribution — a traced model that changed the dynamics would invalidate every episode.
 
+### Compartmental: `epidemic_control` (the family the heads were not built for)
+
+The one runnable task whose **dynamics are not monotone**: nodes recover and stop transmitting, and under SIS become susceptible again. Everything else in this repo keeps the assumption `ICTransmissionHead` rests on, so `research/epidemic_control.md` §2.6 calls this the task that tests whether "structured head" generalizes past IC.
+
+The contract is `plan_horizon` as usual — this is an intervention task, not an inverse one — and what changes is **what a unit of budget buys**. `--epi-lever` picks one of §2.5's four interventions and sets `budget_op` and `allowed_ops` together:
+
+| lever | op | what the harness does with a bare `remove_node` | papers |
+| --- | --- | --- | --- |
+| `vaccinate` | `remove_node` | expands to the node PLUS its incident arcs — immune, uncounted, never infectable | Pastor-Satorras & Vespignani PRE'02, Cohen PRL'03, NetShield ICDM'10, DAVA SDM'14 |
+| `quarantine` | `remove_node` | expands to the incident arcs ALONE — isolated, but still in the graph and still counted | Holme PRE'02, RLGN ICML'21 |
+| `edge_cut` | `remove_edge` | nothing; the arc is the intervention | Kimura TKDD'09, Van Mieghem PRE'11, NetMelt CIKM'12 |
+| `contact_reduce` | `set_edge_weight` | nothing; `--contact-reduction r` scales the arc to `r * beta_uv` | Fractional Immunization SDM'13, Preciado TCNS'14, DURLECA KDD'20 |
+
+`vaccinate` versus `quarantine` is the sharpest pair and the cheapest to read: the SAME node set is chosen under both and they differ only in whether the dosed node leaves the attack rate. That is §8.2 trap 7's "recovered is not removed" made into a lever, and it is why papers reporting "nodes saved" against "no intervention" and against "random vaccination" differ by a large constant. `contact_reduce` is expressible at all only because we wrote our own stepper — NDlib's compartmental models carry no per-arc parameter.
+
+Two rows of §2.5 are deliberately out of scope with a stated reason. **Contact tracing is not an action**: it changes the OBSERVATION, not the graph or the state, and belongs in a POMDP observation model we do not have. **Quarantine with a duration** is not expressible either: a release timer is hidden state and the compartment head is Markov in `(state, action)`.
+
+The reported block is prevented infections plus the outbreak's SHAPE — peak prevalence, time to peak, AUC, endemic prevalence — because §8.2 trap 4 is that a good policy flattens rather than eliminates, so a terminal-state number alone can rank two policies backwards. The eigendrop rides along as CONTEXT and never as the score: §8.2 trap 1 is that a method can win it and lose the attack rate, which is exactly what `netshield` and `dava` do to each other depending on the graph. `coding_agent/check_epidemic_control.py` asserts all of it in 78 checks, including that the oracle head reproduces the simulator's own one-step marginals under all three dynamics.
+
+### Baselines for `epidemic_control` (condition 1)
+
+`tools/immunization_algorithms.py`, signature `(graph, budget, diffusion_model, **kw) -> list[int] | list[tuple]`, returning node ids under the two node levers and `(u, v)` arcs under the two edge ones. Twenty-three members across all three lines of `research/epidemic_control.md` §3, because they optimize **different objectives** and a table with only one line cannot see its own blind spot.
+
+| name | line | what it is |
+| --- | --- | --- |
+| `degree_immunization` | physics | **Pastor-Satorras & Vespignani PRE'02**: top-k degree, computed once. **The row that has to be beaten** — RLGN's own Table 2 has Degree and Eigenvector tying to within 0.1 on two of five graphs |
+| `adaptive_degree_immunization` | physics | **Holme PRE'02**'s `RD` arm: recompute after every dose. Not interconvertible with the static version |
+| `acquaintance_immunization` | physics | **Cohen PRL'03**: pick a random node, dose a random NEIGHBOUR. No global information at all, and §8.3 names it as the row that most embarrasses learned methods on sparse graphs |
+| `eigenvector_immunization` | physics | NetShield's `Eigs` row — the top-k that NetShield's collective selection is supposed to beat |
+| `pagerank_immunization` / `betweenness_immunization` / `kshell_immunization` | physics | the centrality controls; k-shell is Kitsak's "influential spreaders are in the core, not the hubs" |
+| `random_immunization` | physics | **not a throwaway floor**: the GAP between it and degree is the 2002 result that founded this field |
+| `netshield` | spectral | **Tong ICDM'10**: greedy on the submodular Shield-value. Its approximation to the true eigendrop is 0.977–1.000 in its own Table 3 |
+| `netshield_plus` | spectral | **TKDE'15**: recompute the eigenvector every `b` doses. A separate row because `X` and `X+` get cited under one name |
+| `greedy_walk` | spectral | **Saha SDM'15** (SRMN): closed `k`-walks through a node, recomputed. Reimplemented from prose — the authors' code is MATLAB |
+| `preciado_allocation` | spectral | **Preciado TCNS'14**'s geometric program, discretized to a top-k. Labelled a discretization, not the method |
+| `netmelt` | spectral (edge) | **Tong CIKM'12**: score arc `(i, j)` by `u(i)·u(j)`. The canonical edge baseline |
+| `product_degree` / `eigen_score` | spectral (edge) | **Van Mieghem PRE'11**'s two heuristics. Algebraically the same rule under two names, which is a fact worth reading off a table |
+| `greedy_walk_edge` | spectral (edge) | GreedyWalk's SRME variant, adaptive |
+| `edge_betweenness_cut` | spectral (edge) | the bridge control |
+| `dava` / `dava_fast` | data-aware | **Zhang & Prakash SDM'14**: merge the observed infected set into a superseed, build a dominator tree, cut the nodes all paths must pass through. **The row this task is positioned against** (§9.4) |
+| `frontier_immunization` / `frontier_edge_cut` | data-aware | dose the susceptible boundary of the observed outbreak. The control DAVA has to beat to have contributed anything |
+| `mc_greedy_immunization` | simulation | greedy on the simulated attack rate. NP-hard and NOT submodular here, so no `(1 - 1/e)` bound — a strong heuristic, not a ceiling with a proof |
+| `random_edge_cut` | — | the edge levers' floor |
+
+`mc_greedy_immunization` is blocked from generated scripts by default for the same reason `celf` and `greedy_blocking` are: it re-simulates on a private simulator and bypasses the metered evaluator.
+
 ### Baselines for `cascade_reconstruction` (condition 1)
 
 `tools/reconstruction_algorithms.py`, signature `(graph, observation, horizon, **kw) -> dict[int, tuple[int, int | None]]`, returning a whole **trajectory**.

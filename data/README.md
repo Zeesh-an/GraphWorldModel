@@ -170,6 +170,16 @@ Warning: The continuous form is the marginal of the **last step**, conditioned o
 
 `branch = "cf_i"` rows are **skipped**: a counterfactual fork changes the action mid-episode, so its terminal state was not produced by the `t = 0` seed set alone. For the same reason the task registry pins `default_gen_action_ops = ()` for any `recover` task and asserts it — an episode carrying a mid-cascade injection has an observation its seed set did not cause, and its `(x, y)` pair would be a lie. With empty action ops `sample_injection` always returns `NULL` and `counterfactual_actions` produces nothing, so `--inject-p` and `--cf-prob` are inert rather than needing to be zeroed.
 
+### Compartmental episodes (`--gen-models SIR|SIS|SEIR`)
+
+`--task epidemic_control` swaps the NDlib simulator for `data/wm_epidemic.py`, and the reason is `research/epidemic_control.md` §2.2 rather than taste: NDlib's `SIRModel` / `SISModel` / `SEIRModel` all declare an EMPTY edge-parameter dict and compare a draw against one scalar `beta` per neighbour, so there is no per-arc transmission probability. That deletes `set_edge_weight` (the whole graded contact-reduction branch of that literature), degenerates `GraphInput.edge_weight` to ones, and makes `structured_residual` — an anchor on `logit(w)` — inexpressible. Our stepper is four lines of transition rule and recovers all three.
+
+An episode's `algorithm` is a PAIR here, `<outbreak selector>+<immunizer selector>`, exactly as a competitive episode's is: the outbreak model is a second experimental axis a seeding task does not have, and the `none` immunizer leaves the outbreak unprotected and supplies the reference every prevented-infections number divides by. The t=0 bag carries the index cases as `add_node` AND the doses as full deletion bags, so the head's `T_exo` sees a vaccinated node's arcs already gone from `edge_index`.
+
+Records gain four marginals — `next_marginal_incidence`, `_exposed`, `_infectious`, `_recovered` — and `next_marginal_infected` stays the EVER-infected one, which is what lets every existing reader keep working. `state` gains `exposed` and `recovered`, both omitted when empty so an IC/LT JSONL is byte-identical. Three rates land in `metadata.json` (`epi_beta`, `epi_gamma`, `epi_alpha`) and `train_wm` reads them back rather than taking a flag: §8.2 trap 2 records that beta and gamma are free parameters nobody standardizes, so a table that fixes them without stating them is comparable only to itself, and a head whose gamma disagrees with the simulator that made its targets is fit against a transition that never happened.
+
+`--epi-gamma 1.0` under SIR **is Independent Cascade** — a node transmits once and is then spent — which `coding_agent/check_epidemic_control.py` measures against NDlib rather than asserting.
+
 ### ...and as whole HISTORIES (`--task cascade_reconstruction`)
 
 Cascade reconstruction reads the same rows one level up: not the two ends of an episode but every step in between, regrouped by `world_model/wm_data.py::load_episode_trajectories`. The activation time of a node is the `t` at which it first appears in a main record's `next_state.frontier`, which needs no extra bookkeeping — the `frontier` channel has been on disk all along.

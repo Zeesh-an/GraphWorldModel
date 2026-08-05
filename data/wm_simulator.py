@@ -25,6 +25,19 @@ valid_action_ops = (
     "set_edge_weight",
 )
 
+# The three COMPARTMENTAL dynamics, which `data/wm_epidemic.py` simulates rather
+# than NDlib. Named here because `--diffusion-model` is one flag across every task
+# and half the pipeline has to ask "is this one of the epidemic ones" without
+# importing the epidemic module (research/epidemic_control.md §2.1).
+epidemic_dynamics = ("SIR", "SIS", "SEIR")
+
+# Dynamics whose edges carry a real per-arc transmission probability, so
+# `GraphInput.edge_weight` must be the true w rather than ones. LT is the only
+# structural dynamics that does not, and it is what this set exists to exclude —
+# the epidemic ones DO, which is the whole reason §2.2 says to write our own
+# stepper instead of using NDlib's scalar-beta SIR/SIS/SEIR.
+weighted_dynamics = ("IC",) + epidemic_dynamics
+
 # What `remove_node` means. The two readings are genuinely different problems and
 # the wrong one silently biases every number:
 #
@@ -80,12 +93,32 @@ class State:
 
     The positive keys are omitted from `to_dict` when both are empty, so a
     single-cascade JSONL is byte-identical to what it was before competition existed.
+
+    A COMPARTMENTAL task (epidemic control) carries two more sets, and the mapping
+    is again deliberate rather than symmetric
+    (research/epidemic_control.md §2.3):
+
+      * `infected` is EVER-INFECTED — the attack set, the thing being minimized. It
+        is monotone under SIR, SIS and SEIR alike (a node never un-becomes
+        ever-infected), which is what lets `reward = len(state.infected)`, the
+        spread curve, the plots and the summary go on reading it with no branch.
+      * `frontier` is the currently INFECTIOUS set `I`. That is exactly what it
+        already means under IC (status-1 spreaders), and it is the set that drives
+        transmission — it is also the one that is NOT monotone, because `I -> R`
+        under SIR/SEIR and `I -> S` under SIS both shrink it.
+      * `exposed` is `E` (SEIR only) and `recovered` is `R` (SIR/SEIR). Susceptible
+        is everything else: a node in none of the four is `S`, which under SIS is
+        how a recovered-to-susceptible node reads while staying ever-infected.
+
+    Both are omitted from `to_dict` when empty, so an IC/LT JSONL is unchanged.
     """
 
     infected: list[int]
     frontier: list[int]
     pos_infected: list[int] = field(default_factory=list)
     pos_frontier: list[int] = field(default_factory=list)
+    exposed: list[int] = field(default_factory=list)
+    recovered: list[int] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         infected = sorted(int(node) for node in self.infected)
@@ -105,6 +138,16 @@ class State:
                 "pos_frontier": positive_frontier,
                 "pos_infected_count": len(positive),
                 "pos_frontier_count": len(positive_frontier),
+            }
+
+        if self.exposed or self.recovered:
+            exposed = sorted(int(node) for node in self.exposed)
+            recovered = sorted(int(node) for node in self.recovered)
+            state |= {
+                "exposed": exposed,
+                "recovered": recovered,
+                "exposed_count": len(exposed),
+                "recovered_count": len(recovered),
             }
 
         return state

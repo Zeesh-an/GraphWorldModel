@@ -10,6 +10,60 @@ All URLs returned HTTP 200 on **2026-07-28** unless annotated otherwise.
 
 ---
 
+## 0.0 Status: IMPLEMENTED, and three corrections to this file
+
+`--task epidemic_control` is runnable. `data/wm_epidemic.py` is the compartmental
+simulator (§9.2's recommendation, written rather than borrowed),
+`world_model/wm_model.py::CompartmentTransitionHead` is §2.4's transition matrix,
+`coding_agent/epidemic.py` is §2.5's four levers, and
+`coding_agent/tools/immunization_algorithms.py` is all three lines of §3 —
+23 members across the node and edge levers.
+`python -m coding_agent.check_epidemic_control` asserts the contract (78 checks).
+
+**Three claims in this file were wrong and are corrected here rather than edited
+away**, because each one changed what got built:
+
+1. **EpiLearn does NOT ship a NetShield implementation.** §3.2's Code column and
+   §11 both say it does. Verified by listing the whole repository tree and grepping
+   every module for `shield` / `immuniz` / `interven` [derived, 2026-08-05]: what
+   EpiLearn ships is forecasting (`STGCN`, `EpiGNN`, `ColaGNN`, `DCRNN`, `STAN`),
+   detection, a `NetworkSIR` forward simulator, `DMP`, and graph transforms. There
+   is no shield value, no immunization selector and no intervention API. It is
+   registered as `blocked` with that reason.
+
+2. **A public NetShield, DAVA and DAVA-fast DO exist, in one repo.** §11 lists all
+   three among the methods with "no public release", and §5.5 says the same. They
+   are all in [`allogn/Network-Immunization`](https://github.com/allogn/Network-Immunization)
+   — `NetShieldSolver.py`, `DomSolver.py` (DAVA, with a `fast` parameter) — along
+   with NetShape (Khalil KDD'14), Degree and Random. All six are wired as
+   `external:netimm_*` and share one install. **Our own reimplementations of
+   NetShield and DAVA produce byte-identical node sets to theirs** on
+   `hospital_lh10` at k=8 [derived, 2026-08-05], which is the cross-check §11 asks
+   for and neither implementation is authoritative without.
+
+3. **GreedyWalk's code is MATLAB and unobtainable, which §11 marks as unverified.**
+   Two independent sources now agree: the paper's own link is a `tinyurl`, and
+   `allogn/Network-Immunization`'s README states that its Walk8 solver "is not
+   available as the code was provided by authors of *Scalable Approximation
+   Algorithm for Network Immunization* and the algorithm is implemented in MATLAB"
+   [verified, 2026-08-05]. Our `greedy_walk` / `greedy_walk_edge` are
+   reimplementations from the paper's prose and are labelled as such.
+
+**Four published `lambda_1` values now reproduce exactly** [derived, 2026-08-05],
+which is the first time this repo checks a spectral quantity against the
+literature: Oregon-1 **58.72**, Oregon-2 **70.74**, Brightkite **101.49** (all
+§5.2), and the `youtube` we already load at **210.4**. That validates
+`world_model/wm_metrics.py::spectral_radius` against somebody else's arithmetic on
+four graphs.
+
+**Every SocioPatterns count in §6.2 reproduces to the digit**, including the
+per-household breakdown §6.2 gives for Kilifi (B=15, E=17, F=8, H=29, L=6). One
+exception, recorded in its own loader: Thiers11 is **1,709** undirected edges, not
+1,710 — §6.2's derivation counts the file's one self-contact `(43, 43)` as a dyad
+and `edges_to_adjacency` drops it, as it does for every other loader here.
+
+---
+
 ## 0. Verification policy
 
 | Tier           | Meaning                                                                                                              |
@@ -227,7 +281,7 @@ This is the branch with real algorithms and comparable numbers.
 | **Eigenvalue threshold** (key)                              | 2003        | SRDS                            | Proves SIS dies out iff `λ₁ · β/δ < 1`. **The foundational result.** Verified title by text extraction.                                                                                                                                                  | [Wang, Chakrabarti, Wang & Faloutsos (CMU PDF)](https://www.cs.cmu.edu/~christos/PUBLICATIONS/srds03-virus.pdf)                                                                                     | —                                                                                                         |
 | **Epidemic thresholds in real networks**                 | 2008        | ACM TISSEC 10(4)                | The journal version, with the NLDS derivation and empirical validation.                                                                                                                                                                                  | [Chakrabarti, Wang, Wang, Leskovec & Faloutsos (CMU PDF)](http://www.cs.cmu.edu/~deepay/mywww/papers/tissec08.pdf) · [ACM DOI](https://dl.acm.org/doi/10.1145/1284680.1284681) (403 paywall)        | —                                                                                                         |
 | **Threshold conditions for arbitrary cascade models** (key) | 2011        | ICDM                            | Generalizes `λ₁ · s < 1` to **any** propagation model expressible as a node-level Markov chain (SIR, SIRS, SEIR, SIV, …), with `s` a model-specific scalar. This is what licenses using one surrogate for every compartmental model.                     | [Prakash et al. ICDM'11 PDF](https://faculty.cc.gatech.edu/~badityap/papers/gen-threshold-icdm11.pdf) · [KAIS'12 extended](https://faculty.cc.gatech.edu/~badityap/papers/gen-threshold-kais12.pdf) | —                                                                                                         |
-| **NetShield / NetShield+** (key)                            | 2010 / 2015 | ICDM / TKDE                     | Node immunization. Defines the **Shield-value** `Sv(S) = Σ 2λu(i)² − Σ A(i,j)u(i)u(j)`, proves it is submodular, greedy selects `k` nodes in `O(nk² + m)`. **The canonical node baseline.**                                                              | [ICDM'10 PDF](https://faculty.cc.gatech.edu/~badityap/papers/netshield-icdm10.pdf) · [TKDE'15 PDF](https://chenannie45.github.io/netshield-tkde15.pdf)                                              | no official release; a `NetShield` function ships in [EpiLearn](https://github.com/Emory-Melody/EpiLearn) |
+| **NetShield / NetShield+** (key)                            | 2010 / 2015 | ICDM / TKDE                     | Node immunization. Defines the **Shield-value** `Sv(S) = Σ 2λu(i)² − Σ A(i,j)u(i)u(j)`, proves it is submodular, greedy selects `k` nodes in `O(nk² + m)`. **The canonical node baseline.**                                                              | [ICDM'10 PDF](https://faculty.cc.gatech.edu/~badityap/papers/netshield-icdm10.pdf) · [TKDE'15 PDF](https://chenannie45.github.io/netshield-tkde15.pdf)                                              | no official release. Warning: the `NetShield`-in-EpiLearn claim is WRONG (§0.0). The runnable one is [allogn/Network-Immunization](https://github.com/allogn/Network-Immunization) |
 | **NetMelt / NetGel (Gelling)** (key)                        | 2012        | CIKM (best paper)               | The **edge** counterpart: delete `k` edges to minimize `λ₁` (NetMelt), or add `k` edges to maximize it (NetGel). Score for edge `(i,j)` is `u(i)·v(j)` (left/right first eigenvectors). **The canonical edge baseline.**                                 | [Tong, Prakash, Eliassi-Rad, Faloutsos & Faloutsos, CIKM'12 PDF](https://faculty.cc.gatech.edu/~badityap/papers/netgel-cikm12.pdf)                                                                  | no public code found                                                                                      |
 | **Decreasing `λ₁` by link removals**                     | 2011        | PRE 84:016101                   | Proves the edge version NP-hard; introduces the `deg(u)·deg(v)` (**ProductDegree**) and `\|x(u)·x(v)\|` (**EigenScore**) heuristics that every later paper baselines against.                                                                            | [Van Mieghem et al., APS](https://journals.aps.org/pre/abstract/10.1103/PhysRevE.84.016101) (403 paywall)                                                                                           | —                                                                                                         |
 | **GreedyWalk / PrimalDual** (key)                           | 2015        | SDM                             | First **approximation guarantees** for spectral-radius minimization. Scores an edge by the number of closed `k`-walks through it; `PrimalDual` gives an `O(log n)`-type bound. Handles both edge (SRME) and node (SRMN) variants with non-uniform costs. | [Saha, Adiga, Prakash & Vullikanti, arXiv 1501.06614](https://arxiv.org/abs/1501.06614) · [PDF](https://faculty.cc.gatech.edu/~badityap/papers/greedywalk-sdm15.pdf)                                | [tinyurl.com/l3lgsq7](http://tinyurl.com/l3lgsq7) (link from the paper, **not verified**)                 |
@@ -240,7 +294,7 @@ This is the branch with real algorithms and comparable numbers.
 | Method                          | Year        | Venue          | Idea                                                                                                                                                                                                                                                                   | Paper                                                                                                                                                                   | Code                 |
 | ------------------------------- | ----------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
 | **Blocking links**              | 2009        | ACM TKDD 3(2)  | Greedy edge removal minimizing expected IC contamination, with a bond-percolation estimator. The IC-side ancestor of influence blocking.                                                                                                                               | [Kimura, Saito & Motoda, ACM DOI](https://dl.acm.org/doi/10.1145/1514888.1514892) (403 paywall)                                                                         | —                    |
-| **DAVA / DAVA-fast** (key)         | 2014        | SDM            | **Data-aware** vaccine allocation: given the _observed_ set of already-infected nodes, merge them into a supernode, build a dominator tree of the reachable subgraph, and solve exactly on the tree. Gets a provable approximation on trees; DAVA-fast is near-linear. | [Zhang & Prakash, SDM'14 PDF](https://faculty.cc.gatech.edu/~badityap/papers/dava-sdm14.pdf)                                                                            | no public code found |
+| **DAVA / DAVA-fast** (key)         | 2014        | SDM            | **Data-aware** vaccine allocation: given the _observed_ set of already-infected nodes, merge them into a supernode, build a dominator tree of the reachable subgraph, and solve exactly on the tree. Gets a provable approximation on trees; DAVA-fast is near-linear. | [Zhang & Prakash, SDM'14 PDF](https://faculty.cc.gatech.edu/~badityap/papers/dava-sdm14.pdf)                                                                            | none by the authors; a third-party `DomSolver` in [allogn/Network-Immunization](https://github.com/allogn/Network-Immunization) (§0.0) |
 | **DAVA journal version**        | 2015        | ACM TKDD 10(2) | Adds the uncertain-prior and multiple-strain variants.                                                                                                                                                                                                                 | [Zhang & Prakash, TKDD PDF](https://faculty.cc.gatech.edu/~badityap/papers/dava-vdp-tkdd15.pdf)                                                                         | no public code found |
 | **Group immunization**          | 2015 / 2016 | ICDM / TKDE    | Immunize _groups_ (households, wards, age bands) rather than individuals — the realistic-policy variant.                                                                                                                                                               | [ICDM'15 PDF](https://faculty.cc.gatech.edu/~badityap/papers/groupvacc-icdm15.pdf) · [TKDE'16 PDF](https://faculty.cc.gatech.edu/~badityap/papers/groupimmu-tkde16.pdf) | no public code found |
 | **Data-driven immunization**    | 2017 / 2018 | ICDM / KAIS    | Immunization when the graph is only partially observed and the infection log is the primary signal.                                                                                                                                                                    | [ICDM'17 PDF](https://faculty.cc.gatech.edu/~badityap/papers/dataimm-icdm17.pdf) · [KAIS'18 PDF](https://faculty.cc.gatech.edu/~badityap/papers/dataimm-kais18.pdf)     | no public code found |

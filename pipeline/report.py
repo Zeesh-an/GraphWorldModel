@@ -459,6 +459,18 @@ def _results_table(agent_results: list[dict]) -> list[str]:
             "literature publishes in.",
             "",
         ]
+    elif any(result.get("epidemic") for result in agent_results):
+        lines += [
+            "> **`spread` is the ATTACK RATE and LOWER IS BETTER.** This is a "
+            "compartmental epidemic-control task: an outbreak is already running "
+            "from index cases no arm chose, the budget buys doses, and the column "
+            "counts every node that was EVER infected. Unlike every other task "
+            "here the dynamics are NOT monotone — infectious nodes recover and stop "
+            "transmitting — so the outbreak burns out on its own and the "
+            "prevented-infections table below reports what each arm saved before "
+            "that happened, together with the curve's shape.",
+            "",
+        ]
     elif sense == minimize:
         lines += [
             "> **`spread` is the objective and LOWER IS BETTER.** This is a "
@@ -672,6 +684,118 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
         "honest answer rather than a padded set.",
         "",
     ]
+
+    return lines
+
+
+def _epidemic_section(agent_results: list[dict]) -> list[str]:
+    """
+    Prevented infections and the outbreak's SHAPE — what an immunization table reports.
+
+    Empty for every non-compartmental task. Three groups, and the order is the
+    argument this task makes (research/epidemic_control.md §8.3):
+
+      1. `prevented` is the attack rate subtracted from the unprotected reference,
+         both measured on the shared referee.
+      2. `peak` / `t_peak` / `AUC` are the SHAPE. §8.2 trap 4 is the reason they are
+         not optional: a good policy flattens rather than eliminates, so a
+         terminal-state number alone can rank two policies backwards.
+      3. `eigendrop` is the spectral line's own metric, and it is here as CONTEXT.
+         §8.2 trap 1: a method can win it and lose the attack rate, because
+         `lambda_1` does not know where the outbreak IS. Seeing NetShield above
+         DAVA in this column and below it in the previous one is the point of
+         printing both.
+    """
+    scored = [result for result in agent_results if result.get("epidemic")]
+    if not scored:
+        return []
+
+    largest = max(result["budget"] for result in scored)
+    at_largest = sorted(
+        [result for result in scored if result["budget"] == largest],
+        key=lambda result: -(result.get("mc_prevented_infections") or 0.0),
+    )
+    head = at_largest[0]
+    unprotected = (
+        head.get("mc_unprotected_attack_rate")
+        or head.get("unprotected_attack_rate")
+        or 0.0
+    )
+    alpha = head.get("epi_alpha")
+
+    lines = [
+        f"## Prevented infections at k={largest}",
+        "",
+        f"`prevented = |R(inf)| unprotected - |R(inf)| with doses`, both terms "
+        f"measured on the shared ground-truth referee. The outbreak was seeded by "
+        f"`{head.get('outbreak_selector', '?')}` at **{head.get('n_outbreak', '?')} "
+        f"index case(s)** and reaches **{unprotected:,.1f}** nodes unprotected. "
+        f"Dynamics: **{head.get('compartments', '?')}**, per-contact transmission "
+        f"`{head.get('epi_beta', '?')}x` the arc's own probability, leaving-`I` rate "
+        f"`{head.get('epi_gamma', '?')}`"
+        + (f", `E -> I` rate `{alpha}`" if alpha is not None else "")
+        + f". Lever: `{head.get('lever', '?')}` ({head.get('lever_papers', '')}).",
+        "",
+        "> **`beta` and `gamma` are free parameters and nobody standardizes them.** "
+        "[`research/epidemic_control.md`](../../../../research/epidemic_control.md) "
+        "§8.2 trap 2: NetShield reports against a normalized virus strength swept on "
+        "the x-axis, and most other papers fix one pair without justifying it. The "
+        "rates above are stated for exactly that reason — this table is comparable "
+        "to another run at the same rates and to nothing else.",
+        "",
+        "> **Read `eigendrop` as context, never as the score.** It is what the "
+        "spectral line (NetShield, NetMelt, Gelling, GreedyWalk) actually optimizes, "
+        "and it needs no simulator at all — so it is the only column this table and "
+        "theirs share. It is also the column §8.2 trap 1 warns about: `lambda_1` says "
+        "nothing about WHERE the infection currently is, which is DAVA's entire "
+        "contribution and the reason a data-aware method can post the smallest "
+        "eigendrop here and still prevent the most infections.",
+        "",
+        "| arm | attack rate | prevented | % of outbreak | peak I | t_peak | "
+        "AUC | eigendrop | spent |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+
+    for result in at_largest:
+        curve = result.get("mc_curve") or result
+        prevented = result.get("mc_prevented_infections")
+        percent = result.get("mc_prevented_pct_of_unprotected")
+        spectral = result.get("spectral") or {}
+        eigendrop = spectral.get("eigendrop_pct")
+        lines.append(
+            f"| `{result['arm']}` "
+            f"| {_format_number(ground_truth_reward(result))} "
+            f"| {'—' if prevented is None else f'{prevented:+.2f}'} "
+            f"| {'—' if percent is None else f'{percent:.1f}%'} "
+            f"| {_format_number(curve.get('peak_prevalence'))} "
+            f"| {curve.get('time_to_peak', '—')} "
+            f"| {_format_number(curve.get('auc_infectious'))} "
+            f"| {'—' if eigendrop is None else f'{eigendrop:.1f}%'} "
+            f"| {result.get('n_spent', '—')} |"
+        )
+
+    lines += [
+        "",
+        "`prevented` counts only nodes the outbreak **would otherwise have reached**: "
+        "a dose spent on a node the epidemic never gets to scores exactly zero, "
+        "however central that node is. The infectious set also RECOVERS, so the "
+        "outbreak burns out on its own and a dose is worth only what it saves before "
+        "then — which is why `t_peak` moving earlier is a real result even when the "
+        "attack rate barely moves.",
+        "",
+    ]
+
+    if head.get("compartments") == "SIS":
+        lines += [
+            "> **SIS has no terminal state**, so the attack rate above is the "
+            "CUMULATIVE incidence (every node ever infected) rather than a final "
+            "size, and it grows monotonically with the horizon. §8.2 trap 6: the "
+            "quantity this literature reports for SIS is the endemic prevalence "
+            "`lim |I(t)|/N`, which is the `epi_endemic_prevalence` column of "
+            "`summary.csv`. Read that one, not this one, when comparing to a "
+            "published SIS number.",
+            "",
+        ]
 
     return lines
 
@@ -924,6 +1048,7 @@ def write_report(
     lines += _results_table(agent_results)
     lines += _adaptivity_section(agent_results)
     lines += _blocking_section(agent_results)
+    lines += _epidemic_section(agent_results)
     lines += _structural_section(agent_results)
     lines += _winner_section(agent_results)
     lines += _world_model_section(wm_results)

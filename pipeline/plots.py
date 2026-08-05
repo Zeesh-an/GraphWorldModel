@@ -924,6 +924,144 @@ def plot_blocking_ratio(
 localization_metric_keys = ("precision", "recall", "f1", "auc")
 
 
+def plot_epidemic_curve(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    `|I(t)|` per arm — the epidemic curve, and the figure this literature is about.
+
+    None for every non-compartmental sweep. The y-axis is the CURRENTLY-infectious
+    count, not the cumulative one, and that is the whole reason the figure exists:
+    the attack-rate column already reports the total, while "flatten the curve" is a
+    statement about this shape and nothing else (research/epidemic_control.md §2.6,
+    §8.2 trap 4). Two arms with the same attack rate and different peaks are two
+    different policies, and only this plot says so.
+
+    The dashed curve is the outbreak with nobody dosed, so the vertical gap at each
+    `t` is what that arm's allocation actually bought at that moment.
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("epidemic")
+        and (result.get("mc_prevalence_curve") or result.get("prevalence_curve"))
+    ]
+    if not scored:
+        return None
+
+    largest = max(result["budget"] for result in scored)
+    at_largest = [result for result in scored if result["budget"] == largest]
+    figure, axes = plt.subplots(figsize=figure_size)
+
+    for index, arm in enumerate(_sorted_arms(at_largest)):
+        runs = _by_arm(at_largest, arm)
+        curve = runs[0].get("mc_prevalence_curve") or runs[0].get("prevalence_curve")
+        axes.plot(
+            range(len(curve)),
+            curve,
+            color=condition_colors.get(_condition_of(at_largest, arm)),
+            label=arm,
+            **_arm_style(index),
+        )
+
+    reference = next(
+        (
+            result.get("mc_unprotected_prevalence_curve")
+            or result.get("unprotected_prevalence_curve")
+            for result in at_largest
+            if result.get("mc_unprotected_prevalence_curve")
+            or result.get("unprotected_prevalence_curve")
+        ),
+        None,
+    )
+    if reference:
+        axes.plot(
+            range(len(reference)),
+            reference,
+            color="#888888",
+            linestyle="--",
+            linewidth=1.2,
+            label="no doses (unprotected)",
+        )
+
+    head = at_largest[0]
+    axes.set_xlabel("timestep")
+    axes.set_ylabel("infectious nodes |I(t)| — LOWER AND FLATTER IS BETTER")
+    axes.set_title(
+        f"{title_prefix}: epidemic curve at k={largest}, "
+        f"{head.get('compartments', '?')} "
+        f"(beta x{head.get('epi_beta', '?')}, gamma {head.get('epi_gamma', '?')}), "
+        f"lever={head.get('lever', '?')}"
+    )
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+
+    return _save(figure, out_path)
+
+
+def plot_eigendrop_vs_attack(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Eigendrop against prevented infections, one point per arm — §8.2 trap 1, drawn.
+
+    None for every sweep without a NODE lever (the edge levers spend arcs and have
+    no spectral column). The x-axis is what the spectral line optimizes and the
+    y-axis is what we score, and the figure exists because the two DISAGREE: a
+    method can shrink `lambda_1` the most and prevent the fewest infections,
+    because `lambda_1` is a global property of the graph that says nothing about
+    where the outbreak currently is.
+
+    That disagreement is DAVA's entire contribution and the reason §9.4 says to
+    position this task against DAVA rather than against NetShield. A scatter with a
+    visible negative region is the result; a tight positive line would mean the
+    surrogate was sufficient on this graph and the task had nothing to add.
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("epidemic") and (result.get("spectral") or {}).get("eigendrop_pct")
+    ]
+    if not scored:
+        return None
+
+    largest = max(result["budget"] for result in scored)
+    at_largest = [result for result in scored if result["budget"] == largest]
+    figure, axes = plt.subplots(figsize=figure_size)
+
+    for index, arm in enumerate(_sorted_arms(at_largest)):
+        runs = _by_arm(at_largest, arm)
+        result = runs[0]
+        prevented = result.get("mc_prevented_infections")
+
+        if prevented is None:
+            continue
+
+        axes.scatter(
+            result["spectral"]["eigendrop_pct"],
+            prevented,
+            s=70,
+            color=condition_colors.get(_condition_of(at_largest, arm)),
+            label=arm,
+            edgecolors="black",
+            linewidths=0.5,
+            zorder=3,
+        )
+
+    axes.set_xlabel(
+        "eigendrop % — what the SPECTRAL line optimizes (NetShield, NetMelt)"
+    )
+    axes.set_ylabel("prevented infections — what we score")
+    axes.set_title(
+        f"{title_prefix}: surrogate vs objective at k={largest} "
+        f"(a point high-left beat the surrogate on the real thing)"
+    )
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=7, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+
+    return _save(figure, out_path)
+
+
 def plot_localization_metrics(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
@@ -1392,6 +1530,13 @@ def build_plots(
         ),
         plot_blocking_ratio(
             agent_results, plots_dir / "blocking_ratio.png", title_prefix
+        ),
+        # Both return None on a sweep with no compartments, same as every pair here
+        plot_epidemic_curve(
+            agent_results, plots_dir / "epidemic_curve.png", title_prefix
+        ),
+        plot_eigendrop_vs_attack(
+            agent_results, plots_dir / "eigendrop_vs_attack.png", title_prefix
         ),
         # All three return None on a sweep that recovers nothing, same as the
         # adaptive and dismantling pairs above

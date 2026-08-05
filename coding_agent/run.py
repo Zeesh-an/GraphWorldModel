@@ -78,6 +78,14 @@ from coding_agent.containment import (
     select_outbreak,
 )
 from coding_agent.credit import counterfactual_credit, planned_action
+from coding_agent.epidemic import (
+    default_contact_reduction,
+    epidemic_metrics,
+    resolve_lever as resolve_epidemic_lever,
+    unprotected_reference,
+    valid_levers as valid_epidemic_levers,
+    vaccinate,
+)
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
@@ -127,11 +135,21 @@ from coding_agent.tools.blocking_algorithms import (
     emittable,
     lever_shape,
 )
+from coding_agent.epidemic import lever_shape as epidemic_lever_shape
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.immunization_algorithms import (
+    immunization_algorithms,
+    immunization_levers,
+    immunization_shape,
+)
+from coding_agent.tools.immunization_algorithms import (
+    emittable as immunization_emittable,
+)
 from coding_agent.tools.library_api import (
     algorithm_names,
     blocking_names,
     dismantling_names,
+    immunization_names,
     localization_names,
     reconstruction_names,
 )
@@ -146,12 +164,18 @@ from data.wm_competitive import (
     shared_positive_prob,
     tie_break_choices,
 )
-from data.wm_simulator import spent, valid_action_ops, valid_remove_semantics
+from data.wm_epidemic import EpidemicConfig, default_burn_in, endemic_prevalence
+from data.wm_simulator import (
+    epidemic_dynamics,
+    spent,
+    valid_action_ops,
+    valid_remove_semantics,
+)
 from pipeline.conditions import parse_arm
 from pipeline.layout import budget_label, checkpoint_suffix
 from pipeline.tasks import get_task, maximize
 from world_model.wm_data import load_graph_store
-from world_model.wm_metrics import containment_metrics
+from world_model.wm_metrics import containment_metrics, epidemic_curve_metrics
 from world_model.wm_sl import valid_priors, vae_prior
 
 world_model = "world_model"
@@ -218,6 +242,19 @@ class ExperimentConfig:
     tie_break: str = auto_dominance
     positive_prob: str = shared_positive_prob
     detection_delay: int = 0
+    # Epidemic control. `outbreak_pct` / `outbreak_selector` above double as the
+    # index-case count and the OUTBREAK MODEL, so nothing new is needed for those.
+    # What is new is the lever (which of §2.5's four interventions the budget buys)
+    # and the three compartmental rates, which §8.2 trap 2 says must be reported
+    # rather than left implicit — beta and gamma are free parameters nobody
+    # standardizes, so a table that fixes them without saying so is comparable only
+    # to itself. All are inert unless the task registry marks the task epidemic.
+    epi_lever: str = vaccinate
+    epi_beta: float = 1.0
+    epi_gamma: float = 0.3
+    epi_alpha: float = 0.5
+    epi_burn_in: float = default_burn_in
+    contact_reduction: float = default_contact_reduction
     # Source localization. The two SPLITS are the load-bearing pair
     # (research/source_localization.md §8.5.1): the outer loop's reward is computed
     # on `sl_select_split` and the winning program is then re-scored, unmodified,
@@ -468,11 +505,23 @@ def _competitive_config(config: ExperimentConfig) -> CompetitiveConfig:
     )
 
 
+def _epidemic_config(config: ExperimentConfig) -> EpidemicConfig:
+    """The compartmental dynamics this run simulates."""
+    return EpidemicConfig(
+        beta_scale=config.epi_beta,
+        gamma=config.epi_gamma,
+        alpha=config.epi_alpha,
+        remove_semantics=config.remove_semantics,
+        burn_in=config.epi_burn_in,
+    )
+
+
 def _build_environment(
     config: ExperimentConfig,
     graph: GraphInfo,
     negative_seeds: tuple = (),
     competitive: bool = False,
+    epidemic: bool = False,
 ) -> object:
     # --seed is the base seed for every rollout in this run. Shared across
     # candidates on purpose (common random numbers), and recorded per rollout in
@@ -486,6 +535,7 @@ def _build_environment(
             remove_semantics=config.remove_semantics,
             negative_seeds=negative_seeds,
             competitive_config=_competitive_config(config) if competitive else None,
+            epidemic_config=_epidemic_config(config) if epidemic else None,
         )
 
     if config.evaluator == world_model:
@@ -502,6 +552,20 @@ def _build_environment(
             base_seed=config.seed,
             negative_seeds=negative_seeds,
         )
+
+        # ...and a non-compartmental checkpoint cannot be rolled out against an
+        # epidemic task: its head is monotone by construction, so `I` could never
+        # shrink and every rollout would report a cascade that transmits forever
+        # (research/epidemic_control.md §2.4)
+        if epidemic and not environment.epidemic:
+            raise ValueError(
+                f"checkpoint {config.wm_results_json} was trained on IC/LT "
+                f"transitions but this run is a compartmental epidemic task. Its "
+                f"head composes `y_inf = infected + (1 - infected) * p_new`, which "
+                f"is monotone by construction and cannot represent recovery. "
+                f"Regenerate with `data/generate_wm_data.py --models SIR` and "
+                f"retrain, or point --wm-results-json at a compartmental checkpoint."
+            )
 
         # A single-cascade checkpoint cannot be rolled out against a two-cascade
         # task: its head has no positive channel at all, so it would predict the
@@ -542,8 +606,19 @@ def _build_environment(
             remove_semantics=config.remove_semantics,
             negative_seeds=negative_seeds,
             competitive=competitive,
-            tie_break=resolve_tie_break(config.tie_break, config.diffusion_model),
+            tie_break=(
+                config.tie_break
+                if epidemic
+                else resolve_tie_break(config.tie_break, config.diffusion_model)
+            ),
             positive_prob=competitive_config.positive_prob,
+            # The compartment head's oracle form reproduces the simulator's own
+            # one-step marginals exactly, so this is a genuine ceiling here rather
+            # than a well-shaped approximation of one
+            epidemic=epidemic,
+            epi_beta=config.epi_beta,
+            epi_gamma=config.epi_gamma,
+            epi_alpha=config.epi_alpha,
         )
 
     raise ValueError(f"unknown evaluator {config.evaluator!r}")
@@ -624,7 +699,11 @@ def run_experiment(
     )
 
     environment = _build_environment(
-        config, graph, negative_seeds=outbreak, competitive=registry.competitive
+        config,
+        graph,
+        negative_seeds=outbreak,
+        competitive=registry.competitive,
+        epidemic=registry.epidemic,
     )
 
     if config.campaigns > 1:
@@ -723,6 +802,10 @@ def run_experiment(
     budget_op, lever_ops = (
         resolve_lever(config.blocking_lever)
         if registry.competitive
+        # Same rule on the epidemic side, and it is what stops an arm being
+        # budgeted for `remove_node` while permitted `set_edge_weight`
+        else resolve_epidemic_lever(config.epi_lever)
+        if registry.epidemic
         else (registry.budget_op, tuple(config.allowed_ops))
     )
 
@@ -757,8 +840,20 @@ def run_experiment(
         # Two-cascade fields; inert for every task that is not competitive, so one
         # code path serves all five runnable tasks
         competitive=registry.competitive,
-        tie_break=resolve_tie_break(config.tie_break, config.diffusion_model),
+        tie_break=(
+            config.tie_break
+            if registry.epidemic
+            else resolve_tie_break(config.tie_break, config.diffusion_model)
+        ),
         detection_delay=config.detection_delay,
+        # Compartmental fields; inert for every task that is not epidemic, so one
+        # code path serves all six runnable tasks
+        epidemic=registry.epidemic,
+        epi_lever=config.epi_lever,
+        contact_reduction=config.contact_reduction,
+        epi_beta=config.epi_beta,
+        epi_gamma=config.epi_gamma,
+        epi_alpha=config.epi_alpha,
         rounds=config.rounds if adaptive else None,
         per_round_budget=config.per_round_budget if adaptive else None,
         round_gap=config.round_gap,
@@ -778,6 +873,16 @@ def run_experiment(
             f"{competitive_model_name(config.positive_prob)}, "
             f"tie_break={task.tie_break}, detection_delay={config.detection_delay} "
             f"— MINIMIZING the rumour's final size"
+        )
+    elif outbreak and registry.epidemic:
+        print(
+            f"[run] outbreak: {len(outbreak)} index case(s) ({outbreak_pct:g}% of "
+            f"N, selector={config.outbreak_selector}, seed={config.seed}) | "
+            f"{config.diffusion_model} beta_scale={config.epi_beta} "
+            f"gamma={config.epi_gamma}"
+            + (f" alpha={config.epi_alpha}" if config.diffusion_model == "SEIR" else "")
+            + f" | lever={config.epi_lever} (budget buys {budget_op}) "
+            f"— MINIMIZING the attack rate"
         )
     elif outbreak:
         print(
@@ -825,6 +930,13 @@ def run_experiment(
             from coding_agent.tools.library_api import blocking_names_for
 
             menu = blocking_names_for(task.budget_op)
+        elif task.immunizes:
+            # Only the members whose OUTPUT this lever can emit: routing into the
+            # edge selectors from a vaccination arm would return arcs the executor
+            # then rejects
+            from coding_agent.tools.library_api import immunization_names_for
+
+            menu = immunization_names_for(task.epi_lever)
         elif task.contains:
             menu = dismantling_names
         else:
@@ -868,6 +980,7 @@ def run_experiment(
             + list(adaptive_algorithms)
             + blocking_names
             + dismantling_names
+            + immunization_names
             + localization_names
             + reconstruction_names
         ):
@@ -875,7 +988,8 @@ def run_experiment(
                 f"unknown baseline {config.baseline!r}; choose a static algorithm "
                 f"from {algorithm_names}, an adaptive policy from "
                 f"{sorted(adaptive_algorithms)}, a blocker from {blocking_names}, a "
-                f"dismantler from {dismantling_names}, a source localizer from "
+                f"dismantler from {dismantling_names}, an immunizer from "
+                f"{immunization_names}, a source localizer from "
                 f"{localization_names}, or a trajectory decoder from "
                 f"{reconstruction_names}"
             )
@@ -989,6 +1103,45 @@ class BlockingBaseline(Strategy):
         )
         return blocking.blocking_plan(
             picks, graph, budget, "{config.blocking_lever}", horizon
+        )
+"""
+        elif config.baseline in immunization_algorithms:
+            # A published immunizer is a static DOSE allocation, committed at t=0.
+            # It is handed the outbreak because the data-aware members (dava,
+            # frontier_immunization) condition on it; the structural ones take **kw
+            # and ignore it. `immunization_plan` then reconciles the two output
+            # shapes — node ids on the node levers, `(u, v)` arcs on the edge ones —
+            # and drops any index case the algorithm picked anyway.
+            if not immunization_emittable(config.baseline, config.epi_lever):
+                raise ValueError(
+                    f"baseline {config.baseline!r} returns "
+                    f"{immunization_shape[config.baseline]}s and this arm's lever "
+                    f"({config.epi_lever!r}) spends its budget on "
+                    f"{epidemic_lever_shape[config.epi_lever]}s, so its output is not "
+                    f"something this arm may emit. It is a "
+                    f"{immunization_levers[config.baseline]} method — run it with "
+                    f"--epi-lever {immunization_levers[config.baseline]}, or pick a "
+                    f"{config.epi_lever} member."
+                )
+
+            canned_script = f"""\
+class ImmunizationBaseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        picks = immunization_algorithms.{config.baseline}(
+            graph,
+            budget,
+            "{config.diffusion_model}",
+            outbreak={tuple(outbreak)!r},
+            horizon=horizon,
+        )
+        return epidemic.immunization_plan(
+            picks,
+            graph,
+            budget,
+            "{config.epi_lever}",
+            horizon,
+            {tuple(outbreak)!r},
+            {config.contact_reduction!r},
         )
 """
         elif config.baseline in dismantling_algorithms:
@@ -1377,7 +1530,59 @@ class Baseline(Strategy):
             f"lever={result['lever']}, |S_P|/|S_N|={result['budget_ratio']})"
         )
 
-    if task.contains and not task.blocks:
+    if task.immunizes:
+        # §8.3's block. The reward is the attack rate (lower is better); PREVENTED
+        # INFECTIONS is that subtracted from the unprotected reference, which is
+        # what an immunization table reports. The reference is measured on THIS
+        # arm's evaluator, on purpose: a difference of two different rulers is not a
+        # quantity, and --compare re-measures both on the shared referee.
+        print("[run] unprotected reference |R(inf)| on this evaluator...")
+        unprotected, unprotected_curve = unprotected_reference(
+            environment, task, graph, config.horizon, config.budget
+        )
+        result["epidemic"] = True
+        result["compartments"] = config.diffusion_model
+        result["epi_beta"] = config.epi_beta
+        result["epi_gamma"] = config.epi_gamma
+        result["epi_alpha"] = (
+            config.epi_alpha if config.diffusion_model == "SEIR" else None
+        )
+        result["outbreak_selector"] = config.outbreak_selector
+        result["outbreak_pct"] = outbreak_pct
+        result["contact_reduction"] = (
+            config.contact_reduction if task.epi_lever == "contact_reduce" else None
+        )
+        result["prevalence_curve"] = trajectory.prevalence_curve
+        # The curve the doses were measured against, so the report can draw the
+        # flattening rather than only the totals
+        result["unprotected_prevalence_curve"] = unprotected_curve
+        result |= epidemic_metrics(
+            trajectory.reward,
+            unprotected,
+            task,
+            graph,
+            trajectory.actions,
+            trajectory.prevalence_curve,
+        )
+        spectral = result.get("spectral") or {}
+        print(
+            f"[run] epidemic: attack {trajectory.reward:.2f} vs unprotected "
+            f"{unprotected:.2f} — prevented "
+            f"{result['prevented_infections']:+.2f} "
+            f"({result['prevented_pct_of_unprotected']:.1f}% of the outbreak, "
+            f"lever={result['lever']}, peak "
+            f"{result.get('peak_prevalence', 0.0):.1f} at t="
+            f"{result.get('time_to_peak', 0)})"
+        )
+        if spectral:
+            print(
+                f"[run] spectral: lambda1 {spectral['lambda1_intact']:.3f} -> "
+                f"{spectral['lambda1']:.3f} "
+                f"(eigendrop {spectral['eigendrop']:.3f} = "
+                f"{spectral['eigendrop_pct']:.1f}%) — CONTEXT, not the score"
+            )
+
+    if task.contains and not task.blocks and not task.immunizes:
         result["containment"] = True
         result["outbreak"] = list(outbreak)
         result["outbreak_pct"] = outbreak_pct
@@ -1529,6 +1734,12 @@ class Baseline(Strategy):
             competitive_config=(
                 _competitive_config(config) if task.blocks else None
             ),
+            # ...and the same rule for the compartmental case: refereeing an SIR
+            # arm on an IC replay would compare a process with recovery against one
+            # without and read as an enormous fidelity error
+            epidemic_config=(
+                _epidemic_config(config) if task.immunizes else None
+            ),
         )
 
         if config.campaigns > 1:
@@ -1561,6 +1772,36 @@ class Baseline(Strategy):
             f"±{mc_trajectory.cost['reward_se']:.2f} "
             f"(wm_minus_mc={result['wm_minus_mc']:+.2f})"
         )
+
+        if task.immunizes:
+            # The prevented-infections column every immunization table reports, on
+            # the SHARED referee. Both terms are re-measured here rather than
+            # reusing the arm's own reference, because prevented infections is a
+            # DIFFERENCE and a difference of two evaluators' numbers is not a
+            # quantity. The curve comes back too, so peak and time-to-peak are
+            # ground-truth rather than model-predicted.
+            mc_unprotected, mc_unprotected_curve = unprotected_reference(
+                mc_environment, task, graph, config.horizon, config.budget
+            )
+            result["mc_unprotected_prevalence_curve"] = mc_unprotected_curve
+            result["mc_unprotected_attack_rate"] = mc_unprotected
+            result["mc_prevented_infections"] = mc_unprotected - mc_trajectory.reward
+            result["mc_prevented_pct_of_unprotected"] = (
+                100.0 * (mc_unprotected - mc_trajectory.reward) / mc_unprotected
+                if mc_unprotected
+                else 0.0
+            )
+            result["mc_prevalence_curve"] = mc_trajectory.prevalence_curve
+            result["mc_curve"] = epidemic_curve_metrics(
+                mc_trajectory.prevalence_curve or [], graph.num_nodes, config.epi_burn_in
+            )
+            print(
+                f"[run] ground-truth prevented infections: "
+                f"{result['mc_prevented_infections']:+.2f} of {mc_unprotected:.2f} "
+                f"({result['mc_prevented_pct_of_unprotected']:.1f}%), peak "
+                f"{result['mc_curve']['peak_prevalence']:.1f} at t="
+                f"{result['mc_curve']['time_to_peak']}"
+            )
 
         if task.blocks:
             # The prevented-influence column every blocking table reports, on the
@@ -1857,6 +2098,56 @@ if __name__ == "__main__":
         "and anything the blocker emits before then is dropped. This is the axis "
         "that makes the first-mover advantage measurable (default: 0).",
     )
+    # Epidemic control
+    parser.add_argument(
+        "--epi-lever",
+        type=str,
+        default=vaccinate,
+        choices=list(valid_epidemic_levers),
+        help="epidemic control: which of the four interventions the budget buys. "
+        "vaccinate = the node is immune, leaves the graph and is never counted; "
+        "quarantine = the node is ISOLATED but stays in the graph and stays "
+        "counted; edge_cut = cut arcs (Kimura, NetMelt, Van Mieghem); "
+        "contact_reduce = scale arc probabilities down (social distancing, the "
+        f"lever NDlib's compartmental models cannot express) (default: {vaccinate}).",
+    )
+    parser.add_argument(
+        "--contact-reduction",
+        type=float,
+        default=default_contact_reduction,
+        help="epidemic control: the multiplier --epi-lever contact_reduce writes. "
+        "0 is a full cut through the weight channel and is directly comparable to "
+        f"edge_cut at the same k (default: {default_contact_reduction}).",
+    )
+    parser.add_argument(
+        "--epi-beta",
+        type=float,
+        default=1.0,
+        help="epidemic control: multiplier on the graph's per-arc probability, so "
+        "beta_uv = clip(scale * p(u->v)) (default: 1.0).",
+    )
+    parser.add_argument(
+        "--epi-gamma",
+        type=float,
+        default=0.3,
+        help="epidemic control: rate of LEAVING I — recovery under SIR/SEIR, "
+        "return-to-susceptible under SIS. 1.0 under SIR reproduces IC exactly "
+        "(default: 0.3).",
+    )
+    parser.add_argument(
+        "--epi-alpha",
+        type=float,
+        default=0.5,
+        help="epidemic control: E -> I rate, SEIR only (default: 0.5).",
+    )
+    parser.add_argument(
+        "--epi-burn-in",
+        type=float,
+        default=default_burn_in,
+        help="epidemic control: fraction of the prevalence curve discarded before "
+        "the endemic prevalence is time-averaged. SIS has no terminal state, so "
+        f"final size is undefined there (default: {default_burn_in}).",
+    )
     # Source localization
     parser.add_argument(
         "--sl-select-split",
@@ -2056,8 +2347,9 @@ if __name__ == "__main__":
         "--diffusion-model",
         type=str,
         default="IC",
-        choices=["IC", "LT"],
-        help="diffusion dynamics (default: IC).",
+        choices=["IC", "LT"] + list(epidemic_dynamics),
+        help="dynamics. SIR/SIS/SEIR run the compartmental simulator and select "
+        "the compartment head (default: IC).",
     )
     parser.add_argument(
         "--remove-semantics",
@@ -2209,6 +2501,12 @@ if __name__ == "__main__":
         tie_break=args.tie_break,
         positive_prob=args.positive_prob,
         detection_delay=args.detection_delay,
+        epi_lever=args.epi_lever,
+        contact_reduction=args.contact_reduction,
+        epi_beta=args.epi_beta,
+        epi_gamma=args.epi_gamma,
+        epi_alpha=args.epi_alpha,
+        epi_burn_in=args.epi_burn_in,
         sl_select_split=args.sl_select_split,
         sl_eval_split=args.sl_eval_split,
         sl_instances=args.sl_instances,

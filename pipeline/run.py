@@ -88,6 +88,10 @@ from coding_agent.tools.blocking_algorithms import (
     default_blocking_baselines,
 )
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithm_names
+from coding_agent.tools.immunization_algorithms import (
+    default_immunization_baselines,
+    immunization_algorithm_names,
+)
 from coding_agent.tools.localization_algorithms import localization_algorithm_names
 from coding_agent.tools.reconstruction_algorithms import (
     reconstruction_algorithm_names,
@@ -95,6 +99,12 @@ from coding_agent.tools.reconstruction_algorithms import (
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.blocking import counter_seed, resolve_lever, valid_levers
 from coding_agent.containment import outbreak_selectors, select_outbreak
+from coding_agent.epidemic import (
+    default_contact_reduction,
+    resolve_lever as resolve_epidemic_lever,
+    valid_levers as valid_epidemic_levers,
+    vaccinate,
+)
 from coding_agent.localization import (
     episode_budget,
     load_instances,
@@ -111,7 +121,12 @@ from coding_agent.reconstruction import (
 from coding_agent.rounds import round_batches
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
 from data.wm_graphs import kronecker_seeds
-from data.wm_simulator import valid_action_ops, valid_remove_semantics
+from data.wm_epidemic import default_burn_in
+from data.wm_simulator import (
+    epidemic_dynamics,
+    valid_action_ops,
+    valid_remove_semantics,
+)
 from pipeline.conditions import (
     Arm,
     condition_names,
@@ -242,6 +257,17 @@ class PipelineConfig:
     detection_delay: int = 0
     negative_selectors: tuple = ("random", "degree", "pagerank")
     blocker_selectors: tuple = blocking_selectors
+    # Epidemic control. `outbreak_pct` / `outbreak_selector` above double as the
+    # index-case count and the OUTBREAK MODEL, so only the compartmental specifics
+    # live here. All are inert unless the task registry marks the task epidemic.
+    epi_lever: str = vaccinate
+    contact_reduction: float = default_contact_reduction
+    epi_beta: float = 1.0
+    epi_gamma: float = 0.3
+    epi_alpha: float = 0.5
+    epi_burn_in: float = default_burn_in
+    outbreak_selectors: tuple = ("random", "degree", "pagerank")
+    immunizer_selectors: tuple = blocking_selectors
     # Source localization; every field is inert unless the task inverts, so one
     # sweep configuration serves all four runnable tasks
     sl_select_split: str = "train"
@@ -289,7 +315,9 @@ class PipelineConfig:
     _graph: object = field(default=None, repr=False)
 
 
-def expand_baselines(names: tuple, task: str, lever: str = counter_seed) -> list[str]:
+def expand_baselines(
+    names: tuple, task: str, lever: str = counter_seed, epi_lever: str = vaccinate
+) -> list[str]:
     """
     Resolve --baselines into arm specs.
 
@@ -307,6 +335,11 @@ def expand_baselines(names: tuple, task: str, lever: str = counter_seed) -> list
     classical = (
         default_blocking_baselines[lever]
         if get_task(task).competitive
+        # Same rule on the epidemic side and for the same reason: a lever can only
+        # emit what its own members return, so `netmelt`'s arcs would be rejected
+        # by a vaccination arm and `netshield`'s nodes by an edge one
+        else default_immunization_baselines[epi_lever]
+        if get_task(task).epidemic
         else get_task(task).default_baselines or default_baselines
     )
     specs = []
@@ -376,13 +409,22 @@ def resolve_baselines(config: PipelineConfig) -> tuple:
     if get_task(config.task).competitive:
         return default_blocking_baselines[config.blocking_lever]
 
+    if get_task(config.task).epidemic:
+        return default_immunization_baselines[config.epi_lever]
+
     return get_task(config.task).default_baselines or default_baselines
 
 
 def resolve_allowed_ops(config: PipelineConfig) -> tuple:
-    """--allowed-ops, else the ops the task's planner is defined to emit."""
+    """--allowed-ops, else the LEVER's ops, else the task's planner's own set."""
     if config.allowed_ops is not None:
         return tuple(config.allowed_ops)
+
+    # An epidemic arm's op vocabulary is decided by which of the four interventions
+    # its budget buys, not by the task; `coding_agent.run` resolves the same pair
+    # again from `--epi-lever`, and this keeps the two agreeing
+    if get_task(config.task).epidemic:
+        return resolve_epidemic_lever(config.epi_lever)[1]
 
     return get_task(config.task).allowed_ops
 
@@ -398,7 +440,10 @@ def resolve_gen_action_ops(config: PipelineConfig) -> tuple:
 def build_arms(config: PipelineConfig) -> list[Arm]:
     """Classical pool + external published baselines + the named conditions."""
     specs = expand_baselines(
-        resolve_baselines(config), config.task, config.blocking_lever
+        resolve_baselines(config),
+        config.task,
+        config.blocking_lever,
+        config.epi_lever,
     )
     specs += list(resolve_arms(config))
 
@@ -566,6 +611,22 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         ),
         negative_selectors=tuple(config.negative_selectors),
         blocker_selectors=tuple(config.blocker_selectors),
+        # Compartmental generation. The three rates are what §8.2 trap 2 says must
+        # be recorded rather than left implicit, and `train_wm` reads them back off
+        # metadata.json rather than off a flag, so a head can never be fit against
+        # transitions a different gamma produced. The generator switches simulators
+        # on `--gen-models`, so nothing here needs a `--epidemic` flag.
+        epi_beta=config.epi_beta,
+        epi_gamma=config.epi_gamma,
+        epi_alpha=config.epi_alpha,
+        epi_burn_in=config.epi_burn_in,
+        outbreak_pct=(
+            get_task(config.task).outbreak_pct
+            if config.outbreak_pct is None
+            else config.outbreak_pct
+        ),
+        outbreak_selectors=tuple(config.outbreak_selectors),
+        immunizer_selectors=tuple(config.immunizer_selectors),
     )
 
     return run_generation(generation_config)
@@ -679,7 +740,11 @@ def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
 
     task = get_task(config.task)
     budget_op = (
-        resolve_lever(config.blocking_lever)[0] if task.competitive else task.budget_op
+        resolve_lever(config.blocking_lever)[0]
+        if task.competitive
+        else resolve_epidemic_lever(config.epi_lever)[0]
+        if task.epidemic
+        else task.budget_op
     )
     batches = external_seeds.get("batches")
 
@@ -870,10 +935,15 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
 
                 # A blocking repo has to be told which rumour it is answering: two of
                 # the three would otherwise draw their own from a fixed seed and
-                # answer a different one than every arm it is being compared against
+                # answer a different one than every arm it is being compared against.
+                # An EPIDEMIC repo needs the same channel for a different reason —
+                # DAVA and NetShape are DEFINED on the observed infected set, so a
+                # run without it is answering a structural question rather than the
+                # data-aware one that is the whole point of those rows.
+                task_registry = get_task(config.task)
                 external_negative = (
                     _negative_seeds(config, graph)
-                    if get_task(config.task).competitive
+                    if task_registry.competitive or task_registry.epidemic
                     else None
                 )
 
@@ -923,6 +993,14 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 tie_break=config.tie_break,
                 positive_prob=config.positive_prob,
                 detection_delay=config.detection_delay,
+                # Inert unless the task registry marks the task epidemic; passed
+                # always so one code path serves the compartmental family too
+                epi_lever=config.epi_lever,
+                contact_reduction=config.contact_reduction,
+                epi_beta=config.epi_beta,
+                epi_gamma=config.epi_gamma,
+                epi_alpha=config.epi_alpha,
+                epi_burn_in=config.epi_burn_in,
                 # Inert unless the task inverts. `native_arm` cannot be recovered
                 # downstream — resolve_evaluator has already rewritten a native
                 # arm to monte_carlo with one episode — and it decides whether
@@ -1142,6 +1220,42 @@ def _write_manifest(layout: Layout, config: PipelineConfig) -> None:
     )
 
 
+def resolve_dynamics(config: PipelineConfig) -> None:
+    """
+    Default `--gen-models` / `--diffusion-model` to the TASK's own dynamics family.
+
+    IC/LT and SIR/SIS/SEIR produce different state layouts (two overlapping
+    indicators vs four exclusive compartments) and different target widths, so a
+    dataset holds one family or the other. Rather than making every epidemic
+    invocation restate both flags, the task's own dynamics are the default and a
+    genuine mismatch raises here instead of at the first matmul.
+    """
+    task = get_task(config.task)
+    compartmental = set(config.gen_models) & set(epidemic_dynamics)
+
+    if task.epidemic:
+        if config.diffusion_model not in task.dynamics:
+            config.diffusion_model = task.dynamics[0]
+
+        if set(config.gen_models) - set(epidemic_dynamics):
+            config.gen_models = (config.diffusion_model,)
+
+        if config.diffusion_model not in config.gen_models:
+            raise ValueError(
+                f"--diffusion-model {config.diffusion_model} is not in --gen-models "
+                f"{list(config.gen_models)}, so the agent stage would be handed a "
+                f"dataset that was never generated for it"
+            )
+    elif compartmental or config.diffusion_model in epidemic_dynamics:
+        raise ValueError(
+            f"task {config.task!r} runs on IC/LT but was given compartmental "
+            f"dynamics (gen_models={list(config.gen_models)}, "
+            f"diffusion_model={config.diffusion_model}). SIR/SIS/SEIR produce four "
+            f"exclusive compartments and a 5-target head; only "
+            f"--task epidemic_control reads them."
+        )
+
+
 def run_pipeline(config: PipelineConfig) -> dict:
     pipeline_start = time.perf_counter()
 
@@ -1149,6 +1263,8 @@ def run_pipeline(config: PipelineConfig) -> dict:
     # config gets the task's semantics instead of leaking None into GenConfig
     if config.remove_semantics is None:
         config.remove_semantics = get_task(config.task).remove_semantics
+
+    resolve_dynamics(config)
 
     layout = Layout(
         config.task, config.dataset, config.run, root=config.results_root
@@ -1394,8 +1510,11 @@ if __name__ == "__main__":
         type=str,
         nargs="+",
         default=["IC", "LT"],
-        choices=["IC", "LT"],
-        help="dynamics to generate transitions for (default: IC LT).",
+        choices=["IC", "LT"] + list(epidemic_dynamics),
+        help="dynamics to generate transitions for. IC/LT run NDlib and produce two "
+        "overlapping state indicators; SIR/SIS/SEIR run data/wm_epidemic.py and "
+        "produce four exclusive compartments, so the two families cannot share one "
+        "dataset (default: IC LT).",
     )
     parser.add_argument(
         "--gen-algorithms",
@@ -1715,6 +1834,85 @@ if __name__ == "__main__":
         f"prevented-influence number divides by (default: {' '.join(blocking_selectors)}).",
     )
     parser.add_argument(
+        "--epi-lever",
+        type=str,
+        default=vaccinate,
+        choices=list(valid_epidemic_levers),
+        help="epidemic control: which of the four interventions the budget buys. "
+        "vaccinate = the node is immune, leaves the graph and is never counted "
+        "(NetShield, DAVA, Pastor-Satorras & Vespignani, Cohen); quarantine = the "
+        "node is ISOLATED but stays in the graph and stays counted, which is §8.2 "
+        "trap 7's 'recovered is not removed'; edge_cut = cut arcs (Kimura, NetMelt, "
+        "Van Mieghem); contact_reduce = scale arc probabilities down (social "
+        "distancing, the lever NDlib's compartmental models cannot express) "
+        f"(default: {vaccinate}).",
+    )
+    parser.add_argument(
+        "--contact-reduction",
+        type=float,
+        default=default_contact_reduction,
+        help="epidemic control: the multiplier --epi-lever contact_reduce writes on "
+        "each arc it spends budget on. 0 is a full cut through the weight channel "
+        "and is directly comparable to edge_cut at the same k, which isolates "
+        f"graded-vs-all-or-nothing as its own axis (default: {default_contact_reduction}).",
+    )
+    parser.add_argument(
+        "--epi-beta",
+        type=float,
+        default=1.0,
+        help="epidemic control: multiplier on the graph's own per-arc probability, "
+        "so beta_uv = clip(scale * p(u->v)). 1.0 leaves it at the weighted-cascade "
+        "value; the literature's scalar-beta regime is --prob-model uniform "
+        "--uniform-p <beta> with this at 1.0. Crosses all three stages and lands in "
+        "metadata.json, because §8.2 trap 2 records that a table which fixes beta "
+        "without stating it is comparable only to itself (default: 1.0).",
+    )
+    parser.add_argument(
+        "--epi-gamma",
+        type=float,
+        default=0.3,
+        help="epidemic control: rate of LEAVING I — recovery under SIR/SEIR, "
+        "return-to-susceptible under SIS. One parameter for both, because the "
+        "lambda1 * beta / delta < 1 threshold uses one. 1.0 under SIR reproduces IC "
+        "exactly, which is the cheapest correctness check this task has "
+        "(default: 0.3).",
+    )
+    parser.add_argument(
+        "--epi-alpha",
+        type=float,
+        default=0.5,
+        help="epidemic control: E -> I rate, SEIR only (default: 0.5).",
+    )
+    parser.add_argument(
+        "--epi-burn-in",
+        type=float,
+        default=default_burn_in,
+        help="epidemic control: fraction of the prevalence curve discarded before "
+        "the endemic prevalence is time-averaged. SIS has NO terminal state, so "
+        "final size is undefined there and this is the metric that replaces it "
+        f"(§8.2 trap 6) (default: {default_burn_in}).",
+    )
+    parser.add_argument(
+        "--outbreak-selectors",
+        type=str,
+        nargs="+",
+        default=["random", "degree", "pagerank"],
+        choices=list(spine_algorithms),
+        help="epidemic control, data stage: how each episode's index cases are "
+        "chosen — the outbreak model, a second experimental axis a seeding task "
+        "does not have (default: random degree pagerank).",
+    )
+    parser.add_argument(
+        "--immunizer-selectors",
+        type=str,
+        nargs="+",
+        default=list(blocking_selectors),
+        choices=list(blocking_selectors),
+        help="epidemic control, data stage: how each episode's t=0 dose allocation "
+        "is chosen. `none` leaves the outbreak unprotected and is the reference "
+        f"every prevented-infections number divides by (default: {' '.join(blocking_selectors)}).",
+    )
+    parser.add_argument(
         "--baselines",
         type=str,
         nargs="*",
@@ -1724,6 +1922,7 @@ if __name__ == "__main__":
             + list(adaptive_algorithm_names)
             + list(blocking_algorithm_names)
             + list(dismantling_algorithm_names)
+            + list(immunization_algorithm_names)
             + list(localization_algorithm_names)
             + list(reconstruction_algorithm_names)
             + [f"external:{name}" for name in external_baselines]
@@ -1731,8 +1930,8 @@ if __name__ == "__main__":
         ),
         metavar="NAME",
         help="baselines to run: a static IM algorithm, a per-round adaptive "
-        "policy, an influence blocker, a network dismantler, a source localizer, "
-        "a trajectory decoder "
+        "policy, an influence blocker, a network dismantler, an epidemic "
+        "immunizer, a source localizer, a trajectory decoder "
         "(all condition 1), 'external:<name>' for a published repo (condition 7), or "
         "the aliases 'all' / 'all-classical' / 'all-external'. 'all' includes only "
         "external baselines already installed. Unset = the task registry's own pool "
@@ -1985,8 +2184,10 @@ if __name__ == "__main__":
         "--diffusion-model",
         type=str,
         default="IC",
-        choices=["IC", "LT"],
-        help="dynamics used downstream of generation (default: IC).",
+        choices=["IC", "LT"] + list(epidemic_dynamics),
+        help="dynamics used downstream of generation. SIR/SIS/SEIR select the "
+        "compartmental simulator and the compartment head, and must match "
+        "--gen-models (default: IC).",
     )
     parser.add_argument(
         "--horizon", type=int, default=10, help="agent rollout horizon (default: 10)."
@@ -2170,6 +2371,14 @@ if __name__ == "__main__":
         detection_delay=args.detection_delay,
         negative_selectors=tuple(args.negative_selectors),
         blocker_selectors=tuple(args.blocker_selectors),
+        epi_lever=args.epi_lever,
+        contact_reduction=args.contact_reduction,
+        epi_beta=args.epi_beta,
+        epi_gamma=args.epi_gamma,
+        epi_alpha=args.epi_alpha,
+        epi_burn_in=args.epi_burn_in,
+        outbreak_selectors=tuple(args.outbreak_selectors),
+        immunizer_selectors=tuple(args.immunizer_selectors),
         sl_select_split=args.sl_select_split,
         sl_eval_split=args.sl_eval_split,
         sl_instances=args.sl_instances,

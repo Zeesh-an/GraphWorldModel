@@ -20,6 +20,7 @@ from coding_agent.tools import (
     algorithms,
     blocking_algorithms,
     dismantling_algorithms,
+    immunization_algorithms,
     localization_algorithms,
     primitives,
     reconstruction_algorithms,
@@ -150,6 +151,20 @@ if _unknown_blocked:
         f"in blocking_algorithms; fix the list or the rename"
     )
 
+# ...and on the epidemic-control side. `mc_greedy_immunization` simulates the whole
+# compartmental outbreak once per candidate per dose, which is the same leak
+# `greedy_blocking` has and for the same reason.
+mc_blocked_immunization = immunization_algorithms.mc_immunization_algorithms
+
+_unknown_blocked = set(mc_blocked_immunization) - set(
+    immunization_algorithms.immunization_algorithms
+)
+if _unknown_blocked:
+    raise ValueError(
+        f"mc_immunization_algorithms names {sorted(_unknown_blocked)}, which are "
+        f"not in immunization_algorithms; fix the list or the rename"
+    )
+
 # ...and on the cascade-reconstruction side. `mcmc_decode` and `forward_backward`
 # evaluate the transition kernel `proposals x horizon` times per instance, and a
 # generated program already HAS the metered kernel (`self.step_marginals`) — so
@@ -277,6 +292,17 @@ def _blocked_blocker(name: str, *_args, **_kwargs) -> None:
     )
 
 
+def _blocked_immunizer(name: str, *_args, **_kwargs) -> None:
+    raise StrategyError(
+        f"immunization_algorithms.{name} is not available: it simulates the whole "
+        f"compartmental outbreak once per candidate per dose, which bypasses the "
+        f"metered evaluator and dominates wall clock. Blocked: "
+        f"{', '.join(mc_blocked_immunization)}. Use a structural or data-aware "
+        f"immunizer (degree_immunization, netshield, dava, frontier_immunization, "
+        f"acquaintance_immunization) or write your own selection logic."
+    )
+
+
 def _blocked_localizer(name: str, *_args, **_kwargs) -> None:
     raise StrategyError(
         f"localization_algorithms.{name} is not available: it re-simulates every "
@@ -385,6 +411,22 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
             },
             blocking_levers=blocking_algorithms.blocking_levers,
         ),
+        # Vaccination / quarantine / edge selectors for epidemic control, on the
+        # same terms: present under every task, and the MC-heavy member blocked
+        # unless --allow-mc-algorithms. `immunization_levers` rides along because a
+        # generated script that composes one has to know which op it may emit —
+        # `netmelt` returns arcs and `netshield` returns nodes.
+        "immunization_algorithms": SimpleNamespace(
+            **{
+                name: (
+                    function
+                    if allow_mc_algorithms or name not in mc_blocked_immunization
+                    else partial(_blocked_immunizer, name)
+                )
+                for name, function in immunization_algorithms.immunization_algorithms.items()
+            },
+            immunization_levers=immunization_algorithms.immunization_levers,
+        ),
         # SOURCE-SET inference for source localization, on the same terms again.
         # These are the published methods a localize() program is being compared
         # against, so hiding them would ask the model to reinvent LPSI.
@@ -426,6 +468,11 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         # turns a library selector's output — node ids from three levers, arcs from
         # the fourth — into the one plan shape the executor validates.
         "blocking": importlib.import_module("coding_agent.blocking"),
+        # ...and the epidemic helpers. `immunization_plan` is what turns an
+        # immunizer's output — node ids from two levers, arcs from the other two —
+        # into the one plan shape the executor validates, and it also drops any
+        # index case the algorithm happened to pick.
+        "epidemic": importlib.import_module("coding_agent.epidemic"),
         "__builtins__": __builtins__,
     }
 

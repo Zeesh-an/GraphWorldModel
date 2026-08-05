@@ -13,6 +13,7 @@ import numpy as np
 
 from coding_agent.types import GraphInfo
 from data.wm_competitive import CompetitiveConfig, CompetitiveSimulator, run_competitive
+from data.wm_epidemic import EpidemicConfig, EpidemicSimulator
 from data.wm_simulator import ActionOp, Simulator, blocked, spent
 
 seed_upper_bound = 1 << 30
@@ -70,6 +71,92 @@ def build_competitive_simulator(
     simulator.reset(diffusion_model, [int(node) for node in negative_seeds])
 
     return simulator
+
+
+def build_epidemic_simulator(
+    graph: GraphInfo,
+    diffusion_model: str,
+    seed: int = 0,
+    config: EpidemicConfig | None = None,
+) -> EpidemicSimulator:
+    """Construct a compartmental SIR/SIS/SEIR simulator from a GraphInfo."""
+    nx_graph, ic_prob_map = _nx_from_graph_info(graph)
+    simulator = EpidemicSimulator(
+        nx_graph, ic_prob_map=ic_prob_map, seed=seed, config=config
+    )
+    simulator.reset(diffusion_model)
+
+    return simulator
+
+
+def mc_simulate_epidemic(
+    graph: GraphInfo,
+    outbreak: list[int],
+    doses: list[int],
+    diffusion_model: str = "SIR",
+    lever: str = "vaccinate",
+    mc_runs: int = 20,
+    horizon: int = 20,
+    seed: int = 0,
+    config: EpidemicConfig | None = None,
+    contact_reduction: float = 0.0,
+) -> tuple[float, list[float]]:
+    """
+    Mean attack rate and mean prevalence curve when `doses` are spent against `outbreak`.
+
+    The compartmental counterpart of `mc_simulate_containment`, and the honest
+    classical cost of scoring one allocation: LOWER is better. It returns the CURVE
+    as well as the total, because research/epidemic_control.md §2.6 grades this task
+    on the outbreak's shape and recomputing the curve would mean a second run.
+
+    `doses` are node ids under the node levers and `(u, v)` arcs under the edge
+    ones, matching what the library's members return; the bag is built through the
+    same `epidemic.immunization_plan` rule the harness uses, so a simulation-based
+    selector and the arm that runs it agree on what a dose does.
+    """
+    if not outbreak:
+        return 0.0, []
+
+    # Imported here rather than at module scope: epidemic imports primitives
+    from coding_agent.epidemic import expand_immunization, immunization_plan
+
+    rng = np.random.default_rng(seed)
+    plan = immunization_plan(
+        doses,
+        graph,
+        len(list(doses)),
+        lever,
+        horizon=0,
+        protected=tuple(int(node) for node in outbreak),
+        contact_reduction=contact_reduction,
+    )
+    bag = [ActionOp("add_node", int(node)) for node in outbreak]
+    bag += expand_immunization(plan[0], graph, lever)
+
+    totals, curves = [], []
+
+    for _ in range(mc_runs):
+        simulator = build_epidemic_simulator(
+            graph,
+            diffusion_model,
+            seed=int(rng.integers(seed_upper_bound)),
+            config=config,
+        )
+        state = simulator.advance(bag)
+
+        for _ in range(horizon):
+            if not state.frontier and not state.exposed:
+                break
+
+            state = simulator.advance([])
+
+        totals.append(len(state.infected))
+        curves.append(list(simulator.prevalence))
+
+    width = max(len(curve) for curve in curves)
+    padded = [curve + [0.0] * (width - len(curve)) for curve in curves]
+
+    return float(np.mean(totals)), np.mean(padded, axis=0).tolist()
 
 
 def mc_simulate_blocking(

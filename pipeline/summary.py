@@ -119,6 +119,35 @@ summary_columns = (
     "blocking_budget_ratio",
     "blocking_spent",
     "blocking_n_spent",
+    # Epidemic control: the compartmental columns. `epi_prevented` is the headline
+    # this literature publishes in, and the three curve columns beside it are the
+    # SHAPE — §8.2 trap 4 records that a good policy flattens rather than
+    # eliminates, so a terminal-state number alone can rank two policies backwards.
+    # `epi_eigendrop` is the spectral line's own metric, carried as CONTEXT: §8.2
+    # trap 1 is that a method can win it and lose the attack rate.
+    "epidemic",
+    "epi_compartments",
+    "epi_lever",
+    "epi_beta",
+    "epi_gamma",
+    "epi_alpha",
+    "epi_outbreak_selector",
+    "epi_attack_rate",
+    "epi_attack_rate_pct",
+    "epi_unprotected",
+    "epi_prevented",
+    "epi_prevented_pct",
+    "epi_peak_prevalence",
+    "epi_peak_prevalence_pct",
+    "epi_time_to_peak",
+    "epi_auc_infectious",
+    "epi_endemic_prevalence",
+    "epi_lambda1_intact",
+    "epi_lambda1",
+    "epi_eigendrop",
+    "epi_eigendrop_pct",
+    "epi_spent",
+    "epi_n_spent",
     # Source localization: the inverse task's own metric set. Empty for every arm
     # that intervenes, so one table still holds all four runnable tasks.
     # `sl_f1` is the held-out score and duplicates `spread_ground_truth` on
@@ -210,6 +239,12 @@ def _row(result: dict, sense: str = "maximize") -> dict:
     structural = result.get("structural") or {}
     metrics = result.get("metrics") or {}
     selection_metrics = result.get("selection_metrics") or {}
+    # The spectral block is present only under a NODE lever — the edge levers spend
+    # arcs, and `immunization_metrics` has nothing to delete
+    spectral = result.get("spectral") or {}
+    # ...and the ground-truth curve only exists under --compare, so the arm's own
+    # is the fallback rather than the preference
+    epidemic_curve = result.get("mc_curve") or {}
 
     return {
         "arm": result.get("arm"),
@@ -330,8 +365,55 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         ),
         "blocking_prevented_pct_of_nodes": result.get("prevented_pct_of_nodes"),
         "blocking_budget_ratio": result.get("budget_ratio"),
-        "blocking_spent": result.get("spent"),
-        "blocking_n_spent": result.get("n_spent"),
+        "blocking_spent": result.get("spent") if result.get("blocking") else None,
+        "blocking_n_spent": result.get("n_spent") if result.get("blocking") else None,
+        # Epidemic control. The `mc_*` prevented columns are preferred over the
+        # arm's own for the same reason blocking's are — prevented infections is a
+        # DIFFERENCE, and a difference of two evaluators' numbers is not a quantity.
+        # The curve columns likewise prefer the referee's, so peak and time-to-peak
+        # describe the ground-truth outbreak rather than the model's picture of it.
+        "epidemic": result.get("epidemic"),
+        "epi_compartments": result.get("compartments"),
+        "epi_lever": result.get("lever") if result.get("epidemic") else None,
+        "epi_beta": result.get("epi_beta"),
+        "epi_gamma": result.get("epi_gamma"),
+        "epi_alpha": result.get("epi_alpha"),
+        "epi_outbreak_selector": result.get("outbreak_selector"),
+        "epi_attack_rate": result.get(
+            "mc_reward", result.get("attack_rate")
+        ) if result.get("epidemic") else None,
+        "epi_attack_rate_pct": result.get("attack_rate_pct"),
+        "epi_unprotected": result.get(
+            "mc_unprotected_attack_rate", result.get("unprotected_attack_rate")
+        ),
+        "epi_prevented": result.get(
+            "mc_prevented_infections", result.get("prevented_infections")
+        ),
+        "epi_prevented_pct": result.get(
+            "mc_prevented_pct_of_unprotected",
+            result.get("prevented_pct_of_unprotected"),
+        ),
+        "epi_peak_prevalence": epidemic_curve.get(
+            "peak_prevalence", result.get("peak_prevalence")
+        ),
+        "epi_peak_prevalence_pct": epidemic_curve.get(
+            "peak_prevalence_pct", result.get("peak_prevalence_pct")
+        ),
+        "epi_time_to_peak": epidemic_curve.get(
+            "time_to_peak", result.get("time_to_peak")
+        ),
+        "epi_auc_infectious": epidemic_curve.get(
+            "auc_infectious", result.get("auc_infectious")
+        ),
+        "epi_endemic_prevalence": epidemic_curve.get(
+            "endemic_prevalence", result.get("endemic_prevalence")
+        ),
+        "epi_lambda1_intact": spectral.get("lambda1_intact"),
+        "epi_lambda1": spectral.get("lambda1"),
+        "epi_eigendrop": spectral.get("eigendrop"),
+        "epi_eigendrop_pct": spectral.get("eigendrop_pct"),
+        "epi_spent": result.get("spent") if result.get("epidemic") else None,
+        "epi_n_spent": result.get("n_spent") if result.get("epidemic") else None,
         # Source localization. Empty for every seeding or containment arm; the
         # metrics are exact (F1 against a known source set carries no evaluator
         # noise), so there is no fidelity column here and none is expected.

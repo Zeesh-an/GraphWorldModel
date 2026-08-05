@@ -255,6 +255,15 @@
 #                   every arm in a sweep faces the same outbreak. On influence
 #                   blocking these two are |S_N| and the ATTACKER MODEL, which
 #                   is that task's second experimental axis
+#   EPI_LEVER       epidemic control: which of the four interventions the
+#                   budget buys — vaccinate (immune, uncounted), quarantine
+#                   (isolated but counted), edge_cut, contact_reduce. Sets the
+#                   budgeted op and the permitted op together.
+#   EPI_BETA        per-contact transmission as a multiple of the arc's own
+#                   probability; EPI_GAMMA the rate of leaving I (recovery under
+#                   SIR/SEIR, return-to-susceptible under SIS). Both land in
+#                   metadata.json — §8.2 trap 2 records that a table which fixes
+#                   them without stating them is comparable only to itself.
 #   BLOCKING_LEVER  influence blocking: which of the four published
 #                   interventions the budget buys — counter_seed (default),
 #                   node_block, edge_block, weight_block
@@ -558,6 +567,23 @@ CR_INSTANCES="${CR_INSTANCES:-}"
 CR_SELECT_SPLIT="${CR_SELECT_SPLIT:-}"
 CR_EVAL_SPLIT="${CR_EVAL_SPLIT:-}"
 CR_TREE_WEIGHT="${CR_TREE_WEIGHT:-}"
+
+# Epidemic control. `EPI_LEVER` is the load-bearing one: the four interventions of
+# research/epidemic_control.md §2.5 are four different problems, and vaccinate and
+# quarantine differ in the DOSE ACCOUNTING rather than in what is chosen (§8.2 trap
+# 7's "recovered is not removed"). EPI_BETA / EPI_GAMMA cross all three stages and
+# land in metadata.json, because §8.2 trap 2 records that a table which fixes them
+# without stating them is comparable only to itself. Note GEN_MODELS and
+# DIFFUSION_MODEL must both be one of SIR / SIS / SEIR here — the pipeline defaults
+# them from the task registry, so leaving both unset is the SIR setting.
+EPI_LEVER="${EPI_LEVER:-}"
+CONTACT_REDUCTION="${CONTACT_REDUCTION:-}"
+EPI_BETA="${EPI_BETA:-}"
+EPI_GAMMA="${EPI_GAMMA:-}"
+EPI_ALPHA="${EPI_ALPHA:-}"
+EPI_BURN_IN="${EPI_BURN_IN:-}"
+OUTBREAK_SELECTORS="${OUTBREAK_SELECTORS:-}"
+IMMUNIZER_SELECTORS="${IMMUNIZER_SELECTORS:-}"
 CR_MCMC_PROPOSALS="${CR_MCMC_PROPOSALS:-}"
 CR_MCMC_BURN_IN="${CR_MCMC_BURN_IN:-}"
 
@@ -602,7 +628,14 @@ WS_P="${WS_P:-0.1}"
 SBM_BLOCKS="${SBM_BLOCKS:-4}"
 SBM_P_IN="${SBM_P_IN:-0.15}"
 SBM_P_OUT="${SBM_P_OUT:-0.01}"
-GEN_MODELS="${GEN_MODELS:-IC LT}"
+# Left EMPTY for a compartmental task so pipeline.run.resolve_dynamics defaults
+# both this and DIFFUSION_MODEL from the registry; IC/LT and SIR/SIS/SEIR produce
+# different state layouts and cannot share a dataset
+if [ "$TASK" = "epidemic_control" ]; then
+  GEN_MODELS="${GEN_MODELS:-SIR}"
+else
+  GEN_MODELS="${GEN_MODELS:-IC LT}"
+fi
 GEN_ALGORITHMS="${GEN_ALGORITHMS:-$class_selectors}"
 # Unset = the TASK REGISTRY decides, which is what makes --task
 # critical_node_detection generate remove_node transitions and let its
@@ -661,7 +694,11 @@ BUDGETS="${BUDGETS:-}"
 EVALUATOR="${EVALUATOR:-oracle}"
 LLM_MODEL="${LLM_MODEL:-gpt-5.6-terra}"
 TEMPERATURE="${TEMPERATURE:-}"
-DIFFUSION_MODEL="${DIFFUSION_MODEL:-IC}"
+if [ "$TASK" = "epidemic_control" ]; then
+  DIFFUSION_MODEL="${DIFFUSION_MODEL:-SIR}"
+else
+  DIFFUSION_MODEL="${DIFFUSION_MODEL:-IC}"
+fi
 HORIZON="${HORIZON:-10}"
 OUTER_ITERS="${OUTER_ITERS:-5}"
 WINDOWS="${WINDOWS:-3}"
@@ -757,6 +794,16 @@ fi
 [ -n "$CAMPAIGNS" ]         && flags+=(--campaigns "$CAMPAIGNS")
 [ -n "$OUTBREAK_PCT" ]      && flags+=(--outbreak-pct "$OUTBREAK_PCT")
 [ -n "$OUTBREAK_SELECTOR" ] && flags+=(--outbreak-selector "$OUTBREAK_SELECTOR")
+# Epidemic control (research/epidemic_control.md). Inert unless the task registry
+# marks the task epidemic, so leaving them unset is exactly every other task.
+[ -n "$EPI_LEVER" ]           && flags+=(--epi-lever "$EPI_LEVER")
+[ -n "$CONTACT_REDUCTION" ]   && flags+=(--contact-reduction "$CONTACT_REDUCTION")
+[ -n "$EPI_BETA" ]            && flags+=(--epi-beta "$EPI_BETA")
+[ -n "$EPI_GAMMA" ]           && flags+=(--epi-gamma "$EPI_GAMMA")
+[ -n "$EPI_ALPHA" ]           && flags+=(--epi-alpha "$EPI_ALPHA")
+[ -n "$EPI_BURN_IN" ]         && flags+=(--epi-burn-in "$EPI_BURN_IN")
+[ -n "$OUTBREAK_SELECTORS" ]  && flags+=(--outbreak-selectors $OUTBREAK_SELECTORS)
+[ -n "$IMMUNIZER_SELECTORS" ] && flags+=(--immunizer-selectors $IMMUNIZER_SELECTORS)
 
 [ -n "$BLOCKING_LEVER" ]     && flags+=(--blocking-lever "$BLOCKING_LEVER")
 [ -n "$TIE_BREAK" ]          && flags+=(--tie-break "$TIE_BREAK")

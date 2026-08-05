@@ -16,10 +16,17 @@ ends up reporting one thing under another's name.
     message-passing model provably cannot represent giant-component membership on
     a diameter-46 graph, and §8.3 therefore puts the connectivity functionals in
     the report as descriptive context beside the diffusion number that the arm was
-    actually optimized for.
+    actually optimized for. The epidemic block (`spectral_radius`,
+    `epidemic_curve_metrics`, `immunization_metrics`) sits in the same category and
+    carries the same warning from the other side: `research/epidemic_control.md`
+    §8.2 trap 1 records that a method can win on eigendrop and lose on simulated
+    final size, so the eigendrop is reported BESIDE the attack rate rather than as
+    the score.
 """
 
 import numpy as np
+import scipy.sparse as sp
+import scipy.sparse.linalg as spla
 
 
 def binary_f1(pred: np.ndarray, target: np.ndarray) -> float:
@@ -633,6 +640,177 @@ def spearman(first: np.ndarray, second: np.ndarray) -> float:
         return 0.0
 
     return float(np.dot(first_centered, second_centered) / denominator)
+
+
+def spectral_radius(
+    edge_index: np.ndarray,
+    num_nodes: int,
+    removed: tuple | list = (),
+) -> float:
+    """
+    `lambda_1(A)` of the undirected adjacency after deleting `removed`.
+
+    The one number the entire epidemic-control literature agrees on
+    (research/epidemic_control.md §1.2): for essentially every propagation model,
+    the epidemic dies out iff `lambda_1 * beta / delta < 1`, which is what
+    NetShield, NetMelt, Gelling, GreedyWalk and Preciado are all actually
+    optimizing. It needs no simulator at all, which is exactly §9.9's point —
+    computing it costs one `eigsh` call on a graph we already hold, and it is the
+    only bridge between our simulated-outbreak table and the spectral line's.
+
+    Warning: it is a SURROGATE and §8.2 trap 1 is emphatic that reporting only the
+    eigendrop grades us on the quantity the classical methods were built to
+    optimize — a comparison we cannot win and that does not test the world model.
+    It is reported BESIDE the simulated attack rate, never instead of it.
+    """
+    if num_nodes <= 0:
+        return 0.0
+
+    dropped = {int(node) for node in removed}
+    sources, targets = [], []
+
+    for edge in range(edge_index.shape[1]):
+        source = int(edge_index[0, edge])
+        target = int(edge_index[1, edge])
+
+        if source == target or source in dropped or target in dropped:
+            continue
+
+        sources += [source, target]
+        targets += [target, source]
+
+    if not sources:
+        return 0.0
+
+    adjacency = sp.csr_matrix(
+        (np.ones(len(sources), dtype=np.float64), (sources, targets)),
+        shape=(num_nodes, num_nodes),
+    )
+    # Symmetrized above, so duplicate arcs of an undirected graph would count twice
+    adjacency.data[:] = 1.0
+
+    # eigsh needs k < n, and a graph small enough for the dense path is small
+    # enough that the dense path is faster anyway
+    if num_nodes <= 3:
+        return float(np.abs(np.linalg.eigvalsh(adjacency.toarray())).max())
+
+    try:
+        values = spla.eigsh(
+            adjacency, k=1, which="LA", return_eigenvectors=False, maxiter=5000
+        )
+        return float(values[0])
+    except spla.ArpackNoConvergence as error:
+        # ARPACK stalls on graphs with a near-degenerate top pair; its partial
+        # result is still the best estimate available and is better than a
+        # missing column
+        return float(error.eigenvalues.max()) if error.eigenvalues.size else 0.0
+
+
+def epidemic_curve_metrics(
+    prevalence: list[float],
+    num_nodes: int,
+    burn_in: float = 0.5,
+) -> dict:
+    """
+    The SHAPE of an outbreak, from its `|I(t)|` curve — §2.6's four new quantities.
+
+    The attack rate says how many were infected; none of these do, and §8.3 lists
+    them because flattening a curve without shrinking its integral is precisely
+    what an epidemic-control policy is judged on:
+
+      * **peak prevalence** `max_t |I(t)| / N` — the health-system-capacity metric,
+        and the one "flatten the curve" names.
+      * **time to peak** `argmax_t |I(t)|` — a policy that delays the peak buys
+        response time even when it saves nobody.
+      * **AUC** `sum_t |I(t)|` — the integrated load.
+      * **endemic prevalence** — the time average after burn-in, which is the ONLY
+        one of the four that is defined for SIS. §8.2 trap 6: SIS has no terminal
+        state, so final size is undefined there and every rollout metric that
+        assumes one is silently wrong.
+    """
+    curve = [float(value) for value in prevalence]
+
+    if not curve or num_nodes <= 0:
+        return {
+            "peak_prevalence": 0.0,
+            "peak_prevalence_pct": 0.0,
+            "time_to_peak": 0,
+            "auc_infectious": 0.0,
+            "auc_infectious_pct": 0.0,
+            "endemic_prevalence": 0.0,
+            "endemic_prevalence_pct": 0.0,
+        }
+
+    peak = max(curve)
+    start = min(int(len(curve) * max(0.0, min(1.0, burn_in))), len(curve) - 1)
+    endemic = float(np.mean(curve[start:]))
+
+    return {
+        "peak_prevalence": peak,
+        "peak_prevalence_pct": 100.0 * peak / num_nodes,
+        "time_to_peak": int(np.argmax(curve)),
+        "auc_infectious": float(sum(curve)),
+        # Normalized by N * T so two runs at different horizons are comparable
+        "auc_infectious_pct": 100.0 * sum(curve) / (num_nodes * len(curve)),
+        "endemic_prevalence": endemic,
+        "endemic_prevalence_pct": 100.0 * endemic / num_nodes,
+    }
+
+
+def immunization_metrics(
+    edge_index: np.ndarray,
+    num_nodes: int,
+    removed: list[int],
+    threshold: float = gcc_threshold,
+) -> dict:
+    """
+    The spectral and structural description of one arm's dose allocation.
+
+    §8.3's context columns, and the same role `containment_metrics` plays for
+    dismantling: never a training target and never the arm's reward, which is the
+    simulated attack rate. What this adds over that function is the EIGENDROP —
+    `lambda_1(A) - lambda_1(A - S)` — because that is the quantity NetShield,
+    NetMelt, Gelling and GreedyWalk report and therefore the only number our table
+    and theirs share.
+
+    Reported together with the connectivity profile on purpose. §5.8 of the
+    dismantling review and §8.2 trap 1 here make the same point from two sides: a
+    method can win on eigendrop and lose on simulated final size, because
+    `lambda_1` says nothing about WHERE the infection currently is. Printing both
+    beside the attack rate is what makes that disagreement visible rather than a
+    thing a reader has to already know.
+    """
+    order = [int(node) for node in removed]
+    neighbours = adjacency_sets(edge_index, num_nodes)
+
+    intact = connectivity_profile(neighbours, set())
+    after = connectivity_profile(neighbours, set(order))
+    lambda_intact = spectral_radius(edge_index, num_nodes)
+    lambda_after = spectral_radius(edge_index, num_nodes, order)
+
+    return {
+        "doses": order,
+        "k": len(order),
+        "lambda1_intact": lambda_intact,
+        "lambda1": lambda_after,
+        "eigendrop": lambda_intact - lambda_after,
+        "eigendrop_pct": (
+            100.0 * (lambda_intact - lambda_after) / lambda_intact
+            if lambda_intact
+            else 0.0
+        ),
+        "pairwise_conn_intact": intact["pairwise_conn"],
+        "pairwise_conn": after["pairwise_conn"],
+        "largest_cc_intact": intact["largest_cc_size"],
+        "largest_cc_size": after["largest_cc_size"],
+        "gcc_fraction": after["gcc_fraction"],
+        "n_components": after["n_components"],
+        "largest_cc_drop_pct": (
+            100.0 * (1.0 - after["largest_cc_size"] / intact["largest_cc_size"])
+            if intact["largest_cc_size"]
+            else 0.0
+        ),
+    }
 
 
 def containment_metrics(

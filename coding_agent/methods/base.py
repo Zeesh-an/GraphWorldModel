@@ -16,6 +16,10 @@ from coding_agent.blocking import (
     proximity_ring,
 )
 from coding_agent.containment import build_outbreak, removal_plan, removal_set
+from coding_agent.epidemic import (
+    build_immunization,
+    immunization_plan,
+)
 from coding_agent.credit import planned_action
 from coding_agent.executor import (
     StrategyError,
@@ -42,6 +46,7 @@ from coding_agent.tools import algorithms, primitives
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.tools.blocking_algorithms import all_blocking_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.immunization_algorithms import immunization_algorithms
 from coding_agent.tools.localization_algorithms import (
     localization_algorithms,
     localization_scorers,
@@ -101,6 +106,52 @@ dismantling_anchor_algorithms = (
     "netshield",
     "random_removal",
 )
+
+# The leaderboard for an EPIDEMIC CONTROL task, per lever. `degree_immunization`
+# heads the node list because it is the row that actually has to be beaten
+# (research/epidemic_control.md §9.4, §5.1: RLGN's own Table 2 has Degree tying
+# Eigenvector to within 0.1 on two of five graphs). `netshield` and `dava` are the
+# two published methods this task is positioned BETWEEN, and running both is the
+# only way §8.2 trap 1 is visible — the spectral method wins the eigendrop and the
+# data-aware one wins the attack rate. `acquaintance_immunization` is on the list
+# because §8.3 names it as the row that most embarrasses learned methods, and
+# `random_immunization` is not a throwaway floor: the GAP between it and degree is
+# Pastor-Satorras & Vespignani's founding result. `mc_greedy_immunization` is
+# deliberately absent for the same reason `greedy_blocking` and `adapt_greedy` are.
+immunization_anchor_algorithms = {
+    "vaccinate": (
+        "degree_immunization",
+        "netshield",
+        "dava",
+        "acquaintance_immunization",
+        "random_immunization",
+    ),
+    "quarantine": (
+        "degree_immunization",
+        "netshield",
+        "dava",
+        "acquaintance_immunization",
+        "random_immunization",
+    ),
+    "edge_cut": (
+        "netmelt",
+        "product_degree",
+        "frontier_edge_cut",
+        "random_edge_cut",
+    ),
+    "contact_reduce": (
+        "netmelt",
+        "product_degree",
+        "frontier_edge_cut",
+        "random_edge_cut",
+    ),
+}
+
+# The floor every allocation has to beat, and the reference every
+# prevented-infections number divides by: the outbreak with nobody dosed. An
+# anchor row rather than a private simulation, so it is measured by the same
+# evaluator as the arm it calibrates.
+no_immunization = "no_immunization"
 
 # The leaderboard for an INVERSE task. `lpsi` heads it because it is the row that
 # actually has to be beaten (research/source_localization.md §2.9 risk 1): a 2017
@@ -738,8 +789,18 @@ def wrap_exogenous(
     reusing it would have every arm start the rumour's own counter-cascade for it.
     The rumour is committed by the simulator's `reset` there (§2.1), and the wrapper's
     remaining jobs are the detection delay and the removal expansion.
+
+    A COMPARTMENTAL task takes the epidemic wrapper, and that difference is not
+    cosmetic either: `vaccinate` expands a bare `remove_node` into the node PLUS its
+    incident arcs while `quarantine` expands it into the arcs ALONE, and the
+    containment wrapper only knows the first (research/epidemic_control.md §2.5).
     """
-    if task.blocks:
+    if task.immunizes:
+        immunization = build_immunization(graph, task)
+
+        if immunization is not None:
+            action_fn = immunization.wrap(action_fn)
+    elif task.blocks:
         negative = build_negative_cascade(graph, task)
 
         if negative is not None:
@@ -862,6 +923,49 @@ class _BlockingAnchor:
 
         return blocking_plan(
             picks, graph, budget, lever_of(self.task), horizon, self.task.outbreak
+        )
+
+
+class _ImmunizationAnchor:
+    """
+    Wraps a library immunizer as the plan_horizon()-shaped object evaluate_strategy wants.
+
+    The compartmental twin of `_BlockingAnchor`, and separate from `_PlanAnchor` for
+    the same reason: the immunization library's members return two SHAPES — node ids
+    on the two node levers and `(u, v)` arcs on the two edge ones — and
+    `immunization_plan` is what reconciles them. `None` as the selector is the
+    UNPROTECTED reference: an empty plan, so the outbreak runs with nobody dosed,
+    which is the number every prevented-infections column divides by.
+    """
+
+    def __init__(self, selector, task: TaskSpec, graph: GraphInfo) -> None:
+        self.selector = selector
+        self.task = task
+        self.graph = graph
+        self.source_script = ""
+
+    def plan_horizon(
+        self, graph: GraphInfo, budget: int, horizon: int
+    ) -> list[list[ActionOp]]:
+        if self.selector is None:
+            return [[] for _ in range(horizon + 1)]
+
+        picks = self.selector(
+            graph,
+            budget,
+            self.task.diffusion_model,
+            outbreak=self.task.outbreak,
+            horizon=horizon,
+        )
+
+        return immunization_plan(
+            picks,
+            graph,
+            budget,
+            self.task.epi_lever,
+            horizon,
+            self.task.outbreak,
+            self.task.contact_reduction,
         )
 
 
@@ -1057,6 +1161,49 @@ def baseline_anchor(
             f"(±{trajectory.cost.get('reward_se', 0.0):.2f} SE, "
             f"prevented {unopposed - trajectory.reward:+.2f} = "
             f"{100.0 * (unopposed - trajectory.reward) / max(unopposed, 1e-9):.1f}%)"
+            for name, trajectory in ranked
+        ]
+
+        return "\n".join(lines), best_trajectory, best_name
+
+    if task.immunizes:
+        # An epidemic-control task's floor is the IMMUNIZATION library, and the row
+        # that matters is `no_immunization` — the outbreak with nobody dosed. Every
+        # other row is only interesting as a difference from it, which is what
+        # "prevented infections" means (§8.3).
+        lever = task.epi_lever
+        scored = [
+            (no_immunization, evaluate_strategy(
+                _ImmunizationAnchor(None, task, graph), environment, task, graph
+            )[0])
+        ]
+
+        for name in immunization_anchor_algorithms[lever]:
+            anchor = _ImmunizationAnchor(immunization_algorithms[name], task, graph)
+            trajectory, _ = evaluate_strategy(anchor, environment, task, graph)
+            scored.append((name, trajectory))
+
+        unprotected = scored[0][1].reward
+        ranked = rank_by(scored, lambda entry: entry[1].reward, task.sense)
+        best_name, best_trajectory = ranked[0]
+
+        lines = [
+            f"REFERENCE SCORES: classical epidemic-control baselines for the "
+            f"{lever} lever, run on THIS graph against THIS outbreak, under THIS "
+            f"evaluator, at the same budget and horizon. The column is the attack "
+            f"rate — how many nodes were EVER infected — so LOWER IS BETTER; "
+            f"`prevented` is how many infections each one stopped. "
+            f"`no_immunization` is the outbreak with nobody dosed, and beating it "
+            f"by a lot is the bar. Read `netshield` against `dava` specifically: "
+            f"the first minimizes the graph's leading eigenvalue and does not know "
+            f"where the outbreak IS, the second conditions on exactly that, and on "
+            f"a small localized outbreak the second usually wins by a wide margin:",
+        ]
+        lines += [
+            f"  {name:<28} {trajectory.reward:9.2f} "
+            f"(±{trajectory.cost.get('reward_se', 0.0):.2f} SE, "
+            f"prevented {unprotected - trajectory.reward:+.2f} = "
+            f"{100.0 * (unprotected - trajectory.reward) / max(unprotected, 1e-9):.1f}%)"
             for name, trajectory in ranked
         ]
 

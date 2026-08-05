@@ -16,8 +16,11 @@ from tqdm import tqdm
 from data.wm_actions import (
     blocking_selectors,
     counterfactual_actions,
+    delete_node_bag,
+    immunizer_selectors as default_immunizer_selectors,
     sample_injection,
     select_blockers,
+    select_immunizers,
     select_seeds,
     spine_algorithms,
 )
@@ -27,6 +30,11 @@ from data.wm_competitive import (
     auto_dominance,
     shared_positive_prob,
     tie_break_choices,
+)
+from data.wm_epidemic import (
+    EpidemicConfig,
+    EpidemicSimulator,
+    default_burn_in,
 )
 from data.wm_graphs import (
     GraphBundle,
@@ -39,6 +47,7 @@ from data.wm_simulator import (
     ActionOp,
     Simulator,
     State,
+    epidemic_dynamics,
     spent,
     valid_action_ops,
     valid_remove_semantics,
@@ -80,6 +89,10 @@ def build_record(
     next_marginal_pos_frontier: dict[int, float] | None = None,
     negative_seeds: list[int] | None = None,
     parents: dict[int, list[int]] | None = None,
+    next_marginal_incidence: dict[int, float] | None = None,
+    next_marginal_exposed: dict[int, float] | None = None,
+    next_marginal_infectious: dict[int, float] | None = None,
+    next_marginal_recovered: dict[int, float] | None = None,
 ) -> dict:
     """Build one transition record for the JSONL storage."""
     record = {
@@ -118,6 +131,23 @@ def build_record(
             str(node): round(probability, 6)
             for node, probability in (next_marginal_pos_frontier or {}).items()
         }
+
+    # The three CURRENT compartments plus the incidence, present only on a
+    # compartmental episode so an IC/LT/competitive JSONL is byte-identical to what
+    # it was. `next_marginal_infected` above stays the EVER-infected marginal under
+    # this layout too, which is what lets every existing reader keep working
+    # (research/epidemic_control.md §2.3).
+    if next_marginal_incidence is not None:
+        for key, marginal in (
+            ("next_marginal_incidence", next_marginal_incidence),
+            ("next_marginal_exposed", next_marginal_exposed),
+            ("next_marginal_infectious", next_marginal_infectious),
+            ("next_marginal_recovered", next_marginal_recovered),
+        ):
+            record[key] = {
+                str(node): round(probability, 6)
+                for node, probability in (marginal or {}).items()
+            }
 
     # S_N is a property of the EPISODE rather than of any action (§2.1), so it is
     # stamped on every record instead of being recoverable from the t=0 bag the way
@@ -254,6 +284,23 @@ class GenConfig:
     negative_pct: float = 1.0
     negative_selectors: tuple = ("random", "degree", "pagerank")
     blocker_selectors: tuple = blocking_selectors
+    # Compartmental (epidemic control) generation. `--models SIR/SIS/SEIR` swaps the
+    # NDlib Simulator for data.wm_epidemic.EpidemicSimulator and widens the state
+    # from two overlapping indicators to four exclusive compartments; the three
+    # parameters are what research/epidemic_control.md §8.2 trap 2 says must be
+    # recorded rather than left implicit, because a table that fixes beta and gamma
+    # without stating them is comparable only to itself. All land in metadata.json.
+    epi_beta: float = 1.0
+    epi_gamma: float = 0.3
+    epi_alpha: float = 0.5
+    epi_burn_in: float = default_burn_in
+    # |outbreak| as a percentage of N, and how each episode's dose allocation is
+    # chosen. Reuses the blocker machinery: "given the outbreak's sources, pick k
+    # nodes" is the same problem shape, and `none` supplies the unprotected
+    # reference every prevented-infections number divides by.
+    outbreak_pct: float = 1.0
+    outbreak_selectors: tuple = ("random", "degree", "pagerank")
+    immunizer_selectors: tuple = default_immunizer_selectors
     ba_m: int = 3
     ws_k: int = 6
     ws_p: float = 0.1
@@ -593,6 +640,181 @@ def _competitive_episode_transitions(
             break
 
 
+def _epidemic_episode_transitions(
+    bundle: GraphBundle,
+    model: str,
+    algorithm: str,
+    budget: int,
+    rollout: int,
+    config: GenConfig,
+    base_rng: np.random.Generator,
+    writer: TransitionWriter,
+    split: str,
+) -> None:
+    """
+    One compartmental episode: seed the outbreak, let a dose allocation answer it,
+    record five targets.
+
+    `algorithm` is a PAIR here — "<outbreak selector>+<immunizer selector>" — for
+    the same reason a blocking episode's is: an intervention transition is only
+    labelled by both, and the outbreak model is a second experimental axis a seeding
+    task does not have. The `none` immunizer leaves the outbreak unopposed and its
+    episodes are the sigma(outbreak, empty) reference.
+
+    Two things differ from the competitive path and both matter:
+
+      * **The outbreak is an `add_node` bag at t=0**, not a `reset` argument. That
+        keeps the t=0 action readable as the source set by
+        `wm_data.load_episode_endpoints` exactly as every other task's is, and it is
+        also what the coding-agent harness injects, so the data and the inference
+        path commit the outbreak the same way.
+      * **The doses ride in the SAME t=0 bag** as full deletion bags
+        (`delete_node_bag`), because a vaccinated node's incident arcs have to be
+        gone from `edge_index` for the head's T_exo to be right — the identical
+        requirement critical node detection has, and the reason `expand_removals`
+        exists on the inference side.
+    """
+    outbreak_algorithm, _, immunizer_algorithm = algorithm.partition("+")
+    episode_id = f"{bundle.graph_id}|{model}|{algorithm}|k{budget}|r{rollout}"
+
+    selection_rng = np.random.default_rng(base_rng.integers(0, seed_upper_bound))
+    injection_rng = np.random.default_rng(base_rng.integers(0, seed_upper_bound))
+    simulator_seed = int(base_rng.integers(0, seed_upper_bound))
+
+    num_nodes = bundle.nx_graph.number_of_nodes()
+    num_sources = max(1, round(num_nodes * config.outbreak_pct / 100))
+    sources = select_seeds(
+        bundle,
+        num_seeds=num_sources,
+        algorithm=outbreak_algorithm,
+        model="IC",
+        rng=selection_rng,
+    )
+    doses = select_immunizers(
+        bundle, sources, budget, immunizer_algorithm, selection_rng
+    )
+
+    simulator = EpidemicSimulator(
+        bundle.nx_graph,
+        ic_prob_map=bundle.ic_prob_map,
+        seed=simulator_seed,
+        config=EpidemicConfig(
+            beta_scale=config.epi_beta,
+            gamma=config.epi_gamma,
+            alpha=config.epi_alpha,
+            remove_semantics=config.remove_semantics,
+            burn_in=config.epi_burn_in,
+        ),
+    )
+    simulator.reset(model)
+
+    s_t = simulator.current_state()
+    opening_bag = [ActionOp("add_node", node) for node in sources]
+    for node in doses:
+        opening_bag += delete_node_bag(bundle.nx_graph, node)
+
+    for t in range(config.horizon + 1):
+        action = (
+            opening_bag
+            if t == 0
+            else sample_injection(
+                s_t,
+                graph=simulator.graph,
+                rng=injection_rng,
+                p_inject=config.inject_p,
+                action_ops=config.action_ops,
+                weight_range=(config.weight_lo, config.weight_hi),
+                remove_semantics=config.remove_semantics,
+            )
+        )
+
+        if t > 0 and config.cf_prob > 0 and injection_rng.random() < config.cf_prob:
+            snapshot = simulator.snapshot()
+            cf_bags = counterfactual_actions(
+                s_t,
+                graph=simulator.graph,
+                main_bag=action,
+                count=config.cf_branches,
+                rng=injection_rng,
+                action_ops=config.action_ops,
+                remove_semantics=config.remove_semantics,
+            )
+            for branch_index, cf_bag in enumerate(cf_bags):
+                simulator.restore(snapshot)
+                s_cf, *cf_marginals = simulator.advance_marginal(
+                    cf_bag, config.mc_marginals
+                )
+                writer.write(
+                    build_record(
+                        graph_id=bundle.graph_id,
+                        diffusion_model=model,
+                        episode_id=episode_id,
+                        algorithm=algorithm,
+                        branch=f"cf_{branch_index}",
+                        t=t,
+                        state=s_t,
+                        action=cf_bag,
+                        next_state=s_cf,
+                        # LOWER is better: the reward is the attack set's growth,
+                        # so a good dose drives it to zero
+                        reward=float(len(s_cf.infected) - len(s_t.infected)),
+                        next_marginal_infected=cf_marginals[0],
+                        # `frontier` is the infectious set under this layout, so the
+                        # channel every existing reader calls "frontier" is column 3
+                        next_marginal_frontier=cf_marginals[3],
+                        next_marginal_incidence=cf_marginals[1],
+                        next_marginal_exposed=cf_marginals[2],
+                        next_marginal_infectious=cf_marginals[3],
+                        next_marginal_recovered=cf_marginals[4],
+                    ),
+                    model=model,
+                    split=split,
+                )
+            # restore() puts the edge table back as well as the compartments, so
+            # unlike the NDlib path there is no revert_edges companion to call
+            simulator.restore(snapshot)
+
+        s_next, *marginals = simulator.advance_marginal(action, config.mc_marginals)
+        writer.write(
+            build_record(
+                graph_id=bundle.graph_id,
+                diffusion_model=model,
+                episode_id=episode_id,
+                algorithm=algorithm,
+                branch="main",
+                t=t,
+                state=s_t,
+                action=action,
+                next_state=s_next,
+                reward=float(len(s_next.infected) - len(s_t.infected)),
+                next_marginal_infected=marginals[0],
+                next_marginal_frontier=marginals[3],
+                next_marginal_incidence=marginals[1],
+                next_marginal_exposed=marginals[2],
+                next_marginal_infectious=marginals[3],
+                next_marginal_recovered=marginals[4],
+            ),
+            model=model,
+            split=split,
+        )
+
+        s_t = s_next
+        # Both have to be dead: under SEIR a latent node with nobody infectious
+        # left is still going to become infectious, so breaking on I alone would
+        # truncate the epidemic mid-flight
+        if t > 0 and not s_t.frontier and not s_t.exposed and not action:
+            break
+
+
+def _epidemic_algorithms(config: GenConfig) -> list[str]:
+    """The `<outbreak>+<immunizer>` pairs one compartmental sweep rolls out."""
+    return [
+        f"{outbreak}+{immunizer}"
+        for outbreak in config.outbreak_selectors
+        for immunizer in config.immunizer_selectors
+    ]
+
+
 def _competitive_algorithms(config: GenConfig) -> list[str]:
     """The `<attacker>+<blocker>` pairs one competitive sweep rolls out."""
     return [
@@ -610,12 +832,41 @@ def run_generation(config: GenConfig) -> dict[str, object]:
     base_rng = np.random.default_rng(config.seed)
 
     graph_count = 1 if config.dataset in real_directed else config.num_graphs
-    # A competitive sweep's "algorithm" is an (attacker, blocker) PAIR, so the two
-    # selector lists cross rather than the spine list being used at all
+    # A compartmental sweep's "algorithm" is an (outbreak, immunizer) PAIR and a
+    # competitive one an (attacker, blocker) PAIR, so in both cases the two selector
+    # lists cross rather than the spine list being used at all
+    compartmental = any(model in epidemic_dynamics for model in config.models)
+
+    if compartmental and not all(model in epidemic_dynamics for model in config.models):
+        raise ValueError(
+            f"--models {config.models} mixes compartmental dynamics with IC/LT. They "
+            f"produce different state layouts (4 exclusive compartments vs 2 "
+            f"overlapping indicators) and different target widths, so one dataset "
+            f"cannot hold both. Generate them into separate runs."
+        )
+
+    if compartmental and config.competitive:
+        raise ValueError(
+            "--competitive is a two-CASCADE layout and the compartmental models are "
+            "a four-COMPARTMENT one; no head reads both"
+        )
+
     algorithms = (
-        _competitive_algorithms(config) if config.competitive else config.algorithms
+        _epidemic_algorithms(config)
+        if compartmental
+        else _competitive_algorithms(config)
+        if config.competitive
+        else config.algorithms
     )
     total_episodes = graph_count * len(config.models) * len(algorithms) * config.rollouts
+
+    if compartmental:
+        print(
+            f"[gen] compartmental: models={list(config.models)} "
+            f"beta_scale={config.epi_beta} gamma={config.epi_gamma} "
+            f"alpha={config.epi_alpha} |outbreak|={config.outbreak_pct}% of N, "
+            f"{len(algorithms)} (outbreak+immunizer) pairs"
+        )
 
     if config.competitive:
         print(
@@ -655,7 +906,9 @@ def run_generation(config: GenConfig) -> dict[str, object]:
                         budget = _resolve_budget(config, num_nodes, base_rng)
                         episode_budgets.append(budget)
                         episode = (
-                            _competitive_episode_transitions
+                            _epidemic_episode_transitions
+                            if compartmental
+                            else _competitive_episode_transitions
                             if config.competitive
                             else _episode_transitions
                         )
@@ -716,6 +969,24 @@ def run_generation(config: GenConfig) -> dict[str, object]:
         metadata["competitive"] = {
             model: competitive.resolved(model) for model in config.models
         } | {"negative_pct": config.negative_pct}
+
+    # ...and the compartmental ones, for the reason §8.2 trap 2 gives: beta and
+    # gamma are free parameters nobody standardizes, so a table that fixes them
+    # without stating them is comparable only to itself. `train_wm` reads these back
+    # rather than taking them from a flag, so a head can never be fit against
+    # transitions a different rate produced.
+    if compartmental:
+        epidemic = EpidemicConfig(
+            beta_scale=config.epi_beta,
+            gamma=config.epi_gamma,
+            alpha=config.epi_alpha,
+            remove_semantics=config.remove_semantics,
+            burn_in=config.epi_burn_in,
+        )
+        metadata["epidemic"] = {
+            model: epidemic.resolved(model) for model in config.models
+        } | {"outbreak_pct": config.outbreak_pct}
+
     (out_dir / "metadata.json").write_text(json.dumps(metadata, indent=2, default=str))
     print(f"[done] {n_episodes} episodes in {generation_seconds:.1f}s -> {out_dir}")
 
@@ -814,8 +1085,11 @@ def parse_args() -> GenConfig:
         type=str,
         nargs="+",
         default=["IC", "LT"],
-        choices=["IC", "LT"],
-        help="diffusion models to generate (default: IC LT).",
+        choices=["IC", "LT"] + list(epidemic_dynamics),
+        help="dynamics to generate. IC/LT run the NDlib simulator and produce two "
+        "overlapping state indicators; SIR/SIS/SEIR run data/wm_epidemic.py and "
+        "produce four exclusive compartments, so the two families cannot share a "
+        "dataset (default: IC LT).",
     )
     parser.add_argument(
         "--prob-model",
@@ -960,6 +1234,64 @@ def parse_args() -> GenConfig:
         f"(default: {' '.join(blocking_selectors)}).",
     )
     parser.add_argument(
+        "--epi-beta",
+        type=float,
+        default=1.0,
+        help="compartmental only: multiplier on the graph's own per-arc probability, "
+        "so beta_uv = clip(scale * p(u->v)). 1.0 leaves it at the weighted-cascade "
+        "value; the literature's scalar-beta regime is --prob-model uniform "
+        "--uniform-p <beta> with this at 1.0 (default: 1.0).",
+    )
+    parser.add_argument(
+        "--epi-gamma",
+        type=float,
+        default=0.3,
+        help="compartmental only: rate of LEAVING I — recovery under SIR/SEIR, "
+        "return-to-susceptible under SIS. One parameter for both because the "
+        "lambda1 * beta / delta < 1 threshold uses one. 1.0 under SIR reproduces IC "
+        "exactly (default: 0.3).",
+    )
+    parser.add_argument(
+        "--epi-alpha",
+        type=float,
+        default=0.5,
+        help="compartmental only: E -> I rate, SEIR only (default: 0.5).",
+    )
+    parser.add_argument(
+        "--epi-burn-in",
+        type=float,
+        default=default_burn_in,
+        help="compartmental only: fraction of the prevalence curve discarded before "
+        "the endemic prevalence is time-averaged. SIS has no terminal state, so "
+        f"final size is undefined there (default: {default_burn_in}).",
+    )
+    parser.add_argument(
+        "--outbreak-pct",
+        type=float,
+        default=1.0,
+        help="compartmental only: outbreak size as a percentage of N (default: 1.0).",
+    )
+    parser.add_argument(
+        "--outbreak-selectors",
+        type=str,
+        nargs="+",
+        default=["random", "degree", "pagerank"],
+        choices=list(spine_algorithms),
+        help="compartmental only: how each episode's index cases are chosen — the "
+        "outbreak model, a second experimental axis a seeding task does not have "
+        "(default: random degree pagerank).",
+    )
+    parser.add_argument(
+        "--immunizer-selectors",
+        type=str,
+        nargs="+",
+        default=list(default_immunizer_selectors),
+        choices=list(default_immunizer_selectors),
+        help="compartmental only: how each episode's t=0 dose allocation is chosen. "
+        "`none` leaves the outbreak unprotected and is the sigma(outbreak, empty) "
+        f"reference (default: {' '.join(default_immunizer_selectors)}).",
+    )
+    parser.add_argument(
         "--weight-lo",
         type=float,
         default=0.0,
@@ -1091,6 +1423,13 @@ def parse_args() -> GenConfig:
         negative_pct=args.negative_pct,
         negative_selectors=tuple(args.negative_selectors),
         blocker_selectors=tuple(args.blocker_selectors),
+        epi_beta=args.epi_beta,
+        epi_gamma=args.epi_gamma,
+        epi_alpha=args.epi_alpha,
+        epi_burn_in=args.epi_burn_in,
+        outbreak_pct=args.outbreak_pct,
+        outbreak_selectors=tuple(args.outbreak_selectors),
+        immunizer_selectors=tuple(args.immunizer_selectors),
     )
 
 

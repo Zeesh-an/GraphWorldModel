@@ -8,12 +8,15 @@ from coding_agent.executor import (
     mc_blocked_algorithms,
     mc_blocked_blocking,
     mc_blocked_dismantling,
+    mc_blocked_immunization,
     mc_blocked_localization,
     mc_blocked_reconstruction,
     scored_blocked_primitives,
 )
 from coding_agent.tools.graph_profile import build_graph_profile
 from coding_agent.tools.library_api import (
+    build_immunization_menu,
+    build_immunization_reference,
     build_adaptive_reference,
     build_algorithm_menu,
     build_algorithm_sources,
@@ -414,6 +417,256 @@ blocking_budget_rules = {
 }
 
 
+
+# EPIDEMIC CONTROL, per lever. Separate from the containment briefs because the
+# DYNAMICS differ, not only the intervention: nodes RECOVER here, which means the
+# outbreak burns out on its own and a dose is only worth what it saves BEFORE that
+# happens (research/epidemic_control.md §2.4, §8.3).
+epidemic_briefs = {
+    "vaccinate": """\
+You are designing a network VACCINATION algorithm as an executable Python script.
+
+YOUR GOAL: MINIMIZE the attack rate — the number of nodes EVER infected by the end.
+LOWER IS BETTER, and every score you are shown reads that way.
+
+You do NOT start the outbreak. Index cases are already infectious at fixed nodes
+you did not choose and cannot change — they are listed in the task block below.
+Your budget buys DOSES: each `remove_node` immunizes that node, taking it out of
+the graph along with all its edges, so it can never be infected, never transmit,
+and never counts toward the attack rate.
+
+Warning: DOSING AN INDEX CASE IS REJECTED. Immunizing a node that is already
+infectious ends the outbreak rather than controlling it, which is a different
+problem. Filter the sources out of your candidate set before you rank anything.
+
+THE DYNAMICS ARE NOT MONOTONE, and this is what separates the task from node
+removal on a one-way cascade:
+- An infectious node RECOVERS at a fixed rate and then stops transmitting forever
+  (under SIS it becomes susceptible again instead). The outbreak therefore burns
+  out on its own, and a dose is worth only what it saves before that happens.
+- That means TIMING is built into the structure: a node three hops from the
+  sources may never be reached at all, so protecting it buys nothing however
+  central it is.
+- The peak of the epidemic matters as much as its total. A policy that flattens
+  the curve without shrinking the total is a real result in this literature.
+
+WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
+- Two published families disagree, and the disagreement is the interesting part.
+  The SPECTRAL family (NetShield) minimizes the adjacency's leading eigenvalue,
+  which is a model-independent bound on whether an epidemic can take off at all —
+  but it does not know where this outbreak IS.
+- The DATA-AWARE family (DAVA) conditions on exactly that: it cuts the nodes that
+  DOMINATE the paths out of the observed sources. On a small localized outbreak it
+  beats the spectral family by a wide margin, and on a large diffuse one it does not.
+- Plain top-degree is a 2002 heuristic and it is the row you actually have to
+  beat. `acquaintance_immunization` uses no global information at all and is the
+  published embarrassment for methods that read the whole graph.
+""",
+    "quarantine": """\
+You are designing a network QUARANTINE algorithm as an executable Python script.
+
+YOUR GOAL: MINIMIZE the attack rate — the number of nodes EVER infected by the end.
+LOWER IS BETTER, and every score you are shown reads that way.
+
+You do NOT start the outbreak. Index cases are already infectious at fixed nodes
+you did not choose — they are listed in the task block below. Your budget buys
+ISOLATION: each `remove_node` cuts every contact of that node while LEAVING THE
+NODE IN THE GRAPH. It is not immune. If the outbreak already reached it, it stays
+counted in the attack rate; it simply stops passing the infection on.
+
+That difference from vaccination is the whole point of this lever: isolating a
+node you were too late to protect saves its neighbours and not the node, while a
+vaccine spent on an already-infected node saves nobody at all. Rank candidates by
+what they carry ONWARD, not by whether they themselves survive.
+
+The same non-monotone dynamics apply: infectious nodes recover and stop
+transmitting, so the outbreak burns out on its own and an isolation is worth only
+what it prevents before that happens.
+""",
+    "edge_cut": """\
+You are designing a CONTACT-SEVERING algorithm as an executable Python script.
+
+YOUR GOAL: MINIMIZE the attack rate — the number of nodes EVER infected by the end.
+LOWER IS BETTER.
+
+You do NOT start the outbreak. Index cases are already infectious at fixed nodes
+listed in the task block. Your budget buys ARC CUTS: each `remove_edge(u, v)`
+deletes one directed contact, so the infection can no longer travel that way.
+Nobody is immunized — every node stays in the graph and stays infectable through
+whatever routes remain.
+
+This is a strictly weaker instrument than vaccination at the same k (one dose
+removes deg(v) arcs at once), so a k-arc budget only pays off when the graph has
+BRIDGES: a few arcs whose loss disconnects the outbreak from a large region. On a
+dense graph it will not, and reporting that honestly is a result.
+
+The published spectral rule scores an arc by u(i) * u(j), the product of the
+leading eigenvector's endpoint entries — that is NetMelt, and it does not know
+where the outbreak is. Cutting the boundary of the observed infected set does.
+""",
+}
+epidemic_briefs["contact_reduce"] = """\
+You are designing a CONTACT-REDUCTION algorithm as an executable Python script.
+
+YOUR GOAL: MINIMIZE the attack rate — the number of nodes EVER infected by the end.
+LOWER IS BETTER.
+
+You do NOT start the outbreak. Index cases are already infectious at fixed nodes
+listed in the task block. Your budget buys REWEIGHTS: each
+`set_edge_weight(u, v, w)` lowers the per-contact transmission probability on that
+arc to `w`. This is the graded version of a cut — social distancing rather than
+a travel ban — and it is the only lever in this literature that is continuous.
+
+You may only LOWER an arc. Raising one is rejected.
+
+The same reasoning as the cut lever applies: at equal k this buys less than a dose
+does, so it pays off exactly where a few arcs carry the outbreak between regions.
+"""
+
+epidemic_budget_rules = {
+    "vaccinate": """\
+- A dose is ActionOp("remove_node", node). Emit at most `budget` remove_node
+  actions in total. You do NOT need to emit the incident remove_edge ops — the
+  harness expands each dose into a full node deletion for you.
+- Dosing the same node twice is REJECTED: it spends two units of budget on one node.
+- Dosing an INDEX CASE is REJECTED. Filter `self.outbreak` out of your candidates.
+- Emitting add_node is REJECTED. You are not seeding this outbreak.""",
+    "quarantine": """\
+- An isolation is ActionOp("remove_node", node). Emit at most `budget` of them.
+  The harness cuts that node's incident arcs and LEAVES THE NODE in the graph, so
+  it stays susceptible and stays counted.
+- Isolating the same node twice is REJECTED.
+- Isolating an INDEX CASE is REJECTED. Filter `self.outbreak` out of your candidates.
+- Emitting add_node is REJECTED.""",
+    "edge_cut": """\
+- A cut is ActionOp("remove_edge", u, v), one directed arc. Emit at most `budget`
+  remove_edge actions in total.
+- Cutting the same arc twice is REJECTED. Cutting two different arcs out of the
+  same node is FINE — the budget is counted per arc, not per node.
+- Emitting add_node or remove_node is REJECTED under this lever.""",
+    "contact_reduce": """\
+- A reduction is ActionOp("set_edge_weight", u, v, w), which sets arc u -> v to
+  transmission probability w. Emit at most `budget` of them.
+- w must be between 0.0 and the arc's CURRENT probability. Raising an arc is
+  REJECTED: you are reducing contact, not increasing it.
+- Reweighting the same arc twice is REJECTED. Two different arcs out of one node
+  is FINE — the budget is per arc.
+- Emitting add_node or remove_node is REJECTED under this lever.""",
+}
+
+
+def _epidemic_rules(task: TaskSpec) -> tuple[str, str, str]:
+    """(brief, budget rules, library line) for one epidemic lever."""
+    library_line = (
+        "- `immunization_algorithms`, `dismantling_algorithms`, `algorithms` and\n"
+        "  `primitives` modules (API below). `immunization_algorithms` members are\n"
+        "  the published baselines for THIS task and take `outbreak=` — they are\n"
+        "  what you are being compared against."
+    )
+
+    return (
+        epidemic_briefs[task.epi_lever],
+        epidemic_budget_rules[task.epi_lever],
+        library_line,
+    )
+
+
+epidemic_timing_note = """\
+
+USING THE HORIZON: put every dose in element 0 and leave the rest of the plan
+empty. A node protected at t>0 may already be infected, and protecting it then
+saves nothing it has not already passed on. Pre-emptive allocation is strictly
+stronger, so all of your effort belongs in WHICH nodes you protect, not when.
+
+Two consequences of the recovery rate that are easy to miss. The outbreak has a
+finite lifetime, so a region it will not reach before burning out is a region you
+should not spend on. And its PEAK matters: the report grades peak prevalence and
+time-to-peak beside the total, so a policy that delays the wave has bought
+something real even when the final count barely moves.
+"""
+
+
+epidemic_exemplars = """\
+EXAMPLES — two strategies at the level you should START from, not finish at.
+
+Example 1, dominator-style allocation (the DAVA idea, cut the nodes that all paths
+out of the outbreak must pass through, weighted by how much sits behind them):
+```python
+class OutbreakDominators(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        sources = set(self.outbreak)
+
+        # How much of the graph each node still leads to, discounted by distance
+        # from the outbreak — a cheap stand-in for "expected nodes saved by cutting"
+        reach = {node: 0.0 for node in range(graph.num_nodes)}
+        wave, seen, depth = set(sources), set(sources), 0.0
+        while wave and depth < horizon:
+            nxt = set()
+            for node in wave:
+                for other in graph.out_neighbors(node):
+                    if other not in seen:
+                        nxt.add(other)
+            for node in nxt:
+                # Onward reach, damped so a node the outbreak barely gets to is cheap
+                reach[node] = len(set(graph.out_neighbors(node)) - seen) * (0.6 ** depth)
+            seen |= nxt
+            wave, depth = nxt, depth + 1.0
+
+        chosen, cut = [], set()
+        for _ in range(budget):
+            best, best_score = -1, float("-inf")
+            for node in range(graph.num_nodes):
+                if node in sources or node in cut:
+                    continue
+                # Discount a node whose neighbours are already protected: two cuts
+                # on the same route buy one route
+                overlap = sum(1 for other in graph.out_neighbors(node) if other in cut)
+                score = reach[node] / (1.0 + overlap)
+                if score > best_score:
+                    best, best_score = node, score
+            if best < 0:
+                break
+            chosen.append(best)
+            cut.add(best)
+
+        return [[ActionOp("remove_node", int(node)) for node in chosen]] + [
+            [] for _ in range(horizon)
+        ]
+```
+
+Example 2, NetShield restricted to the outbreak's reachable set (the spectral rule
+is the published bar; narrowing it to nodes the epidemic can actually reach is the
+cheapest way to beat it, because a dose outside that set scores exactly zero):
+```python
+class ReachableShield(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        sources = set(self.outbreak)
+
+        reach, wave = set(sources), set(sources)
+        for _ in range(horizon):
+            nxt = {o for n in wave for o in graph.out_neighbors(n)} - reach
+            if not nxt:
+                break
+            reach |= nxt
+            wave = nxt
+
+        shield = immunization_algorithms.netshield(
+            graph, min(graph.num_nodes, budget * 6), "SIR", outbreak=tuple(sources)
+        )
+        picks = [n for n in shield if n in reach and n not in sources][:budget]
+
+        # Top up from the reachable set by degree if the shield ran short there
+        if len(picks) < budget:
+            rest = sorted(reach - sources - set(picks), key=graph.degree, reverse=True)
+            picks += rest[: budget - len(picks)]
+
+        return [[ActionOp("remove_node", int(node)) for node in picks]] + [
+            [] for _ in range(horizon)
+        ]
+```
+"""
+
+
 def _blocking_rules(task: TaskSpec) -> tuple[str, str, str]:
     """(brief, budget rules, library line) for one blocking lever."""
     from coding_agent.blocking import lever_of
@@ -438,10 +691,13 @@ def _common_rules(task: TaskSpec | None) -> str:
         return _localization_rules(task)
 
     blocks = task is not None and task.blocks
+    immunizes = task is not None and task.immunizes
     contains = task is not None and task.contains
 
     if blocks:
         brief, budget_rules, library_line = _blocking_rules(task)
+    elif immunizes:
+        brief, budget_rules, library_line = _epidemic_rules(task)
     elif contains:
         brief = containment_brief
         budget_rules = """\
@@ -1380,7 +1636,13 @@ def build_outbreak_block(task: TaskSpec) -> str:
         if len(sources) > max_listed_outbreak
         else ""
     )
-    label = "RUMOUR SEEDS S_N" if task.blocks else "OUTBREAK SOURCES"
+    label = (
+        "RUMOUR SEEDS S_N"
+        if task.blocks
+        else "INDEX CASES"
+        if task.immunizes
+        else "OUTBREAK SOURCES"
+    )
     delay = (
         f"You are DETECTED LATE: anything you emit before t={task.detection_delay} "
         f"is dropped by the harness.\n"
@@ -1405,11 +1667,38 @@ def build_outbreak_block(task: TaskSpec) -> str:
     )
     tie = f"TIE-BREAK: if you and the rumour reach a node on the SAME step, {rule}.\n" if rule else ""
 
+    # §8.2 trap 2: beta and gamma are free parameters nobody standardizes, so a
+    # model told the wrong ones plans against dynamics it will not get. Stated in
+    # the task block rather than a footnote for the same reason the tie-break is.
+    rates = (
+        f"DYNAMICS: {task.diffusion_model}. Per-contact transmission is "
+        f"{task.epi_beta:g} x the arc's own probability; an infectious node leaves "
+        f"I with probability {task.epi_gamma:g} per step"
+        + (
+            f" and an exposed node becomes infectious with probability "
+            f"{task.epi_alpha:g} per step"
+            if task.diffusion_model == "SEIR"
+            else ""
+        )
+        + (
+            ", returning to SUSCEPTIBLE — it can be infected again, and there is no "
+            "terminal state.\n"
+            if task.diffusion_model == "SIS"
+            else ", and is then RECOVERED: immune, non-transmitting, but still "
+            "counted in the attack rate.\n"
+        )
+        + f"Mean infectious period is about {1.0 / max(task.epi_gamma, 1e-9):.1f} "
+        f"steps, so the outbreak burns out on its own — a dose is worth only what "
+        f"it saves before then.\n"
+        if task.immunizes
+        else ""
+    )
+
     return (
         f"\n{label} ({len(sources)} nodes, fixed, NOT yours to choose; also\n"
         f"available inside your Strategy as `self.outbreak`): {listed}{overflow}\n"
         f"The cascade starts here at t=0 and spreads for {task.horizon} timesteps.\n"
-        f"{tie}{delay}"
+        f"{rates}{tie}{delay}"
     )
 
 
@@ -1562,6 +1851,14 @@ def build_observation_block(task: TaskSpec) -> str:
 
 def _budget_unit(task: TaskSpec) -> str:
     """What one unit of budget buys, in words, for the task block."""
+    if task.immunizes:
+        return {
+            "vaccinate": "max doses total",
+            "quarantine": "max isolations total",
+            "edge_cut": "max arc cuts total",
+            "contact_reduce": "max arc reductions total",
+        }[task.epi_lever]
+
     if task.blocks:
         return {
             "add_node": "max counter-seeds total",
@@ -1589,6 +1886,8 @@ def build_user_prompt(
             menu = build_localization_menu()
         elif task.blocks:
             menu = build_blocking_menu(task.budget_op)
+        elif task.immunizes:
+            menu = build_immunization_menu(task.epi_lever)
         elif task.contains:
             menu = build_dismantling_menu()
         else:
@@ -1636,6 +1935,22 @@ def build_user_prompt(
             + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as "
             "`primitives`)\n"
             + build_primitives_reference(exclude=scored_blocked_primitives)
+        )
+        final_line = f"Write the Strategy now (method = {method})."
+    elif task.immunizes:
+        # An epidemic task's library is the IMMUNIZATION pool. The dismantlers rank
+        # by connectivity damage and know nothing about where the outbreak is or
+        # that nodes recover, and the IM algorithms return seed sets — neither
+        # answers the question this task asks. The generic primitives ride along
+        # because an immunizer still needs centralities.
+        reference = (
+            build_immunization_reference(
+                task.epi_lever,
+                exclude=() if allow_mc_algorithms else mc_blocked_immunization,
+            )
+            + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as "
+            "`primitives`)\n"
+            + build_primitives_reference()
         )
         final_line = f"Write the Strategy now (method = {method})."
     elif task.blocks:
@@ -1699,6 +2014,9 @@ def build_user_prompt(
         objective_line = (
             "MINIMIZE how far the RUMOUR spreads (lower is better)"
             if task.blocks
+            else "MINIMIZE the ATTACK RATE — how many nodes are EVER infected "
+            "(lower is better)"
+            if task.immunizes
             else "MINIMIZE the final infected count (lower is better)"
             if task.contains
             else task.objective
@@ -1939,6 +2257,7 @@ def build_system_prompt(
     decodes = task is not None and task.decodes
 
     blocks = task is not None and task.blocks
+    immunizes = task is not None and task.immunizes
 
     if task is not None:
         if decodes:
@@ -1949,6 +2268,8 @@ def build_system_prompt(
             horizon_note = adaptive_timing_note
         elif blocks:
             horizon_note = blocking_timing_note
+        elif immunizes:
+            horizon_note = epidemic_timing_note
         elif contains:
             horizon_note = containment_timing_note
         elif any(op in task.allowed_ops for op in edge_ops):
@@ -1999,6 +2320,15 @@ def build_system_prompt(
             from coding_agent.blocking import lever_of
 
             base += blocking_exemplars[lever_of(task)]
+        elif immunizes:
+            # Only the node levers have exemplars: the edge levers' contract is one
+            # line different from the blocking edge lever's, and the two node ones
+            # are where every published method in this literature lives
+            base += (
+                epidemic_exemplars
+                if task.epi_lever in ("vaccinate", "quarantine")
+                else blocking_exemplars["edge_block"]
+            )
         elif contains:
             base += containment_exemplars
         else:
@@ -2155,12 +2485,17 @@ def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
         objective_line = (
             "MINIMIZE how far the RUMOUR spreads (lower is better)"
             if task.blocks
+            else "MINIMIZE the ATTACK RATE — how many nodes are EVER infected "
+            "(lower is better)"
+            if task.immunizes
             else "MINIMIZE the final infected count (lower is better)"
             if task.contains
             else task.objective
         )
         if task.blocks:
             menu = build_blocking_menu(task.budget_op)
+        elif task.immunizes:
+            menu = build_immunization_menu(task.epi_lever)
         elif task.contains:
             menu = build_dismantling_menu()
         else:

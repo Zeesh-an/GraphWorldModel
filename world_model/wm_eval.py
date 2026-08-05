@@ -11,9 +11,13 @@ from scipy.stats import wasserstein_distance
 
 from world_model.wm_data import (
     TransitionDataset,
+    apply_edge_ops,
     build_competitive_features,
+    build_epidemic_features,
     build_features,
     build_graph_input,
+    ch_epi_ever,
+    ch_epi_infectious,
     ch_frontier,
     ch_infected,
     collate_transitions,
@@ -28,6 +32,7 @@ from world_model.wm_metrics import (
 )
 
 from data.wm_competitive import CompetitiveConfig, CompetitiveSimulator
+from data.wm_epidemic import EpidemicConfig, EpidemicSimulator
 from data.wm_simulator import ActionOp, Simulator, State, blocked, spent
 
 seed_upper_bound = 1 << 30
@@ -51,6 +56,7 @@ def evaluate_one_step(
     threshold: float = 0.5,
     hide_edge_weights: bool = False,
     competitive: bool = False,
+    epidemic: bool = False,
 ) -> dict[str, float]:
     """
     Teacher-forced one-step evaluation over an entire dataset.
@@ -65,12 +71,24 @@ def evaluate_one_step(
     the POSITIVE cascade, so "did the model flip the target to infected" has to read
     the positive channel or it measures the exact opposite of the intervention. The
     positive cascade's own suite is reported alongside under `pos_*`.
+
+    Under `epidemic` the headline suite is again unchanged and describes columns 0-1,
+    which are the ATTACK SET and the INCIDENCE — the quantity a control task is
+    scored on. What changes is that `remove_node` is a DOSE rather than a spent
+    spreader, so the removal metric reads the infectious channel and is reported as
+    `dose_success`; and the three compartment columns get their own accuracy under
+    `compartment_acc`, because a head that predicts the attack set well while
+    getting `I` wrong has failed at the only thing that makes this task different
+    from critical node detection (research/epidemic_control.md §2.4).
     """
     model.eval()
     pos_pred_infected_parts = []
     pos_target_infected_parts = []
     pos_current_infected_parts = []
     block_hits = block_total = 0
+    compartment_pred_parts = []
+    compartment_target_parts = []
+    compartment_prob_parts = []
     pred_infected_parts = []
     pred_frontier_parts = []
     prob_infected_parts = []
@@ -102,8 +120,24 @@ def evaluate_one_step(
 
         target_infected_parts.append(item["y_inf"].numpy())
         target_frontier_parts.append(item["y_fr"].numpy())
-        current_infected_parts.append(item["X"][:, ch_infected].numpy())
-        current_frontier_parts.append(item["X"][:, ch_frontier].numpy())
+        # Under the compartmental layout the attack set is channel 4 and the
+        # infectious set channel 2; under IC/LT they are 0 and 1. Both are "the set
+        # being scored" and "the current wave", which is what the persistence
+        # baseline and the change-F1 both need.
+        current_infected_parts.append(
+            item["X"][:, ch_epi_ever if epidemic else ch_infected].numpy()
+        )
+        current_frontier_parts.append(
+            item["X"][:, ch_epi_infectious if epidemic else ch_frontier].numpy()
+        )
+
+        if epidemic:
+            # Columns 2-4 are E / I / R. Scored as one flat 0/1 problem rather than
+            # three, because the head composes them from one simplex and a
+            # per-column number would hide that E is empty under SIR and SIS.
+            compartment_pred_parts.append((probs[:, 2:5] > threshold).astype(np.float32))
+            compartment_prob_parts.append(probs[:, 2:5])
+            compartment_target_parts.append(item["y"][:, 2:5].numpy())
 
         if competitive:
             pos_pred_infected_parts.append((probs[:, 2] > threshold).astype(np.float32))
@@ -179,6 +213,30 @@ def evaluate_one_step(
     results["remove_frontier_success"] = (
         remove_hits / remove_total if remove_total else float("nan")
     )
+
+    if epidemic:
+        # A dose is not a spent spreader: the target must be predicted OUT of the
+        # infectious set, which is the same measurement under a different name and
+        # a different column
+        results["dose_success"] = results["remove_frontier_success"]
+        compartment_target = (
+            _cat_arrays([part.ravel() for part in compartment_target_parts]) > 0.5
+        ).astype(np.float32)
+        compartment_pred = _cat_arrays(
+            [part.ravel() for part in compartment_pred_parts]
+        )
+        results["compartment_acc"] = (
+            float((compartment_pred.astype(bool) == compartment_target.astype(bool)).mean())
+            if compartment_pred.size
+            else float("nan")
+        )
+        results["compartment_f1"] = binary_f1(
+            compartment_pred.astype(bool), compartment_target.astype(bool)
+        )
+        results["brier_compartment"] = brier_score(
+            _cat_arrays([part.ravel() for part in compartment_prob_parts]),
+            _cat_arrays([part.ravel() for part in compartment_target_parts]),
+        )
 
     # Action sensitivity: mean number of distinct output tuples per (state, multiple actions) group
     distinct_counts = [
@@ -778,6 +836,297 @@ def sample_competitive_step(
     )
 
 
+def _store_graph(store_entry: dict) -> tuple:
+    """(nx graph, {(u, v): p}) from a stored graph — shared by all three rebuilders."""
+    edge_index = store_entry["edge_index"]
+    ic_probs = store_entry["ic_probs"]
+    num_nodes = store_entry["num_nodes"]
+    directed = bool(store_entry["meta"].get("directed", False))
+
+    graph = nx.DiGraph() if directed else nx.Graph()
+    graph.add_nodes_from(range(num_nodes))
+    graph.add_edges_from(
+        (int(edge_index[0, edge]), int(edge_index[1, edge]))
+        for edge in range(edge_index.shape[1])
+    )
+    ic_prob_map = {
+        (int(edge_index[0, edge]), int(edge_index[1, edge])): float(ic_probs[edge])
+        for edge in range(edge_index.shape[1])
+    }
+
+    return graph, ic_prob_map
+
+
+def rebuild_epidemic_simulator(
+    store_entry: dict,
+    diffusion_model: str,
+    seed: int = 0,
+    config: EpidemicConfig | None = None,
+) -> EpidemicSimulator:
+    """An EpidemicSimulator on a stored graph, with no outbreak committed yet."""
+    graph, ic_prob_map = _store_graph(store_entry)
+    simulator = EpidemicSimulator(
+        graph, ic_prob_map=ic_prob_map, seed=seed, config=config
+    )
+    simulator.reset(diffusion_model)
+
+    return simulator
+
+
+def _initial_epidemic_state(record: dict) -> State:
+    """The first recorded state of a compartmental episode, as a State."""
+    state = record["state"]
+
+    return State(
+        infected=list(state["infected"]),
+        frontier=list(state["frontier"]),
+        exposed=list(state.get("exposed", [])),
+        recovered=list(state.get("recovered", [])),
+    )
+
+
+def sample_epidemic_step(
+    state: State,
+    action: list[dict],
+    probs: np.ndarray,
+    rng: np.random.Generator,
+    num_nodes: int,
+    dynamics: str = "SIR",
+) -> State:
+    """
+    One sampled compartmental step from the head's five marginals.
+
+    COUPLED, exactly as the two-cascade sampler is coupled and for a stronger
+    version of the same reason: S, E, I and R are mutually EXCLUSIVE, so four
+    independent Bernoulli draws would put a node in two compartments at once —
+    a state the simulator cannot reach and one that inflates a free-running rollout
+    in whichever direction the noise happens to point. One uniform per node is drawn
+    against the cumulative (E, I, R, S) distribution the head already composed, so
+    the result is always a valid one-hot.
+
+    `S` is derived rather than predicted (`1 - E - I - R`) and the four are
+    renormalized, because the head's exact composition is put through a
+    sigmoid/logit round trip and a clamp before it gets here — the sum is 1 up to
+    floating point, not identically.
+
+    `ever` is advanced from the SAMPLE, not from column 0: a node counts as newly
+    infected exactly when it was susceptible before the step and is not after, which
+    is the simulator's own bookkeeping and the only definition that stays right when
+    SIS sends a node back to S.
+    """
+    adds = {int(op["target"]) for op in action if op["op"] == "add_node"}
+    removes = {int(op["target"]) for op in action if op["op"] == "remove_node"}
+
+    # T_exo, matching the head's: a seed is an index case straight into I, a dose
+    # empties every compartment
+    infectious = (set(state.frontier) | adds) - removes
+    exposed = set(state.exposed) - adds - removes
+    recovered = set(state.recovered) - adds - removes
+    ever = (set(state.infected) | adds) - removes
+
+    committed = np.zeros(num_nodes, dtype=bool)
+    committed[list(removes)] = True
+
+    exposed_p = np.clip(probs[:, 2], 0.0, 1.0)
+    infectious_p = np.clip(probs[:, 3], 0.0, 1.0)
+    recovered_p = np.clip(probs[:, 4], 0.0, 1.0)
+    susceptible_p = np.clip(1.0 - exposed_p - infectious_p - recovered_p, 0.0, 1.0)
+
+    stacked = np.stack(
+        [exposed_p, infectious_p, recovered_p, susceptible_p], axis=1
+    )  # shape: (N, 4)
+    total = stacked.sum(axis=1, keepdims=True)
+    stacked = stacked / np.where(total > 0.0, total, 1.0)
+
+    draw = rng.random(num_nodes)[:, None]
+    # First cumulative bucket the uniform lands in; 3 = susceptible
+    drawn = (np.cumsum(stacked, axis=1) < draw).sum(axis=1).clip(0, 3)
+    drawn[committed] = 3
+
+    was_susceptible = np.ones(num_nodes, dtype=bool)
+    was_susceptible[list(exposed | infectious | recovered | removes)] = False
+
+    next_exposed = set(np.flatnonzero(drawn == 0).tolist()) - removes
+    next_infectious = set(np.flatnonzero(drawn == 1).tolist()) - removes
+    next_recovered = set(np.flatnonzero(drawn == 2).tolist()) - removes
+
+    if dynamics != "SEIR":
+        next_exposed = set()
+
+    if dynamics == "SIS":
+        next_recovered = set()
+
+    newly = {
+        node
+        for node in next_exposed | next_infectious
+        if was_susceptible[node]
+    }
+
+    return State(
+        infected=sorted(ever | newly),
+        frontier=sorted(next_infectious),
+        exposed=sorted(next_exposed),
+        recovered=sorted(next_recovered),
+    )
+
+
+@torch.inference_mode()
+def epidemic_rollout_ensemble(
+    model: nn.Module,
+    out_dir: str,
+    diffusion_model: str,
+    store: dict[str, dict],
+    device: torch.device,
+    split: str = "test",
+    n_samples: int = 20,
+    max_episodes: int = 50,
+    seed: int = 0,
+    hide_edge_weights: bool = False,
+    config: EpidemicConfig | None = None,
+) -> dict[str, float]:
+    """
+    Compartmental sampled-ensemble rollout against the true epidemic simulator.
+
+    The compartmental twin of `rollout_ensemble`, and the metric that decides
+    whether the compartment head can be used as a SIMULATOR rather than only a
+    one-step predictor. Two things it reports that the single-cascade version cannot:
+
+      * **`ens_prevalence_bias`**, on `|I(t)|`. `ens_count_bias` is on the attack
+        set, which is monotone and therefore forgiving; the prevalence is the
+        non-monotone quantity, and a head that cannot shrink `I` shows up here
+        first — as a positive bias that grows with `t` — while the attack-set bias
+        still looks fine. This is the saturation guard for the compartmental case.
+      * **`ens_peak_model` / `ens_peak_true`**, the peak prevalence, which is what
+        §2.6 lists as the shape metric this literature grades on and the attack rate
+        does not capture.
+    """
+    rng = np.random.default_rng(seed)
+    path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
+    records = [
+        json.loads(line) for line in path.read_text().splitlines() if line.strip()
+    ]
+
+    by_episode = defaultdict(list)
+    for record in records:
+        if record["branch"] == "main":
+            by_episode[(record["graph_id"], record["episode_id"])].append(record)
+
+    episode_keys = list(by_episode)
+    if max_episodes and len(episode_keys) > max_episodes:
+        episode_keys = [
+            episode_keys[index]
+            for index in rng.choice(len(episode_keys), size=max_episodes, replace=False)
+        ]
+
+    model.eval()
+    marginal_mae, count_w1, count_bias, prevalence_bias = [], [], [], []
+    final_model_counts, final_true_counts = [], []
+    peak_model, peak_true = [], []
+
+    for graph_id, episode_id in episode_keys:
+        episode_records = sorted(
+            by_episode[(graph_id, episode_id)], key=lambda record: record["t"]
+        )
+        num_nodes = store[graph_id]["num_nodes"]
+        adjacency_map = reconstruct_episode_adjacency(
+            episode_records, store[graph_id]["base_edges"]
+        )
+        num_steps = len(episode_records)
+
+        true_ever = np.zeros((n_samples, num_steps, num_nodes), dtype=np.float32)
+        true_infectious = np.zeros((n_samples, num_steps), dtype=np.float32)
+
+        for sample in range(n_samples):
+            simulator = rebuild_epidemic_simulator(
+                store[graph_id],
+                diffusion_model,
+                seed=int(rng.integers(seed_upper_bound)),
+                config=config,
+            )
+            for step, record in enumerate(episode_records):
+                state = simulator.advance(_action_bag(record["action"]))
+                true_ever[
+                    sample, step, np.asarray(state.infected, dtype=np.int64)
+                ] = 1.0
+                true_infectious[sample, step] = len(state.frontier)
+
+        model_ever = np.zeros((n_samples, num_steps, num_nodes), dtype=np.float32)
+        model_infectious = np.zeros((n_samples, num_steps), dtype=np.float32)
+
+        for sample in range(n_samples):
+            state = _initial_epidemic_state(episode_records[0])
+
+            for step, record in enumerate(episode_records):
+                edge_index, weights = edges_to_arrays(
+                    adjacency_map[(record["t"], "main")]
+                )
+                rolled = dict(record) | {"state": state.to_dict()}
+                X, _ = build_epidemic_features(rolled, edge_index, num_nodes)
+                graph_input = build_graph_input(
+                    edge_index,
+                    weights,
+                    num_nodes,
+                    diffusion_model,
+                    device,
+                    hide_edge_weights,
+                )
+                probs = (
+                    torch.sigmoid(model(torch.from_numpy(X).to(device), graph_input))
+                    .cpu()
+                    .numpy()
+                )
+                state = sample_epidemic_step(
+                    state, record["action"], probs, rng, num_nodes, diffusion_model
+                )
+                model_ever[
+                    sample, step, np.asarray(state.infected, dtype=np.int64)
+                ] = 1.0
+                model_infectious[sample, step] = len(state.frontier)
+
+        marginal_mae.append(
+            float(np.abs(model_ever.mean(axis=0) - true_ever.mean(axis=0)).mean())
+        )
+
+        model_counts = model_ever.sum(axis=2)
+        true_counts = true_ever.sum(axis=2)
+
+        for step in range(num_steps):
+            count_w1.append(
+                wasserstein_distance(model_counts[:, step], true_counts[:, step])
+            )
+            count_bias.append(
+                float(model_counts[:, step].mean() - true_counts[:, step].mean())
+            )
+            prevalence_bias.append(
+                float(
+                    model_infectious[:, step].mean() - true_infectious[:, step].mean()
+                )
+            )
+
+        final_model_counts.append(float(model_counts[:, -1].mean()))
+        final_true_counts.append(float(true_counts[:, -1].mean()))
+        peak_model.append(float(model_infectious.max(axis=1).mean()))
+        peak_true.append(float(true_infectious.max(axis=1).mean()))
+
+    def mean(values: list) -> float:
+        return float(np.mean(values)) if values else 0.0
+
+    return {
+        "ens_marg_mae": mean(marginal_mae),
+        "ens_count_w1": mean(count_w1),
+        "ens_count_bias": mean(count_bias),
+        # The non-monotone quantity, and the one a head that cannot represent
+        # recovery gets wrong first
+        "ens_prevalence_bias": mean(prevalence_bias),
+        "ens_peak_model": mean(peak_model),
+        "ens_peak_true": mean(peak_true),
+        "ens_final_count_model": mean(final_model_counts),
+        "ens_final_count_true": mean(final_true_counts),
+        "ens_n_samples": float(n_samples),
+        "ens_n_episodes": float(len(episode_keys)),
+    }
+
+
 def rebuild_simulator(
     store_entry: dict, diffusion_model: str, seed: int = 0
 ) -> Simulator:
@@ -1049,6 +1398,225 @@ def blocking_regret(
             float(np.mean(proximity_regrets)) if proximity_regrets else 0.0
         ),
     }
+
+
+@torch.inference_mode()
+def immunization_regret(
+    model: nn.Module,
+    store_entry: dict,
+    diffusion_model: str,
+    device: torch.device,
+    n_states: int = 10,
+    n_candidates: int = 20,
+    mc_runs: int = 8,
+    horizon: int = 10,
+    seed: int = 0,
+    hide_edge_weights: bool = False,
+    config: EpidemicConfig | None = None,
+) -> dict[str, float]:
+    """
+    One-dose choice: does the model pick the node whose vaccination saves the most?
+
+    The compartmental analogue of `blocking_regret`, measuring PREVENTED INFECTIONS
+    — `|R(inf)| unprotected - |R(inf)| with one dose` — which is what §8.3 says the
+    table should report rather than the eigendrop the spectral line optimizes.
+    Regret is against the best candidate in the same shortlist, so 0 means the model
+    chose the node the simulator agrees was best.
+
+    Three comparison baselines, chosen from §3.1 rather than for convenience:
+    `degree` is Pastor-Satorras & Vespignani's targeted immunization (and the row a
+    learned method has to beat), `acquaintance` is Cohen et al.'s no-global-
+    information rule that most embarrasses learned methods on sparse graphs (§8.3),
+    and `random` is the control their whole line exists to beat. Beating random is
+    not evidence here; beating degree and acquaintance is.
+
+    Each candidate's dose is emitted as a full DELETION BAG — `remove_node` plus its
+    incident arcs — because the head's T_exo assumes a vaccinated node's edges are
+    gone from `edge_index`, and a bare removal would leave a fresh susceptible its
+    in-edges promptly re-infect.
+    """
+    rng = np.random.default_rng(seed)
+    num_nodes = store_entry["num_nodes"]
+    edge_index = store_entry["edge_index"]
+    ic_probs = store_entry["ic_probs"]
+
+    degrees = np.zeros(num_nodes)
+    np.add.at(degrees, edge_index[0], 1)
+    np.add.at(degrees, edge_index[1], 1)
+
+    neighbours = defaultdict(list)
+    for edge in range(edge_index.shape[1]):
+        neighbours[int(edge_index[0, edge])].append(int(edge_index[1, edge]))
+        neighbours[int(edge_index[1, edge])].append(int(edge_index[0, edge]))
+
+    def dose_bag(node: int) -> list[ActionOp]:
+        bag = [ActionOp("remove_node", int(node))]
+        for other in set(neighbours[int(node)]):
+            bag.append(ActionOp("remove_edge", int(node), int(other)))
+            bag.append(ActionOp("remove_edge", int(other), int(node)))
+
+        return bag
+
+    model.eval()
+    model_regrets, random_regrets, degree_regrets, acquaintance_regrets = [], [], [], []
+
+    def true_attack(sources: list[int], dose: int | None) -> float:
+        opening = [ActionOp("add_node", int(node)) for node in sources]
+        if dose is not None:
+            opening = opening + dose_bag(dose)
+
+        totals = []
+        for _ in range(mc_runs):
+            simulator = rebuild_epidemic_simulator(
+                store_entry,
+                diffusion_model,
+                seed=int(rng.integers(seed_upper_bound)),
+                config=config,
+            )
+            state = simulator.current_state()
+            for timestep in range(horizon + 1):
+                state = simulator.advance(opening if timestep == 0 else [])
+                if timestep > 0 and not state.frontier and not state.exposed:
+                    break
+
+            totals.append(len(state.infected))
+
+        return float(np.mean(totals))
+
+    for _ in range(n_states):
+        size = max(1, num_nodes // 100)
+        sources = sorted(
+            int(node) for node in rng.choice(num_nodes, size=size, replace=False)
+        )
+        pool = [node for node in range(num_nodes) if node not in sources]
+
+        if not pool:
+            continue
+
+        candidates = sorted(
+            {
+                int(node)
+                for node in rng.choice(
+                    pool, size=min(n_candidates, len(pool)), replace=False
+                )
+            }
+        )
+
+        predicted = []
+        for candidate in candidates:
+            bag = dose_bag(candidate)
+            edges = apply_edge_ops(
+                store_entry["base_edges"], [action.to_dict() for action in bag]
+            )
+            candidate_index, candidate_weights = edges_to_arrays(edges)
+            record = {
+                "state": {
+                    "infected": sources,
+                    "frontier": sources,
+                    "exposed": [],
+                    "recovered": [],
+                },
+                "action": [action.to_dict() for action in bag],
+                "next_marginal_infected": {},
+                "next_marginal_incidence": {},
+                "next_marginal_exposed": {},
+                "next_marginal_infectious": {},
+                "next_marginal_recovered": {},
+            }
+            X, _ = build_epidemic_features(record, candidate_index, num_nodes)
+            graph_input = build_graph_input(
+                candidate_index,
+                candidate_weights,
+                num_nodes,
+                diffusion_model,
+                device,
+                hide_edge_weights,
+            )
+            probs = (
+                torch.sigmoid(model(torch.from_numpy(X).to(device), graph_input))
+                .cpu()
+                .numpy()
+            )
+            # The model's own estimate of how far the outbreak gets next step; the
+            # dose it should choose is the one that MINIMIZES it
+            predicted.append(probs[:, 0].sum())
+
+        model_choice = candidates[int(np.argmin(predicted))]
+        random_choice = candidates[int(rng.integers(len(candidates)))]
+        degree_choice = candidates[
+            int(np.argmax([degrees[candidate] for candidate in candidates]))
+        ]
+        # Cohen et al. 2003: pick a random node, immunize a random NEIGHBOUR of it.
+        # Restricted to the shortlist so all four choices face the same menu.
+        acquaintance_choice = degree_choice
+        for _ in range(len(candidates)):
+            anchor = int(rng.integers(num_nodes))
+            options = [node for node in neighbours[anchor] if node in set(candidates)]
+            if options:
+                acquaintance_choice = int(rng.choice(options))
+                break
+
+        unprotected = true_attack(sources, None)
+        prevented = {
+            candidate: unprotected - true_attack(sources, candidate)
+            for candidate in candidates
+        }
+        oracle = max(prevented.values())
+
+        model_regrets.append(oracle - prevented[model_choice])
+        random_regrets.append(oracle - prevented[random_choice])
+        degree_regrets.append(oracle - prevented[degree_choice])
+        acquaintance_regrets.append(oracle - prevented[acquaintance_choice])
+
+    def mean(values: list) -> float:
+        return float(np.mean(values)) if values else 0.0
+
+    return {
+        "immun_regret_model": mean(model_regrets),
+        "immun_regret_random": mean(random_regrets),
+        "immun_regret_degree": mean(degree_regrets),
+        "immun_regret_acquaintance": mean(acquaintance_regrets),
+    }
+
+
+@torch.inference_mode()
+def immunization_regret_multi(
+    model: nn.Module,
+    store: dict[str, dict],
+    diffusion_model: str,
+    device: torch.device,
+    n_graphs: int = 5,
+    seed: int = 0,
+    hide_edge_weights: bool = False,
+    config: EpidemicConfig | None = None,
+    **kwargs: object,
+) -> dict[str, float]:
+    """Average immunization regret over the first n_graphs graphs, with a cross-graph std."""
+    graph_ids = list(store)[:n_graphs]
+    if not graph_ids:
+        raise ValueError("immunization_regret_multi: empty graph store")
+
+    per_graph = [
+        immunization_regret(
+            model,
+            store[graph_id],
+            diffusion_model,
+            device,
+            seed=seed + offset,
+            hide_edge_weights=hide_edge_weights,
+            config=config,
+            **kwargs,
+        )
+        for offset, graph_id in enumerate(graph_ids)
+    ]
+
+    results = {"plan_n_graphs": float(len(per_graph))}
+    for key in per_graph[0]:
+        values = np.array([entry[key] for entry in per_graph], dtype=np.float64)
+        results[key] = float(values.mean())
+        results[f"{key}_std"] = float(values.std())
+
+    return results
 
 
 @torch.inference_mode()

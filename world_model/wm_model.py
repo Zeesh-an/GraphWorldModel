@@ -10,12 +10,23 @@ from data.wm_competitive import (
     positive_dominance,
     resolve_tie_break,
 )
-from data.wm_simulator import blocked, spent, valid_remove_semantics
+from data.wm_simulator import (
+    blocked,
+    epidemic_dynamics,
+    spent,
+    valid_remove_semantics,
+)
 from world_model.wm_data import (
     GraphInput,
     ch_add,
     ch_comp_add,
     ch_comp_remove,
+    ch_epi_add,
+    ch_epi_ever,
+    ch_epi_exposed,
+    ch_epi_infectious,
+    ch_epi_recovered,
+    ch_epi_remove,
     ch_frontier,
     ch_infected,
     ch_neg_frontier,
@@ -561,6 +572,231 @@ class CompetitiveLTHead(nn.Module):
         )
 
 
+class CompartmentTransitionHead(nn.Module):
+    """
+    Structured SIR / SIS / SEIR head: a per-node row-stochastic TRANSITION MATRIX,
+    not a probability.
+
+    Warning: THIS IS THE ONE PLACE THE STRUCTURED-HEAD IDEA HAD TO CHANGE, and
+    research/epidemic_control.md §2.4 is the argument. `ICTransmissionHead` composes
+
+        y_inf = infected + (1 - infected) * p_new
+
+    which is monotone non-decreasing in `infected` BY CONSTRUCTION: `p_new >= 0`, so
+    `y_inf >= infected` for every assignment of encoder weights and every value of
+    `q(u -> v)`. There is no way to make that expression predict a node LEAVING the
+    infected set, and `LTThresholdHead` has the identical shape. That monotonicity
+    is load-bearing rather than incidental — `RESULTS.md` records it as what fixed
+    rollout saturation (`count_bias` +49 -> +0.27) — and it is exactly the
+    assumption `I -> R` and `I -> S` violate. So this is a NEW head reusing the
+    per-edge transmission model, not an edit to the existing ones, and IC/LT keep
+    theirs untouched.
+
+    What replaces it is §2.4's matrix, with the same three structural properties:
+
+            S              E            I            R
+        S   1 - p_inf      p_inf        .            .        <- infection is S's only exit
+        E   .              1 - alpha    alpha        .        <- SEIR only
+        I   .              .            1 - gamma    gamma     <- SIS sends this to S
+        R   .              .            .            1        <- absorbing
+
+      * **Only `p_inf` needs the graph**, and it is exactly `ICTransmissionHead`'s
+        construction lifted verbatim: `1 - prod(1 - q_uv * infectious_u)`. The rates
+        are per-node scalars with no graph term, structurally identical to
+        `LTThresholdHead`'s `theta_hat_v`.
+      * **The rows are exact, not penalized.** Each row is composed in closed form
+        from probabilities, so `S + E + I + R = 1` holds identically and no simplex
+        penalty is needed.
+      * **Self-termination survives.** A susceptible node with no infectious
+        in-neighbour has `p_inf = 0`, and `I` decays geometrically at `gamma`, so a
+        free-running rollout still cannot saturate — under SIS too, where nothing
+        else would stop it.
+
+    Columns 0-1 of the output are the EVER-infected marginal and the INCIDENCE,
+    which is what lets every existing reader keep slicing `probs[:, 0]` and
+    `probs[:, 1]` (`wm_data.epidemic_out_channels`). Ever-infected is still monotone
+    and that is correct: a node never un-becomes ever-infected under any of the
+    three. What is not monotone, and what this head can now represent, is `I`.
+
+    Under `oracle` the whole matrix is the simulator's own: `q = beta_scale * w`,
+    `gamma_hat = gamma`, `alpha_hat = alpha`. That makes the head EXACT rather than
+    merely well-shaped, which is what `--head structured_oracle` is for here.
+    """
+
+    def __init__(
+        self,
+        hidden_dim: int,
+        dynamics: str = "SIR",
+        oracle: bool = False,
+        residual: bool = False,
+        beta_scale: float = 1.0,
+        gamma: float | None = None,
+        alpha: float | None = None,
+        remove_semantics: str = blocked,
+    ) -> None:
+        super().__init__()
+
+        if dynamics not in epidemic_dynamics:
+            raise ValueError(
+                f"unknown compartmental model {dynamics!r}; choose one of "
+                f"{epidemic_dynamics}"
+            )
+
+        if oracle and gamma is None:
+            raise ValueError(
+                "structured_oracle needs the TRUE rates to pin its matrix to; pass "
+                "gamma (and alpha under SEIR) from the dataset's own metadata"
+            )
+
+        self.dynamics = dynamics
+        self.oracle = oracle
+        self.residual = residual
+        self.beta_scale = float(beta_scale)
+        self.gamma = gamma
+        self.alpha = alpha
+        self.remove_semantics = remove_semantics
+
+        if not oracle:
+            self.edge_mlp = nn.Sequential(
+                nn.Linear(2 * hidden_dim + 1, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, 1),
+            )
+            # Per-node rate of leaving I. One head per dynamics rather than a
+            # shared one, because the destination differs (R under SIR/SEIR, S
+            # under SIS) and a rate fit against one is not the other's.
+            self.leave_infectious = nn.Linear(hidden_dim, 1)
+            # ...and E -> I, which only SEIR has a target column for
+            self.leave_exposed = (
+                nn.Linear(hidden_dim, 1) if dynamics == "SEIR" else None
+            )
+
+            for module in self.modules():
+                if isinstance(module, nn.Linear):
+                    nn.init.xavier_uniform_(module.weight)
+
+                    if module.bias is not None:
+                        nn.init.zeros_(module.bias)
+
+    def _transmission(
+        self,
+        hidden: torch.Tensor,
+        sources: torch.Tensor,
+        destinations: torch.Tensor,
+        edge_weight: torch.Tensor,
+    ) -> torch.Tensor:
+        """`q(u -> v)`, anchored on the arc's own `beta_uv = beta_scale * w`."""
+        anchor = (self.beta_scale * edge_weight).clamp(0.0, 1.0)  # shape: (E,)
+
+        if self.oracle:
+            return anchor
+
+        features = torch.cat(
+            [hidden[sources], hidden[destinations], edge_weight.unsqueeze(dim=-1)],
+            dim=-1,
+        )  # shape: (E, 2H + 1)
+        logits = self.edge_mlp(features).squeeze(dim=-1)  # shape: (E,)
+
+        if self.residual:
+            # The anchor is beta_uv, NOT the raw w: --epi-beta rescales every arc,
+            # and anchoring on w would put the correction a constant factor off
+            safe = anchor.clamp(prob_epsilon, 1.0 - prob_epsilon)
+            logits = logits + torch.log(safe) - torch.log1p(-safe)
+
+        return torch.sigmoid(logits)
+
+    def _rate(
+        self, layer: nn.Module | None, hidden: torch.Tensor, constant: float | None
+    ) -> torch.Tensor:
+        if self.oracle or layer is None:
+            return torch.full(
+                (hidden.shape[0],),
+                float(constant if constant is not None else 0.0),
+                device=hidden.device,
+            )
+
+        return torch.sigmoid(layer(hidden).squeeze(dim=-1))
+
+    def forward(
+        self, hidden: torch.Tensor, X: torch.Tensor, graph: GraphInput
+    ) -> torch.Tensor:
+        num_nodes = hidden.shape[0]
+
+        # T_exo. `add_node` is an INDEX CASE and goes straight into I, matching the
+        # simulator: a seeded outbreak is already infectious, and under SEIR putting
+        # it in E instead would delay every episode's first wave by one step.
+        # `remove_node` is a DOSE and under `blocked` empties every compartment
+        # including S, so the node's five targets are all zero — which is what the
+        # simulator writes for it.
+        keep = 1.0 - X[:, ch_epi_remove] if self.remove_semantics == blocked else 1.0
+        seeded = X[:, ch_epi_add]
+
+        infectious = torch.clamp(X[:, ch_epi_infectious] + seeded, max=1.0) * keep
+        # A node the action just seeded leaves whatever compartment it was in
+        exposed = X[:, ch_epi_exposed] * (1.0 - seeded) * keep
+        recovered = X[:, ch_epi_recovered] * (1.0 - seeded) * keep
+        ever = torch.clamp(X[:, ch_epi_ever] + seeded, max=1.0) * keep
+        susceptible = torch.clamp(
+            1.0 - exposed - infectious - recovered, min=0.0
+        ) * keep
+
+        edge_index, edge_weight = graph.edge_index, graph.edge_weight
+
+        if edge_index.numel() == 0:
+            p_infection = torch.zeros(num_nodes, device=hidden.device)
+        else:
+            sources, destinations = edge_index[0], edge_index[1]
+            p_infection = _arrival_probability(
+                self._transmission(hidden, sources, destinations, edge_weight),
+                infectious,
+                sources,
+                destinations,
+                num_nodes,
+            )
+
+        leaving = self._rate(
+            getattr(self, "leave_infectious", None), hidden, self.gamma
+        )
+        newly = susceptible * p_infection
+
+        if self.dynamics == "SEIR":
+            promoted = exposed * self._rate(
+                getattr(self, "leave_exposed", None), hidden, self.alpha
+            )
+            next_exposed = exposed - promoted + newly
+            next_infectious = infectious - infectious * leaving + promoted
+        else:
+            next_exposed = torch.zeros_like(newly)
+            next_infectious = infectious - infectious * leaving + newly
+
+        # SIS has no absorbing compartment: a node that leaves I is susceptible
+        # again and may be re-infected later, which is the case plain monotone
+        # composition is not merely loose about but flatly cannot represent
+        next_recovered = (
+            torch.zeros_like(newly)
+            if self.dynamics == "SIS"
+            else recovered + infectious * leaving
+        )
+
+        # `(1 - ever) * newly` rather than `ever + newly`, and the guard is not
+        # cosmetic under SIS: there a node can be ever-infected AND currently
+        # susceptible, so a bare sum would push it past 1 and the clamp would hide
+        # it. Under SIR/SEIR an ever-infected node has `susceptible = 0` and the
+        # factor is a no-op.
+        probs = torch.stack(
+            [
+                ever + (1.0 - ever) * newly,
+                newly,
+                next_exposed,
+                next_infectious,
+                next_recovered,
+            ],
+            dim=1,
+        ).clamp(prob_epsilon, 1.0 - prob_epsilon)  # shape: (N, 5)
+
+        return torch.log(probs) - torch.log1p(-probs)
+
+
 def competitive_exogenous(
     X: torch.Tensor, remove_semantics: str
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -621,6 +857,13 @@ class WorldModel(nn.Module):
         competitive: bool = False,
         tie_break: str = "auto",
         positive_prob: float | None = None,
+        epidemic: bool = False,
+        # PREFIXED, and not optional: `backbone_kwargs` already carries GCNII's own
+        # `alpha`, so an unprefixed compartmental rate collides with it and every
+        # call raises "got multiple values for keyword argument 'alpha'"
+        epi_beta: float = 1.0,
+        epi_gamma: float | None = None,
+        epi_alpha: float | None = None,
         **backbone_kwargs: object,
     ) -> None:
         super().__init__()
@@ -639,7 +882,14 @@ class WorldModel(nn.Module):
         self.head_type = head_type
         self.remove_semantics = remove_semantics
         self.competitive = competitive
-        self.tie_break = resolve_tie_break(tie_break, diffusion_model)
+        self.epidemic = epidemic
+        # `auto` has no meaning outside a two-cascade run, and resolve_tie_break
+        # would map a compartmental dynamics onto IC's rule; the field is inert
+        # there, so it is left at what was passed rather than resolved against a
+        # dynamics that has no founding paper for it
+        self.tie_break = (
+            tie_break if epidemic else resolve_tie_break(tie_break, diffusion_model)
+        )
 
         # Encoder produces (N, hidden_dim) node embeddings
         self.encoder = backbones[backbone](
@@ -650,11 +900,43 @@ class WorldModel(nn.Module):
             **backbone_kwargs,
         )
 
+        # A compartmental task has ONE head across its three dynamics and no
+        # `linear` variant, for a sharper version of the competitive reason: an
+        # unstructured (N, 5) head has nothing making the four compartments a
+        # simplex, nothing stopping `I` from growing without an infectious
+        # neighbour, and — the point of the task — nothing that represents
+        # recovery as a transition rather than as a coincidence
+        # (research/epidemic_control.md §2.4).
+        if epidemic:
+            if competitive:
+                raise ValueError(
+                    "a task is either two-CASCADE or four-COMPARTMENT, never both"
+                )
+
+            if head_type == "linear":
+                raise ValueError(
+                    "a compartmental task has no `linear` head: nothing then keeps "
+                    "S/E/I/R on the simplex or the rollout self-terminating, and a "
+                    "free-running SIS cascade with no structural cap saturates the "
+                    "graph. Use --head structured (or structured_residual, which "
+                    "anchors q on the true per-arc beta)."
+                )
+
+            self.head = CompartmentTransitionHead(
+                hidden_dim,
+                dynamics=diffusion_model,
+                oracle=head_type == "structured_oracle",
+                residual=head_type == "structured_residual",
+                beta_scale=epi_beta,
+                gamma=epi_gamma,
+                alpha=epi_alpha,
+                remove_semantics=remove_semantics,
+            )
         # A competitive task has its own head per dynamics and no `linear` variant:
         # an unstructured (N, 4) head has nothing holding the two cascades apart, so
         # its free-running rollout saturates BOTH and the blocked-influence number
         # comes out of two runaway cascades cancelling
-        if competitive:
+        elif competitive:
             if head_type == "linear":
                 raise ValueError(
                     "a competitive task has no `linear` head: nothing then keeps the "
@@ -723,9 +1005,11 @@ class WorldModel(nn.Module):
         # X: (N, in_channels) node features; graph: GraphInput
         hidden = self.encoder(X, graph)
 
-        if self.head_type == "linear" and not self.competitive:
+        if self.head_type == "linear" and not (self.competitive or self.epidemic):
             return self.head(hidden)  # (N, 2) logits
 
-        # (N, 2) single-cascade, (N, 4) competitive; columns 0-1 are the same
-        # quantity under both, which is what keeps every downstream reader working
+        # (N, 2) single-cascade, (N, 4) competitive, (N, 5) compartmental; columns
+        # 0-1 are the same PAIR of quantities under all three — the set being scored
+        # and who newly joined it — which is what keeps every downstream reader
+        # working with no branch
         return self.head(hidden, X, graph)
