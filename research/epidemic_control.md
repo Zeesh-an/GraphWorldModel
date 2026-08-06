@@ -255,7 +255,7 @@ The last row matters for positioning: the spectral line (§3) optimizes a quanti
 | Epidemic-curve metrics (§2.6)                   | ~60 lines in `wm_metrics.py`                                     |
 | Contact-network loaders (§6.3)                  | ~40 lines each, 5–8 datasets                                     |
 
-**Roughly 1–1.5 weeks.** That places it above [`source_localization.md`](source_localization.md) (nothing new to simulate) and [`influence_estimation.md`](influence_estimation.md) (already computed), on par with [`influence_blocking.md`](influence_blocking.md) (2-cascade state), and well below [`cascading_failure.md`](cascading_failure.md) (a whole new `T_endo`).
+**Roughly 1–1.5 weeks.** That places it above [`source_localization.md`](source_localization.md) (nothing new to simulate), on par with [`influence_blocking.md`](influence_blocking.md) (2-cascade state), and well below the screened-out cascading-failure task (a whole new `T_endo`).
 
 The distinguishing argument for doing it: **it is the only candidate task that forces us to confront non-monotone dynamics.** Every other yes-fit task in this folder keeps the monotone assumption our structured heads are built on. If the world model is meant to be a general simulator rather than an IC simulator, this is the task that proves it — or fails to.
 

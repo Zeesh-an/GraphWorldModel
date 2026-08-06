@@ -297,18 +297,14 @@ python -m pipeline.run --dataset jazz --run gcnii_ablation \
 python -c "from pipeline.tasks import runnable_task_names; print(runnable_task_names())"
 ```
 
-**Eight run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, `influence_blocking`, `cascade_reconstruction`, `epidemic_control`, and `cascade_prediction`. The other six are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
+**Eight tasks, and all eight run.** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, `influence_blocking`, `cascade_reconstruction`, `epidemic_control`, and `cascade_prediction`. Five further tasks were screened, reviewed against the criteria in [`research/README.md`](research/README.md) and **not pursued** — cascading failure, graph completion, influence estimation, network inference and temporal forecasting. Two of them left findings the shipped tasks still rest on (rollout drift as an axis separate from one-step accuracy; that no published work in this space is action-conditioned), and those are recorded in the research index rather than in a task file.
 
 ```
 $ python -m pipeline.run --dataset ba --task cascading_failure
-ValueError: task 'cascading_failure' is planned, not runnable by this pipeline.
-T_endo is global load redistribution, not local edge-wise propagation, so a
-k-hop encoder structurally cannot see the next failure. Motter-Lai (betweenness
-load + tolerance alpha) is the entry point that needs no electrical data. See
-research/cascading_failure.md for the full analysis. Runnable today:
-['adaptive_online_im', 'cascade_prediction', 'cascade_reconstruction',
-'critical_node_detection', 'epidemic_control', 'influence_blocking',
-'influence_maximization', 'source_localization']
+run.py: error: argument --task: invalid choice: 'cascading_failure'
+(choose from adaptive_online_im, cascade_prediction, cascade_reconstruction,
+critical_node_detection, epidemic_control, influence_blocking,
+influence_maximization, source_localization)
 ```
 
 The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, the budget sweep, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it — it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
@@ -500,4 +496,4 @@ GraphWorldModel/
 └── requirements.txt
 ```
 
-> **Legacy.** The original seed→outcome inverse-problem world-model training and the VAE joint-training pipeline have been removed (`world_model/old/`, `world_model/model/vae.py`). The diffusion-only CND/IM/SL data generators remain archived under `data/old/` for reference. The encoder files in `world_model/model/` still contain the old `*ForwardModel` classes, now unused. The action-conditioned world model above is the only active path.
+> **Legacy.** The original seed→outcome inverse-problem world-model training and the VAE joint-training pipeline have been removed (`world_model/old/`, `world_model/model/vae.py`), and so have the diffusion-only CND/IM/SL data generators that were archived under `data/old/` — nothing imported them, they predated the absolute-import convention and no longer ran, and `wm_metrics.connectivity_profile` had already superseded the one function worth keeping. The encoder files in `world_model/model/` still contain the old `*ForwardModel` classes, now unused. The action-conditioned world model above is the only active path.

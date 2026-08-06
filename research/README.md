@@ -2,7 +2,9 @@
 
 One markdown file per graph task, all in the same format. Each is self-contained: task definition, fit with our methodology, every baseline method with paper and code URLs, every dataset those baselines evaluate on with node/edge counts and source URLs, transcribed result tables, evaluation protocols, and an honest list of what the review could **not** establish.
 
-**9,600 lines · 13 tasks · ~450 methods · ~400 datasets · 1,060 unique URLs**, compiled 2026-07-28/29.
+**6,200 lines · 8 tasks · ~330 methods · ~300 datasets · 697 unique URLs**, compiled 2026-07-28/29, narrowed to the shipped set 2026-08-06.
+
+Five further tasks were screened and reviewed and are **not being pursued** — cascading failure, graph completion, influence estimation, network inference and temporal forecasting. Their files were deleted rather than left as dead weight; `git log` is the record if any of that analysis is ever wanted back. What each one concluded is summarized under "Screened out" below, because two of those conclusions changed how the shipped tasks are built.
 
 These files are **literature references**, not design documents. What we built lives in `../CLAUDE.md` and the per-package READMEs; what the field published lives here.
 
@@ -22,17 +24,26 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | [`influence_blocking.md`](influence_blocking.md)           | yes **implemented**      | 782   | (key) SandIMIN PVLDB'24 Table 5 — email-Eu-core, YouTube, our exact metric |
 | [`source_localization.md`](source_localization.md)         | yes **implemented**      | 964   | (key) SL-VAE KDD'22 Tables 1–4 — 5 of its 7 graphs are ours                |
 | [`critical_node_detection.md`](critical_node_detection.md) | yes **implemented**      | 1,001 | (key) CoreHD/BPD Table I — "Grid" is our `power_grid` byte-for-byte        |
-| [`influence_estimation.md`](influence_estimation.md)       | yes **already computed** | 553   | (key) GLIE + SIEA — `ca_grqc`, `nethept`, `netphy`, `youtube` match        |
 | [`cascade_reconstruction.md`](cascade_reconstruction.md)   | yes **implemented**      | 763   | (key) DITTO KDD'23 Tables 4–5 — BA, ER, Oregon2 and rt-pol are all ours    |
 | [`epidemic_control.md`](epidemic_control.md)               | yes **implemented**      | 745   | (key) GreedyWalk SDM'15 Table 2 — four published `λ₁` reproduce exactly    |
 | [`adaptive_online_im.md`](adaptive_online_im.md)           | yes **implemented**      | 572   | only DeepIM's re-run OIM row; the rest are figures                      |
-| [`network_inference.md`](network_inference.md)             | Warning: moderate             | 782   | no — Kronecker synthetics, not our graphs                               |
 | [`cascade_prediction.md`](cascade_prediction.md)           | yes **implemented**      | 567   | (key) CasFT AAAI-25 Table 2 + CasTemp's leak-free re-run — context only, our preprocessing differs |
-| [`cascading_failure.md`](cascading_failure.md)             | Warning: moderate             | 728   | Jhun et al. Table I, via Motter–Lai on our `power_grid`                 |
-| [`graph_completion.md`](graph_completion.md)               | no poor fit             | 724   | SEAL NeurIPS'18 — `netscience`, `power_grid` byte-identical             |
-| [`temporal_forecasting.md`](temporal_forecasting.md)       | no poor fit             | 582   | no — zero dataset overlap                                               |
 
-The two no files exist because "we considered it and here is exactly why it does not fit" is worth more than silence — and both turned out to carry something useful anyway (§9 of each).
+Every file above is an **implemented** task. The screening criteria are kept because they are what a
+ninth task would have to pass.
+
+### Screened out (files removed 2026-08-06)
+
+Recorded here rather than deleted silently, because three of the five produced findings the shipped
+tasks still depend on.
+
+| Task | Verdict | What it left behind |
+| ---- | ------- | ------------------- |
+| **influence estimation** | not pursued | Its metrics are things we already print — `ens_final_count_model` vs `ens_final_count_true` IS an influence-estimation result. If a reviewer asks for one, relabel rather than build. |
+| **network inference** | not pursued | The folder's only case where the AGENT half fits and the world-model half does not: `G` is the variable being recovered, not a condition, and NETRATE's likelihood is already convex and closed-form. That asymmetry is why criterion 2 exists. |
+| **cascading failure** | not pursued | `T_endo` is global load redistribution, not local edge-wise propagation, so a k-hop encoder structurally cannot see the next failure. The clearest statement in the folder of what our architecture *cannot* represent. |
+| **graph completion** | not pursued | No state evolves and `add_edge` means *infer* rather than *intervene*. Useful only as a robustness condition. |
+| **temporal forecasting** | not pursued | **Cross-cutting finding 4 below came from this file** — rollout degradation is a separate axis from one-step accuracy, and scheduled sampling is the standard fix. That finding outlived the task. |
 
 ---
 
@@ -46,13 +57,13 @@ Things that emerged from more than one file, or that change what we should do.
 
 3. **Adaptive IM cannot be sold on spread. yes IMPLEMENTED on that basis.** The adaptivity gap is bounded (myopic ∈ [e/(e−1), 4]; full-adoption ≤ ⌈n^{1/3}⌉) and non-adaptive greedy is provably no worse than adaptive greedy on all graphs. The claim has to be **cost**: the MC arm scales with rounds, a forward pass does not. Built accordingly: every `adaptive_*@E` arm is paired with `evolve_*@E` at matched `k`, the gap is computed and printed with that calibration stated above the table, and `evaluator_seconds` carries the actual claim.
 
-4. **Our rollout evaluation is blind to per-step drift.** From `temporal_forecasting.md` §9: DCRNN shows rollout degradation is a separate axis from one-step accuracy. We early-stop on one-step `delta_f1` and report aggregate `ens_count_bias`; neither sees a model that is sharp at `t+1` and drifting by `t+5`. Scheduled sampling is the field's standard fix and needs **zero extra simulator calls**, unlike the DAgger attempt that failed here.
+4. **Our rollout evaluation is blind to per-step drift.** From the temporal-forecasting review (screened out, but this is what it left behind): DCRNN shows rollout degradation is a separate axis from one-step accuracy. We early-stop on one-step `delta_f1` and report aggregate `ens_count_bias`; neither sees a model that is sharp at `t+1` and drifting by `t+5`. Scheduled sampling is the field's standard fix and needs **zero extra simulator calls**, unlike the DAgger attempt that failed here.
 
 5. **The DeepIM NetScience anomaly is narrowed, not solved.** Its 1,565/13,532 graph is shared with SL-VAE and _only_ SL-VAE; IVGD, GraphSL and SIDSL all use our 1,589/2,742. A shared preprocessing lineage between two papers, and the minority version in its own literature.
 
 6. **Published tables are less trustworthy than they look.** BasicTS+ found the same method on the same data varying **33%** across papers, from normalisation and metric implementation alone. Cascade prediction's per-paper cascade filters move MSLE more than the gap between adjacent methods. Several canonical papers (Rozenshtein KDD'16, Xiao 2018, Farajtabar AISTATS'15, NETRATE) publish **no result tables at all** — any number attributed to them is fabricated.
 
-7. **No published work is action-conditioned.** True in influence estimation (every method answers `σ(S)` on a fixed graph) and in cascading failure (every GNN is one-shot; every planner plans against the exact simulator). That is the contribution _and_ the problem: there is no step-wise baseline to compare against.
+7. **No published work is action-conditioned.** Found in two of the screened-out files and true across the shipped ones: every influence estimator answers `σ(S)` on a FIXED graph, and every cascading-failure GNN is one-shot while every planner plans against the exact simulator. Ours answers `σ(s_t, a_t)` — spread after an intervention. That is the contribution _and_ the problem: there is no step-wise baseline to compare against, which is why conditions 3-6 are an internal ablation rather than a leaderboard.
 
 8. **Supplying a better forward model is not a contribution; supplying a better inversion is. yes IMPLEMENTED on that basis.** From `source_localization.md` §2.2: SL-VAE states outright that its forward operator is pluggable and reports no significant difference across GAT, MONSTOR and DeepIS. Every inverse task in this folder invites the same trap, because each one's strongest methods are built by learning a forward model and inverting it, and we have a forward model. Dropping ours into that slot reproduces a paper its authors already wrote. The escape is to contribute the `argmax` instead: `source_localization.md` §2.3 reformulates the task as **amortized program search**, where the coding agent searches the space of inversion algorithms and the world model is the forward oracle they call. That reframing is also what restores the six-condition table, since a task with no agent has no arms 3–6. Built exactly that way: the agent writes `localize(graph, observation, budget)`, `self.predict_marginals(seeds)` is the one new primitive and its four bindings ARE conditions 3–6, and the component-swap framing ships as **arm A** (`gradient_free@world_model`, condition 8) so `6 vs A` is a measured comparison rather than an argument. Labels select the program and are never available to it, so the selected artifact runs on cascades with no ground truth at all.
 
@@ -62,13 +73,11 @@ Things that emerged from more than one file, or that change what we should do.
    | ---- | - | - | - | - | ------- |
    | `cascade_reconstruction` §2.4 | yes | yes | yes | yes | **best fit in the folder**; inner loop runs at ~10⁴ oracle calls per instance |
    | `source_localization` §2.3 | yes | yes | yes | yes | both loops, ~10² calls per instance |
-   | `network_inference` §2.6 | yes | no | Warning: | no | **agent fits, world model does not**: `G` is the variable, and NETRATE's likelihood is already convex and closed-form |
-   | `influence_estimation` | no | yes | n/a | n/a | world model only; forecasting has no algorithm to search |
    | `cascade_prediction` §2.1 | Warning: | yes | yes | yes | **the criteria say no and it shipped anyway** — see below |
 
    **Cascade prediction is the deliberate exception, and its own file says so.** Criterion 1 fails outright: §2.1 records that `a_t` is NULL at every step, so the action space goes idle, five of six arms have nothing to distinguish them, and §9.3 concludes it "cannot demonstrate the capability the project is about". It ships anyway for the reason §9.1 gives, which no other file in this folder can claim: **it is the only falsification test available for the IC/LT assumption every other task inherits.** Everywhere else, a learned model is evaluated against traces from the simulator that trained it — a closed loop that measures learning error and never modelling error. Real Weibo retweets break the loop, and `--compare` reports the modelling error directly. Two things follow that are worth carrying: criterion 1 turns out to be about whether the ALGORITHM search is interesting, not whether the task is, and conditions 3-6 survive an empty action space because what varies down the ladder becomes the forward model the predictor may CALL rather than the intervention it may choose.
 
-   Two consequences worth carrying. **Network inference is the folder's only inverted case**: everywhere else that fails, it fails on the agent side. And **the reward is the specification**: `cascade_reconstruction.md` §2.6 shows that scoring a program search on the easy half of a metric pair (node set rather than tree) does not merely under-report, it makes the search discard the capability. Check that a trivial baseline scores badly under the chosen reward before running any search.
+   Two consequences worth carrying. **The criteria can fail on either side**: the screened-out network-inference review is the folder's only case where the AGENT half fits and the world model does not (`G` is the variable being recovered rather than a condition), where everywhere else that fails, fails on the agent side. And **the reward is the specification**: `cascade_reconstruction.md` §2.6 shows that scoring a program search on the easy half of a metric pair (node set rather than tree) does not merely under-report, it makes the search discard the capability. Check that a trivial baseline scores badly under the chosen reward before running any search.
 
    **Both inverse tasks are now built on that basis, and the second one is the sharper test.** Cascade reconstruction ships as `--task cascade_reconstruction`: the agent writes `reconstruct(graph, observation, horizon)`, `self.step_marginals(infected, frontier)` is the one new primitive and its four bindings ARE conditions 3–6, and the component-swap framing ships as **arm A** (`decode_free@world_model`, condition 8) — DITTO's Metropolis-Hastings sampler with our learned kernel in place of its mean-field `β̂`, so `6 vs A` is measured rather than argued. Three differences from source localization are worth naming. The inner loop runs at ~10⁴ kernel calls per instance against ~10², which is what makes the cost axis load-bearing rather than a footnote. The reward is `λ·PathPrecision + (1−λ)·EventF1` rather than a single metric, and `trivial_decoder_reward` is computed into every results JSON because the check above is a requirement here, not advice. And it needed one thing source localization did not: a **ground-truth parent**, which NDlib does not emit at all — `--trace-parents` swaps in traced IC/LT models that record the transmission edge, and without it the tree-weighted reward is not computable and the harness refuses to run.
 

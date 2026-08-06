@@ -40,7 +40,7 @@ Kempe, Kleinberg & Tardos (KDD 2003) established the two things that define the 
 | **IC** (Independent Cascade) | stochastic                     | each newly activated `u` gets one chance to activate each out-neighbour `v` with probability `p(u→v)`. Monotone — no de-activation. |
 | **LT** (Linear Threshold)    | deterministic given thresholds | `v` activates when the summed weight of its active in-neighbours ≥ its threshold `θ_v`; `θ_v` is drawn per node per episode.        |
 
-Computing `σ(S)` exactly is **#P-hard** under both (Chen, Wang & Wang KDD 2010 for IC; Chen, Yuan & Zhang ICDM 2010 for LT), which is why every practical method either Monte-Carlo estimates it, bounds it, or learns it. See [`influence_estimation.md`](influence_estimation.md) for that sub-literature.
+Computing `σ(S)` exactly is **#P-hard** under both (Chen, Wang & Wang KDD 2010 for IC; Chen, Yuan & Zhang ICDM 2010 for LT), which is why every practical method either Monte-Carlo estimates it, bounds it, or learns it. That sub-literature (GLIE, MONSTOR, SIEA) was reviewed as its own task and not pursued — `world_model/wm_eval.py::rollout_ensemble` already prints the quantity it optimizes.
 
 ### Variants catalogued elsewhere in this folder
 
@@ -48,7 +48,7 @@ Computing `σ(S)` exactly is **#P-hard** under both (Chen, Wang & Wang KDD 2010 
 | --------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Minimize a _negative_ cascade instead of maximizing a positive one                | [`influence_blocking.md`](influence_blocking.md)           |
 | Seeds chosen in rounds with feedback; unknown edge probabilities; continuous time | [`adaptive_online_im.md`](adaptive_online_im.md)           |
-| Estimating `σ(S)` as a task in its own right                                      | [`influence_estimation.md`](influence_estimation.md)       |
+| Estimating `σ(S)` as a task in its own right                                      | reviewed, not pursued — `rollout_ensemble` already prints it |
 | Removing nodes to _reduce_ spread or connectivity                                 | [`critical_node_detection.md`](critical_node_detection.md) |
 | Recovering `S` from an observed final state                                       | [`source_localization.md`](source_localization.md)         |
 
@@ -436,7 +436,7 @@ yes = already implemented in `data/datasets/`.
 
 #### Cascade datasets — a _different_ evaluation protocol
 
-These carry observed diffusion traces, not just topology. They enable the IMINFECTOR-style **DNI** protocol, which never assumes IC/LT. They are the shared substrate for [`cascade_prediction.md`](cascade_prediction.md), [`cascade_reconstruction.md`](cascade_reconstruction.md) and [`network_inference.md`](network_inference.md).
+These carry observed diffusion traces, not just topology. They enable the IMINFECTOR-style **DNI** protocol, which never assumes IC/LT. They are the shared substrate for [`cascade_prediction.md`](cascade_prediction.md) and [`cascade_reconstruction.md`](cascade_reconstruction.md).
 
 | Dataset         | Nodes                      | Edges        | Cascades              | Avg cascade | Source                                                                                                     |
 | --------------- | -------------------------- | ------------ | --------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |

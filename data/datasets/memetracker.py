@@ -26,7 +26,7 @@ different name, and the honest response is a loader that states its own version.
 at a time, never which host it took it from. MemeTracker's `L` (link) lines DO
 record hyperlinks, but between POSTS and often to hosts that never carried the
 phrase, so they are not a transmission tree for the cascade — using them as one is
-exactly the mistake `research/network_inference.md` exists to name. Every adopter is
+exactly the network-inference mistake: an observed link is not a transmission. Every adopter is
 therefore attributed to the phrase's first host and the observed path has length 2,
 identical to Digg's convention and stated for the same reason.
 

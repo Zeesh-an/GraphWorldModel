@@ -366,4 +366,3 @@ This determinism difference is why IC averages over `--mc-marginals` draws while
 | `validate_wm_data.py` | post-hoc gate-check harness                                                                                       |
 | `datasets/`           | per-dataset download + load helpers (lazy-imported by `wm_graphs.py`)                                             |
 | `datasets/cascade_common.py` | the CASCADE-corpus contract: `Cascade`, CasFlow's canonical line format, the published filters, the graph built from observed paths |
-| `old/`                | **legacy** diffusion-only CND/IM/SL generators (archived; superseded by `generate_wm_data.py`)                    |

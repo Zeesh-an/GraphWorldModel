@@ -2597,8 +2597,8 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Fail before any stage runs: a planned task has no head, no simulator, or
-    # no data, and the message names which
+    # Fail before any stage runs, with the runnable list in the message rather
+    # than an argparse choices dump
     task = require_runnable(args.task)
 
     # The task registry is the default so a containment task cannot be generated

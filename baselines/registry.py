@@ -4959,8 +4959,8 @@ external_baselines: dict[str, ExternalBaseline] = {
         blocker=(
             "MATLAB and CVX, neither of which this harness can drive, and the wrong "
             "TASK besides: NETRATE recovers the transmission RATES of a latent "
-            "network from many cascades, which is network inference "
-            "(research/network_inference.md), not trajectory decoding. It is "
+            "network from many cascades, which is NETWORK INFERENCE — a task reviewed "
+            "and not pursued — rather than trajectory decoding. It is "
             "registered here only because Farajtabar's 'Back to the Past' fits it "
             "FIRST and then inverts the result, so it is a component of a §3 method "
             "rather than a method of its own."

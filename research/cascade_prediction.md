@@ -396,7 +396,7 @@ Ranked, cheapest first:
 
 1. **APS** — 616K nodes / 3.3M edges, cascades are citation lists, no rate limits, no Chinese-platform registration. The 3-year/5-year windows are long enough that a *step* can be a year, which maps onto our discrete-time simulator without resampling. **This is the one to do.**
 2. **Weibo (DeepHawkes bundle)** — we already fetch the AMiner release for the `weibo` graph; the cascades are one more file. The global graph (6.7M nodes) exceeds our pipeline, but cascade-local graphs do not.
-3. **Digg 2009** — small, public, `(story, user, time)` triples, and it doubles as a [`source_localization.md`](source_localization.md) / [`network_inference.md`](network_inference.md) corpus.
+3. **Digg 2009** — small, public, `(story, user, time)` triples, and it doubles as a [`source_localization.md`](source_localization.md) corpus.
 4. **Twitter (Weng)** — only via CasFlow's Drive mirror; the canonical host is dead. Avoid unless a Twitter row is specifically needed.
 
 **Not recommended:** Tweet-1Mo (no graph — our model needs one), Facebook photos (not public), Taoke (too new, single-paper).

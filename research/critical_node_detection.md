@@ -83,7 +83,7 @@ Our world model factorizes `s_{t+1} = T_endo(T_exo(s_t, a_t))` — a determinist
 - `T_exo` = delete the chosen node and its incident edges. Deterministic. Fine.
 - `T_endo` = **nothing**. There is no diffusion. Between interventions the state does not move.
 
-The "state" `s_t = (infected, frontier)` has no meaning here. The natural observable is _per-node membership in the largest remaining component_, and the model degenerates from a transition kernel to a **one-step connectivity regressor** `f(G, S) → [v ∈ GCC(G − S)]_{v∈V}`. That is not a world model; it is a graph-labelling task. (We already built exactly this once and deleted it — `data/old/generate_cnd_data.py` + `data/old/connectivity.py` produce `removal_sets → connectivity_vecs / n_components / largest_cc_sizes / pairwise_conn` and nothing else. See §9.)
+The "state" `s_t = (infected, frontier)` has no meaning here. The natural observable is _per-node membership in the largest remaining component_, and the model degenerates from a transition kernel to a **one-step connectivity regressor** `f(G, S) → [v ∈ GCC(G − S)]_{v∈V}`. That is not a world model; it is a graph-labelling task. (We already built exactly this once and deleted it — the archived `generate_cnd_data.py` + `connectivity.py` pair produced `removal_sets → connectivity_vecs / n_components / largest_cc_sizes / pairwise_conn` and nothing else; both were removed with `data/old/` in August 2026. See §9.)
 
 Three concrete objections, in increasing order of how much they should change our mind:
 
@@ -144,8 +144,8 @@ Three consequences that matter for CND and would silently corrupt any containmen
 
 | Objective                             | New code                                                                        | Cost                               |
 | ------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------- |
-| Pairwise connectivity                 | resurrect `data/old/connectivity.py` (already computes it)                      | ~0                                 |
-| LCC size / GCC fraction               | same file, already computed                                                     | ~0                                 |
+| Pairwise connectivity                 | `wm_metrics.connectivity_profile` (shipped; one BFS pass)                       | done                               |
+| LCC size / GCC fraction               | same function, same pass                                                        | done                               |
 | Component count                       | same file, already computed                                                     | ~0                                 |
 | Schneider `R` / ANC                   | a sequential-removal evaluator + integral in `wm_metrics.py`                    | ~half a day                        |
 | Dismantling-set size at `C=0.01`      | same evaluator, different reduction                                             | ~0 once `R` exists                 |
@@ -931,8 +931,8 @@ Our existing `coding_agent/tools/algorithms.py` already has degree, pagerank and
 
 **Pre-existing, and still what §2.1 argues against reviving:**
 
-- `data/old/connectivity.py` — `simulate_removal()` already returns `(connectivity_vec, n_components, largest_cc_size, pairwise_conn)`, i.e. three of the six objectives in §1.1, exactly. `wm_metrics.connectivity_profile` now computes the same three from one BFS pass, so this file is superseded rather than needed.
-- `data/old/generate_cnd_data.py` — the archived structural-CND generator. Its docstring documents the same `removal_sets → connectivity_vecs` schema this file argues is a _regressor_, not a world model. It is evidence for §2.1, not code to revive.
+- `wm_metrics.connectivity_profile` — returns pairwise connectivity, component count and largest-CC size from one BFS pass, i.e. three of the six objectives in §1.1, exactly. It superseded the archived `data/old/connectivity.py`, which was deleted in August 2026 along with the rest of that folder.
+- **The archived structural-CND generator** (`data/old/generate_cnd_data.py`, also deleted) documented a `removal_sets → connectivity_vecs` schema — which is exactly the _regressor_ framing §2.1 argues against, and is why the diffusion variant is what shipped. `git log` has it if the argument ever needs the exhibit.
 - `wm_eval.py::remove_frontier_success` — already a containment metric under another name. Warning: Under `blocked` a structured head zeroes the removed node in `T_exo`, so it reads ~1.0 by construction and is **not** informative on this task; read `delta_f1` and the rollout `ens_count_bias` instead.
 
 ---

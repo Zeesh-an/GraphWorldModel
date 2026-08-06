@@ -1,12 +1,16 @@
 """
-Which graph tasks exist, what each one needs, and which are runnable today.
+Which graph tasks exist and what each one needs.
 
 `--task` validates against this registry, and `Layout` uses the name as the first
 level of the results tree, so `results/<task>/<dataset>/<run>/` and
 `research/<task>.md` always agree on spelling.
 
-Every planned entry names the one thing that blocks it. "What would it take to
-add X" is answered here; why it is worth adding is answered in `research/<X>.md`.
+Every entry here is RUNNABLE. Five further tasks were screened, reviewed and
+dropped in August 2026 — cascading failure, graph completion, influence
+estimation, network inference and temporal forecasting — and their literature
+reviews were removed with them; `git log` is the record. `status` and `blocker`
+survive so a future entry can be added in the un-shipped state without changing
+the dataclass or the readers that print it.
 """
 
 from dataclasses import dataclass
@@ -128,8 +132,9 @@ class Task:
     # share a wall clock (research/cascade_prediction.md §2.4, §8.3).
     #
     # It is a field rather than a property of `forecast` because the two are
-    # genuinely separable: `influence_estimation` also forecasts and would do it on
-    # simulated episodes with soft targets, which is a different data path.
+    # genuinely separable: a forecast task on SIMULATED episodes would keep soft
+    # targets and the counterfactual forks, which is a different data path from a
+    # replayed log even though both predict a scalar.
     observational: bool = False
     blocker: str | None = None
 
@@ -450,16 +455,6 @@ tasks = {
         ),
         blocker=None,
     ),
-    "influence_estimation": Task(
-        name="influence_estimation",
-        title="Influence Spread Estimation",
-        status=planned,
-        objective=forecast,
-        dynamics=("IC", "LT"),
-        action_ops=(),
-        summary="Predict sigma(S) without Monte Carlo.",
-        blocker=None,
-    ),
     "cascade_reconstruction": Task(
         name="cascade_reconstruction",
         title="Cascade Reconstruction",
@@ -575,20 +570,6 @@ tasks = {
         ),
         blocker=None,
     ),
-    "network_inference": Task(
-        name="network_inference",
-        title="Diffusion Network Inference",
-        status=planned,
-        objective=recover,
-        dynamics=("IC",),
-        action_ops=("add_edge", "remove_edge", "set_edge_weight"),
-        summary="Recover the latent influence network from cascade traces alone.",
-        blocker="Edge weights are already differentiable via the "
-        "structured_residual head, but edge *existence* is not: edge_index is "
-        "integer, so recovery needs a dense N x N scorer (feasible only at "
-        "N <= ~2K) and a survival likelihood incompatible with the "
-        "teacher-forced loop.",
-    ),
     "cascade_prediction": Task(
         name="cascade_prediction",
         title="Cascade / Popularity Prediction",
@@ -660,45 +641,7 @@ tasks = {
         ),
         blocker=None,
     ),
-    "cascading_failure": Task(
-        name="cascading_failure",
-        title="Cascading Failure in Infrastructure Networks",
-        status=planned,
-        objective=minimize,
-        dynamics=("motter_lai", "dc_power_flow"),
-        action_ops=("remove_node", "remove_edge", "add_edge", "set_edge_weight"),
-        # A bus outage takes the substation and its lines out of the network
-        remove_semantics=blocked,
-        summary="Line trips redistribute load and trigger further failures.",
-        blocker="T_endo is global load redistribution, not local edge-wise "
-        "propagation, so a k-hop encoder structurally cannot see the next "
-        "failure. Motter-Lai (betweenness load + tolerance alpha) is the "
-        "entry point that needs no electrical data.",
-    ),
-    "graph_completion": Task(
-        name="graph_completion",
-        title="Graph Completion under Incompleteness",
-        status=out_of_scope,
-        objective=None,
-        dynamics=(),
-        action_ops=(),
-        summary="Impute missing node features or edges.",
-        blocker="No state evolves and none of the five ops apply — `add_edge` "
-        "here means infer, not intervene. Our model never reads node features "
-        "at all. Useful only as a robustness condition; see the research doc.",
-    ),
-    "temporal_forecasting": Task(
-        name="temporal_forecasting",
-        title="Traffic and Temporal Graph Forecasting",
-        status=out_of_scope,
-        objective=None,
-        dynamics=(),
-        action_ops=(),
-        summary="Forecast continuous node signals over time on a fixed graph.",
-        blocker="No interventions, so T_exo is unused and action-conditioning "
-        "— the contribution — goes untested. No simulator, no counterfactual "
-        "forks, no dataset overlap. Kept for its rollout-training techniques.",
-    ),
+
 }
 
 # A typo in an action op above would silently produce a task whose ops the
@@ -718,9 +661,9 @@ for _task in tasks.values():
         )
 
     # A budget op the planner may not emit is a task whose every candidate is
-    # rejected at validation — cheaper to catch here than one budget in. Only the
-    # runnable tasks are held to it: a planned entry's ops are documentation of
-    # what it WOULD need, and `budget_op` is not settled until it ships.
+    # rejected at validation — cheaper to catch here than one budget in. Guarded on
+    # `runnable` so an entry added in the un-shipped state can carry the ops it
+    # WOULD need before `budget_op` is settled.
     #
     # A forecast task is exempt because it spends NO budget at all: `a_t` is NULL at
     # every step, no plan is ever validated, and naming an op it may emit would
