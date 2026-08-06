@@ -4,7 +4,7 @@ IntNet1 Dataset Loader
 Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
     - 6,474 nodes, 12,572 undirected edges
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 The autonomous-system peering graph in CoreHD / BPD Table I, also reported by

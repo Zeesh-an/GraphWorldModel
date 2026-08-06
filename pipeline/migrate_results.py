@@ -30,7 +30,7 @@ def plan_moves(root: Path, task: str) -> list[tuple[Path, Path]]:
         dataset = config.get("dataset")
         if dataset is None:
             raise ValueError(
-                f"{manifest} has no config.dataset — it predates the manifest "
+                f"{manifest} has no config.dataset: it predates the manifest "
                 f"format and must be moved by hand"
             )
 
@@ -69,7 +69,7 @@ if __name__ == "__main__":
     moves = plan_moves(root, args.task)
 
     if not moves:
-        print(f"[migrate] no pre-task trees under {root}/ — nothing to do")
+        print(f"[migrate] no pre-task trees under {root}/: nothing to do")
         raise SystemExit(0)
 
     for old_dir, new_dir in moves:

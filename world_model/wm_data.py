@@ -20,7 +20,7 @@ ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge = range(6)
 
 # ...and the COMPETITIVE layout (research/influence_blocking.md §2.1): the same
 # (infected, frontier) pair per cascade, then the same four structure/action
-# channels. 6 -> 8, and nothing in the encoders changes — they take (N, in_channels)
+# channels. 6 -> 8, and nothing in the encoders changes: they take (N, in_channels)
 # and are agnostic to what the columns mean, so only this table and the feature
 # builder move.
 #
@@ -40,7 +40,7 @@ competitive_in_channels = 8
 ) = range(8)
 
 # Output columns. The FIRST TWO are the negative cascade under both layouts, which
-# is what lets every existing consumer — the reward, the samplers, the eval suite —
+# is what lets every existing consumer: the reward, the samplers, the eval suite,
 # read `probs[:, 0]` / `probs[:, 1]` and get the quantity being optimized without a
 # single branch. The positive pair is an instrument and never the score.
 out_channels = 2
@@ -74,7 +74,7 @@ epidemic_in_channels = 9
 
 # Output columns, and the first two are load-bearing rather than a choice. Every
 # reader in this pipeline slices `probs[:, 0]` as "the set being scored" and
-# `probs[:, 1]` as "who newly joined it" — the rollout sampler, the one-step suite,
+# `probs[:, 1]` as "who newly joined it", the rollout sampler, the one-step suite,
 # the plots, the summary. Under this layout column 0 is the EVER-infected marginal
 # (the attack set, monotone) and column 1 the INCIDENCE (who left S this step), so
 # all of them keep working with no branch. Columns 2-4 are the current compartments
@@ -117,7 +117,7 @@ degree_floor = 1e-12
 # ├─────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────┼──────────────────┼───────────────────────────────────────────┤
 # │ 1   │ CH_FRONTIER │ node is in the current spreading wave (frontier) at time t, before the action      │ binary 0/1       │ record["state"]["frontier"]               │
 # ├─────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────┼──────────────────┼───────────────────────────────────────────┤
-# │ 2   │ CH_DEGREE   │ log1p(total degree) of the node in the time-t graph A_t — structural connectivity  │ continuous float │ counts of the node in edge_index (in+out) │
+# │ 2   │ CH_DEGREE   │ log1p(total degree) of the node in the time-t graph A_t: structural connectivity  │ continuous float │ counts of the node in edge_index (in+out) │
 # ├─────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────┼──────────────────┼───────────────────────────────────────────┤
 # │ 3   │ CH_ADD      │ node is the target of an add_node op this step (just seeded)                       │ binary 0/1       │ the action bag                            │
 # ├─────┼─────────────┼────────────────────────────────────────────────────────────────────────────────────┼──────────────────┼───────────────────────────────────────────┤
@@ -400,7 +400,7 @@ def build_epidemic_features(
     four exclusive state channels instead of two overlapping ones, plus the
     cumulative attack indicator, then the same degree and action channels.
 
-    `S` is derived rather than stored, because the record has no susceptible list —
+    `S` is derived rather than stored, because the record has no susceptible list,
     a node is susceptible exactly when it is in none of E / I / R. A node VACCINATED
     at an earlier step is in none of them either, and reads as susceptible here;
     that is correct rather than a leak, because the deletion bag stripped its
@@ -513,13 +513,13 @@ def load_episode_endpoints(
     Regroup `transitions_<dm>_<split>.jsonl` by episode into (x, y) pairs.
 
     The labelled data source localization needs, recovered from transitions that
-    already exist — no new simulator, no new action op, no regeneration
+    already exist: no new simulator, no new action op, no regeneration
     (research/source_localization.md §2.1). Per episode:
 
-      * **sources `x`** — the `t = 0`, `branch = "main"` record's action IS the seed
+      * **sources `x`**: the `t = 0`, `branch = "main"` record's action IS the seed
         commit, a bag of `add_node` ops, and the generator writes it for every
         episode of every task.
-      * **observation `y`** — the LAST main record's view of the terminal state, in
+      * **observation `y`**: the LAST main record's view of the terminal state, in
         two forms. `marginal` is that record's `next_marginal_infected`, i.e. the
         MC-averaged `P(infected)`; `binary` is its realized `next_state.infected`.
         §2.9 risk 5 is why both are kept: our marginals are averaged over
@@ -528,7 +528,7 @@ def load_episode_endpoints(
         and only the binarized one is comparable to §5.1.
 
     Warning: `marginal` is the marginal of the LAST STEP, conditioned on the realized
-    trajectory up to it — not the marginal of the whole cascade from `x`. Every
+    trajectory up to it, not the marginal of the whole cascade from `x`. Every
     node infected earlier reads exactly 1.0 and only the final wave is fractional.
     That is still a continuous `y in [0,1]^|V|`, which is the input type SL-VAE
     assumes, and it is what the generator writes; stating it here so nobody reads
@@ -618,14 +618,14 @@ def load_episode_trajectories(
     a trajectory decoder is scored on every step in between, so this keeps all of
     them. Per episode:
 
-      * **activation time `t(v)`** — the step at which `v` first appears in
+      * **activation time `t(v)`**: the step at which `v` first appears in
         `next_state.frontier`. §2.2's central asset: the `frontier` channel IS the
         quantity DITTO's NRMSE scores and Rozenshtein's `FR` scheme samples, and
         the generator has been writing it every step all along.
-      * **the transmission edge** — `parents`, which only exists under
+      * **the transmission edge**: `parents`, which only exists under
         `--trace-parents`. Absent means the tree half cannot be scored and the
         caller must say so rather than silently reporting the easy half (§2.6).
-      * **`states` / `frontiers`** — `(T + 1, N)` binary, one row per step, so a
+      * **`states` / `frontiers`**: `(T + 1, N)` binary, one row per step, so a
         decoder's whole output can be compared against the whole truth.
 
     Sources are the `t = 0` bag's `add_node` targets, exactly as in
@@ -765,7 +765,7 @@ def dataset_is_epidemic(out_dir: Path) -> bool:
     Read rather than passed, for the same reason `dataset_is_competitive` is: a
     9-channel head fed 6-channel features fails loudly at the first matmul, but a
     6-channel head fed a compartmental dataset would silently fit the ever-infected
-    marginal alone — losing recovery entirely, which is the exact failure mode
+    marginal alone: losing recovery entirely, which is the exact failure mode
     research/epidemic_control.md §2.4 says this task exists to expose.
     """
     metadata_path = Path(out_dir) / "metadata.json"
@@ -783,7 +783,7 @@ def epidemic_rates(out_dir: Path, diffusion_model: str) -> dict:
     Read back rather than taken from a flag, for the same reason the competitive
     tie-break is: a head whose recovery rate disagrees with the simulator that made
     the targets is fit against a transition that never happened, and nothing about
-    the loss curve would say so. §8.2 trap 2 is the other half — beta and gamma are
+    the loss curve would say so. §8.2 trap 2 is the other half: beta and gamma are
     free parameters nobody standardizes, so a run that cannot state its own is
     comparable to nothing.
     """

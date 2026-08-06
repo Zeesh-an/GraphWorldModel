@@ -9,12 +9,12 @@ Source: https://github.com/SparklyYS/Simultaneous-IMM (mirror of Wei Chen's data
       directed graph with a symmetric adjacency (identical IC/LT behaviour,
       since p(u→v) = 1/in-degree(v) and in-degree == out-degree == degree here)
     - Standard benchmark for Influence Maximization
-    - No inherent node features — uses log(1 + total degree) as synthetic features
+    - No inherent node features: uses log(1 + total degree) as synthetic features
     - No node labels
 
 Wei Chen's original `hep.txt` (see `netphy.py`, same archive) declares
 15,233 nodes / 58,891 edge LINES; deduplicating its multi-edges and dropping
-39 self-loops gives 31,359 undirected edges. This mirror has 31,376 — the same
+39 self-loops gives 31,359 undirected edges. This mirror has 31,376: the same
 graph to within 17 edges (0.05%). The "31.4K undirected" in the SSA/D-SSA
 benchmark table is this count; the "58,891" in IRIE's table is the raw line
 count. See research/influence_maximization.md §6.4.1.
@@ -47,16 +47,16 @@ def download_nethept() -> Path:
     attribute_path = data_dir / "attribute.txt"
 
     if graph_path.exists():
-        print(f"[✓] NetHEPT already downloaded at {graph_path}")
+        print(f"[ok] NetHEPT already downloaded at {graph_path}")
         return graph_path
 
-    print("[↓] Downloading NetHEPT edge list ...")
+    print("[get] Downloading NetHEPT edge list ...")
     urllib.request.urlretrieve(nethept_graph_url, graph_path)
-    print(f"[✓] Saved edge list to {graph_path}")
+    print(f"[ok] Saved edge list to {graph_path}")
 
-    print("[↓] Downloading NetHEPT attributes ...")
+    print("[get] Downloading NetHEPT attributes ...")
     urllib.request.urlretrieve(nethept_attribute_url, attribute_path)
-    print(f"[✓] Saved attributes to {attribute_path}")
+    print(f"[ok] Saved attributes to {attribute_path}")
 
     return graph_path
 
@@ -130,10 +130,10 @@ def load_nethept(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
     # Placeholder labels
     node_labels = np.zeros(num_nodes, dtype=np.int32)
 
-    print(f"[✓] NetHEPT loaded: {num_nodes} nodes, {adjacency.nnz} directed edges")
-    print(f"    In-degree  — avg: {in_degrees.mean():.1f}, max: {in_degrees.max():.0f}")
+    print(f"[ok] NetHEPT loaded: {num_nodes} nodes, {adjacency.nnz} directed edges")
+    print(f"    In-degree: avg: {in_degrees.mean():.1f}, max: {in_degrees.max():.0f}")
     print(
-        f"    Out-degree — avg: {out_degrees.mean():.1f}, max: {out_degrees.max():.0f}"
+        f"    Out-degree: avg: {out_degrees.mean():.1f}, max: {out_degrees.max():.0f}"
     )
 
     return adjacency, node_feats, node_labels, num_nodes

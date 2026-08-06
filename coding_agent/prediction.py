@@ -12,7 +12,7 @@ this cannot demonstrate the capability the project is about.
 It is here anyway, for the reason §9.1 gives and nothing else in `research/` can
 claim: **this is the falsification test for our IC/LT assumption.** Every other task
 in this repo evaluates a learned model against traces drawn from the same NDlib
-simulator that trained it — a closed loop that can only ever measure learning error,
+simulator that trained it: a closed loop that can only ever measure learning error,
 never modelling error. A real Weibo cascade breaks the loop. Our structured head's
 `p_new(v) = 1 - prod(1 - q(u->v) * frontier_u)` is either an adequate approximation
 of whatever produced those retweets or it is not, and §2.2 names three specific
@@ -23,28 +23,28 @@ and to design the experiment so that losing is informative.
 
 Four pieces:
 
-  * **`load_forecasts`** — the `(G, prefix, P(t_p))` instances, regrouped from
+  * **`load_forecasts`**: the `(G, prefix, P(t_p))` instances, regrouped from
     transitions that were REPLAYED rather than simulated (`data/wm_cascades.py`). No
     new simulator and no new action op, but a hard precondition: the dataset must
     carry the `observed` block, because §2.2's whole argument collapses if the
     "real cascade" is an NDlib rollout.
 
-  * **`bind_forecast_marginals`** — the ONE new primitive, and its four bindings.
+  * **`bind_forecast_marginals`**: the ONE new primitive, and its four bindings.
     `@native` gets a raiser; `@monte_carlo` / `@oracle` / `@world_model` each unroll
     their own environment's `step_marginals`. The generated predictor is
-    byte-identical across arms 3-6 and only its oracle changes — which is what keeps
+    byte-identical across arms 3-6 and only its oracle changes, which is what keeps
     conditions 3-6 an ablation on one variable even though the ACTION space is
     empty. §2.1 says five of six arms have nothing to distinguish them; that is true
     of the action space and false of the forward model, and this is where the
     difference lives.
 
-  * **`evaluate_predictor`** — the outer loop's reward, an ERROR that minimizes.
+  * **`evaluate_predictor`**: the outer loop's reward, an ERROR that minimizes.
     §8.1's first sentence is "Get MSLE right or nothing else matters", and three
     independent choices hide inside that name (log base, total vs increment, the
     smoothing offset), so every variant is computed and the reward names which one
     it used.
 
-  * **`trivial_predictor_error`** — what predicting the training geometric mean
+  * **`trivial_predictor_error`**: what predicting the training geometric mean
     scores. The analogue of `trivial_decoder_reward`, and needed for a sharper
     reason than that one: MSLE is an error in LOG space, so an instance-blind
     constant is a much stronger baseline than intuition suggests, and a program
@@ -54,7 +54,7 @@ Four pieces:
 Like the two inverse tasks, the reward is EXACT: it is measured against a
 popularity we read off a log, so it carries no evaluator noise and is comparable
 across conditions without the `--compare` referee. The referee still runs and
-measures something else — what the ARM's own evaluator thinks the cascade would
+measures something else: what the ARM's own evaluator thinks the cascade would
 have done, which is §9.1's modelling error in the units the rest of this repo
 reports.
 """
@@ -104,7 +104,7 @@ class CascadeObservation:
 
     `adopters` maps every node that adopted inside the observation window to the
     timestep it did, so a predictor has the WHOLE observed history rather than a
-    count — which is the input Cheng et al.'s temporal features (the class their
+    count, which is the input Cheng et al.'s temporal features (the class their
     paper found dominates) are computed from. `frontier` is the last observed wave,
     and it is what a forward model has to be seeded from: an adopter three steps ago
     has already transmitted.
@@ -120,7 +120,7 @@ class CascadeObservation:
     observed_steps: int = 0
     horizon: int = 0
     # Wall-clock publication time, so a predictor can key off the diurnal rhythm the
-    # Weibo protocol filters on (§8.2). Never the ANSWER — that is `actual`, and it
+    # Weibo protocol filters on (§8.2). Never the ANSWER: that is `actual`, and it
     # lives on the instance rather than here.
     publish_time: int = 0
 
@@ -160,7 +160,7 @@ class ForecastOracle:
     Held as an object rather than a bare closure for the same reason
     `localization.ForwardOracle` and `reconstruction.StepOracle` are: the call count
     IS the cost claim. One call unrolls `steps` timesteps across `samples`
-    realizations, so it costs `steps * samples` metered kernel evaluations — which
+    realizations, so it costs `steps * samples` metered kernel evaluations, which
     an @monte_carlo arm pays in real episodes and a @world_model arm pays in
     matmuls. §2.4 lists "reaching published-table parity: not worth it" and the
     diagnostic as the point, and this counter is the diagnostic.
@@ -236,11 +236,11 @@ def unavailable_forecast_marginals(_adopters, _frontier, _steps) -> np.ndarray:
     Raising rather than being absent for the same reason the other two raisers do:
     an AttributeError traceback costs a whole refinement iteration and a message
     that names the condition costs one repair turn. The experimental condition is
-    identical either way — §2.1 says the action space goes idle, so what conditions
+    identical either way: §2.1 says the action space goes idle, so what conditions
     3-6 actually vary is the FORWARD MODEL, and this arm is the one that answers
     whether having one is worth anything at all. §3.1 and §5.1 both say it may not
     be: feature-driven regression "in some cases even beat[s] deep learning models",
-    and Feature-based scores MSLE 1.9881 on APS-3y against CasFlow's 1.4370 — closer
+    and Feature-based scores MSLE 1.9881 on APS-3y against CasFlow's 1.4370: closer
     than a decade of architecture would suggest.
     """
     raise StrategyError(
@@ -248,7 +248,7 @@ def unavailable_forecast_marginals(_adopters, _frontier, _steps) -> np.ndarray:
         "arm has NO forward model, by design. It exists to measure whether one is "
         "worth anything at all for popularity prediction, and the literature "
         "suggests it may not be. Write a purely feature-driven or point-process "
-        "predictor instead — Szabo-Huberman's log-linear rule on the observed count, "
+        "predictor instead: Szabo-Huberman's log-linear rule on the observed count, "
         "the reshare rate in the second half of the window (Cheng et al.'s single "
         "best feature), a branching-factor extrapolation, a Hawkes fit on the wave "
         "series. `cascade_features(graph, observation)` gives you all of them."
@@ -275,14 +275,14 @@ def observed_waves(episode: dict, window: int) -> dict[int, int]:
     Read off `frontiers` rather than off `activation_time`, and the offset is the
     whole reason this is a function. `load_episode_trajectories` builds `frontiers`
     as `(steps + 1, N)` where row 0 is the episode's INITIAL frontier and row `r + 1`
-    is record `r`'s `next_state.frontier` — so under our replay, where record `t`
+    is record `r`'s `next_state.frontier`, so under our replay, where record `t`
     carries the wave binned at `t`, wave `t` is row `t + 1`. Its `activation_time`
     field applies a different convention (`enumerate(records, start=1)` with the
     sources forced to 0), which is correct for the simulated episodes cascade
     reconstruction scores and is off by one for a replayed one.
 
     Taking the rows directly means the prefix a predictor sees is exactly the
-    `window` bins the protocol says it should, rather than one fewer — an error in
+    `window` bins the protocol says it should, rather than one fewer: an error in
     the SAFE direction, which is why it would never have surfaced as a failure.
     """
     frontiers = episode["frontiers"]
@@ -290,8 +290,8 @@ def observed_waves(episode: dict, window: int) -> dict[int, int]:
 
     # `frontiers` has `len(records) + 1` rows, so wave `t` (row `t + 1`) exists only
     # up to `t = len(records) - 1`. A cascade SHORTER than the observation window is
-    # the normal case rather than an edge one — most cascades are over long before
-    # `t_o` — so the bound is a clamp rather than a guard.
+    # the normal case rather than an edge one: most cascades are over long before
+    # `t_o`, so the bound is a clamp rather than a guard.
     last = min(window, frontiers.shape[0] - 2)
 
     for step in range(last + 1):
@@ -418,7 +418,7 @@ def implemented(strategy: object, name: str) -> object | None:
 
     Same identity check as the other two harnesses, and here for the same reason:
     `Strategy` is a `typing.Protocol` whose method bodies are `...`, so subclassing
-    it inherits a `predict` that returns None — which this task would then read as a
+    it inherits a `predict` that returns None, which this task would then read as a
     DECLINE rather than as a missing contract, and quietly score the arm as having
     refused every cascade.
     """
@@ -438,7 +438,7 @@ def validate_prediction(value: object, instance: ForecastInstance) -> float | No
     than an error (§8.4): SEISMIC returns no prediction for a supercritical cascade
     because the expected size diverges, and forcing a number there would be a guess
     dressed as a model. What is NOT legitimate is a popularity below what was already
-    observed — a progressive cascade cannot shrink, and an observation is ground
+    observed: a progressive cascade cannot shrink, and an observation is ground
     truth about the nodes it reports.
     """
     if value is None:
@@ -515,7 +515,7 @@ def evaluate_predictor(
 
     Returns the same `(Trajectory, plan_seconds)` pair `evaluate_strategy` does, so
     every method (one_shot, evolve, the checkpointing, the population feedback)
-    consumes it unchanged. `reward` is the configured ERROR, which MINIMIZES — the
+    consumes it unchanged. `reward` is the configured ERROR, which MINIMIZES: the
     one family in this repo whose reward does.
     """
     start = time.perf_counter()
@@ -596,7 +596,7 @@ def evaluate_predictor(
         raise StrategyError(
             f"predict() declined all {declined} cascades, so there is nothing to "
             f"score. Declining is legitimate for a GENERATIVE model on a "
-            f"supercritical cascade (research/cascade_prediction.md §8.4 — SEISMIC "
+            f"supercritical cascade (research/cascade_prediction.md §8.4: SEISMIC "
             f"does exactly that on ~3% of Tweet-1Mo), but a predictor that never "
             f"answers has no error to report. Fall back to a feature-driven estimate "
             f"when your generative fit diverges."
@@ -648,7 +648,7 @@ def trivial_predictor_error(
 
     The analogue of `reconstruction.trivial_decoder_reward`, and needed for a
     sharper reason: MSLE is an error in LOG space, so its minimizer over an
-    instance-blind constant is the geometric mean of the training sizes — a much
+    instance-blind constant is the geometric mean of the training sizes: a much
     stronger baseline than the same idea would be under squared error. An arm that
     only ties with this row has discovered the corpus's size distribution and
     nothing about the instance, and a reader cannot see that from the arm's own
@@ -692,7 +692,7 @@ def referee_modelling_error(
 
     The `--compare` referee for this task, and the number §9.1 is actually about.
     The reward already measures how good a PROGRAM is; this measures how good the
-    MODEL is — roll `f_theta` (or NDlib, or the analytic IC form) forward from the
+    MODEL is: roll `f_theta` (or NDlib, or the analytic IC form) forward from the
     observed prefix with no program in the loop, and compare its expected popularity
     against what the log says happened. That difference is modelling error against a
     process that is not IC, which is the one quantity no other task in this repo can
@@ -754,7 +754,7 @@ def summarize_prediction(
     matters is OVER- against UNDER-prediction: MSLE is symmetric in log space, so a
     model that misses every viral cascade and one that invents virality everywhere
     can post the same number, and only the sign of the residual tells them apart.
-    That is also the failure §2.2 predicts specifically — a saturating IC rollout
+    That is also the failure §2.2 predicts specifically: a saturating IC rollout
     over-predicts, and our own `ens_count_bias` metric exists to catch exactly it.
     """
     cost = trajectory.cost
@@ -773,7 +773,7 @@ def summarize_prediction(
         f"{metric.upper()}={trajectory.reward:.4f} (LOWER IS BETTER) over "
         f"{metrics.get('n_scored', 0)} logged cascades, "
         f"{metrics.get('n_failed', 0)} declined "
-        f"({metrics.get('decline_rate', 0.0):.1%} — declining is legitimate for a "
+        f"({metrics.get('decline_rate', 0.0):.1%}, declining is legitimate for a "
         f"generative fit that diverges, and it is counted rather than penalized)",
         f"log-space errors: MSLE={metrics.get('msle', float('nan')):.4f}  "
         f"MALE={metrics.get('male', float('nan')):.4f}  "
@@ -808,14 +808,14 @@ def summarize_prediction(
                 f"DIAGNOSIS: you are systematically {direction}-predicting by about "
                 f"{2 ** abs(float(np.mean(residuals))):.1f}x. MSLE is symmetric in "
                 f"log space, so a constant multiplicative bias is the cheapest thing "
-                f"to fix and it costs nothing structural — rescale before changing "
+                f"to fix and it costs nothing structural: rescale before changing "
                 f"the model."
             )
 
     if task.observes:
         lines.append(
             "NOTE: these are REAL logged cascades, not simulated ones. Whatever "
-            "produced them is not Independent Cascade — adoption is not memoryless, "
+            "produced them is not Independent Cascade: adoption is not memoryless, "
             "exposure is repeated rather than one-shot per neighbour, and some "
             "adopters arrive with no adopting neighbour at all. A forward model that "
             "assumes otherwise will be wrong in a systematic direction, and the "
@@ -883,7 +883,7 @@ def resolve_target(target: str) -> str:
         raise ValueError(
             f"unknown --cp-target {target!r}; choose one of {valid_targets}. "
             f"{increment_target!r} is CasFlow's own label and {total_target!r} is "
-            f"CasFT's Eq. 26 — research/cascade_prediction.md §5.7 difference 3 "
+            f"CasFT's Eq. 26: research/cascade_prediction.md §5.7 difference 3 "
             f"records that the two share a symbol and are not the same quantity."
         )
 

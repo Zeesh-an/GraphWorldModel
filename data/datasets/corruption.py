@@ -4,7 +4,7 @@ Corruption Dataset Loader
 Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
     - 309 nodes, 3,281 undirected edges
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Brazilian corruption scandals 1987-2014: nodes are people, an edge means two

@@ -16,8 +16,8 @@
 #
 #   1. taoke        auto-downloads, small, and the only corpus here with a REAL
 #                   logged transmission edge. Warning: 6.5 lists it under "not
-#                   recommended" (too new, single-paper) and it is FRONT-LOADED —
-#                   85% of its items launch within 14 minutes — so it runs under
+#                   recommended" (too new, single-paper) and it is FRONT-LOADED,
+#                   85% of its items launch within 14 minutes, so it runs under
 #                   the RANDOM split, which is the only protocol it supports. Smoke
 #                   test, not a result.
 #   2. digg_cascades auto-downloads, real social graph, real vote times. Its windows

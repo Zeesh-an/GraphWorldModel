@@ -31,7 +31,7 @@
 #                 optional axes: a program that only works under IC has encoded
 #                 IC-specific structure rather than an inference rule
 #
-# The GRAPH axis — the headline, and the one no per-instance method can enter —
+# The GRAPH axis: the headline, and the one no per-instance method can enter,
 # is not here because it needs a finished run to transfer FROM. Run the dataset
 # sweep first, then per (source, target) pair:
 #

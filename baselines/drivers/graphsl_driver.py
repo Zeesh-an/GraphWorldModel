@@ -14,7 +14,7 @@ comparison it exists to produce:
   * **It never calls GraphSL's `test()` / `infer()`.** Those score against the
     label column internally and return only an aggregate `Metric`, so no
     per-instance prediction escapes them. We need the SOURCE SET itself, because
-    our own referee scores it — the same discipline every external baseline in
+    our own referee scores it: the same discipline every external baseline in
     this repo follows. The prediction lines are therefore reproduced here from
     each method's own `test` body.
 
@@ -37,7 +37,7 @@ Environment:
     GWM_GRAPHSL_SEED     random seed
 """
 
-# `GraphSL` is installed in baselines/external/graphsl/.venv, NOT in ours — that
+# `GraphSL` is installed in baselines/external/graphsl/.venv, NOT in ours: that
 # isolation is the whole point of the external-baseline design, since its pins
 # and ours cannot coexist. An editor resolving this file against the project
 # interpreter therefore reports every GraphSL import as missing, and it is right
@@ -286,7 +286,7 @@ def predict_slvae(adjacency, train_dataset, all_datasets, _payload, epochs, seed
     # SL-VAE's inference is itself an optimization: initialize a seed vector from
     # the VAE's training latents, then descend the forward-reconstruction loss on
     # it per instance. Reproduced from `SLVAE.infer`, minus its metric block. Note
-    # what this costs — one gradient loop PER TEST INSTANCE is exactly the
+    # what this costs: one gradient loop PER TEST INSTANCE is exactly the
     # per-instance optimization research/source_localization.md §1 puts SL-VAE in
     # the non-amortized row for.
     slvae_model = slvae_model.to(model.device)

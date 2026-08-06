@@ -1,5 +1,5 @@
 """
-Named classical INFLUENCE BLOCKING baselines — the condition-1 floor for
+Named classical INFLUENCE BLOCKING baselines: the condition-1 floor for
 `--task influence_blocking`.
 
 Two contracts, because this literature has two shapes of intervention
@@ -18,23 +18,23 @@ right op and charges the right budget.
 Read §5.4 and §5.3 before treating any of these as a weak floor. In ascending order
 of danger:
 
-  1. `random_blocking`, `degree_blocking` — the free wins, and `degree_blocking` is
+  1. `random_blocking`, `degree_blocking`: the free wins, and `degree_blocking` is
      free for a REASON worth internalizing: CLDAG's own §6.3 reports that "the
      traditional degree heuristic cannot be used for influence blocking maximization
      at all". This is the exact opposite of influence maximization, where degree is
      the strong cheap baseline. A blocking result that only beats degree has beaten
      nothing.
-  2. **`proximity`** — pick the out-neighbours of the rumour's own seeds. CLDAG finds
+  2. **`proximity`**: pick the out-neighbours of the rumour's own seeds. CLDAG finds
      it strong enough to trail only CLDAG itself until the negative cascade can
      traverse long paths, and StratLearner's Table 1 has it at 0.770 / 0.776 on
      power-law and ER, above every learned method except StratLearner. It is also
-     UNSTABLE — 0.170 on Facebook — which is what makes it interesting rather than
+     UNSTABLE (0.170 on Facebook) which is what makes it interesting rather than
      merely strong. This is the row to beat.
-  3. **`imin_lhga`** — SandIMIN's own trivial highest-gain heuristic, which wins
+  3. **`imin_lhga`**: SandIMIN's own trivial highest-gain heuristic, which wins
      outright in 6 of the 30 cells of its Table 5 against the two principled methods
      in the same paper. A published VLDB algorithm is beaten by a greedy heuristic a
      fifth of the time, so any table we publish needs this row or it is not evidence.
-  4. **`cmia_o`** — Wu & Pan's MIA-style method is still the standard scalable IBM
+  4. **`cmia_o`**: Wu & Pan's MIA-style method is still the standard scalable IBM
      baseline and was still being benchmarked against in 2023 (NIE).
 
 Two conventions everything here obeys:
@@ -92,7 +92,7 @@ def _candidate_pool(
     Nodes worth spending budget on: the rumour's reachable region, sources excluded.
 
     Falls back to the whole graph when `negative_seeds` is empty, which only happens
-    in a degenerate configuration — every real blocking instance has a rumour.
+    in a degenerate configuration: every real blocking instance has a rumour.
     """
     sources = {int(node) for node in negative_seeds}
 
@@ -119,7 +119,7 @@ def _pad(chosen: list[int], graph: GraphInfo, budget: int, protected=()) -> list
     """
     Top up a short blocker set with the highest-degree nodes not already in it.
 
-    Every structural member can run out before the budget does — the rumour's
+    Every structural member can run out before the budget does: the rumour's
     out-neighbourhood is smaller than `k`, the RR sets are exhausted, the MIA
     arborescences are all covered. A short set silently under-spends and reads as a
     weak method rather than as a small candidate pool.
@@ -139,7 +139,7 @@ def _pad(chosen: list[int], graph: GraphInfo, budget: int, protected=()) -> list
     return chosen
 
 
-# Live-edge sampling and dominators — shared by the percolation family
+# Live-edge sampling and dominators: shared by the percolation family
 def _sample_live_graph(graph: GraphInfo, rng: np.random.Generator) -> dict[int, list[int]]:
     """One IC live-edge realization as an out-adjacency."""
     live = {node: [] for node in range(graph.num_nodes)}
@@ -178,7 +178,7 @@ def dominator_tree(
     `(idom, subtree sizes)` for the reachable region of one live-edge graph.
 
     A node `v` dominates `w` when EVERY path from the sources to `w` runs through
-    `v`, so deleting `v` disconnects exactly `v`'s dominator subtree — and that
+    `v`, so deleting `v` disconnects exactly `v`'s dominator subtree, and that
     subtree size is precisely the reduction in reachable set from cutting `v`. One
     tree therefore scores every candidate at once, which is why it is the right
     primitive for both Xie's AdvancedGreedy (their Algorithm 2 builds the same tree,
@@ -208,7 +208,7 @@ def dominator_tree(
         if int(node) in position and int(node) not in removed
     }
     # A virtual super-source, encoded as "the seeds have no predecessor and are
-    # their own immediate dominator" — which is what makes the tree well defined for
+    # their own immediate dominator", which is what makes the tree well defined for
     # a seed SET rather than a single root
     idom = {node: (node if node in roots else None) for node in order}
 
@@ -307,7 +307,7 @@ def multi_hop_proximity(
     hops: int = 4,
     **kwargs: object,
 ) -> list[int]:
-    """Rank by damped reach from the rumour times onward degree — proximity past hop 1."""
+    """Rank by damped reach from the rumour times onward degree: proximity past hop 1."""
     exposure = exposure_scores(graph, negative_seeds, hops=hops)
     onward = primitives.compute_out_degree(graph)
     scores = exposure * (1.0 + onward)
@@ -330,7 +330,7 @@ def degree_blocking(
     negative_seeds=(),
     **kwargs: object,
 ) -> list[int]:
-    """Top-degree nodes, ignoring the rumour entirely — CLDAG reports this fails outright."""
+    """Top-degree nodes, ignoring the rumour entirely: CLDAG reports this fails outright."""
     sources = {int(node) for node in negative_seeds}
     ranked = [
         node
@@ -411,7 +411,7 @@ def _prevention_sets(
     Tong's R-tuples: for a sampled target `w`, which nodes could have SAVED it.
 
     Under the live-edge characterisation a node `w` reached by the rumour is saved by
-    a positive seed `v` iff `v` reaches it no later than the rumour does — `<=` under
+    a positive seed `v` iff `v` reaches it no later than the rumour does: `<=` under
     positive dominance and `<` under negative dominance (§8.4, TC-AIBM Lemma 1). So
     one sample is: draw a live-edge graph, draw a target `w` the rumour reaches,
     compute its distance from `S_N`, and collect every node whose distance to `w`
@@ -610,7 +610,7 @@ def cmia_o(
     hole in §5), so this is the MIA construction it is built on rather than a
     transcription: maximum-influence paths from `S_N` and from the blocker set,
     truncated at `mia_threshold`, with a node counted as saved when the positive path
-    arrives no later than the negative one — `<=` under positive dominance and `<`
+    arrives no later than the negative one: `<=` under positive dominance and `<`
     under negative, which is the same live-edge criterion `rps` uses. Greedy over
     candidates, recomputing the positive arborescence after each pick.
 
@@ -693,7 +693,7 @@ def random_blocking(
     seed: int = 0,
     **kwargs: object,
 ) -> list[int]:
-    """Uniformly random non-source nodes — the floor every table needs."""
+    """Uniformly random non-source nodes: the floor every table needs."""
     rng = np.random.default_rng(seed)
     pool = [
         node
@@ -721,7 +721,7 @@ def greedy_prevention(
     Budak's Greedy / TC-AIBM's `Greedy-B`: marginal-gain greedy on simulated prevented influence.
 
     The honest classical cost of this problem and the method every scalable paper
-    exists to avoid — `budget x candidates x mc_runs` competitive episodes. Blocked
+    exists to avoid: `budget x candidates x mc_runs` competitive episodes. Blocked
     from generated scripts by default for the same reason `celf` is: its episodes run
     on a private simulator and never reach `real_env_episodes`.
     """
@@ -756,7 +756,7 @@ def greedy_prevention(
     return _pad(chosen, graph, budget, negative_seeds)
 
 
-# Node blocking (lever: remove_node) — the IMIN line
+# Node blocking (lever: remove_node), the IMIN line
 def imin_lhga(
     graph: GraphInfo,
     budget: int,
@@ -789,7 +789,7 @@ def imin_lsbm(
     """
     SandIMIN's lower-bound sampling maximization: RR coverage over the blockable candidates.
 
-    Warning: WHAT THIS IMPLEMENTS. SandIMIN's contribution is a SANDWICH — a submodular
+    Warning: WHAT THIS IMPLEMENTS. SandIMIN's contribution is a SANDWICH, a submodular
     lower bound and upper bound around the non-submodular IMIN objective, with the
     `(1 - 1/e - eps)` guarantee holding on the bound rather than on the objective.
     This is the lower-bound component's selection rule (reverse-reachable coverage
@@ -842,7 +842,7 @@ def advanced_greedy(
     Xie et al. ICDE'23 / IJoC'25 AdvancedGreedy: delete the vertex that dominates the most reach.
 
     Their Algorithm 2 accelerates the baseline greedy by building a DOMINATOR TREE
-    over sampled live-edge graphs — verified from `src/AdvancedGreedy.cpp`, which
+    over sampled live-edge graphs: verified from `src/AdvancedGreedy.cpp`, which
     ships a Lengauer-Tarjan implementation (`struct tl` with `semi` / `idom` / `dt`)
     and restricts candidates to the sources' out-neighbours. A node's dominated
     subtree size IS the reduction in reachable set from deleting it, which is why one
@@ -895,7 +895,7 @@ def greedy_replace(
     greedy forward, then walk the picks in REVERSE, un-remove each one and let the
     candidate rule choose again, stopping the moment it re-chooses the same node. The
     ICDE'23 Tables V-VI put it within 0.12% of the exact optimum at `b = 4` in a
-    third of a second against 22 hours — which is the sharpest single statement of
+    third of a second against 22 hours, which is the sharpest single statement of
     why this problem is combinatorially brutal and empirically easy.
     """
     removed = advanced_greedy(
@@ -934,8 +934,8 @@ def kimura_link_blocking(
     """
     Kimura, Saito & Motoda (AAAI 2008): block `k` links to minimize expected contamination.
 
-    Their estimator is the BOND PERCOLATION method — sample live-edge graphs and
-    measure reachability on them — and their solver is plain greedy with no
+    Their estimator is the BOND PERCOLATION method: sample live-edge graphs and
+    measure reachability on them, and their solver is plain greedy with no
     approximation guarantee claimed. Implemented here as: on each sampled realization
     build the dominator tree from `S_N`, and credit the arc `(idom(v), v)` with `v`'s
     dominated subtree size, which is exactly the reduction in contamination from
@@ -968,7 +968,7 @@ def out_edge_blocking(
     negative_seeds=(),
     **kwargs: object,
 ) -> list[tuple]:
-    """Cut the highest `exposure(u) * p(u,v)` arcs — the cheapest sensible edge floor."""
+    """Cut the highest `exposure(u) * p(u,v)` arcs: the cheapest sensible edge floor."""
     exposure = exposure_scores(graph, negative_seeds)
     scores = {}
 
@@ -1003,7 +1003,7 @@ def edge_betweenness_blocking(
     scores = {}
     for source in sources:
         # Shortest-path counts by BFS, credited to the arc each node was first
-        # reached through — the sampled-pivot edge betweenness restricted to the
+        # reached through: the sampled-pivot edge betweenness restricted to the
         # rumour's own sources, which is the only region that can matter (§8.1)
         distance = {source: 0}
         parent = {}
@@ -1033,7 +1033,7 @@ def random_edge_blocking(
     seed: int = 0,
     **kwargs: object,
 ) -> list[tuple]:
-    """Uniformly random arcs — the edge-lever floor."""
+    """Uniformly random arcs: the edge-lever floor."""
     rng = np.random.default_rng(seed)
     total = graph.edge_index.shape[1]
     chosen = rng.choice(total, size=min(budget, total), replace=False)
@@ -1095,7 +1095,7 @@ edge_blocking_algorithms = {
 
 # What a member RETURNS, which is what decides whether a lever can emit it: a node
 # selector serves both node levers and an arc selector serves both edge levers.
-# `degree_blocking` is the clearest case — "the top-degree nodes" is the same
+# `degree_blocking` is the clearest case: "the top-degree nodes" is the same
 # computation whether you seed them or delete them.
 node_shape = "node"
 edge_shape = "edge"
@@ -1109,7 +1109,7 @@ lever_shape = {
 
 
 def blocking_shape(name: str) -> str:
-    """`node` or `edge` — what this member hands back."""
+    """`node` or `edge`: what this member hands back."""
     return edge_shape if name in edge_blocking_algorithms else node_shape
 
 
@@ -1119,7 +1119,7 @@ def emittable(name: str, lever: str) -> bool:
 
 
 # The sub-literature each member comes from, for the menus and the report. NOT the
-# compatibility rule — that is `emittable` above — because several members are
+# compatibility rule (that is `emittable` above) because several members are
 # published in one line and perfectly usable in the other.
 blocking_levers = {
     "proximity": "counter_seed",
@@ -1152,12 +1152,12 @@ mc_blocking_algorithms = ("greedy_prevention",)
 # dangerous the row is (§9.3), and each one leads with the baseline that actually has
 # to be beaten rather than with a floor.
 #
-#   counter_seed  `proximity` — above every learned method except StratLearner on
+#   counter_seed  `proximity`: above every learned method except StratLearner on
 #                 two of that paper's three graphs, and CLDAG finds it trails only
 #                 CLDAG until the rumour can traverse long paths
-#   node_block    `imin_lhga` — SandIMIN's own trivial heuristic, which beats both of
+#   node_block    `imin_lhga`: SandIMIN's own trivial heuristic, which beats both of
 #                 that paper's principled methods in 6 of its 30 cells
-#   edge/weight   `kimura_link_blocking` — the founding link-blocking method, and the
+#   edge/weight   `kimura_link_blocking`: the founding link-blocking method, and the
 #                 only published one for this lever with a stated estimator
 #
 # `degree_blocking` is in the node pools as the published FAILURE mode, not as a

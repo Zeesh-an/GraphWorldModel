@@ -8,7 +8,7 @@ Source: https://snap.stanford.edu/data/ego-Twitter.html
     - Union of 973 ego networks
     - Originally directed: edge (a, b) means a follows b
     - Symmetrized to undirected during loading
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 """
 
@@ -30,19 +30,19 @@ def download_twitter() -> Path:
     txt_path = data_dir / "twitter_combined.txt"
 
     if txt_path.exists():
-        print(f"[✓] Twitter already downloaded at {txt_path}")
+        print(f"[ok] Twitter already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading Twitter from {twitter_url} ...")
+        print(f"[get] Downloading Twitter from {twitter_url} ...")
         urllib.request.urlretrieve(twitter_url, gz_path)
-        print(f"[✓] Saved to {gz_path}")
+        print(f"[ok] Saved to {gz_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with gzip.open(gz_path, "rb") as gz_file:
         with open(txt_path, "wb") as txt_file:
             txt_file.write(gz_file.read())
-    print(f"[✓] Extracted to {txt_path}")
+    print(f"[ok] Extracted to {txt_path}")
 
     return txt_path
 
@@ -112,7 +112,7 @@ def load_twitter(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
 
     n_edges_undirected = adjacency.nnz // 2
     print(
-        f"[✓] Twitter loaded: {num_nodes} nodes, "
+        f"[ok] Twitter loaded: {num_nodes} nodes, "
         f"{n_edges_undirected} undirected edges"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")

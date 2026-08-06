@@ -7,7 +7,7 @@ function, in the same shape as `stream.GraphEditStream.wrap`, which is why no
 environment changed:
 
   * **The outbreak.** In influence maximization the planner starts the cascade.
-    In containment it does not — an outbreak is already running and the budget
+    In containment it does not: an outbreak is already running and the budget
     buys blockers. The outbreak is therefore injected at t=0 as `add_node` ops the
     planner neither chooses nor pays for, exactly as the edit stream injects edge
     ops it is not charged for.
@@ -15,7 +15,7 @@ environment changed:
   * **Deletion as a bag.** §2.3's "lazy fix": `remove_node(v)` plus one
     `remove_edge` per incident arc, so node deletion needs no sixth op. This is
     not cosmetic. Both structured heads document that a blocked node's edges are
-    "gone from edge_index" and rely on it — `ICTransmissionHead` zeroes the node's
+    "gone from edge_index" and rely on it: `ICTransmissionHead` zeroes the node's
     `infected` channel under `blocked`, which makes it a fresh susceptible that
     its (still present) in-edges would happily re-infect. The data generator
     already emits full bags via `wm_actions.delete_node_bag`, so expanding here
@@ -105,7 +105,7 @@ def core_numbers(graph: GraphInfo) -> np.ndarray:
 
 
 def neighbour_sets(graph: GraphInfo) -> list[set[int]]:
-    """Undirected adjacency as sets — what every dismantling routine works over."""
+    """Undirected adjacency as sets: what every dismantling routine works over."""
     groups = [set() for _ in range(graph.num_nodes)]
 
     for edge in range(graph.edge_index.shape[1]):
@@ -121,7 +121,7 @@ def neighbour_sets(graph: GraphInfo) -> list[set[int]]:
 
 def delete_node_ops(graph: GraphInfo, node: int) -> list[ActionOp]:
     """
-    `remove_node(v)` plus a `remove_edge` per incident arc — node deletion, in the
+    `remove_node(v)` plus a `remove_edge` per incident arc: node deletion, in the
     existing op set.
 
     Both orientations are emitted on an undirected graph because the simulator's
@@ -192,7 +192,7 @@ class Outbreak:
         one removal, not a second intervention to be charged for.
 
         Order matters and this is the right one: the outbreak's seeds go in FIRST,
-        so a policy that blocks a source node at t=0 still wins — `apply_actions`
+        so a policy that blocks a source node at t=0 still wins: `apply_actions`
         walks the bag in order, so the later `remove_node` overwrites the earlier
         `add_node` and the node ends up blocked rather than infectious.
         """
@@ -211,8 +211,8 @@ def build_outbreak(graph: GraphInfo, task: TaskSpec) -> Outbreak | None:
 
     A containment task gets one even with an EMPTY source set (`--outbreak-pct 0`),
     because the wrapper does two jobs: seeding the outbreak, and expanding removals
-    into deletion bags. The second is not optional — both structured heads assume a
-    blocked node's edges are gone from `edge_index` — so returning None there would
+    into deletion bags. The second is not optional: both structured heads assume a
+    blocked node's edges are gone from `edge_index`, so returning None there would
     leave the heads reading a graph the simulator no longer has.
     """
     if not task.outbreak and not task.contains:

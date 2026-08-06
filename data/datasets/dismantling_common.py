@@ -2,7 +2,7 @@
 Shared loader body for the network-dismantling benchmark graphs.
 
 Every graph in `research/critical_node_detection.md` §6.2 arrives as a plain
-1-indexed edge list — the GND repo publishes raw `.txt`, KONECT ships `out.<name>`
+1-indexed edge list: the GND repo publishes raw `.txt`, KONECT ships `out.<name>`
 inside a tarball, networkrepository ships Matrix Market inside a zip. Once the
 bytes are on disk the four formats differ only in which leading lines to skip, so
 one function does the parse and each `data/datasets/<name>.py` supplies the URL.
@@ -114,7 +114,7 @@ def load_edge_list(
     unit = "arcs" if directed else "undirected edges"
     count = adjacency.nnz if directed else adjacency.nnz // 2
     print(
-        f"[✓] {title} loaded: {num_nodes} nodes, {count} {unit} "
+        f"[ok] {title} loaded: {num_nodes} nodes, {count} {unit} "
         f"(from {raw_edges.shape[0]} raw lines)"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")

@@ -149,7 +149,7 @@ class CodingAgent:
         Call the provider on a message thread; return (raw reply, extracted script).
 
         The raw reply is returned rather than dropped because the prose around
-        the code block is where the model says what it was trying to do — the
+        the code block is where the model says what it was trying to do: the
         single most useful artifact when a run goes wrong, and it cannot be
         reconstructed from the script afterwards.
         """
@@ -182,7 +182,7 @@ class Conversation:
     program from the task description and a scalar reward every round.
 
     Only the extracted script is stored back as the assistant turn, not the raw
-    prose reply — it is the artifact the next turn edits, and it keeps the
+    prose reply: it is the artifact the next turn edits, and it keeps the
     thread compact.
     """
 
@@ -217,7 +217,7 @@ class Conversation:
 
     def ask(self, user_text: str) -> str:
         """
-        One prose turn on the same thread — the reply is NOT code-extracted.
+        One prose turn on the same thread: the reply is NOT code-extracted.
 
         Used for the closing write-up, where the point is that the model can
         still see every script it wrote and every reward it was given back.
@@ -230,7 +230,7 @@ class Conversation:
         return reply
 
     def reset(self) -> None:
-        """Drop everything but the system turn — a fresh episode, same contract."""
+        """Drop everything but the system turn: a fresh episode, same contract."""
         del self.messages[1:]
 
     def restore(self, messages: list[dict], transcript: list[dict]) -> None:

@@ -6,8 +6,8 @@ and `instances.npz` (written by `registry._reconstruction_export(supervised=True
 and writes `predictions.json`.
 
 WHY THE MODEL AND NOT `scripts/run_imputation.py`. GRIN's own entry point is a
-PyTorch Lightning experiment over `lib/datasets/{air,la,bay,synthetic}` — four
-hardcoded traffic and air-quality datasets, none of which is a cascade — and its
+PyTorch Lightning experiment over `lib/datasets/{air,la,bay,synthetic}`: four
+hardcoded traffic and air-quality datasets, none of which is a cascade, and its
 `requirements.txt` pins `tensorflow==2.5.0`, `tensorflow-gpu==2.4.0`,
 `pytorch-lightning==1.4` and `torch==1.8`. Those pins do not resolve on a current
 Python and none of them is needed: `lib.nn.models.GRINet` imports only `torch`,
@@ -21,7 +21,7 @@ first number to raise before quoting it as parity.
 
 WHY IT IS WORTH THE TROUBLE ANYWAY. GRIN is the strongest supervised baseline in
 `research/cascade_reconstruction.md` §5.1 and the one DITTO uses as the **ideal
-upper bound** — every `Gap` column in its Tables 4-5 is measured against a GRIN
+upper bound**: every `Gap` column in its Tables 4-5 is measured against a GRIN
 trained with the TRUE `beta`. It is therefore the single most useful reference
 number in this literature, and it is the row that shows what a method WITH labels
 achieves against our own unsupervised arms.
@@ -34,7 +34,7 @@ simulated diffusion to `F1 ~ 0.32` on real, which is §2.11 risk 4 in one table.
 
 `GRINet.forward(x, mask)` takes `[batch, steps, nodes, channels]` and returns
 `(imputation, prediction)` in training and `imputation` in eval, where
-`impute_only_holes` pins the observed entries back — the same thing
+`impute_only_holes` pins the observed entries back: the same thing
 `imputation_common.decode_all` does, so the two agree.
 """
 

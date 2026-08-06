@@ -7,7 +7,7 @@ Run inside the Deep_demixing clone with our work directory as argv[1]. Reads
 
 WHY THIS ONE IS DIFFERENT FROM ITS TWO SIBLINGS. GRIN and SPIN impute a partially
 observed TIME SERIES; Deep Demixing demixes ONE AGGREGATED SNAPSHOT into node
-states at all `T` steps. Its `x` is `[nodes, 1]` — the collapsed observation — and
+states at all `T` steps. Its `x` is `[nodes, 1]` (the collapsed observation) and
 its `y` is `[nodes, T]`, the uncollapsed history. That is a closer match to our
 `final_snapshot` setting than to the report settings, and it is why this driver
 builds `x` by collapsing rather than by masking: under any setting we hand it the
@@ -17,7 +17,7 @@ node's observed activation as a single scalar, which is exactly the input its
 WHY THE MODEL AND NOT `scripts/exp0-minimal.py`. That script reads a pickle in the
 repo's own `{'adj', 'attr', 'data'}` layout, trains four models at once, and
 writes checkpoints under `models/exp_0/`. We use `CVAE_UNET_Batch` directly with
-our own Adam loop, on the same terms as the GRIN and SPIN drivers — **the authors'
+our own Adam loop, on the same terms as the GRIN and SPIN drivers: **the authors'
 model, our optimizer**.
 
 THREE THINGS VERIFIED BY READING `models.py` AT HEAD, each of which would be a
@@ -27,14 +27,14 @@ silent bug otherwise:
     logstd_pr))` and `y_hat` is already through a sigmoid, so no second one here.
   * **At eval it uses the PRIOR path**: `z = cat(x_encoded, p)` where `p` comes
     from `self.prior(x, A_coo)` and reads only `x`. `data.y` is still touched to
-    compute the posterior's `mu`/`logstd`, which are returned and unused — so this
+    compute the posterior's `mu`/`logstd`, which are returned and unused, so this
     driver passes ZEROS for `y` at prediction time. That is not a convenience: an
     evaluation row must never see its own history, and passing the real `y` would
     put the answer inside the forward pass even though the output does not depend
     on it.
   * `CVAE_UNET_Batch` computes `batch = repeat_interleave(arange(x.shape[0] // M),
     M)`, so every graph in a batch must have exactly `max_nodes` nodes. Ours all
-    do — one graph, one node count — and the edge index is offset per batch member
+    do (one graph, one node count) and the edge index is offset per batch member
     accordingly.
 
 The KLD term is included with a small weight, which is the conditional-VAE
@@ -43,8 +43,8 @@ prior heads against nothing and is the easiest way to get a plausible-looking bu
 untrained decoder.
 
 Warning: SUPERVISED, like its two siblings. It is also the WEAKEST published row in
-`research/cascade_reconstruction.md` §5.2 — DIPT reports it at Path Precision
-0.062-0.327 and Jaccard 0.031-0.195 across five graphs — and its own paper says
+`research/cascade_reconstruction.md` §5.2: DIPT reports it at Path Precision
+0.062-0.327 and Jaccard 0.031-0.195 across five graphs, and its own paper says
 accuracy degrades as `T` grows because the solution space blows up. A low number
 here is the expected outcome, not a wiring failure.
 """
@@ -67,7 +67,7 @@ def build_batch(data: dict, rows: list, base_edges, device, with_target: bool):
 
     `x` is `[batch * nodes, 1]` (the collapsed observation), `y` is
     `[batch * nodes, T]` (the uncollapsed history), and `edge_index` is
-    `base_edges` repeated once per batch member with node ids offset — which is
+    `base_edges` repeated once per batch member with node ids offset, which is
     what makes the model's own `repeat_interleave` batch vector line up.
 
     `base_edges` is passed rather than built here because the helper that builds
@@ -164,7 +164,7 @@ if __name__ == "__main__":
             except RuntimeError as error:
                 # torch_geometric's GraphUNet.augment_adj does a sparse-CSR @
                 # sparse-CSR matmul, which a torch built without MKL cannot do on
-                # CPU — the stock Apple Silicon wheel is the common case. It is a
+                # CPU: the stock Apple Silicon wheel is the common case. It is a
                 # property of the environment, not of this adapter: the same four
                 # lines fail standalone. Named here because the raw traceback
                 # points into torch_geometric and reads like a wiring bug.
@@ -175,7 +175,7 @@ if __name__ == "__main__":
                     "[deep_demixing] this torch build has no MKL, and "
                     "torch_geometric's GraphUNet (which CVAE_UNET_Batch is built "
                     "from) needs a sparse-CSR matmul that CPU-without-MKL does not "
-                    "implement. Reproduce it in four lines with GraphUNet alone — "
+                    "implement. Reproduce it in four lines with GraphUNet alone: "
                     "it is the environment, not the export. Run this arm on the "
                     "cluster (Linux torch ships with MKL) or set "
                     "GWM_IMPUTE_DEVICE=cuda."

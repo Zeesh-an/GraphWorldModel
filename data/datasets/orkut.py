@@ -1,17 +1,17 @@
 """
 Orkut Dataset Loader
 
-Downloads and loads the SNAP com-Orkut friendship network — the largest of Han
+Downloads and loads the SNAP com-Orkut friendship network: the largest of Han
 et al.'s adaptive-IM benchmarks (research/adaptive_online_im.md §5.2, §6.2).
 
 Source: https://snap.stanford.edu/data/com-Orkut.html
     - 3,072,441 nodes (members), 117,185,083 undirected friendships
     - Undirected; the densest graph in the whole catalogue at average degree 76.2
-    - Han et al. quote `3.07M / 117M`, average degree 76.2 — agrees with SNAP to
+    - Han et al. quote `3.07M / 117M`, average degree 76.2: agrees with SNAP to
       the digit, so there is no version collision here
     - The SNAP release also ships ground-truth communities; we load the ungraph
       edge list only, since nothing in this pipeline consumes community labels
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 SCALE WARNING. 117M undirected edges is ~234M arcs after symmetrization, which
@@ -44,18 +44,18 @@ def download_orkut() -> Path:
     txt_path = data_dir / "com-orkut.ungraph.txt"
 
     if txt_path.exists():
-        print(f"[✓] Orkut already downloaded at {txt_path}")
+        print(f"[ok] Orkut already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading Orkut from {orkut_url} ...")
+        print(f"[get] Downloading Orkut from {orkut_url} ...")
         urllib.request.urlretrieve(orkut_url, gz_path)
-        print(f"[✓] Saved to {gz_path}")
+        print(f"[ok] Saved to {gz_path}")
 
-    print("[↓] Extracting (this file is large) ...")
+    print("[get] Extracting (this file is large) ...")
     with gzip.open(gz_path, "rb") as gz_file:
         txt_path.write_bytes(gz_file.read())
-    print(f"[✓] Extracted to {txt_path}")
+    print(f"[ok] Extracted to {txt_path}")
 
     return txt_path
 
@@ -82,7 +82,7 @@ def load_orkut(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
     node_labels = np.zeros(num_nodes, dtype=np.int32)
 
     print(
-        f"[✓] Orkut loaded: {num_nodes} nodes, "
+        f"[ok] Orkut loaded: {num_nodes} nodes, "
         f"{adjacency.nnz // 2} undirected edges"
     )
 

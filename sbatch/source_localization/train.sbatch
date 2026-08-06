@@ -16,7 +16,7 @@
 #            results/source_localization/jazz/default/data
 #
 # `--remove-semantics spent` is the default and is right here: this task emits no
-# remove_node at all, so the semantics never fires — but the flag is stated rather
+# remove_node at all, so the semantics never fires, but the flag is stated rather
 # than omitted because `train_wm` compares it against the dataset's own
 # metadata.json, and a silent mismatch is the failure that check exists for.
 #
@@ -26,8 +26,8 @@
 #
 #   ens_count_bias   a rollout that SATURATES destroys the information the inverse
 #                    problem needs, so a positive bias here shows up as a collapsed
-#                    F1 downstream while one-step delta_f1 — dominated by unchanged
-#                    nodes — stays comfortable. That asymmetry is the point: source
+#                    F1 downstream while one-step delta_f1: dominated by unchanged
+#                    nodes: stays comfortable. That asymmetry is the point: source
 #                    localization fails LOUDLY where the existing metrics do not.
 #
 #   the head         the structured heads are what make the model invertible in

@@ -4,7 +4,7 @@ Brightkite Dataset Loader (location-based social network)
 Source: https://snap.stanford.edu/data/loc-Brightkite.html
     - 58,228 nodes, 214,078 undirected edges [verified, SNAP]
     - Undirected, unweighted, tab-separated with a `#` header
-    - No inherent node features — uses log(1 + degree)
+    - No inherent node features: uses log(1 + degree)
 
 GreedyWalk's Table 2 row at 58,228 / 214,078 with a published **lambda_1 = 101.49**
 [verified, `research/epidemic_control.md` §5.2], and the largest graph in that table

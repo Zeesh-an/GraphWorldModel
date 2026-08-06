@@ -6,7 +6,7 @@ Downloads and loads the SNAP gemsec-Deezer friendship network.
 Source: https://snap.stanford.edu/data/gemsec-Deezer.html
     - 47,538 nodes (users), 222,887 undirected edges (mutual friendships)
     - Undirected, unweighted, ids already contiguous 0..47537
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels (the archive ships genre lists we do not densify)
 
 Warning: **"Deezer" in this literature is the HUNGARY subgraph, not the whole release.**
@@ -24,7 +24,7 @@ nothing published. The other two files stay in `data/raw/deezer/` for anyone who
 wants them; point `country` at one to load it instead.
 
 IVGD uses this graph for its SCALABILITY column and nothing else, so its only
-published number here is a runtime — and even that could not have its column
+published number here is a runtime, and even that could not have its column
 header confirmed (§5.2, marked [claim]). It is loaded for the same purpose: a size
 at which the cost claim of §2.3.2 has room to separate the arms, not a head-to-head
 F1 comparison there is no row to make.
@@ -55,20 +55,20 @@ def download_deezer() -> Path:
     edges_path = data_dir / "deezer_clean_data" / f"{country}_edges.csv"
 
     if edges_path.exists():
-        print(f"[✓] Deezer already downloaded at {edges_path}")
+        print(f"[ok] Deezer already downloaded at {edges_path}")
         return edges_path
 
     if not archive_path.exists():
-        print(f"[↓] Downloading Deezer from {deezer_url} ...")
+        print(f"[get] Downloading Deezer from {deezer_url} ...")
         urllib.request.urlretrieve(deezer_url, archive_path)
-        print(f"[✓] Saved to {archive_path}")
+        print(f"[ok] Saved to {archive_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     # tarfile rather than zipfile: SNAP serves this one as a gzipped tar, unlike
     # the neighbouring datasets
     with tarfile.open(archive_path, "r:gz") as tar_file:
         tar_file.extractall(data_dir, filter="data")
-    print(f"[✓] Extracted to {data_dir}")
+    print(f"[ok] Extracted to {data_dir}")
 
     return edges_path
 
@@ -96,7 +96,7 @@ def load_deezer(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]
 
     degrees = np.array(adjacency.sum(axis=1)).flatten()
     print(
-        f"[✓] Deezer loaded: {num_nodes} nodes, {adjacency.nnz // 2} undirected "
+        f"[ok] Deezer loaded: {num_nodes} nodes, {adjacency.nnz // 2} undirected "
         f"edges ({path.stem})"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")

@@ -1,8 +1,8 @@
-# Influence Maximization — Prior Work, Datasets, and Published Results
+# Influence Maximization: Prior Work, Datasets, and Published Results
 
 Unified reference for the IM literature relevant to this project: every method we might baseline against, every graph any of them evaluates on, published result tables with budgets and links and code, and the version forensics that determine which published numbers are legitimately comparable to ours.
 
-This file merges the former `IM_RESEARCH.md` (methods and results) and `IM_DATASETS.md` (dataset catalogue). It is the reference implementation of the format every other file in this folder follows — see [`README.md`](README.md).
+This file merges the former `IM_RESEARCH.md` (methods and results) and `IM_DATASETS.md` (dataset catalogue). It is the reference implementation of the format every other file in this folder follows: see [`README.md`](README.md).
 
 All URLs returned HTTP 200 on **2026-07-28** unless annotated otherwise.
 
@@ -14,18 +14,18 @@ All URLs returned HTTP 200 on **2026-07-28** unless annotated otherwise.
 | -------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **[verified]** | Read from the paper's own table via text extraction, or from the data repository's own statistics page. Trustworthy. |
 | **[derived]**  | Computed by us from a file we downloaded, or reconstructed arithmetically from published splits.                     |
-| **[figure]**   | Read off a plotted figure — the paper published no table. Approximate, direction only.                               |
+| **[figure]**   | Read off a plotted figure: the paper published no table. Approximate, direction only.                               |
 | **[claim]**    | Stated in prose by a paper or a secondary source; not cross-checked against a file or table.                         |
 
 This matters more than it sounds. Automated PDF summarizers hallucinate plausible-looking numbers from IM papers. While compiling this file, a summarizer reported IRIE scoring `142.8` on NetHEPT at k=50; the actual published value in that paper's Table 3 is **724.67**. A second summarizer scrambled IMINFECTOR's Table 3 columns, which produced a false conclusion about the Weibo graph that took a primary-source check to undo (§6.4.5). Every number below marked [verified] was read from the paper's own table via `pdftotext -layout`.
 
-**Edge-count convention.** Undirected graphs are quoted as _undirected edges_; directed graphs as _arcs_. Our loaders report `adjacency.nnz`, which for a symmetrized undirected graph is **2× the undirected edge count**. This single convention difference explains most apparent "discrepancies" between our numbers and published tables — check it before concluding two graphs differ.
+**Edge-count convention.** Undirected graphs are quoted as _undirected edges_; directed graphs as _arcs_. Our loaders report `adjacency.nnz`, which for a symmetrized undirected graph is **2× the undirected edge count**. This single convention difference explains most apparent "discrepancies" between our numbers and published tables: check it before concluding two graphs differ.
 
 ---
 
 ## 1. Task definition
 
-Given a graph `G = (V, E)`, a stochastic diffusion model, and a budget `k`, choose a seed set `S ⊆ V` with `|S| = k` maximizing the **expected spread** `σ(S)` — the expected number of nodes eventually activated when the diffusion is initiated from `S`.
+Given a graph `G = (V, E)`, a stochastic diffusion model, and a budget `k`, choose a seed set `S ⊆ V` with `|S| = k` maximizing the **expected spread** `σ(S)`: the expected number of nodes eventually activated when the diffusion is initiated from `S`.
 
 ```
 S* = argmax_{S ⊆ V, |S| = k}  σ(S)
@@ -37,10 +37,10 @@ Kempe, Kleinberg & Tardos (KDD 2003) established the two things that define the 
 
 | Model                        | Determinism                    | Rule                                                                                                                                |
 | ---------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| **IC** (Independent Cascade) | stochastic                     | each newly activated `u` gets one chance to activate each out-neighbour `v` with probability `p(u→v)`. Monotone — no de-activation. |
+| **IC** (Independent Cascade) | stochastic                     | each newly activated `u` gets one chance to activate each out-neighbour `v` with probability `p(u→v)`. Monotone: no de-activation. |
 | **LT** (Linear Threshold)    | deterministic given thresholds | `v` activates when the summed weight of its active in-neighbours ≥ its threshold `θ_v`; `θ_v` is drawn per node per episode.        |
 
-Computing `σ(S)` exactly is **#P-hard** under both (Chen, Wang & Wang KDD 2010 for IC; Chen, Yuan & Zhang ICDM 2010 for LT), which is why every practical method either Monte-Carlo estimates it, bounds it, or learns it. That sub-literature (GLIE, MONSTOR, SIEA) was reviewed as its own task and not pursued — `world_model/wm_eval.py::rollout_ensemble` already prints the quantity it optimizes.
+Computing `σ(S)` exactly is **#P-hard** under both (Chen, Wang & Wang KDD 2010 for IC; Chen, Yuan & Zhang ICDM 2010 for LT), which is why every practical method either Monte-Carlo estimates it, bounds it, or learns it. That sub-literature (GLIE, MONSTOR, SIEA) was reviewed as its own task and not pursued: `world_model/wm_eval.py::rollout_ensemble` already prints the quantity it optimizes.
 
 ### Variants catalogued elsewhere in this folder
 
@@ -48,7 +48,7 @@ Computing `σ(S)` exactly is **#P-hard** under both (Chen, Wang & Wang KDD 2010 
 | --------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | Minimize a _negative_ cascade instead of maximizing a positive one                | [`influence_blocking.md`](influence_blocking.md)           |
 | Seeds chosen in rounds with feedback; unknown edge probabilities; continuous time | [`adaptive_online_im.md`](adaptive_online_im.md)           |
-| Estimating `σ(S)` as a task in its own right                                      | reviewed, not pursued — `rollout_ensemble` already prints it |
+| Estimating `σ(S)` as a task in its own right                                      | reviewed, not pursued: `rollout_ensemble` already prints it |
 | Removing nodes to _reduce_ spread or connectivity                                 | [`critical_node_detection.md`](critical_node_detection.md) |
 | Recovering `S` from an observed final state                                       | [`source_localization.md`](source_localization.md)         |
 
@@ -60,16 +60,16 @@ Computing `σ(S)` exactly is **#P-hard** under both (Chen, Wang & Wang KDD 2010 
 
 | Element          | How IM maps onto `f_θ(G, s_t, a_t) → s_{t+1}`                                                                                                                                   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **State** `s_t`  | `(infected, frontier)` per node — ever-activated, and activated on this step. Channels 0–1 of `X`.                                                                              |
-| **Action** `a_t` | `add_node(v)` — commit `v` to the seed set. At `t = 0` a whole seed set is committed at once; at `t > 0` an action is injected with probability `--inject-p`. Channel 3 of `X`. |
+| **State** `s_t`  | `(infected, frontier)` per node: ever-activated, and activated on this step. Channels 0-1 of `X`.                                                                              |
+| **Action** `a_t` | `add_node(v)`: commit `v` to the seed set. At `t = 0` a whole seed set is committed at once; at `t > 0` an action is injected with probability `--inject-p`. Channel 3 of `X`. |
 | **`T_exo`**      | deterministic: mark the targeted nodes active before the diffusion step.                                                                                                        |
 | **`T_endo`**     | the IC or LT step itself, harvested from NDlib and learned by the structured head.                                                                                              |
 | **Objective**    | `σ(S) = ` final `\|infected\|`, evaluated by ground-truth Monte-Carlo replay.                                                                                                   |
-| **Planning**     | `planning_regret_multi` — use the model to pick a one-step intervention, score regret against the oracle.                                                                       |
+| **Planning**     | `planning_regret_multi`: use the model to pick a one-step intervention, score regret against the oracle.                                                                       |
 
 The other four ops (`remove_node`, `remove_edge`, `add_edge`, `set_edge_weight`) are supported by the simulator and the feature builder but are **not exercised by pure IM**. That is the single strongest argument for adding [`influence_blocking.md`](influence_blocking.md) next: it is the same simulator and the same graphs, and it puts the idle three-quarters of the action space to work.
 
-**What the world model buys here.** IM's cost is dominated by `σ` evaluation — greedy needs `O(k · N · R)` Monte-Carlo simulations. The learned model replaces each with one forward pass. Our six-condition comparison (`pipeline/conditions.py`) is built to measure exactly that trade: conditions 3–6 hold the _method_ fixed and vary only the evaluator (native / MC / oracle / world model), so the table isolates the evaluator's contribution.
+**What the world model buys here.** IM's cost is dominated by `σ` evaluation: greedy needs `O(k · N · R)` Monte-Carlo simulations. The learned model replaces each with one forward pass. Our six-condition comparison (`pipeline/conditions.py`) is built to measure exactly that trade: conditions 3-6 hold the _method_ fixed and vary only the evaluator (native / MC / oracle / world model), so the table isolates the evaluator's contribution.
 
 ---
 
@@ -77,24 +77,24 @@ The other four ops (`remove_node`, `remove_edge`, `add_edge`, `set_edge_weight`)
 
 | Method              | Year | Venue  | Idea                                                                               | Paper                                                                                                                                                             | Code                                               |
 | ------------------- | ---- | ------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- |
-| **Greedy + MC**     | 2003 | KDD    | Submodular greedy, (1−1/e) guarantee. Defines the problem.                         | [Kempe et al.](https://www.cs.cornell.edu/home/kleinber/kdd03-inf.pdf)                                                                                            | —                                                  |
-| **CELF**            | 2007 | KDD    | Lazy-forward marginal gains, ~700× faster than greedy                              | [Leskovec et al.](https://www.cs.cmu.edu/~jure/pubs/detect-kdd07.pdf)                                                                                             | —                                                  |
-| **Degree Discount** | 2009 | KDD    | Discount degree by already-chosen neighbours. Still the strongest cheap heuristic. | [Chen et al.](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/weic-kdd09_influence.pdf)                                                       | —                                                  |
-| **PMIA / MIA**      | 2010 | KDD    | Maximum-influence-arborescence local trees                                         | [Chen et al.](https://www.microsoft.com/en-us/research/publication/scalable-influence-maximization-for-prevalent-viral-marketing-in-large-scale-social-networks/) | —                                                  |
-| **LDAG**            | 2010 | ICDM   | Local DAG under LT                                                                 | [Chen et al.](https://ieeexplore.ieee.org/document/5693962)                                                                                                       | —                                                  |
-| **CELF++**          | 2011 | WWW    | CELF with a secondary-gain cache                                                   | [Goyal et al.](https://snap.stanford.edu/class/cs224w-readings/goyal11celf.pdf)                                                                                   | —                                                  |
-| **SIMPATH**         | 2011 | ICDM   | LT-specific path enumeration                                                       | [Goyal et al.](https://ieeexplore.ieee.org/document/6137213)                                                                                                      | —                                                  |
-| **IRIE**            | 2012 | ICDM   | Influence-rank iteration + influence estimation, no MC                             | [Jung et al. (arXiv 1111.4795)](https://arxiv.org/abs/1111.4795)                                                                                                  | —                                                  |
-| **StaticGreedy**    | 2013 | CIKM   | Fixed live-edge snapshots, ~2 orders faster                                        | [Cheng et al. (arXiv 1212.4779)](https://arxiv.org/abs/1212.4779)                                                                                                 | —                                                  |
-| **RIS**             | 2014 | SODA   | Reverse Influence Sampling — the foundation of everything below                    | [Borgs et al.](https://arxiv.org/abs/1212.0884)                                                                                                                   | —                                                  |
+| **Greedy + MC**     | 2003 | KDD    | Submodular greedy, (1−1/e) guarantee. Defines the problem.                         | [Kempe et al.](https://www.cs.cornell.edu/home/kleinber/kdd03-inf.pdf)                                                                                            |                                                    |
+| **CELF**            | 2007 | KDD    | Lazy-forward marginal gains, ~700× faster than greedy                              | [Leskovec et al.](https://www.cs.cmu.edu/~jure/pubs/detect-kdd07.pdf)                                                                                             |                                                    |
+| **Degree Discount** | 2009 | KDD    | Discount degree by already-chosen neighbours. Still the strongest cheap heuristic. | [Chen et al.](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/weic-kdd09_influence.pdf)                                                       |                                                    |
+| **PMIA / MIA**      | 2010 | KDD    | Maximum-influence-arborescence local trees                                         | [Chen et al.](https://www.microsoft.com/en-us/research/publication/scalable-influence-maximization-for-prevalent-viral-marketing-in-large-scale-social-networks/) |                                                    |
+| **LDAG**            | 2010 | ICDM   | Local DAG under LT                                                                 | [Chen et al.](https://ieeexplore.ieee.org/document/5693962)                                                                                                       |                                                    |
+| **CELF++**          | 2011 | WWW    | CELF with a secondary-gain cache                                                   | [Goyal et al.](https://snap.stanford.edu/class/cs224w-readings/goyal11celf.pdf)                                                                                   |                                                    |
+| **SIMPATH**         | 2011 | ICDM   | LT-specific path enumeration                                                       | [Goyal et al.](https://ieeexplore.ieee.org/document/6137213)                                                                                                      |                                                    |
+| **IRIE**            | 2012 | ICDM   | Influence-rank iteration + influence estimation, no MC                             | [Jung et al. (arXiv 1111.4795)](https://arxiv.org/abs/1111.4795)                                                                                                  |                                                    |
+| **StaticGreedy**    | 2013 | CIKM   | Fixed live-edge snapshots, ~2 orders faster                                        | [Cheng et al. (arXiv 1212.4779)](https://arxiv.org/abs/1212.4779)                                                                                                 |                                                    |
+| **RIS**             | 2014 | SODA   | Reverse Influence Sampling: the foundation of everything below                    | [Borgs et al.](https://arxiv.org/abs/1212.0884)                                                                                                                   |                                                    |
 | **TIM / TIM+**      | 2014 | SIGMOD | RIS with estimated sample size, near-optimal time                                  | [Tang et al. (arXiv 1404.0900)](https://arxiv.org/abs/1404.0900)                                                                                                  | [code](https://sourceforge.net/projects/timplus/)  |
-| **SKIM**            | 2014 | CIKM   | Sketch-based reachability                                                          | [Cohen et al.](https://arxiv.org/abs/1408.6282)                                                                                                                   | —                                                  |
+| **SKIM**            | 2014 | CIKM   | Sketch-based reachability                                                          | [Cohen et al.](https://arxiv.org/abs/1408.6282)                                                                                                                   |                                                    |
 | **IMM**             | 2015 | SIGMOD | Martingale RIS. **The standard classical reference point.**                        | [Tang et al.](https://dl.acm.org/doi/10.1145/2723372.2723734)                                                                                                     | [code](https://sourceforge.net/projects/im-imm/)   |
 | **SSA / D-SSA**     | 2016 | SIGMOD | Stop-and-stare RIS, fewer samples                                                  | [Nguyen et al. (arXiv 1605.07990)](https://arxiv.org/abs/1605.07990)                                                                                              | [code](https://github.com/hungnt55/Stop-and-Stare) |
 | **OPIM-C**          | 2018 | SIGMOD | Online processing RIS, near-optimal anytime                                        | [Tang et al.](https://dl.acm.org/doi/10.1145/3183713.3183749)                                                                                                     | [code](https://github.com/tangj90/OPIM)            |
 | **SubSIM**          | 2020 | SIGMOD | Sublinear-time RIS                                                                 | [Guo et al.](https://dl.acm.org/doi/10.1145/3318464.3389740)                                                                                                      | [code](https://github.com/qtguo/subsim)            |
 
-Our library (`coding_agent/tools/algorithms.py`) implements simplified versions of most of these — see `research_notes/ALGORITHMS.md` for per-function fidelity notes.
+Our library (`coding_agent/tools/algorithms.py`) implements simplified versions of most of these: see `research_notes/ALGORITHMS.md` for per-function fidelity notes.
 
 ---
 
@@ -102,20 +102,20 @@ Our library (`coding_agent/tools/algorithms.py`) implements simplified versions 
 
 | Method                 | Year      | Venue           | Approach                                                                                             | Paper                                                                                                                 | Code                                                                     |
 | ---------------------- | --------- | --------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| **Inf2vec**            | 2018      | ICDE            | Cascade + network embedding                                                                          | [Feng et al.](https://ieeexplore.ieee.org/document/8509310)                                                           | —                                                                        |
-| **IMINFECTOR**         | 2020      | TKDE            | Multi-task NN on real cascades; influencer + susceptible vectors. **Model-free** — no IC/LT assumed. | [arXiv 1904.08804](https://arxiv.org/abs/1904.08804)                                                                  | [github.com/geopanag/IMINFECTOR](https://github.com/geopanag/IMINFECTOR) |
-| **DISCO**              | 2019      | —               | structure2vec + DQN, marginal-gain reward                                                            | [Li et al.](https://arxiv.org/abs/1906.07378)                                                                         | —                                                                        |
+| **Inf2vec**            | 2018      | ICDE            | Cascade + network embedding                                                                          | [Feng et al.](https://ieeexplore.ieee.org/document/8509310)                                                           |                                                                          |
+| **IMINFECTOR**         | 2020      | TKDE            | Multi-task NN on real cascades; influencer + susceptible vectors. **Model-free**: no IC/LT assumed. | [arXiv 1904.08804](https://arxiv.org/abs/1904.08804)                                                                  | [github.com/geopanag/IMINFECTOR](https://github.com/geopanag/IMINFECTOR) |
+| **DISCO**              | 2019      |                 | structure2vec + DQN, marginal-gain reward                                                            | [Li et al.](https://arxiv.org/abs/1906.07378)                                                                         |                                                                          |
 | **GCOMB**              | 2020      | NeurIPS         | GraphSAGE pruning + Q-learning; scales to billion-edge                                               | [Manchanda et al.](https://proceedings.neurips.cc/paper/2020/hash/e7532dbeff7ef901f2e70daacb3f452d-Abstract.html)     | [github.com/idea-iitd/GCOMB](https://github.com/idea-iitd/GCOMB)         |
-| **PIANO**              | 2022      | TCSS            | Evolved DISCO with fuller analysis                                                                   | [Li et al.](https://ieeexplore.ieee.org/document/9769766)                                                             | —                                                                        |
+| **PIANO**              | 2022      | TCSS            | Evolved DISCO with fuller analysis                                                                   | [Li et al.](https://ieeexplore.ieee.org/document/9769766)                                                             |                                                                          |
 | **GLIE**               | 2021→2023 | ASONAM          | GNN learns an upper bound on spread; replaces MC                                                     | [arXiv 2108.04623](https://arxiv.org/abs/2108.04623)                                                                  | [github.com/geopanag/learn_im](https://github.com/geopanag/learn_im)     |
 | **LeNSE**              | 2022      | ICML            | Learns to prune to a solvable subgraph                                                               | [Ireland & Montana](https://proceedings.mlr.press/v162/ireland22a.html)                                               | [github.com/davidireland3/LeNSE](https://github.com/davidireland3/LeNSE) |
 | **ToupleGDD**          | 2023      | TCSS            | 3 coupled GNNs + Double DQN. Trains on <300-node graphs, generalizes to 1M+.                         | [arXiv 2210.07500](https://arxiv.org/abs/2210.07500)                                                                  | [github.com/Dtrycode/ToupleGDD](https://github.com/Dtrycode/ToupleGDD)   |
 | **DeepIM** (key)          | 2023      | **ICML**        | Autoencoder over seed sets + GNN diffusion; optimizes in latent space. IC/LT/SIS.                    | [arXiv 2305.02200](https://arxiv.org/abs/2305.02200) · [PMLR](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf) | [github.com/triplej0079/DeepIM](https://github.com/triplej0079/DeepIM)   |
 | **MOEIM** (key)           | 2024      | GECCO           | Many-objective EA (spread, budget, fairness, communities, time) with graph-aware operators           | [arXiv 2403.18755](https://arxiv.org/abs/2403.18755)                                                                  | [github.com/eliacunegatti/MOEIM](https://github.com/eliacunegatti/MOEIM) |
-| **DeepIM-accelerated** | 2024      | Neural Networks | DeepIM with faster inference                                                                         | [ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S0893608024005732)                              | —                                                                        |
-| **HIM**                | 2025      | —               | Influence strength estimation in hyperbolic space                                                    | [arXiv 2502.13571](https://arxiv.org/abs/2502.13571)                                                                  | —                                                                        |
-| **REM**                | 2025      | —               | Seed2Vec VAE + RL, **multiplex** networks (different problem)                                        | [arXiv 2501.00779](https://arxiv.org/abs/2501.00779)                                                                  | —                                                                        |
-| **Topic-aware IM**     | 2025      | DAMI            | GAT + DRL, magnetic Laplacian PE                                                                     | [Springer](https://link.springer.com/article/10.1007/s10618-025-01133-3)                                              | —                                                                        |
+| **DeepIM-accelerated** | 2024      | Neural Networks | DeepIM with faster inference                                                                         | [ScienceDirect](https://www.sciencedirect.com/science/article/abs/pii/S0893608024005732)                              |                                                                          |
+| **HIM**                | 2025      |                 | Influence strength estimation in hyperbolic space                                                    | [arXiv 2502.13571](https://arxiv.org/abs/2502.13571)                                                                  |                                                                          |
+| **REM**                | 2025      |                 | Seed2Vec VAE + RL, **multiplex** networks (different problem)                                        | [arXiv 2501.00779](https://arxiv.org/abs/2501.00779)                                                                  |                                                                          |
+| **Topic-aware IM**     | 2025      | DAMI            | GAT + DRL, magnetic Laplacian PE                                                                     | [Springer](https://link.springer.com/article/10.1007/s10618-025-01133-3)                                              |                                                                          |
 
 **Surveys:** [ML-based IM survey, TKDD 2023 (arXiv 2211.03074)](https://arxiv.org/abs/2211.03074) · [IM survey 2023 (arXiv 2309.04668)](https://arxiv.org/abs/2309.04668) · [Deep-RL for max-coverage benchmark (arXiv 2406.14697)](https://arxiv.org/abs/2406.14697)
 
@@ -129,7 +129,7 @@ Our library (`coding_agent/tools/algorithms.py`) implements simplified versions 
 
 Protocol: seed 1/5/10/20% of nodes, simulate to termination, average influence spread over **100 rounds**. LT thresholds ~ U[0.3, 0.6]. `−` = out-of-memory.
 
-The **OIM** row is Lei, Maniu, Mo, Cheng & Senellart, _"Online Influence Maximization"_, KDD 2015 [verified, from DeepIM's own reference list] — [code](https://github.com/smaniu/oim). It is the only sequential-decision method in DeepIM's comparison; see [`adaptive_online_im.md`](adaptive_online_im.md).
+The **OIM** row is Lei, Maniu, Mo, Cheng & Senellart, _"Online Influence Maximization"_, KDD 2015 [verified, from DeepIM's own reference list]: [code](https://github.com/smaniu/oim). It is the only sequential-decision method in DeepIM's comparison; see [`adaptive_online_im.md`](adaptive_online_im.md).
 
 Dataset sizes **as used by DeepIM** (Table 1) [verified]:
 
@@ -138,9 +138,9 @@ Dataset sizes **as used by DeepIM** (Table 1) [verified]:
 | Nodes | 198   | 2,810   | 1,565           | 4,941      | 50,000    | 279,613   | 2,251,166   |
 | Edges | 2,742 | 7,981   | 13,532          | 6,594      | 250,000   | 1,170,689 | 225,877,808 |
 
-> The Digg and Weibo columns contain a transcription error — see §6.4.5.
+> The Digg and Weibo columns contain a transcription error: see §6.4.5.
 
-#### IC diffusion — % of nodes infected [verified, Table 2]
+#### IC diffusion: % of nodes infected [verified, Table 2]
 
 | Method        | Cora-ML 1% | 5%       | 10%      | 20%      | NetSci 1% | 5%       | 10%      | 20%      | PowerGrid 1% | 5%       | 10%      | 20%      | Jazz 1% | 5%       | 10%      | 20%  |
 | ------------- | ---------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- | ------------ | -------- | -------- | -------- | ------- | -------- | -------- | ---- |
@@ -161,13 +161,13 @@ Large graphs, IC [verified]:
 | IMM           | 9.2          | 26.2     | 36.3     | 51.2     | 7.4     | 18.4     | 32.8     | 46.9     | 9.5      | 23.8     | 36.4     | 50.3     |
 | OPIM          | 9.6          | 25.3     | 36.6     | 51.7     | 7.6     | 18.5     | 32.9     | 48.9     | 9.7      | 23.7     | 36.6     | 50.3     |
 | SubSIM        | 9.5          | 26.7     | 36.5     | 51.5     | 7.5     | 18.9     | 33.3     | 49.4     | 9.3      | 23.1     | 36.5     | 50.6     |
-| OIM           | 9.6          | 26.2     | 36.7     | 51.3     | 7.8     | 18.2     | 33.1     | 49.6     | —        | —        | —        | —        |
+| OIM           | 9.6          | 26.2     | 36.7     | 51.3     | 7.8     | 18.2     | 33.1     | 49.6     |          |          |          |          |
 | IMINFECTOR    | 9.1          | 26.2     | 36.1     | 51.5     | 7.9     | 18.6     | 33.5     | 49.8     | 9.4      | 23.5     | 36.9     | 50.3     |
-| PIANO         | 9.1          | 26.4     | 36.2     | 51.6     | —       | —        | —        | —        | —        | —        | —        | —        |
-| ToupleGDD     | 9.5          | 26.8     | 37.1     | 51.4     | —       | —        | —        | —        | —        | —        | —        | —        |
+| PIANO         | 9.1          | 26.4     | 36.2     | 51.6     |         |          |          |          |          |          |          |          |
+| ToupleGDD     | 9.5          | 26.8     | 37.1     | 51.4     |         |          |          |          |          |          |          |          |
 | **DeepIM** (key) | **11.6**     | **27.4** | **38.7** | **52.1** | **8.4** | **19.3** | **34.2** | **51.3** | **11.2** | **26.5** | **37.9** | **51.8** |
 
-#### LT diffusion — % of nodes infected [verified, Table 3]
+#### LT diffusion: % of nodes infected [verified, Table 3]
 
 | Method        | Cora-ML 1% | 5%       | 10%      | 20%      | NetSci 1% | 5%       | 10%      | 20%      | PowerGrid 1% | 5%       | 10%      | 20%      | Jazz 1% | 5%      | 10%      | 20%      |
 | ------------- | ---------- | -------- | -------- | -------- | --------- | -------- | -------- | -------- | ------------ | -------- | -------- | -------- | ------- | ------- | -------- | -------- |
@@ -188,13 +188,13 @@ Large graphs, LT [verified]:
 | OPIM          | 1.3          | 5.2     | 12.6     | 62.1     | 2.1     | 11.3     | 38.2     | 57.1     | 1.8      | 6.1     | 18.7     | 46.6     |
 | SubSIM        | 1.4          | 5.5     | 13.1     | 69.6     | 2.4     | 11.3     | 37.9     | 56.9     | 1.7      | 6.7     | 19.2     | 46.8     |
 | IMINFECTOR    | 1.3          | 5.5     | 13.5     | 67.4     | 2.2     | 11.1     | 38.9     | 58.7     | 1.8      | 6.4     | 18.6     | 47.5     |
-| ToupleGDD     | 1.3          | 5.5     | 13.4     | 70.2     | —       | —        | —        | —        | —        | —       | —        | —        |
+| ToupleGDD     | 1.3          | 5.5     | 13.4     | 70.2     |         |          |          |          |          |         |          |          |
 | **DeepIM** (key) | **1.5**      | **6.5** | **15.5** | **99.9** | **3.5** | **15.9** | **41.3** | **76.2** | **3.1**  | **7.6** | **39.3** | **72.4** |
 
 #### Reading these tables
 
 - **The LT gap is where DeepIM's headline claim lives.** Cora-ML LT at 20%: DeepIM 94.1% vs best baseline 71.5% (OPIM). Synthetic LT at 20%: 99.9% vs 70.2%. Jazz LT at 20%: 99.1% vs 24.5%. These are the ~200% improvements the paper advertises.
-- **Under IC the field is nearly tied.** At 20% budget every method on Cora-ML lands in 50.2–52.4%. DeepIM's IC margin is ~1–2 points. This is the same saturation effect we hit on BA-100 — **at 20% budget on a well-connected graph, the problem is close to solved by any reasonable method.** It is a strong argument for reporting the 1% and 5% columns, where the spread between methods is 8.1→14.1 (74% relative).
+- **Under IC the field is nearly tied.** At 20% budget every method on Cora-ML lands in 50.2-52.4%. DeepIM's IC margin is ~1-2 points. This is the same saturation effect we hit on BA-100: **at 20% budget on a well-connected graph, the problem is close to solved by any reasonable method.** It is a strong argument for reporting the 1% and 5% columns, where the spread between methods is 8.1→14.1 (74% relative).
 - **1% budget is where methods actually separate.** Cora-ML IC 1%: IMM 8.1 vs DeepIM 14.1.
 
 ### 5.2 MOEIM (GECCO 2024) (key) beats DeepIM
@@ -205,19 +205,19 @@ Setting-2 datasets (chosen to match DeepIM exactly) [verified, Table 1]: Jazz 19
 
 **Result [claim + figure]:** MOEIM outperforms DeepIM on _almost all_ propagation models and datasets. Reported specifics:
 
-- **Jazz + LT** — MOEIM reaches whole-network influence at **k = 10%**, where DeepIM needs **k = 20%** for the same result. (DeepIM's own table shows Jazz LT 16.4% at k=10 and 99.1% at k=20, so this is a large gap.)
-- **Power Grid + LT** — the one exception: near-identical up to k = 10%, after which **DeepIM is superior**.
+- **Jazz + LT**: MOEIM reaches whole-network influence at **k = 10%**, where DeepIM needs **k = 20%** for the same result. (DeepIM's own table shows Jazz LT 16.4% at k=10 and 99.1% at k=20, so this is a large gap.)
+- **Power Grid + LT**: the one exception: near-identical up to k = 10%, after which **DeepIM is superior**.
 - Setting-1 (6 other graphs, hypervolume over 6 objectives): MOEIM wins 61 of 72 cases vs GDD, CELF, MOEA.
 
-Per-cell spread numbers are published only as non-dominated fronts in Figure 2 — no table. To use MOEIM as a numeric baseline you would need to run [their code](https://github.com/eliacunegatti/MOEIM).
+Per-cell spread numbers are published only as non-dominated fronts in Figure 2: no table. To use MOEIM as a numeric baseline you would need to run [their code](https://github.com/eliacunegatti/MOEIM).
 
-MOEIM's setting-1 datasets [verified]: email-eu-Core 986/25,552 · facebook-combined 4,039/88,234 · gnutella 6,299/20,776 · wiki-vote 7,066/103,663 · lastfm 7,624/27,806 · CA-HepTh 8,638/24,827. **We now load four of these six** — see §6.5.
+MOEIM's setting-1 datasets [verified]: email-eu-Core 986/25,552 · facebook-combined 4,039/88,234 · gnutella 6,299/20,776 · wiki-vote 7,066/103,663 · lastfm 7,624/27,806 · CA-HepTh 8,638/24,827. **We now load four of these six**, see §6.5.
 
 ### 5.3 Classical methods on NetHEPT
 
 NetHEPT (arXiv High-Energy-Physics-Theory collaboration) is _the_ classical IM benchmark. Standard protocol: **k = 1…50**, IC with weighted cascade `p = 1/in-degree`, spread averaged over 10,000 MC simulations.
 
-**IRIE paper, k = 50 [verified, Table 3]** — "ArXiv" here is NetHEPT (15,233 / 58,891):
+**IRIE paper, k = 50 [verified, Table 3]**: "ArXiv" here is NetHEPT (15,233 / 58,891):
 
 | Dataset     | Model | SAEDV    | IRIE         |
 | ----------- | ----- | -------- | ------------ |
@@ -228,7 +228,7 @@ NetHEPT (arXiv High-Energy-Physics-Theory collaboration) is _the_ classical IM b
 | Amazon      | WC    | 487.67   | **824.80**   |
 | DBLP        | WC    | 33,730   | **53,334.8** |
 
-**NetHEPT k=50 under WC ≈ 700–725 nodes ≈ 4.6–4.8% of the graph** [figure, Fig 4.3a]: Greedy/CELF, PMIA, IR, IRIE all converge to ≈700–730; **Degree alone reaches only ≈250** — a 3× gap that makes NetHEPT a genuinely discriminative benchmark, unlike BA at high budget.
+**NetHEPT k=50 under WC ≈ 700-725 nodes ≈ 4.6-4.8% of the graph** [figure, Fig 4.3a]: Greedy/CELF, PMIA, IR, IRIE all converge to ≈700-730; **Degree alone reaches only ≈250**, a 3× gap that makes NetHEPT a genuinely discriminative benchmark, unlike BA at high budget.
 
 LiveJournal, k = 50 [verified, Table 2]:
 
@@ -240,11 +240,11 @@ LiveJournal, k = 50 [verified, Table 2]:
 | PageRank  | 51,162.3         | **629,892** |
 | Degree    | 52,162.3         | 629,498     |
 
-> Note the budget convention clash: classical IM sweeps **absolute k = 1…50** (k=50 is ~0.33% of NetHEPT), while the learning-based line sweeps **percentages, 1–20%** (20% of NetHEPT would be k=3,046). See §8.
+> Note the budget convention clash: classical IM sweeps **absolute k = 1…50** (k=50 is ~0.33% of NetHEPT), while the learning-based line sweeps **percentages, 1-20%** (20% of NetHEPT would be k=3,046). See §8.
 
 ### 5.4 ToupleGDD (TCSS 2023)
 
-Datasets [verified, Table I] — almost entirely disjoint from ours, **except YouTube, wiki-Vote and ca-GrQc**:
+Datasets [verified, Table I]: almost entirely disjoint from ours, **except YouTube, wiki-Vote and ca-GrQc**:
 
 | Dataset        | n         | m      | Type       | Avg degree |
 | -------------- | --------- | ------ | ---------- | ---------- |
@@ -268,11 +268,11 @@ Expected spread, in-degree setting, iterative selection, train+test with initial
 | Wiki-2 (7.1k)  | 290.48   | 423.96   | 521.79   | 601.39    | 669.43    |
 | Epinions (76k) | 6,022.85 | 8,303.34 | 9,693.69 | 10,866.88 | 11,781.69 |
 
-**YouTube results are figure-only** [figure, Fig 3i]: all methods (IMM, OPIM-C, ToupleGDD, S2V-DQN, PIANO, GCOMB) reach ≈50,000–60,000 spread at b=50, i.e. ≈5% of the 1.13M nodes. ToupleGDD ≈ IMM, both above OPIM-C.
+**YouTube results are figure-only** [figure, Fig 3i]: all methods (IMM, OPIM-C, ToupleGDD, S2V-DQN, PIANO, GCOMB) reach ≈50,000-60,000 spread at b=50, i.e. ≈5% of the 1.13M nodes. ToupleGDD ≈ IMM, both above OPIM-C.
 
-**Claim:** ToupleGDD achieves spread "almost equal to IMM", outperforms OPIM-C on Wiki-2/Buzznet/YouTube, and beats all other DRL methods. Its selling point is **generalization** — trained on tiny random graphs, tested on 1M-node graphs.
+**Claim:** ToupleGDD achieves spread "almost equal to IMM", outperforms OPIM-C on Wiki-2/Buzznet/YouTube, and beats all other DRL methods. Its selling point is **generalization**, trained on tiny random graphs, tested on 1M-node graphs.
 
-### 5.5 IMINFECTOR (TKDE 2020) — a different protocol
+### 5.5 IMINFECTOR (TKDE 2020): a different protocol
 
 **Do not compare its numbers to simulated spread.** IMINFECTOR never assumes IC/LT. It splits real cascades 80/20 by time, picks seeds from train, and measures **DNI (Distinct Nodes Influenced)** = the union of nodes appearing in _held-out real cascades_ started by the chosen seeds.
 
@@ -283,10 +283,10 @@ Results [figure, Fig 7]:
 | Dataset         | Best method                  | ≈DNI at max k   | Notes                                            |
 | --------------- | ---------------------------- | --------------- | ------------------------------------------------ |
 | Digg (k=50)     | **Credit Distribution** ≈43k | IMINFECTOR ≈42k | CD wins but is ~10× slower; CELFIE flat at ≈31k  |
-| MAG (k=10,000)  | **IMINFECTOR** ≈235k         | CELFIE ≈160k    | IMM-DB / Simpath-DB ≈110–125k                    |
+| MAG (k=10,000)  | **IMINFECTOR** ≈235k         | CELFIE ≈160k    | IMM-DB / Simpath-DB ≈110-125k                    |
 | Weibo (k=1,000) | **IMINFECTOR** ≈450k         | K-cores ≈400k   | Only IMINFECTOR + K-cores + CELFIE scaled at all |
 
-Notable finding the paper stresses: **IMM underperformed badly on cascade-based evaluation**, which the authors attribute to diffusion-model misspecification — "it performs poorly in this type of evaluation… IMM optimizes diffusion simulations as part of its solution." Directly relevant to us: a method tuned on a _simulator_ can lose on _real observed traces_. See [`cascade_prediction.md`](cascade_prediction.md), where that failure mode is the central issue.
+Notable finding the paper stresses: **IMM underperformed badly on cascade-based evaluation**, which the authors attribute to diffusion-model misspecification, "it performs poorly in this type of evaluation… IMM optimizes diffusion simulations as part of its solution." Directly relevant to us: a method tuned on a _simulator_ can lose on _real observed traces_. See [`cascade_prediction.md`](cascade_prediction.md), where that failure mode is the central issue.
 
 ### 5.6 SOTA summary per dataset
 
@@ -297,10 +297,10 @@ Notable finding the paper stresses: **IMM underperformed badly on cascade-based 
 | **Power Grid**      | **DeepIM** at k≥10% under LT; MOEIM below that          | WC/LT | The one dataset where DeepIM holds                                    |
 | **Network Science** | **DeepIM** (2023)                                       | IC/LT | but on the 13,532-edge version, not ours (§6.4.6)                     |
 | **NetHEPT**         | IMM/OPIM-C/IRIE tier (classical)                        | IC-WC | ≈725 nodes @ k=50; no learning-based paper reports it in the % regime |
-| **Digg / Weibo**    | **DeepIM** (simulated) / **IMINFECTOR** (cascade-based) | —     | two incomparable protocols                                            |
+| **Digg / Weibo**    | **DeepIM** (simulated) / **IMINFECTOR** (cascade-based) |       | two incomparable protocols                                            |
 | **YouTube**         | IMM ≈ ToupleGDD                                         | IC    | figure-only                                                           |
 | **ER / BA / WS**    | ToupleGDD, GCOMB, DeepIM (synthetic)                    | IC/LT | training/generalization only, no canonical table                      |
-| **SBM / Karate**    | **none found**                                          | —     | no published IM baseline                                              |
+| **SBM / Karate**    | **none found**                                          |       | no published IM baseline                                              |
 
 **Overall ranking (single-layer IM, simulated-spread evaluation):**
 
@@ -345,15 +345,15 @@ CELF / degree-discount    ← cheap strong baselines, tie at high budget
 | `youtube`       | 1,134,890 | 2,987,624                    | Undirected (friendships)             | log1p(degree)                                  | [SNAP com-Youtube](https://snap.stanford.edu/data/com-Youtube.html)                                                                                    | yes            |
 | `weibo`         | 1,787,443 | ≈216M arcs                   | Directed (influence u→v)             | log1p(total degree)                            | [AMiner Influence Locality](https://www.aminer.cn/influencelocality)                                                                                   | no **manual** |
 
-**Simulable today:** everything down to and including `netphy` — eleven graphs. The four large ones (`twitter`, `digg`, `youtube`, `weibo`) load fine but exceed what the NDlib rollout + CELF/local-search selector pipeline finishes in reasonable time; they are scalable-simulation targets, not day-one datasets.
+**Simulable today:** everything down to and including `netphy`, eleven graphs. The four large ones (`twitter`, `digg`, `youtube`, `weibo`) load fine but exceed what the NDlib rollout + CELF/local-search selector pipeline finishes in reasonable time; they are scalable-simulation targets, not day-one datasets.
 
 **Weibo needs a human**: AMiner requires registration. See `data/datasets/weibo.py` for the three-step manual procedure.
 
-**Cora-ML is standardized on load.** `data/datasets/cora_ml.py` applies graph2gauss's `SparseGraph.standardize()` (`make_unweighted`, `make_undirected`, `no_self_loops`, `select_lcc` — all defaulting to True), so it produces DeepIM's and MOEIM's 2,810 / 7,981 exactly rather than the raw file's 2,995 / 8,416. The raw graph is not comparable to any published table, its 185 extra nodes are ~60 disconnected fragments that only add noise to a spread metric, and the 2,879-dim features that distinguished it are never read by the model (`IN_CHANNELS = 6`; `build_features` derives `CH_DEGREE` from `edge_index`). Nothing is lost by dropping it.
+**Cora-ML is standardized on load.** `data/datasets/cora_ml.py` applies graph2gauss's `SparseGraph.standardize()` (`make_unweighted`, `make_undirected`, `no_self_loops`, `select_lcc`: all defaulting to True), so it produces DeepIM's and MOEIM's 2,810 / 7,981 exactly rather than the raw file's 2,995 / 8,416. The raw graph is not comparable to any published table, its 185 extra nodes are ~60 disconnected fragments that only add noise to a spread metric, and the 2,879-dim features that distinguished it are never read by the model (`IN_CHANNELS = 6`; `build_features` derives `CH_DEGREE` from `edge_index`). Nothing is lost by dropping it.
 
-**Three graphs carry real node labels** — `cora_ml` (7 topics), `email_eu_core` (42 departments), `lastfm_asia` (18 countries). The rest get placeholder zeros. `email_eu_core`'s departments are the only ground-truth _community_ labels in the suite, which makes it the natural graph for community-aware evaluation (MOEIM's community objective; our SBM experiments, which have no published baseline).
+**Three graphs carry real node labels**: `cora_ml` (7 topics), `email_eu_core` (42 departments), `lastfm_asia` (18 countries). The rest get placeholder zeros. `email_eu_core`'s departments are the only ground-truth _community_ labels in the suite, which makes it the natural graph for community-aware evaluation (MOEIM's community objective; our SBM experiments, which have no published baseline).
 
-**First download of `cora_ml` takes minutes** — `cora_ml.npz` is 85 MB. That loader writes to a `.part` file and renames on completion, so an interrupted run retries cleanly. The other loaders skip when the target file exists, so a run killed mid-download can leave a truncated cache; delete `data/raw/<dataset>/` and re-run.
+**First download of `cora_ml` takes minutes**: `cora_ml.npz` is 85 MB. That loader writes to a `.part` file and renames on completion, so an interrupted run retries cleanly. The other loaders skip when the target file exists, so a run killed mid-download can leave a truncated cache; delete `data/raw/<dataset>/` and re-run.
 
 **Synthetic families (5).** Generated in bulk via `--num-graphs`; `log1p(degree)` node features throughout.
 
@@ -363,9 +363,9 @@ CELF / degree-discount    ← cheap strong baselines, tie at high budget
 | `ba`        | `nx.barabasi_albert_graph`  | `--ba-m` (3)                          | standard                                     |
 | `ws`        | `nx.watts_strogatz_graph`   | `--ws-k` (6), `--ws-p` (0.1)          | standard                                     |
 | `sbm`       | `nx.stochastic_block_model` | `--sbm-blocks/--sbm-p-in/--sbm-p-out` | Warning: **no published IM baseline found**        |
-| `karate`    | `nx.karate_club_graph`      | —                                     | Warning: used by SL-VAE, not by IM papers          |
+| `karate`    | `nx.karate_club_graph`      |                                       | Warning: used by SL-VAE, not by IM papers          |
 
-DeepIM's "Synthetic" row (50,000 nodes / 250,000 edges, avg degree 10) is a **random graph of that density** — an ER/BA-class graph we can reproduce with `--dataset ba --syn-nodes 50000 --ba-m 5`. It is the only synthetic row in the literature with a published per-cell table (§5.1).
+DeepIM's "Synthetic" row (50,000 nodes / 250,000 edges, avg degree 10) is a **random graph of that density**: an ER/BA-class graph we can reproduce with `--dataset ba --syn-nodes 50000 --ba-m 5`. It is the only synthetic row in the literature with a published per-cell table (§5.1).
 
 ### 6.2 Full catalogue
 
@@ -390,7 +390,7 @@ yes = already implemented in `data/datasets/`.
 | **LastFM Asia** yes      | 7,624 | 27,806                 | undirected | 7.3     | [SNAP](https://snap.stanford.edu/data/feather-lastfm-social.html)           | MOEIM                              |
 | ca-HepTh                | 9,877 | 25,998                 | undirected | 5.3     | [SNAP](https://snap.stanford.edu/data/ca-HepTh.html)                        | MOEIM                              |
 
-#### Classical mid-size IM benchmarks (10K – 500K)
+#### Classical mid-size IM benchmarks (10K: 500K)
 
 | Dataset                | Nodes   | Edges                                                   | Type       | Avg deg | Source                                                                                                   | Used by                                                              |
 | ---------------------- | ------- | ------------------------------------------------------- | ---------- | ------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -424,17 +424,17 @@ yes = already implemented in `data/datasets/`.
 | soc-Pokec               | 1,632,803  | 30,622,564                              | directed   | 37.5    | [SNAP](https://snap.stanford.edu/data/soc-Pokec.html)                                                                                                                                                                                                                          | misc                                                                 |
 | as-Skitter              | 1,696,415  | 11,095,298                              | undirected | 13.1    | [SNAP](https://snap.stanford.edu/data/as-Skitter.html)                                                                                                                                                                                                                         | LeNSE                                                                |
 | **Weibo (raw)** yes      | 1,787,443  | ≈216M arcs                              | directed   | ≈242    | [AMiner](https://www.aminer.cn/influencelocality)                                                                                                                                                                                                                              | (ours only)                                                          |
-| Weibo (DeepIM)          | 2,251,166  | 225,877,808                             | directed   | 200     | — see §6.4.5 (transcription error)                                                                                                                                                                                                                                             | DeepIM                                                               |
+| Weibo (DeepIM)          | 2,251,166  | 225,877,808                             | directed   | 200     |: see §6.4.5 (transcription error)                                                                                                                                                                                                                                             | DeepIM                                                               |
 | wiki-Talk               | 2,394,385  | 5,021,410                               | directed   | 4.2     | [SNAP](https://snap.stanford.edu/data/wiki-Talk.html)                                                                                                                                                                                                                          | LeNSE ("Talk")                                                       |
 | sx-stackoverflow        | 2,601,977  | 63,497,050 temporal / 36,233,450 static | directed   | 27.8    | [SNAP](https://snap.stanford.edu/data/sx-stackoverflow.html)                                                                                                                                                                                                                   | GCOMB ("Stack", quotes 2.69M/5.9M after their action-log derivation) |
 | com-Orkut               | 3,072,441  | 117,185,083                             | undirected | 76.2    | [SNAP](https://snap.stanford.edu/data/com-Orkut.html)                                                                                                                                                                                                                          | IMM, SSA, GCOMB                                                      |
 | cit-Patents             | 3,774,768  | 16,518,948                              | directed   | 8.8     | [SNAP](https://snap.stanford.edu/data/cit-Patents.html)                                                                                                                                                                                                                        | adjacent literature                                                  |
 | com-LiveJournal         | 3,997,962  | 34,681,189                              | undirected | 17.3    | [SNAP](https://snap.stanford.edu/data/com-LiveJournal.html)                                                                                                                                                                                                                    | misc                                                                 |
 | soc-LiveJournal1        | 4,847,571  | 68,993,773                              | directed   | 28.5    | [SNAP](https://snap.stanford.edu/data/soc-LiveJournal1.html)                                                                                                                                                                                                                   | IMM, SSA, TIM, IRIE                                                  |
-| Twitter (Kwak'10)       | ≈41.7M     | ≈1.47G                                  | directed   | 70.5    | [KAIST](https://anlab-kaist.github.io/traces/WWW2010) · [LAW mirror](https://law.di.unimi.it/webdata/twitter-2010/) — Warning: the LAW host timed out from our network on 2026-07-29; [Wayback copy](https://web.archive.org/web/2024/https://law.di.unimi.it/webdata/twitter-2010/) | IMM, SSA, TIM, GCOMB                                                 |
+| Twitter (Kwak'10)       | ≈41.7M     | ≈1.47G                                  | directed   | 70.5    | [KAIST](https://anlab-kaist.github.io/traces/WWW2010) · [LAW mirror](https://law.di.unimi.it/webdata/twitter-2010/), Warning: the LAW host timed out from our network on 2026-07-29; [Wayback copy](https://web.archive.org/web/2024/https://law.di.unimi.it/webdata/twitter-2010/) | IMM, SSA, TIM, GCOMB                                                 |
 | com-Friendster          | 65,608,366 | 1,806,067,135                           | undirected | 55.1    | [SNAP](https://snap.stanford.edu/data/com-Friendster.html)                                                                                                                                                                                                                     | SSA, GCOMB                                                           |
 
-#### Cascade datasets — a _different_ evaluation protocol
+#### Cascade datasets: a _different_ evaluation protocol
 
 These carry observed diffusion traces, not just topology. They enable the IMINFECTOR-style **DNI** protocol, which never assumes IC/LT. They are the shared substrate for [`cascade_prediction.md`](cascade_prediction.md) and [`cascade_reconstruction.md`](cascade_reconstruction.md).
 
@@ -443,12 +443,12 @@ These carry observed diffusion traces, not just topology. They enable the IMINFE
 | **Digg 2009**   | 279,631                    | 2,251,166    | 3,553                 | 847         | [ISI/Lerman](https://www.isi.edu/~lerman/downloads/digg2009.html)                                          |
 | **Sina Weibo**  | 1,170,689                  | 225,877,808  | 115,686               | 148         | [AMiner](https://www.aminer.cn/influencelocality) via [IMINFECTOR](https://github.com/geopanag/IMINFECTOR) |
 | **MAG (CS)**    | 1,436,158                  | 15,928,078   | 181,020               | 29          | Microsoft Academic Graph, CS subset, via IMINFECTOR                                                        |
-| **Memetracker** | 12,529 (as used by SL-VAE) | —            | 96M phrases           | —           | [SNAP MemeTracker](https://snap.stanford.edu/data/memetracker9.html)                                       |
-| **Flixster**    | 29,357                     | 425,228 arcs | action log, 10 topics | —           | topic-aware IM literature (Barbieri/Goyal)                                                                 |
+| **Memetracker** | 12,529 (as used by SL-VAE) |              | 96M phrases           |             | [SNAP MemeTracker](https://snap.stanford.edu/data/memetracker9.html)                                       |
+| **Flixster**    | 29,357                     | 425,228 arcs | action log, 10 topics |             | topic-aware IM literature (Barbieri/Goyal)                                                                 |
 
 All five counts above are **[verified]** from IMINFECTOR's Table 3 by direct text extraction, except Memetracker/Flixster which are **[claim]**.
 
-### 6.3 Warning: Name collisions — read this before comparing any number
+### 6.3 Warning: Name collisions, read this before comparing any number
 
 **Seven dataset names in this literature denote more than one graph.** Quoting a published number against the wrong version is the single most common way to produce an invalid comparison table. Each row below is two _different graphs_ that share a name.
 
@@ -460,11 +460,11 @@ All five counts above are **[verified]** from IMINFECTOR's Table 3 by direct tex
 | **Twitter**     | (above)                                       | NetRepo `soc-twitter-follows` **0.8K / 1K**        | ToupleGDD's "Twitter" is this third one                      |
 | **Wiki-Vote**   | NetRepo `soc-wiki-Vote` **889 / 2,900**       | SNAP `wiki-Vote` **7,115 / 103,689**               | ToupleGDD calls A "Wiki-1" and B "Wiki-2"                    |
 | **Digg**        | Syracuse friendship **116,893 / ≈2.6M**       | ISI/Lerman 2009 **279,631 / 2,251,166** + cascades | A: ours · B: IMINFECTOR, DeepIM                              |
-| **NetScience**  | Newman 2006 **1,589 / 2,742**                 | DeepIM's **1,565 / 13,532** (unidentified)         | A: ours, NetRepo · B: DeepIM (§6.4.6 — unresolved)           |
+| **NetScience**  | Newman 2006 **1,589 / 2,742**                 | DeepIM's **1,565 / 13,532** (unidentified)         | A: ours, NetRepo · B: DeepIM (§6.4.6, unresolved)           |
 | **Weibo**       | AMiner raw network **1,787,443 / ≈216M**      | IMINFECTOR-derived **1,170,689 / 225,877,808**     | A: ours · B: IMINFECTOR, DeepIM                              |
 | **LiveJournal** | `com-LiveJournal` **3,997,962 / 34,681,189**  | `soc-LiveJournal1` **4,847,571 / 68,993,773**      | B is the one IMM/SSA report                                  |
 
-Additionally, several papers silently report the **largest connected component** rather than the raw file. This is not a different graph, just a different preprocessing switch — but it changes the numbers:
+Additionally, several papers silently report the **largest connected component** rather than the raw file. This is not a different graph, just a different preprocessing switch, but it changes the numbers:
 
 | Graph             | Raw file        | LCC as reported                    | Reported by                    |
 | ----------------- | --------------- | ---------------------------------- | ------------------------------ |
@@ -482,14 +482,14 @@ Each discrepancy between our version of a graph and the literature's, traced to 
 
 | Dataset        | Cause                                                        | Status                       |
 | -------------- | ------------------------------------------------------------ | ---------------------------- |
-| **NetHEPT**    | Edge-count _convention_, not a different graph               | yes **resolved — same graph** |
+| **NetHEPT**    | Edge-count _convention_, not a different graph               | yes **resolved: same graph** |
 | **Cora-ML**    | Largest-connected-component extraction; same source file     | yes **applied in the loader** |
 | **Digg**       | Different source repository (Syracuse vs ISI/Lerman)         | no different graph           |
 | **Twitter**    | Different repository _and_ different graph (SNAP vs NetRepo) | no unrelated graph           |
 | **Weibo**      | Same source; DeepIM's table has a **transcription error**    | Warning: see §6.4.5                |
 | **NetScience** | Their numbers match neither the cited source nor its LCC     | **unresolved**            |
 
-#### 6.4.1 NetHEPT — resolved, it is the same graph
+#### 6.4.1 NetHEPT: resolved, it is the same graph
 
 An earlier version of this review flagged our NetHEPT (15,229 / 62,752) as differing from the literature's "15,233 / 58,891". It does not. We now have the **primary source**: Wei Chen's own `weic-graphdata.zip` (the archive `netphy.py` downloads) ships `hep.txt`, whose header line reads `15233 58891` [verified].
 
@@ -502,13 +502,13 @@ minus self-loops             : 31,359 edges  -> 62,718 arcs
 our SparklyYS mirror         : 31,376 edges  -> 62,752 arcs, 15,229 nodes
 ```
 
-So the three published figures are three counts of one file: **58,891 = raw lines** (a pair appears once per co-authored paper), **31.4K = deduplicated undirected edges** — which is what the SSA/D-SSA table reports [verified, `p913-Huang.pdf` Table 2] — and our 62,752 is that same edge set stored as both arcs. Our mirror differs from Chen's original by **17 edges and 4 nodes (0.05%)**.
+So the three published figures are three counts of one file: **58,891 = raw lines** (a pair appears once per co-authored paper), **31.4K = deduplicated undirected edges** (which is what the SSA/D-SSA table reports [verified, `p913-Huang.pdf` Table 2]) and our 62,752 is that same edge set stored as both arcs. Our mirror differs from Chen's original by **17 edges and 4 nodes (0.05%)**.
 
 **NetHEPT is therefore directly comparable**, and the classical k=1…50 tables in §5.3 apply to our graph without a caveat.
 
-Corollary: NetHEPT is a **co-authorship** network, not a citation network. Our loader's docstring said "edge (a, b) means paper a cites paper b" — that was wrong and is now fixed. The adjacency was always symmetric, so nothing about the data or the simulation changes.
+Corollary: NetHEPT is a **co-authorship** network, not a citation network. Our loader's docstring said "edge (a, b) means paper a cites paper b", that was wrong and is now fixed. The adjacency was always symmetric, so nothing about the data or the simulation changes.
 
-#### 6.4.2 Cora-ML — solved, and applied
+#### 6.4.2 Cora-ML: solved, and applied
 
 Both we and DeepIM use **the same file**: `cora_ml.npz` from [graph2gauss](https://github.com/abojchevski/graph2gauss). DeepIM loads it through that project's `SparseGraph` class and calls `standardize()`:
 
@@ -528,16 +528,16 @@ largest connected component:   2,810 nodes,  7,981 edges           <- DeepIM's T
 
 `data/datasets/cora_ml.py` now applies symmetrize → drop self-loops → keep LCC, reproducing their graph bit-for-bit. This converted Cora-ML from a caveated row into a directly comparable one.
 
-#### 6.4.3 Digg — different source repository
+#### 6.4.3 Digg: different source repository
 
 |                         | Source                                                                          | Nodes / Edges       |
 | ----------------------- | ------------------------------------------------------------------------------- | ------------------- |
 | **Ours**                | [Syracuse](https://datasets.syr.edu/datasets/Digg.html) `Digg-dataset.zip`      | 116,893 / ≈2.6M     |
 | **IMINFECTOR & DeepIM** | [ISI / Lerman "Digg 2009"](https://www.isi.edu/~lerman/downloads/digg2009.html) | 279,631 / 2,251,166 |
 
-The [IMINFECTOR README](https://github.com/geopanag/IMINFECTOR) names the ISI URL as its Digg source; DeepIM cites IMINFECTOR for its Digg graph. The ISI version also carries **diffusion cascades**, which is why IMINFECTOR could use it — ours is a friendship graph only.
+The [IMINFECTOR README](https://github.com/geopanag/IMINFECTOR) names the ISI URL as its Digg source; DeepIM cites IMINFECTOR for its Digg graph. The ISI version also carries **diffusion cascades**, which is why IMINFECTOR could use it, ours is a friendship graph only.
 
-#### 6.4.4 Twitter — different repository, unrelated graph
+#### 6.4.4 Twitter: different repository, unrelated graph
 
 |                 | Source                                                              | Nodes / Edges      |
 | --------------- | ------------------------------------------------------------------- | ------------------ |
@@ -547,7 +547,7 @@ The [IMINFECTOR README](https://github.com/geopanag/IMINFECTOR) names the ISI UR
 
 ToupleGDD §VI-A: _"Twitter, Wiki-1, caGr and Buzznet are from [37], while Wiki-2, Epinions and Youtube are available on [38]"_, where **[37] = Rossi & Ahmed, Network Repository** and **[38] = Leskovec & Krevl, SNAP**. This same reference split **explains the YouTube match**: their YouTube comes from SNAP, exactly the `com-Youtube` file our loader downloads.
 
-#### 6.4.5 Weibo — DeepIM's table contains a transcription error
+#### 6.4.5 Weibo: DeepIM's table contains a transcription error
 
 IMINFECTOR's own Table 3 reads [verified, direct text extraction]:
 
@@ -556,13 +556,13 @@ IMINFECTOR's own Table 3 reads [verified, direct text extraction]:
 | Nodes | 279,631       | 1,436,158  | **1,170,689** |
 | Edges | **2,251,166** | 15,928,078 | 225,877,808   |
 
-DeepIM's Table 1 — which cites IMINFECTOR for both graphs — reads Digg **279,613 / 1,170,689** and Weibo **2,251,166 / 225,877,808**.
+DeepIM's Table 1 (which cites IMINFECTOR for both graphs) reads Digg **279,613 / 1,170,689** and Weibo **2,251,166 / 225,877,808**.
 
 Those are **the same four numbers reassigned across cells**: Digg's edge count (2,251,166) became Weibo's node count, and Weibo's node count (1,170,689) became Digg's edge count. (279,631 → 279,613 is an additional digit transposition.)
 
-**Consequence:** DeepIM's Digg and Weibo _column headers_ are wrong, but the graphs it ran on are IMINFECTOR's. Our Weibo (1,787,443 nodes, read straight from `weibo_network.txt`) is still a different construction from IMINFECTOR's 1,170,689 — but the gap is much smaller than DeepIM's table implies, and an earlier "union of follower network and cascade users" explanation is not supported by the numbers.
+**Consequence:** DeepIM's Digg and Weibo _column headers_ are wrong, but the graphs it ran on are IMINFECTOR's. Our Weibo (1,787,443 nodes, read straight from `weibo_network.txt`) is still a different construction from IMINFECTOR's 1,170,689, but the gap is much smaller than DeepIM's table implies, and an earlier "union of follower network and cascade users" explanation is not supported by the numbers.
 
-#### 6.4.6 NetScience — unresolved, evidence is contradictory
+#### 6.4.6 NetScience: unresolved, evidence is contradictory
 
 **Our graph is provably the one DeepIM cites.** DeepIM attributes Network Science to Rossi & Ahmed (Network Repository). Our loader pulls from [Netzschleuder](https://networks.skewed.de/net/netscience), and its statistics match [networkrepository.com/netscience.php](https://networkrepository.com/netscience.php) on four independent measures:
 
@@ -573,22 +573,22 @@ Those are **the same four numbers reassigned across cells**: Digg's edge count (
 | Density        | 0.00217332         | 0.00217         |
 | Avg clustering | 0.637791           | 0.638           |
 
-Both are M. Newman's 2006 co-authorship network. But DeepIM reports **1,565 / 13,532** — 4.9× the edges. Two hypotheses were tested and **both fail**:
+Both are M. Newman's 2006 co-authorship network. But DeepIM reports **1,565 / 13,532**: 4.9× the edges. Two hypotheses were tested and **both fail**:
 
 - _Not LCC extraction._ The LCC of this graph is **379 nodes**, not 1,565. (`ca-netscience` on Network Repository is exactly that 379/914 component.)
-- _Not a typo._ Their Table 1 avg-degree column reads 17.28, and 2 × 13,532 / 1,565 = 17.29 — internally consistent, so it describes a real graph they actually ran on.
+- _Not a typo._ Their Table 1 avg-degree column reads 17.28, and 2 × 13,532 / 1,565 = 17.29: internally consistent, so it describes a real graph they actually ran on.
 
 **Conclusion: DeepIM's "Network Science" is a denser graph than the Newman network it cites, and the paper does not say how it was produced.** Resolving it needs their `netscience_25c.SG` pickle, which is not in the public repo (their `data/` folder ships empty).
 
-**Narrowed by the source-localization literature.** The same anomalous graph appears in exactly one other place: SL-VAE (KDD 2022) also reports Network Science as **1,565 / 13,532**, with avg clustering 0.741 [verified]. Every other paper in that literature — IVGD (WWW 2022), GraphSL, SIDSL (2025) — reports **1,589 / 2,742** with clustering 0.638, which is ours. See [`source_localization.md`](source_localization.md) §6.
+**Narrowed by the source-localization literature.** The same anomalous graph appears in exactly one other place: SL-VAE (KDD 2022) also reports Network Science as **1,565 / 13,532**, with avg clustering 0.741 [verified]. Every other paper in that literature (IVGD (WWW 2022), GraphSL, SIDSL (2025)) reports **1,589 / 2,742** with clustering 0.638, which is ours. See [`source_localization.md`](source_localization.md) §6.
 
-So the anomaly is not a DeepIM idiosyncrasy but a shared preprocessing lineage between DeepIM and SL-VAE, and it is the **minority** version within its own literature. Our graph is the one three of the four SL papers use. That does not recover DeepIM's column, but it does mean our NetScience row is comparable to most of the field — the caveat attaches to DeepIM and SL-VAE specifically, not to us.
+So the anomaly is not a DeepIM idiosyncrasy but a shared preprocessing lineage between DeepIM and SL-VAE, and it is the **minority** version within its own literature. Our graph is the one three of the four SL papers use. That does not recover DeepIM's column, but it does mean our NetScience row is comparable to most of the field: the caveat attaches to DeepIM and SL-VAE specifically, not to us.
 
-### 6.5 What to add — ranked recommendation
+### 6.5 What to add: ranked recommendation
 
 Ordered by _research value per hour of implementation_.
 
-#### Tier 1 — yes DONE (small, canonical, published numbers exist)
+#### Tier 1: yes DONE (small, canonical, published numbers exist)
 
 | `--dataset`     | Nodes  | Edges   | Why it earned a slot                                                                                                               |
 | --------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -596,15 +596,15 @@ Ordered by _research value per hour of implementation_.
 | `wiki_vote`     | 7,115  | 103,689 | Dense (avg total degree 29) and directed. ToupleGDD (as "Wiki-2") and MOEIM both report it. Our suite had no dense directed graph. |
 | `email_eu_core` | 1,005  | 24,929  | MOEIM setting-1. Tiny, directed, **42 ground-truth departments** = the only real community labels in the suite.                    |
 | `facebook`      | 4,039  | 88,234  | MOEIM setting-1. Strong community structure, already connected, no preprocessing decisions to get wrong.                           |
-| `ca_grqc`       | 5,242  | 14,484  | ToupleGDD's "caGr". Sparse collaboration graph — the regime where degree heuristics are weakest.                                   |
+| `ca_grqc`       | 5,242  | 14,484  | ToupleGDD's "caGr". Sparse collaboration graph: the regime where degree heuristics are weakest.                                   |
 | `lastfm_asia`   | 7,624  | 27,806  | MOEIM setting-1. Ships **18 country labels**; matches MOEIM's count with no preprocessing.                                         |
 | `cora_ml`       | 2,810  | 7,981   | DeepIM's and MOEIM's Cora-ML, reproduced exactly via graph2gauss `standardize()`.                                                  |
 
-This gives **direct number-for-number comparability with MOEIM's setting-1 table** — four of its six graphs — plus a comparable Cora-ML row against DeepIM's Table 2/3. Before this we could compare against **none** of setting-1.
+This gives **direct number-for-number comparability with MOEIM's setting-1 table** (four of its six graphs) plus a comparable Cora-ML row against DeepIM's Table 2/3. Before this we could compare against **none** of setting-1.
 
-Still missing from MOEIM setting-1: `p2p-Gnutella08` (6,301 / 20,777) and `ca-HepTh` (9,877 / 25,998). Both are SNAP `.txt.gz` files in exactly the format `ca_grqc.py` already parses — each is a copy-and-edit of that loader.
+Still missing from MOEIM setting-1: `p2p-Gnutella08` (6,301 / 20,777) and `ca-HepTh` (9,877 / 25,998). Both are SNAP `.txt.gz` files in exactly the format `ca_grqc.py` already parses, each is a copy-and-edit of that loader.
 
-#### Tier 2 — add when scalable simulation lands
+#### Tier 2: add when scalable simulation lands
 
 | Dataset               | Nodes   | Edges      | Why                                                                                                    |
 | --------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------ |
@@ -615,17 +615,17 @@ Still missing from MOEIM setting-1: `p2p-Gnutella08` (6,301 / 20,777) and `ca-He
 | **Gowalla**           | 196,591 | 950,327    | GCOMB IM/MCP benchmark.                                                                                |
 | **com-DBLP**          | 317,080 | 1,049,866  | LeNSE + GCOMB. Note this is _not_ the classical DBLP (§6.3).                                           |
 | **Deezer HR**         | 54,573  | 498,202    | LeNSE IM benchmark.                                                                                    |
-| **Buzznet**           | 101,200 | ≈2,800,000 | ToupleGDD; extremely high avg degree (54) — a saturation stress test.                                  |
+| **Buzznet**           | 101,200 | ≈2,800,000 | ToupleGDD; extremely high avg degree (54): a saturation stress test.                                  |
 
-#### Tier 3 — only if a scalability claim is being made
+#### Tier 3: only if a scalability claim is being made
 
-`com-Orkut` (3.07M/117M), `soc-LiveJournal1` (4.85M/69.0M), `as-Skitter` (1.70M/11.1M), `wiki-Talk` (2.39M/5.02M), `sx-stackoverflow` (2.60M/63.5M), `soc-Pokec` (1.63M/30.6M), Kwak Twitter (41.7M/1.47G), `com-Friendster` (65.6M/1.81G). We already have four graphs in this class (`twitter`, `digg`, `youtube`, `weibo`) that we cannot simulate — adding more before the simulator scales buys nothing.
+`com-Orkut` (3.07M/117M), `soc-LiveJournal1` (4.85M/69.0M), `as-Skitter` (1.70M/11.1M), `wiki-Talk` (2.39M/5.02M), `sx-stackoverflow` (2.60M/63.5M), `soc-Pokec` (1.63M/30.6M), Kwak Twitter (41.7M/1.47G), `com-Friendster` (65.6M/1.81G). We already have four graphs in this class (`twitter`, `digg`, `youtube`, `weibo`) that we cannot simulate: adding more before the simulator scales buys nothing.
 
 #### Explicitly _not_ recommended
 
 - **More synthetic families.** We already have five and `sbm`/`karate` have no published IM baseline. Adding a sixth generator adds no comparability.
 - **cit-Patents, com-Amazon, com-Friendster.** Present in adjacent literature (max-cover, vertex-cover) but not in any IM table we baseline against.
-- **NetScience "DeepIM version".** Cannot be added — it does not exist publicly (§6.4.6).
+- **NetScience "DeepIM version".** Cannot be added: it does not exist publicly (§6.4.6).
 
 ### 6.6 How to add a dataset
 
@@ -639,7 +639,7 @@ The contract is two files and one line. `--dataset` takes a free string; the reg
        # returns (adjacency (N,N), node_feats (N,F), node_labels (N,), num_nodes)
    ```
 
-   Download into `data/raw/<name>/`, skip if present, print `[✓]`/`[↓]` like the existing loaders. `data/graph_utils.py` carries the four steps every loader needs, so the body is usually ~6 lines:
+   Download into `data/raw/<name>/`, skip if present, print `[ok]`/`[get]` like the existing loaders. `data/graph_utils.py` carries the four steps every loader needs, so the body is usually ~6 lines:
 
    ```python
    raw_edges = np.loadtxt(path, comments="#", dtype=np.int64)   # shape: (E, 2)
@@ -651,7 +651,7 @@ The contract is two files and one line. `--dataset` takes a free string; the reg
 
    plus `largest_connected_component(adjacency)` when reproducing a paper that reports the LCC (it returns the surviving indices so features and labels can be subset identically). `ca_grqc.py` is the shortest complete example; `lastfm_asia.py` shows the real-labels variant.
 
-2. **Add one line to `data/wm_graphs.py::real_directed`**: `"<name>": True|False`. This is the whole registration — `make_real_bundle` imports the module lazily by name and calls the two functions by convention.
+2. **Add one line to `data/wm_graphs.py::real_directed`**: `"<name>": True|False`. This is the whole registration, `make_real_bundle` imports the module lazily by name and calls the two functions by convention.
 
 3. **Add the row** to §6.1 above, to `README.md`, and to `CLAUDE.md`.
 
@@ -663,7 +663,7 @@ Nothing else needs to change: `pipeline/run.py`, the simulator, the feature buil
 
 ## 7. Which paper uses which
 
-Cells mark the dataset **as that paper reports it** — check §6.3 before assuming two papers with the same cell used the same graph.
+Cells mark the dataset **as that paper reports it**: check §6.3 before assuming two papers with the same cell used the same graph.
 
 | Dataset              | Kempe'03 | PMIA'10 | IRIE'12 | TIM'14 | IMM'15 | SSA'16 | GCOMB'20 | IMINFECTOR'20 | LeNSE'22 | GLIE'23 | ToupleGDD'23 | DeepIM'23 | MOEIM'24 |
 | -------------------- | -------- | ------- | ------- | ------ | ------ | ------ | -------- | ------------- | -------- | ------- | ------------ | --------- | -------- |
@@ -712,7 +712,7 @@ GLIE additionally uses **Crime** (829 / 2,946) and **HI-II-14** (4,165 / 26,172)
 
 ## 8. Evaluation protocol
 
-### Budget conventions — the comparability trap
+### Budget conventions: the comparability trap
 
 The two literatures barely overlap in budget regime:
 
@@ -737,7 +737,7 @@ Two settings dominate, and they are not interchangeable:
 
 ### LT thresholds
 
-DeepIM uses `θ_v ~ U[0.3, 0.6]`; we use `θ_v ~ U(0,1)` (NDlib default). **This is a real difference** — a narrower threshold band makes LT cascades substantially easier to ignite, and it partly explains DeepIM's very high LT numbers (Jazz LT@20% = 99.1%).
+DeepIM uses `θ_v ~ U[0.3, 0.6]`; we use `θ_v ~ U(0,1)` (NDlib default). **This is a real difference**: a narrower threshold band makes LT cascades substantially easier to ignite, and it partly explains DeepIM's very high LT numbers (Jazz LT@20% = 99.1%).
 
 ### Metrics
 
@@ -759,17 +759,17 @@ MC replication counts: DeepIM uses **100 rounds**; the classical NetHEPT protoco
 
 2. **NetScience remains uncomparable** (§6.4.6); DeepIM's version has 4.9× more edges and cannot be obtained. Report ours as self-contained.
 
-3. **The saturation problem is confirmed by the literature, not unique to us.** Every method on Cora-ML IC at 20% lands in 50.2–52.4%. Our BA-100 six-way tie is the same phenomenon. **The fix is to report low budgets (1%, 5%) where published methods separate by 74% relative**, and to prefer LT where the gaps are enormous.
+3. **The saturation problem is confirmed by the literature, not unique to us.** Every method on Cora-ML IC at 20% lands in 50.2-52.4%. Our BA-100 six-way tie is the same phenomenon. **The fix is to report low budgets (1%, 5%) where published methods separate by 74% relative**, and to prefer LT where the gaps are enormous.
 
-4. **NetHEPT is the discriminative benchmark.** Degree gets ≈250 where greedy/PMIA/IRIE get ≈725 at k=50. If our agent has to beat degree by 3×, that's a real test — unlike BA where degree is already near-optimal.
+4. **NetHEPT is the discriminative benchmark.** Degree gets ≈250 where greedy/PMIA/IRIE get ≈725 at k=50. If our agent has to beat degree by 3×, that's a real test: unlike BA where degree is already near-optimal.
 
-5. **Add absolute-k budgets for the classical comparison.** The classical literature lives at k ≤ 50; the learning literature at 1–20% of N. Running `--budgets 10 20 30 40 50` alongside `--budget-pcts 1 5 10 20` lets us speak to both.
+5. **Add absolute-k budgets for the classical comparison.** The classical literature lives at k ≤ 50; the learning literature at 1-20% of N. Running `--budgets 10 20 30 40 50` alongside `--budget-pcts 1 5 10 20` lets us speak to both.
 
-6. **SBM has no published IM baseline.** Our SBM experiments can't be positioned against prior work — they are a novel setting (and community structure is exactly where MOEIM's community objective and DeepIM's weakness live). Worth framing as a contribution rather than a comparison.
+6. **SBM has no published IM baseline.** Our SBM experiments can't be positioned against prior work: they are a novel setting (and community structure is exactly where MOEIM's community objective and DeepIM's weakness live). Worth framing as a contribution rather than a comparison.
 
-7. **IMINFECTOR's finding is a warning for us.** A method tuned against a simulator underperformed on real observed cascades. Our world model is trained on NDlib-generated transitions — the same class of assumption. Worth stating as a limitation, and worth testing directly via [`cascade_prediction.md`](cascade_prediction.md).
+7. **IMINFECTOR's finding is a warning for us.** A method tuned against a simulator underperformed on real observed cascades. Our world model is trained on NDlib-generated transitions: the same class of assumption. Worth stating as a limitation, and worth testing directly via [`cascade_prediction.md`](cascade_prediction.md).
 
-8. **Pure IM exercises one of five action ops.** The strongest argument for the next task is that it puts the rest to work — see [`influence_blocking.md`](influence_blocking.md).
+8. **Pure IM exercises one of five action ops.** The strongest argument for the next task is that it puts the rest to work: see [`influence_blocking.md`](influence_blocking.md).
 
 ---
 
@@ -777,13 +777,13 @@ MC replication counts: DeepIM uses **100 rounds**; the classical NetHEPT protoco
 
 **Classical** [Kempe 2003 (KDD)](https://www.cs.cornell.edu/home/kleinber/kdd03-inf.pdf) · [Leskovec 2007 CELF (KDD)](https://www.cs.cmu.edu/~jure/pubs/detect-kdd07.pdf) · [Chen 2009 DegreeDiscount (KDD)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/weic-kdd09_influence.pdf) · [Goyal 2011 CELF++ (WWW)](https://snap.stanford.edu/class/cs224w-readings/goyal11celf.pdf) · [Jung 2012 IRIE (arXiv 1111.4795)](https://arxiv.org/abs/1111.4795) · [Cheng 2013 StaticGreedy (arXiv 1212.4779)](https://arxiv.org/abs/1212.4779) · [Borgs 2014 RIS (arXiv 1212.0884)](https://arxiv.org/abs/1212.0884) · [Tang 2014 TIM (arXiv 1404.0900)](https://arxiv.org/abs/1404.0900) · [Tang 2015 IMM (SIGMOD)](https://dl.acm.org/doi/10.1145/2723372.2723734) · [Nguyen 2016 SSA (arXiv 1605.07990)](https://arxiv.org/abs/1605.07990) · [Tang 2018 OPIM (SIGMOD)](https://dl.acm.org/doi/10.1145/3183713.3183749) · [Guo 2020 SubSIM (SIGMOD)](https://dl.acm.org/doi/10.1145/3318464.3389740)
 
-**Learning-based** [IMINFECTOR (arXiv 1904.08804)](https://arxiv.org/abs/1904.08804) · [code](https://github.com/geopanag/IMINFECTOR) · [GCOMB (NeurIPS 2020)](https://proceedings.neurips.cc/paper/2020/hash/e7532dbeff7ef901f2e70daacb3f452d-Abstract.html) · [code](https://github.com/idea-iitd/GCOMB) · [GLIE (arXiv 2108.04623)](https://arxiv.org/abs/2108.04623) · [code](https://github.com/geopanag/learn_im) — the commonly-cited `geopanag/GLIE` 404s; this is the live repo · [LeNSE (ICML 2022)](https://proceedings.mlr.press/v162/ireland22a.html) · [code](https://github.com/davidireland3/LeNSE) · [ToupleGDD (arXiv 2210.07500)](https://arxiv.org/abs/2210.07500) · [code](https://github.com/Dtrycode/ToupleGDD) · [DeepIM (arXiv 2305.02200)](https://arxiv.org/abs/2305.02200) · [PMLR](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf) · [code](https://github.com/triplej0079/DeepIM) · [MOEIM (arXiv 2403.18755)](https://arxiv.org/abs/2403.18755) · [code](https://github.com/eliacunegatti/MOEIM) · [HIM (arXiv 2502.13571)](https://arxiv.org/abs/2502.13571) · [REM multiplex (arXiv 2501.00779)](https://arxiv.org/abs/2501.00779) · [Topic-aware IM (DAMI 2025)](https://link.springer.com/article/10.1007/s10618-025-01133-3) · [DeepIM accelerated (Neural Networks 2024)](https://www.sciencedirect.com/science/article/abs/pii/S0893608024005732)
+**Learning-based** [IMINFECTOR (arXiv 1904.08804)](https://arxiv.org/abs/1904.08804) · [code](https://github.com/geopanag/IMINFECTOR) · [GCOMB (NeurIPS 2020)](https://proceedings.neurips.cc/paper/2020/hash/e7532dbeff7ef901f2e70daacb3f452d-Abstract.html) · [code](https://github.com/idea-iitd/GCOMB) · [GLIE (arXiv 2108.04623)](https://arxiv.org/abs/2108.04623) · [code](https://github.com/geopanag/learn_im), the commonly-cited `geopanag/GLIE` 404s; this is the live repo · [LeNSE (ICML 2022)](https://proceedings.mlr.press/v162/ireland22a.html) · [code](https://github.com/davidireland3/LeNSE) · [ToupleGDD (arXiv 2210.07500)](https://arxiv.org/abs/2210.07500) · [code](https://github.com/Dtrycode/ToupleGDD) · [DeepIM (arXiv 2305.02200)](https://arxiv.org/abs/2305.02200) · [PMLR](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf) · [code](https://github.com/triplej0079/DeepIM) · [MOEIM (arXiv 2403.18755)](https://arxiv.org/abs/2403.18755) · [code](https://github.com/eliacunegatti/MOEIM) · [HIM (arXiv 2502.13571)](https://arxiv.org/abs/2502.13571) · [REM multiplex (arXiv 2501.00779)](https://arxiv.org/abs/2501.00779) · [Topic-aware IM (DAMI 2025)](https://link.springer.com/article/10.1007/s10618-025-01133-3) · [DeepIM accelerated (Neural Networks 2024)](https://www.sciencedirect.com/science/article/abs/pii/S0893608024005732)
 
 **Surveys / benchmarks** [ML-based IM survey (arXiv 2211.03074, TKDD'23)](https://arxiv.org/abs/2211.03074) · [IM survey (arXiv 2309.04668)](https://arxiv.org/abs/2309.04668) · [Behaviour-aware IM survey (arXiv 2108.03438)](https://arxiv.org/abs/2108.03438) · [Deep-RL max-coverage benchmark (arXiv 2406.14697)](https://arxiv.org/abs/2406.14697)
 
-**Data repositories** [SNAP](https://snap.stanford.edu/data/) · [Network Repository](https://networkrepository.com/) · [Netzschleuder](https://networks.skewed.de/) · [KONECT](http://konect.cc/networks/) · [AMiner](https://www.aminer.cn/data-sna) · [ISI/Lerman](https://www.isi.edu/~lerman/downloads/) · [Syracuse](https://datasets.syr.edu/) · [LAW (Twitter-2010 mirror)](https://law.di.unimi.it/webdata/twitter-2010/) — Warning: the LAW host timed out from our network on 2026-07-29; [Wayback copy](https://web.archive.org/web/2024/https://law.di.unimi.it/webdata/twitter-2010/)
+**Data repositories** [SNAP](https://snap.stanford.edu/data/) · [Network Repository](https://networkrepository.com/) · [Netzschleuder](https://networks.skewed.de/) · [KONECT](http://konect.cc/networks/) · [AMiner](https://www.aminer.cn/data-sna) · [ISI/Lerman](https://www.isi.edu/~lerman/downloads/) · [Syracuse](https://datasets.syr.edu/) · [LAW (Twitter-2010 mirror)](https://law.di.unimi.it/webdata/twitter-2010/), Warning: the LAW host timed out from our network on 2026-07-29; [Wayback copy](https://web.archive.org/web/2024/https://law.di.unimi.it/webdata/twitter-2010/)
 
-**Dataset tables transcribed for this file** [Revisiting SSA (VLDB'17) Table 2](http://www.vldb.org/pvldb/vol10/p913-Huang.pdf) — NetHEPT/NetPHY/Enron/Epinions/DBLP/Orkut/LiveJournal/Twitter · [IMINFECTOR (TKDE'20) Table 3](https://arxiv.org/abs/1904.08804) — Digg/MAG/Weibo + cascades · [LeNSE (ICML'22) Table 2](https://arxiv.org/abs/2205.10106) — train/test edge splits (full graphs reconstructed by summation) · [GCOMB (NeurIPS'20) Table 1a](https://arxiv.org/abs/1903.03332) · [GLIE (arXiv 2108.04623) Table I](https://arxiv.org/abs/2108.04623) · [ToupleGDD (TCSS'23) Table I](https://arxiv.org/abs/2210.07500) · [DeepIM (ICML'23) Table 1](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf) · [MOEIM (GECCO'24) Table 1](https://arxiv.org/abs/2403.18755) · [IRIE (ICDM'12) Table 3](https://arxiv.org/abs/1111.4795) · [PMIA (KDD'10)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/msr-tr-2010-2_v2.pdf) — NetHEPT/NetPHY sizes
+**Dataset tables transcribed for this file** [Revisiting SSA (VLDB'17) Table 2](http://www.vldb.org/pvldb/vol10/p913-Huang.pdf), NetHEPT/NetPHY/Enron/Epinions/DBLP/Orkut/LiveJournal/Twitter · [IMINFECTOR (TKDE'20) Table 3](https://arxiv.org/abs/1904.08804) (Digg/MAG/Weibo + cascades · [LeNSE (ICML'22) Table 2](https://arxiv.org/abs/2205.10106)) train/test edge splits (full graphs reconstructed by summation) · [GCOMB (NeurIPS'20) Table 1a](https://arxiv.org/abs/1903.03332) · [GLIE (arXiv 2108.04623) Table I](https://arxiv.org/abs/2108.04623) · [ToupleGDD (TCSS'23) Table I](https://arxiv.org/abs/2210.07500) · [DeepIM (ICML'23) Table 1](https://proceedings.mlr.press/v202/ling23b/ling23b.pdf) · [MOEIM (GECCO'24) Table 1](https://arxiv.org/abs/2403.18755) · [IRIE (ICDM'12) Table 3](https://arxiv.org/abs/1111.4795) · [PMIA (KDD'10)](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/msr-tr-2010-2_v2.pdf), NetHEPT/NetPHY sizes
 
 ---
 
@@ -793,17 +793,17 @@ Honest list of what this review could **not** establish.
 
 **Results**
 
-- **MOEIM per-cell numbers** — published only as Pareto-front figures. Needs a code run to get a comparable table.
-- **NetHEPT under the percentage-budget convention** — no learning-based paper reports NetHEPT at 1/5/10/20%. Our numbers there will have no direct precedent.
-- **GCOMB, GLIE, LeNSE per-dataset _result_ tables** — identified and linked, but their result cells were not transcribed (they benchmark on YouTube, Stack, and billion-edge graphs largely disjoint from ours). Their _dataset_ tables **are** transcribed, in §6.2.
-- **SBM and Karate** — no IM baselines found in any surveyed paper.
+- **MOEIM per-cell numbers**: published only as Pareto-front figures. Needs a code run to get a comparable table.
+- **NetHEPT under the percentage-budget convention**: no learning-based paper reports NetHEPT at 1/5/10/20%. Our numbers there will have no direct precedent.
+- **GCOMB, GLIE, LeNSE per-dataset _result_ tables**: identified and linked, but their result cells were not transcribed (they benchmark on YouTube, Stack, and billion-edge graphs largely disjoint from ours). Their _dataset_ tables **are** transcribed, in §6.2.
+- **SBM and Karate**: no IM baselines found in any surveyed paper.
 
 **Datasets**
 
 - **DeepIM's Network Science graph** (1,565 / 13,532) matches neither the source it cites nor that source's LCC, and their `data/` folder ships empty (§6.4.6).
-- ~~**NetPHY edge count**~~ — **RESOLVED.** Chen's `phy.txt` deduplicates three ways, and all three published figures are accounted for [derived]: **231,584** raw lines (Chen et al. Table 1) → **180,826** unique _ordered_ pairs, which is SSA's "181K" and reproduces their avg-degree 9.73 exactly (2 × 180,826 / 37,154 = 9.73) → **174,161** unique _undirected_ pairs, which is what our loader builds.
-- **Our Digg edge count** (≈2.6M) has never been pinned exactly — the loader prints it at load time but no number is recorded here.
+- ~~**NetPHY edge count**~~: **RESOLVED.** Chen's `phy.txt` deduplicates three ways, and all three published figures are accounted for [derived]: **231,584** raw lines (Chen et al. Table 1) → **180,826** unique _ordered_ pairs, which is SSA's "181K" and reproduces their avg-degree 9.73 exactly (2 × 180,826 / 37,154 = 9.73) → **174,161** unique _undirected_ pairs, which is what our loader builds.
+- **Our Digg edge count** (≈2.6M) has never been pinned exactly: the loader prints it at load time but no number is recorded here.
 - **Our Weibo edge count** (≈216M) likewise.
 - **Memetracker and Flixster sizes** are [claim] only; no table was transcribed.
 - **GCOMB's "Stack"** (2.69M / 5.9M) is a derived action-log graph, not raw `sx-stackoverflow` (2.60M / 63.5M static-36.2M). Their derivation is not reproduced here.
-- **Twitter and Digg** version gaps are identified but unresolved — we hold different graphs from the literature and cannot obtain theirs cheaply (§6.4.3, §6.4.4).
+- **Twitter and Digg** version gaps are identified but unresolved: we hold different graphs from the literature and cannot obtain theirs cheaply (§6.4.3, §6.4.4).

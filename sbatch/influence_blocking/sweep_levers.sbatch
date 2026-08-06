@@ -16,7 +16,7 @@
 # This is the experiment §7 says does not exist. The seeding line of this
 # literature (Budak, CLDAG, RPS, NIE) and the structural line (Kimura, Xie,
 # SandIMIN, DiffIM) share no dataset outside the SNAP staples and NO PAPER IN
-# EITHER LINE REPORTS THE OTHER'S METRIC — so a single evaluator scoring
+# EITHER LINE REPORTS THE OTHER'S METRIC, so a single evaluator scoring
 # add_node, remove_node, remove_edge and set_edge_weight interventions on the
 # same graph, against the same rumour, under one metric is a comparison nobody
 # has published.

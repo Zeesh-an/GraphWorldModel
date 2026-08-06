@@ -7,7 +7,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
 
-# Two-cascade transitions on email-Eu-core — THE graph to generate first for this
+# Two-cascade transitions on email-Eu-core: THE graph to generate first for this
 # task. It is the one benchmark reported by SandIMIN, both Xie papers AND NIE
 # (research/influence_blocking.md §6.1), so it is the single place our table can be
 # put next to both halves of a literature whose two halves share no metric (§7).
@@ -19,7 +19,7 @@
 # remove 17% of the negative spread, so a large rumour puts every method in a
 # regime where nothing works and every arm ties at "barely anything".
 #
-# All four levers are injected so ONE checkpoint serves every lever — the head has
+# All four levers are injected so ONE checkpoint serves every lever: the head has
 # to have seen a counter-seed, a deletion, a cut and a reweight to predict any of
 # them. `none` is in the blocker list on purpose: those episodes are the unopposed
 # sigma(S_N, empty) reference every prevented-influence number divides by.

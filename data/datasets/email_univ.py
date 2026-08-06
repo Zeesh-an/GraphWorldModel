@@ -4,7 +4,7 @@ email-univ Dataset Loader (university email network)
 Source: http://networkrepository.com/ia-email-univ.php
     - 1,133 nodes, 5,451 undirected edges
     - Undirected, unweighted, Matrix Market coordinate format
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Xiao ICDM'18's `email-univ` row, at 1,133 / 5,451 with assortativity -0.0007

@@ -29,13 +29,13 @@ def fetch(url: str, path: Path) -> Path:
     if path.exists():
         return path
 
-    print(f"[↓] Downloading {url} ...")
+    print(f"[get] Downloading {url} ...")
     request = urllib.request.Request(url, headers={"User-Agent": browser_agent})
 
     with urllib.request.urlopen(request) as response:
         path.write_bytes(response.read())
 
-    print(f"[✓] Saved to {path}")
+    print(f"[ok] Saved to {path}")
 
     return path
 
@@ -58,7 +58,7 @@ def extract(archive: Path, into: Path) -> Path:
     else:
         raise ValueError(f"unknown archive format for {archive}")
 
-    print(f"[✓] Extracted to {into}")
+    print(f"[ok] Extracted to {into}")
 
     return into
 
@@ -118,7 +118,7 @@ def edges_to_adjacency(
     Binary adjacency from an edge list; undirected graphs get both arcs.
 
     Multi-edges collapse because the csr conversion sums duplicates and we then
-    binarize — collaboration files (NetHEPT, NetPHY) list a pair once per
+    binarize: collaboration files (NetHEPT, NetPHY) list a pair once per
     co-authored paper, so this is what turns their raw line count into an edge
     count.
     """
@@ -140,7 +140,7 @@ def edges_to_adjacency(
 
 
 def degree_features(adjacency: sp.csr_matrix, directed: bool) -> np.ndarray:
-    """log1p(degree) node features — total degree (in + out) when directed."""
+    """log1p(degree) node features: total degree (in + out) when directed."""
     out_degrees = np.array(adjacency.sum(axis=1)).flatten()
 
     if directed:
@@ -160,7 +160,7 @@ def largest_connected_component(
     Returns the restricted adjacency and the surviving node indices, so the
     caller can subset features and labels the same way. Several papers report
     the LCC rather than the raw file (see research/influence_maximization.md
-    §6.3) — this is what
+    §6.3): this is what
     reproduces their node counts.
     """
     _, membership = csgraph.connected_components(adjacency, directed=False)
@@ -264,7 +264,7 @@ def save_graph(
         node_feats=node_feats,
         node_labels=node_labels,
     )
-    print(f"[✓] Saved graph data to {out_path}")
+    print(f"[ok] Saved graph data to {out_path}")
 
     return out_path
 

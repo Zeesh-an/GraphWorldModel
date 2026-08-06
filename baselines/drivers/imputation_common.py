@@ -29,7 +29,7 @@ these three is driven through its own training harness. GRIN pins
 Lightning `Experiment` runner, and Deep Demixing's `GCVAE_Trainer` wants its own
 pickle format and DataLoader. We import each repo's MODEL and train it here with
 Adam on a masked BCE. That reproduces the published ARCHITECTURE at a training
-budget we control, not the published training recipe — so these are "the authors'
+budget we control, not the published training recipe, so these are "the authors'
 model, our optimizer" rows, and `--gwm-epochs` is the first number to raise
 before quoting any of them as parity.
 """
@@ -130,7 +130,7 @@ def load_export(work_dir: str) -> dict:
 
 
 def adjacency(edges: np.ndarray, num_nodes: int) -> np.ndarray:
-    """Row-normalized dense adjacency with self-loops — GRIN's `adj` argument."""
+    """Row-normalized dense adjacency with self-loops: GRIN's `adj` argument."""
     dense = np.zeros((num_nodes, num_nodes), dtype=np.float32)
     for source, target in edges:
         dense[int(source), int(target)] = 1.0
@@ -157,7 +157,7 @@ def train_masked(model, forward, data: dict, config: dict, label: str) -> None:
 
     `forward(batch_x, batch_mask) -> logits or probabilities in [0, 1]`; the loss
     is taken over EVERY entry rather than only the held-out ones, because a
-    cascade's zeros are as informative as its ones — a node that never activated
+    cascade's zeros are as informative as its ones: a node that never activated
     is a fact about the trajectory, not a missing value.
     """
     rows = np.flatnonzero(data["is_train"])
@@ -216,7 +216,7 @@ def decode_all(model, forward, data: dict, config: dict, label: str) -> dict:
     Predictions are made for EVERY row, training and evaluation alike. That is
     deliberate: the arm scores the selection pool too (it is what `selection` in
     the report table is), and a training row's prediction is honestly labelled as
-    one — the generalization gap between the two is the column that exposes it.
+    one: the generalization gap between the two is the column that exposes it.
     """
     device = config["device"]
     x = torch.from_numpy(data["x"]).to(device)

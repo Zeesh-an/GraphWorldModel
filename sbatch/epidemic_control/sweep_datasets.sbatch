@@ -23,7 +23,7 @@
 #        `primary_school` has 11 ground-truth classes; `malawi_village` is the
 #        SPARSEST at avg degree 8.1, which §8.3 names as exactly where
 #        `acquaintance_immunization` most embarrasses methods that read the graph.
-#   4    `football`: near-regular degree and 12 known conferences — the control
+#   4    `football`: near-regular degree and 12 known conferences, the control
 #        that shows what happens when the heavy tail the degree heuristic feeds on
 #        is gone.
 #   5-7  The SPECTRAL LINE's benchmarks, with published `lambda_1` per graph
@@ -31,7 +31,7 @@
 #        These are where our eigendrop column can be read next to somebody else's.
 #   8    `ca_grqc`: RLGN's own graph at 5,242 / 14,496, the single most comparable
 #        published table (§5.1). Warning: its budget convention is PER STEP and
-#        ours is one-shot, which §8.2 trap 3 records as non-comparable — cite its
+#        ours is one-shot, which §8.2 trap 3 records as non-comparable: cite its
 #        numbers as context, not as a run.
 #   9    `deezer_ro`: RLGN's GEMSEC-RO column, loaded at its own true edge count
 #        because that paper's Table S4 pairs Romania's nodes with Hungary's edges.

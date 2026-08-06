@@ -38,7 +38,7 @@ class MonteCarloEnvironment:
         self.remove_semantics = remove_semantics
         # Epidemic control: run the COMPARTMENTAL simulator instead of NDlib's
         # IC/LT. `reward` stays `len(state.infected)` because State maps the attack
-        # set — the ever-infected nodes — onto that field, so nothing downstream has
+        # set (the ever-infected nodes) onto that field, so nothing downstream has
         # to know which simulator ran. What IS new is `prevalence_curve`: |I(t)| is
         # a different curve from the cumulative one and is what §2.6's peak,
         # time-to-peak and AUC are all functions of.
@@ -53,7 +53,7 @@ class MonteCarloEnvironment:
         # candidates on purpose: common random numbers make the DIFFERENCE
         # between two strategies far better resolved than either absolute score.
         self.base_seed = base_seed
-        # Cumulative real-environment episodes across all rollout calls — the
+        # Cumulative real-environment episodes across all rollout calls: the
         # sample-efficiency axis for the native-agent condition (--mc-runs 1)
         self.episodes_used = 0
         # Cumulative inner-loop cost. evaluator_seconds is the axis the condition

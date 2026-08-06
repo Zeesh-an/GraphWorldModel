@@ -4,17 +4,17 @@ Primary school (Lyon, temporal) Contact Network Loader
 Source: https://sociopatterns.org/datasets.html
     - 242 nodes, 8,317 undirected edges, 125,773 timestamped contacts [derived]
     - Undirected, unweighted after aggregation
-    - 11 class labels (10 classes plus Teachers) — the ground-truth communities
+    - 11 class labels (10 classes plus Teachers): the ground-truth communities
 §6.6 ranks this SECOND to add and gives the reason: it is the same order as
 `jazz` (198 nodes) and it ships real class structure, which is the community
 partition our SBM experiments only approximate. Stehlé et al. (PLoS ONE 2011).
 
-Its average degree is 68.7 on 242 nodes — extremely dense for a contact graph,
+Its average degree is 68.7 on 242 nodes: extremely dense for a contact graph,
 because a school day puts every child in a room with their whole class repeatedly.
 Expect an epidemic to reach nearly everyone unless the intervention cuts across
 classes, which is exactly what makes the class labels worth having.
 
-Warning: NOT the hospital ward — see `hospital_lh10` and §6.4.
+Warning: NOT the hospital ward, see `hospital_lh10` and §6.4.
 """
 
 from pathlib import Path

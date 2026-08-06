@@ -2,7 +2,7 @@
 Mid-search state for a refinement loop, so a killed sweep resumes where it
 stopped instead of paying for every LLM call again.
 
-Written after each evaluation and deleted on success — a checkpoint on disk
+Written after each evaluation and deleted on success: a checkpoint on disk
 means "this arm did not finish". Everything needed to continue is JSON: the
 population, the conversation thread, the counters, and the anchor rollouts (so a
 resume does not re-pay for the baseline leaderboard).
@@ -40,7 +40,7 @@ def fingerprint(config: object, method: str, graph: object) -> dict:
         # Source localization. Every one of these changes WHAT THE REWARD MEANS,
         # so a resume across any of them would carry a population whose recorded
         # scores were measured on a different problem: a different episode pool, a
-        # different observation, a different k, or — for `native_arm` — with or
+        # different observation, a different k, or (for `native_arm`) with or
         # without a forward model in the search loop at all. `native_arm` is not
         # recoverable from `evaluator`, which reads monte_carlo for both.
         "native_arm": getattr(config, "native_arm", False),

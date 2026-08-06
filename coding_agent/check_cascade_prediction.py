@@ -8,7 +8,7 @@ expensive to discover was false three stages into a sweep:
 
   1. **The metric definitions are the published ones.** §8.1 opens with "Get MSLE
      right or nothing else matters" and then lists three independent choices hiding
-     inside that name — log base, total vs increment, the smoothing offset — and
+     inside that name (log base, total vs increment, the smoothing offset) and
      §5.7 difference 4 records that §5.1 prints two of the variants in ONE table.
      Checked against hand-worked values rather than against ourselves.
 
@@ -180,7 +180,7 @@ def check_declines_are_counted() -> None:
     )
     assert prediction_reward(empty, "msle") == float("inf")
 
-    print("[OK] declines are counted, never scored — and an all-decline arm is +inf")
+    print("[OK] declines are counted, never scored, and an all-decline arm is +inf")
 
 
 def _corpus(count: int = 60, spacing: int = 100) -> list[Cascade]:
@@ -233,7 +233,7 @@ def check_split_is_leak_free() -> None:
         assert cascade.publish_time + config.horizon <= first_test, (
             f"training cascade {cascade.cascade_id} predicts to "
             f"{cascade.publish_time + config.horizon} but the first test cascade is "
-            f"observed from {first_test} — that is exactly the leak §8.3 describes"
+            f"observed from {first_test}: that is exactly the leak §8.3 describes"
         )
 
     # ...and the ORDER is the only thing the random protocol changes, which is what
@@ -281,7 +281,7 @@ def check_replay_round_trip() -> None:
         "train",
     )
 
-    # `a_t = NULL` at every step but the seed commit — §2.1's defining property
+    # `a_t = NULL` at every step but the seed commit: §2.1's defining property
     assert records[0]["action"], "the t=0 record must carry the root's seed commit"
     assert all(not record["action"] for record in records[1:]), (
         "a replayed cascade emitted an action after t=0; §2.1 is that nothing "
@@ -293,7 +293,7 @@ def check_replay_round_trip() -> None:
         for value in record["next_marginal_infected"].values():
             assert value == 1.0, "a replayed target was not a hard 0/1 (§2.4)"
 
-    # Record `t` carries the wave binned at `t` — the invariant `observed_waves`
+    # Record `t` carries the wave binned at `t`: the invariant `observed_waves`
     # depends on, and the one that decides how much prefix a predictor is shown
     recovered = {}
     for step, record in enumerate(records):
@@ -308,7 +308,7 @@ def check_replay_round_trip() -> None:
             )
 
     # A cascade SHORTER than the observation window is the normal case, not an edge
-    # one — most cascades are over long before `t_o` — so `observed_waves` has to
+    # one (most cascades are over long before `t_o`) so `observed_waves` has to
     # clamp rather than index past the end of the recorded history
     episode = {
         "frontiers": np.array(
@@ -389,7 +389,7 @@ def check_floors_are_strong() -> None:
 
     assert floors["trivial_predictor_error"] < 1.0, (
         f"the constant predictor scored {floors['trivial_predictor_error']:.3f}, "
-        f"which is worse than a log-space error should allow — under MSLE the "
+        f"which is worse than a log-space error should allow: under MSLE the "
         f"geometric mean is the minimizer over instance-blind rules and it is "
         f"supposed to be STRONG"
     )
@@ -417,7 +417,7 @@ def check_predictor_cannot_see_the_answer() -> None:
     observation = _observation({0: 0, 1: 1, 2: 2, 3: 3}, window=3, horizon=10)
 
     assert max(observation.adopters.values()) <= observation.observed_steps, (
-        "an adopter past the observation window reached the predictor — that is the "
+        "an adopter past the observation window reached the predictor: that is the "
         "answer, not the prefix"
     )
     assert observation.popularity == 4
@@ -448,8 +448,8 @@ def check_predictor_cannot_see_the_answer() -> None:
     assert validate_prediction(float("inf"), instance) is None
     assert validate_prediction(12.0, instance) == 12.0
 
-    # The feature extractor sees only the prefix, and its second-half rate — the
-    # single most predictive feature in §5.6 — is computable from it
+    # The feature extractor sees only the prefix, and its second-half rate: the
+    # single most predictive feature in §5.6: is computable from it
     features = cascade_features(graph, observation)
     assert features["observed"] == 4
     assert "rate_second_half" in features and np.isfinite(features["rate_second_half"])

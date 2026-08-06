@@ -60,7 +60,7 @@ real_directed = {
     # Influence-blocking benchmarks (research/influence_blocking.md §6.2). Every one
     # is loaded with its own file's directedness rather than symmetrized, because
     # unlike the dismantling literature this one is largely DIRECTED and its
-    # published probabilities are 1/in-degree — which is only defined on arcs.
+    # published probabilities are 1/in-degree, which is only defined on arcs.
     #
     # Warning: two of these collide by name with graphs we already load, and both
     # collisions are recorded in §6.3 rather than resolved by renaming theirs:
@@ -85,13 +85,13 @@ real_directed = {
     "pokec": True,
     # Cascade-reconstruction benchmarks (research/cascade_reconstruction.md §6).
     # All undirected: like the dismantling literature, this one is undirected end
-    # to end — every Steiner-tree method in §3 is defined on the symmetric contact
+    # to end: every Steiner-tree method in §3 is defined on the symmetric contact
     # graph, and DITTO's own loaders call `nx.read_edgelist` without `create_using`.
     #
     # `oregon2` and `rt_pol` are DITTO's two graphs we did not already have;
     # `ca_hepth`, `email_univ`, `uci_students` and `infectious` are the rest of
     # Xiao's two tables; `citeseer` is DIPT's third graph. Warning: `ca_hepth` is
-    # the CO-AUTHORSHIP network and `cit_hepth` the CITATION one — same arXiv
+    # the CO-AUTHORSHIP network and `cit_hepth` the CITATION one: same arXiv
     # section, different graphs, and each loader's docstring says which.
     "oregon2": False,
     "rt_pol": False,
@@ -103,13 +103,13 @@ real_directed = {
     # Epidemic-control benchmarks (research/epidemic_control.md §6). Two families.
     #
     # The SOCIOPATTERNS contact traces (§6.2) are the field's canonical EMPIRICAL
-    # networks — RFID proximity at 20-second resolution in a hospital, a school, a
+    # networks: RFID proximity at 20-second resolution in a hospital, a school, a
     # conference, an office, a village. All undirected, all aggregated from a `tij`
     # stream by one parser (`data/datasets/sociopatterns.py`), and every count is
     # [derived] because SocioPatterns publishes no statistics page at all. Warning:
     # aggregating a contact trace DISCARDS the ordering that makes the epidemic
     # non-trivial (§8.2 trap 5), and §7 records that no paper in the CS immunization
-    # line uses one — they buy realism and community structure, not a published
+    # line uses one: they buy realism and community structure, not a published
     # baseline.
     "hospital_lh10": False,
     "primary_school": False,
@@ -152,15 +152,15 @@ real_directed = {
     # is loaded undirected: the graph we build is the union of the observed
     # propagation paths (CasFlow's own `generate_global_graph`), and an observed
     # retweet is evidence of a tie rather than of a one-way channel. `digg_cascades`
-    # is the exception in construction but not in directedness — it has a real
+    # is the exception in construction but not in directedness: it has a real
     # published friendship graph and uses it, symmetrized.
     #
     # Warning: THREE of these collide by name with graphs we already load, and §6.1
     # and §6.4 record all three rather than renaming theirs. `digg_cascades` is the
     # ISI/Lerman Digg 2009 corpus (279,632 nodes WITH 3,553 vote cascades) while
-    # `digg` is the Syracuse friendship graph (116,893, no cascades) — different
+    # `digg` is the Syracuse friendship graph (116,893, no cascades): different
     # graph, and ours has no traces. `weibo_cascades` is the AMiner retweet TRACES
-    # while `weibo` is the AMiner follower GRAPH — same download, different artefact.
+    # while `weibo` is the AMiner follower GRAPH: same download, different artefact.
     # And `casflow_weibo` is Weibo-A, the DeepHawkes preprocessing that carries the
     # published numbers, which `weibo_cascades` (raw, unfiltered) is not.
     "casflow_weibo": False,
@@ -362,7 +362,7 @@ def make_synthetic_bundle(
         graph_id = f"ws_n{num_nodes}_k{ws_k}_p{ws_p}_s{instance_seed}"
     elif family == "sbm":
         # Even block sizes (remainder folded into the first block); dense within
-        # blocks, sparse across — the community structure BA graphs lack
+        # blocks, sparse across: the community structure BA graphs lack
         sizes = [num_nodes // sbm_blocks] * sbm_blocks
         sizes[0] += num_nodes - sum(sizes)
         block_probs = [
@@ -471,7 +471,7 @@ def load_cascade_corpus(
     means the same thing in each: the graph is built FROM the traces for every
     corpus but Digg, which publishes a real friendship network and uses it.
 
-    Raises on a dataset with no cascades rather than returning an empty list —
+    Raises on a dataset with no cascades rather than returning an empty list,
     `--task cascade_prediction` on a topology-only graph would otherwise generate
     zero episodes and fail three stages later with nothing to point at.
     """
@@ -480,7 +480,7 @@ def load_cascade_corpus(
             f"dataset {dataset!r} carries no cascades, so it cannot be replayed for "
             f"--task cascade_prediction. Real cascade corpora: "
             f"{sorted(cascade_corpora)}. research/cascade_prediction.md §6.1 records "
-            f"that NONE of the graphs we load for the other tasks carry a trace — "
+            f"that NONE of the graphs we load for the other tasks carry a trace: "
             f"that is the whole reason this task needed new loaders."
         )
 

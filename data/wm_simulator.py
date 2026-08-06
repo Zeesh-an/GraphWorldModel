@@ -33,7 +33,7 @@ epidemic_dynamics = ("SIR", "SIS", "SEIR")
 
 # Dynamics whose edges carry a real per-arc transmission probability, so
 # `GraphInput.edge_weight` must be the true w rather than ones. LT is the only
-# structural dynamics that does not, and it is what this set exists to exclude —
+# structural dynamics that does not, and it is what this set exists to exclude,
 # the epidemic ones DO, which is the whole reason §2.2 says to write our own
 # stepper instead of using NDlib's scalar-beta SIR/SIS/SEIR.
 weighted_dynamics = ("IC",) + epidemic_dynamics
@@ -84,7 +84,7 @@ class State:
     task (influence blocking) carries a second cascade in `pos_infected` /
     `pos_frontier`, and the mapping is deliberate rather than symmetric:
 
-      * `infected` / `frontier` are always the **negative** cascade — the rumour, the
+      * `infected` / `frontier` are always the **negative** cascade: the rumour, the
         thing being minimized. Every existing reader (the reward, `spread_curve`,
         `summarize`, `credit`, the plots) therefore measures the objective without
         a single change.
@@ -98,13 +98,13 @@ class State:
     is again deliberate rather than symmetric
     (research/epidemic_control.md §2.3):
 
-      * `infected` is EVER-INFECTED — the attack set, the thing being minimized. It
+      * `infected` is EVER-INFECTED: the attack set, the thing being minimized. It
         is monotone under SIR, SIS and SEIR alike (a node never un-becomes
         ever-infected), which is what lets `reward = len(state.infected)`, the
         spread curve, the plots and the summary go on reading it with no branch.
       * `frontier` is the currently INFECTIOUS set `I`. That is exactly what it
         already means under IC (status-1 spreaders), and it is the set that drives
-        transmission — it is also the one that is NOT monotone, because `I -> R`
+        transmission: it is also the one that is NOT monotone, because `I -> R`
         under SIR/SEIR and `I -> S` under SIS both shrink it.
       * `exposed` is `E` (SEIR only) and `recovered` is `R` (SIR/SEIR). Susceptible
         is everything else: a node in none of the four is `S`, which under SIS is
@@ -498,8 +498,8 @@ class Simulator:
         """
         {v: [u, ...]} for the step that just ran, from the traced model's log.
 
-        A node the ACTION activated has no parent at all — an `add_node` is an
-        exogenous injection, not a transmission — so those are recorded with an
+        A node the ACTION activated has no parent at all: an `add_node` is an
+        exogenous injection, not a transmission, so those are recorded with an
         empty list, which is what marks a source in the reconstructed tree.
         """
         if not self.trace_parents:
@@ -604,7 +604,7 @@ class Simulator:
         `snapshot`/`restore` rewind status and the blocked set but NOT the graph,
         because the graph lives inside NDlib's model. That is fine for a fork whose
         bag is node-only, and wrong for a `blocked` removal, whose deletion bag
-        strips the node's incident arcs permanently — the main branch would resume
+        strips the node's incident arcs permanently: the main branch would resume
         on a graph the fork edited.
 
         Weights come from `ic_prob_map`, the episode's own edge table, so a

@@ -9,8 +9,8 @@ one driver serves all of them and the five rows are produced under identical
 conditions.
 
 Warning: THIS REPO IS THE ONLY PUBLIC NETSHIELD AND THE ONLY PUBLIC DAVA. Both
-papers shipped no code — `research/epidemic_control.md` §11 lists them among the
-five methods with "no public release" — and §3.2's widely-repeated claim that
+papers shipped no code: `research/epidemic_control.md` §11 lists them among the
+five methods with "no public release", and §3.2's widely-repeated claim that
 EpiLearn ships a NetShield implementation is WRONG: that repo's tree has no shield,
 immunization or intervention code at all [derived, 2026-08-05]. So these arms are
 not a convenience, they are the only way a NetShield or DAVA number in our table is
@@ -23,7 +23,7 @@ Run inside the clone with our work directory as argv[1]. Reads `graph.txt` and
 WHY THIS EXISTS RATHER THAN `run_solver.py`. The shipped entry point ties three
 things together that we need apart: it unpickles a NetworkX graph (a pickle written
 by our networkx and read by theirs is a version gamble for no gain), and it then
-runs 100 of its OWN Independent Cascade simulations to score the answer — which is
+runs 100 of its OWN Independent Cascade simulations to score the answer, which is
 work we do not want, because the whole point of the harness is that every arm's
 seeds are scored by ONE referee. Building the graph from a plain edge list and
 stopping after `solver.run()` skips both.
@@ -130,7 +130,7 @@ if __name__ == "__main__":
         if name == "NetShape"
         else {}
     )
-    # `Dom` is DAVA and `Dom` with `fast=True` is DAVA-fast — the paper's own
+    # `Dom` is DAVA and `Dom` with `fast=True` is DAVA-fast: the paper's own
     # near-linear variant, which builds ONE dominator tree instead of k
     if os.environ.get("GWM_NETIMM_FAST") == "1":
         params["fast"] = True
@@ -148,7 +148,7 @@ if __name__ == "__main__":
     # DAVA merges the outbreak into a SUPERSEED whose id is `len(G)` or higher, and
     # its `get_rank` fallback can hand that id back on a trivial instance. Dropping
     # it here rather than in the parser keeps the range check in
-    # `run_baseline.run_external_baseline` meaningful — an out-of-range id there
+    # `run_baseline.run_external_baseline` meaningful: an out-of-range id there
     # means the repo was run on a different graph, which is a real error.
     blocked = [node for node in blocked if 0 <= node < num_nodes]
 

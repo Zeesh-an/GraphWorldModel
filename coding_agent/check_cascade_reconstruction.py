@@ -9,7 +9,7 @@ generated dataset in a temp directory and take a few seconds; nothing here needs
 trained world model or an LLM.
 
   1. **The transmission edge exists and is real.** NDlib does not emit one (§9 item
-     9), so the traced models are ours — and a traced model that silently changed
+     9), so the traced models are ours, and a traced model that silently changed
      the dynamics would invalidate every episode. Checked against the untraced
      model's own distribution, and every recorded `(u, v)` checked to be an arc.
   2. **A source has no parent and activates at t = 0.** The whole `parent = None`
@@ -80,7 +80,7 @@ failed = []
 
 def check(name: str, condition: bool, detail: str = "") -> None:
     (passed if condition else failed).append(f"{name}: {detail}" if detail else name)
-    print(f"[{'PASS' if condition else 'FAIL'}] {name}" + (f" — {detail}" if detail else ""))
+    print(f"[{'PASS' if condition else 'FAIL'}] {name}" + (f": {detail}" if detail else ""))
 
 
 def generate(out_dir: Path) -> dict:

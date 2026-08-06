@@ -4,7 +4,7 @@ com-DBLP Dataset Loader
 Source: https://snap.stanford.edu/data/com-DBLP.html
     - 317,080 nodes, 1,049,866 undirected edges
     - Undirected (DBLP co-authorship)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 SandIMIN's, both Xie papers' and NAMM's `DBLP` (§6.2). Warning: NAMM quotes it as

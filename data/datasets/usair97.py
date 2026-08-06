@@ -3,9 +3,9 @@ USAir97 Dataset Loader
 
 Source: https://networkrepository.com/inf-USAir97.php (Pajek / SuiteSparse 1529)
     - 332 nodes (airports), 2,126 undirected edges (1997 US air routes)
-    - Undirected; the file carries passenger-flow weights, which we drop —
+    - Undirected; the file carries passenger-flow weights, which we drop,
       IC/LT probabilities come from `build_edge_index` like every other graph
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Matrix Market coordinate format: `%` comment lines, then ONE dimension header

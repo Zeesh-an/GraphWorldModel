@@ -45,7 +45,7 @@ class PerStepReprompt(OuterLoopMethod):
             # play the same nominal k as a one_shot arm with 11x the seeds.
             # t=0 starts a new episode under a sequential env; under a lockstep
             # ensemble env every sample's t=0 also resets, so the cap is shared
-            # from t>0 onwards — stricter than per-sample, never looser.
+            # from t>0 onwards: stricter than per-sample, never looser.
             if timestep == 0:
                 seeded.clear()
 

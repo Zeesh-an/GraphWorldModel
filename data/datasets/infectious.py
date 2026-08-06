@@ -6,7 +6,7 @@ Source: http://konect.cc/networks/sociopatterns-infectious/
     - Undirected; the raw file is `u v weight unix_timestamp` per CONTACT, so an
       edge repeats once per 20-second contact and the deduplicated count is what
       is quoted
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Xiao ICDM'18's `infectious` row, at 410 / 2,765 with assortativity 0.0121

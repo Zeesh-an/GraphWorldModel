@@ -4,14 +4,14 @@ Dolphins Dataset Loader
 Source: https://networkrepository.com/soc-dolphins.php (Lusseau et al. 2003)
     - 62 nodes (bottlenose dolphins), 159 undirected edges (frequent associations)
     - Undirected, unweighted
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 THE one benchmark graph the source-localization literature uses that we did not
 already load (`research/source_localization.md` §6.1, §11): IVGD's Table 3, the
 GraphSL package's Table 1 and the 2026 GNN source-detection benchmark's Table 3
 all report it, and all three report 62 / 159. IVGD's row is the most useful of the
-three — `LPSI FS 0.8717` against `IVGD FS 0.9701` on this graph — because it is
+three (`LPSI FS 0.8717` against `IVGD FS 0.9701` on this graph) because it is
 the only place a classical and a learned method are printed side by side on a
 graph small enough that our own numbers converge in seconds.
 

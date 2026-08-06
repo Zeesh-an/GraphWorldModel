@@ -7,11 +7,11 @@ Source: https://snap.stanford.edu/data/email-Eu-core.html
     - 1,005 nodes (researchers), 25,571 directed edges (emails)
     - 642 of those lines are self-loops and are dropped, leaving 24,929 arcs
     - Directed: edge (a, b) means a sent b at least one email
-    - Node labels: 42 ground-truth departments — the ONLY real community labels
+    - Node labels: 42 ground-truth departments, the ONLY real community labels
       in our suite, which makes this the natural graph for community-aware
       evaluation (cf. MOEIM's community objective, and our SBM experiments,
       which have no published baseline)
-    - No inherent node features — uses log(1 + total degree) as synthetic features
+    - No inherent node features: uses log(1 + total degree) as synthetic features
 
 MOEIM reports the largest connected component, 986 / 25,552.
 
@@ -36,7 +36,7 @@ data_dir = Path(__file__).resolve().parent.parent / "raw" / "email_eu_core"
 
 def _fetch(url: str, gz_path: Path, txt_path: Path) -> None:
     if not gz_path.exists():
-        print(f"[↓] Downloading {gz_path.name} from {url} ...")
+        print(f"[get] Downloading {gz_path.name} from {url} ...")
         urllib.request.urlretrieve(url, gz_path)
 
     with gzip.open(gz_path, "rb") as gz_file:
@@ -50,7 +50,7 @@ def download_email_eu_core() -> Path:
     labels_path = data_dir / "email-Eu-core-department-labels.txt"
 
     if txt_path.exists() and labels_path.exists():
-        print(f"[✓] email-Eu-core already downloaded at {txt_path}")
+        print(f"[ok] email-Eu-core already downloaded at {txt_path}")
         return txt_path
 
     _fetch(email_eu_core_url, data_dir / "email-Eu-core.txt.gz", txt_path)
@@ -59,7 +59,7 @@ def download_email_eu_core() -> Path:
         data_dir / "email-Eu-core-department-labels.txt.gz",
         labels_path,
     )
-    print(f"[✓] Extracted to {data_dir}")
+    print(f"[ok] Extracted to {data_dir}")
 
     return txt_path
 
@@ -83,7 +83,7 @@ def load_email_eu_core(
         path.parent / "email-Eu-core-department-labels.txt", dtype=np.int64
     )  # shape: (N, 2) as (node, department)
 
-    # The label file covers every node, so it is the authority on N — the edge
+    # The label file covers every node, so it is the authority on N: the edge
     # list alone would miss any node that neither sent nor received mail
     num_nodes = int(raw_labels.shape[0])
 
@@ -99,12 +99,12 @@ def load_email_eu_core(
     in_degrees = np.array(adjacency.sum(axis=0)).flatten()
     out_degrees = np.array(adjacency.sum(axis=1)).flatten()
     print(
-        f"[✓] email-Eu-core loaded: {num_nodes} nodes, {adjacency.nnz} directed edges, "
+        f"[ok] email-Eu-core loaded: {num_nodes} nodes, {adjacency.nnz} directed edges, "
         f"{len(np.unique(node_labels))} departments"
     )
-    print(f"    In-degree  — avg: {in_degrees.mean():.1f}, max: {in_degrees.max():.0f}")
+    print(f"    In-degree: avg: {in_degrees.mean():.1f}, max: {in_degrees.max():.0f}")
     print(
-        f"    Out-degree — avg: {out_degrees.mean():.1f}, max: {out_degrees.max():.0f}"
+        f"    Out-degree: avg: {out_degrees.mean():.1f}, max: {out_degrees.max():.0f}"
     )
 
     return adjacency, node_feats, node_labels, num_nodes

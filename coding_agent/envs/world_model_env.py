@@ -217,7 +217,7 @@ class WorldModelEnvironment:
         if diffusion_model != "IC":
             raise ValueError(
                 "oracle dynamics are IC-only: LT thresholds are drawn per episode "
-                "and never stored, so no true LT transition function exists — use "
+                "and never stored, so no true LT transition function exists: use "
                 "the monte_carlo evaluator with a large --mc-runs as the LT proxy"
             )
 
@@ -233,7 +233,7 @@ class WorldModelEnvironment:
             competitive=competitive,
             tie_break=tie_break,
             # The oracle head pins q to the TRUE probability, so under MCICM it has
-            # to be told the limiting campaign's constant — the edge weight does not
+            # to be told the limiting campaign's constant: the edge weight does not
             # carry it, and pinning both campaigns to p would silently simulate COICM
             positive_prob=(
                 None if positive_prob == shared_positive_prob else float(positive_prob)
@@ -280,8 +280,8 @@ class WorldModelEnvironment:
         its place: the sampling bindings pay `mc_runs` real episodes per call and
         this pays one batched matmul, at ~10^4 calls per decoded instance (§2.4.2).
 
-        Column 1 of the head is `next_frontier` — the nodes that activate on THIS
-        step — which is exactly the kernel a decoder proposes against. Column 0
+        Column 1 of the head is `next_frontier`: the nodes that activate on THIS
+        step, which is exactly the kernel a decoder proposes against. Column 0
         (`next_infected`) is the accumulated set and would double-count everything
         already infected.
 
@@ -472,7 +472,7 @@ class WorldModelEnvironment:
                 if self.epidemic:
                     # One draw per node against the cumulative (E, I, R, S)
                     # distribution, so the four EXCLUSIVE compartments cannot both
-                    # claim a node — the compartmental version of the same coupling
+                    # claim a node: the compartmental version of the same coupling
                     state = sample_epidemic_step(
                         State(
                             sorted(infected[sample]),
@@ -505,7 +505,7 @@ class WorldModelEnvironment:
 
                 if self.competitive:
                     # One draw per node decides both whether it activates and which
-                    # cascade takes it, so a node can never land in both — the same
+                    # cascade takes it, so a node can never land in both: the same
                     # coupling the tie-break enforces in the simulator
                     state = sample_competitive_step(
                         State(

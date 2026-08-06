@@ -4,13 +4,13 @@ Oregon-2 Dataset Loader (AS peering, 26 May 2001)
 Source: https://snap.stanford.edu/data/Oregon-2.html
     - 11,461 nodes, 32,730 undirected edges
     - Undirected, unweighted, tab-separated with a `#` header
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 DITTO's Table 2 row, at 11,461 / 32,730 [verified], and one of the two REAL graphs
 it simulates on (T = 15, infection 0.1, recovery 0.05, 10% sources). Loading it is
 what makes `research/cascade_reconstruction.md` §5.1's `Oregon2-SI` and
-`Oregon2-SIR` columns reachable — DITTO reports F1 .8280 / .7928 there against a
+`Oregon2-SIR` columns reachable: DITTO reports F1 .8280 / .7928 there against a
 supervised ideal of .8320 / .8024.
 
 `oregon2_010526` is the LAST of the nine weekly snapshots SNAP publishes under

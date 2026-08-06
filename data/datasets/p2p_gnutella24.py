@@ -4,12 +4,12 @@ p2p-Gnutella24 Dataset Loader
 Source: https://snap.stanford.edu/data/p2p-Gnutella24.html
     - 26,518 nodes, 65,369 arcs
     - Directed (Gnutella peer-to-peer hosts, August 2002)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 NIE's mid-size network (§5.5, Table II: 26,518 / 65,369, avg degree 2.47). Sparse
 and near-tree-like, which is the regime where blocking a single cut vertex removes a
-whole branch — the opposite of the hub-dominated social graphs.
+whole branch: the opposite of the hub-dominated social graphs.
 """
 
 from pathlib import Path

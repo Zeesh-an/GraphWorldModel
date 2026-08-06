@@ -12,8 +12,8 @@
 # Usage: sbatch sbatch/critical_node_detection/generate_data_power_grid.sbatch
 #
 # This is the single best-matched benchmark in research/critical_node_detection.md
-# §7 — CoreHD, BPD and NIRM all publish absolute numbers on this exact 4,941/6,594
-# file — and §9.4 predicts we LOSE on it: diameter 46 exhausts a 3-6 layer
+# §7: CoreHD, BPD and NIRM all publish absolute numbers on this exact 4,941/6,594
+# file, and §9.4 predicts we LOSE on it: diameter 46 exhausts a 3-6 layer
 # receptive field, and MIND's Table 5 puts FINDER at 161.7 on `eu-powergrid`
 # against EI's 80.6. Run it first and report the loss as predicted-and-confirmed
 # rather than discovering it late.

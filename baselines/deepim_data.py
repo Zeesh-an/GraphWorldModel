@@ -2,7 +2,7 @@
 Build the `.SG` training file DeepIM needs, from OUR graphs.
 
 DeepIM was blocked because its repo ships an empty `data/` folder. Reading
-`genim.py` shows the file is not exotic — it is a pickled dict with two keys:
+`genim.py` shows the file is not exotic: it is a pickled dict with two keys:
 
     graph = pickle.load(open("data/<dataset>_mean_<DM><10*rate>.SG", "rb"))
     adj, inverse_pairs = graph["adj"], graph["inverse_pairs"]
@@ -13,7 +13,7 @@ DeepIM was blocked because its repo ships an empty `data/` folder. Reading
 
 That second tensor is exactly what our simulator already produces: pick a seed
 set, diffuse to termination, record who ended up infected. So DeepIM is
-unblockable — it needs data we can generate, not data only the authors have.
+unblockable: it needs data we can generate, not data only the authors have.
 
     python -m baselines.deepim_data --data-dir results/ba40/data \
         --dataset jazz --diffusion-model LT --seed-rate 1 --samples 1000
@@ -65,7 +65,7 @@ def build_inverse_pairs(
     random. DeepIM autoencodes seed vectors and then optimises in that latent
     space, so the reachable solutions are only as good as the sets the
     autoencoder was trained on. Train it on uniform-random 16-subsets and the
-    manifold contains nothing but random-quality answers — the optimisation
+    manifold contains nothing but random-quality answers: the optimisation
     converges to seeds that score at or below the random baseline, which is
     exactly what we measured. Degree- and PageRank-biased draws put
     high-influence sets inside the manifold; the uniform third keeps the
@@ -194,7 +194,7 @@ def build_sg_file(
         pickle.dump({"adj": _adjacency(graph), "inverse_pairs": pairs}, handle)
 
     print(
-        f"[deepim] wrote {path} — adj {graph.num_nodes}x{graph.num_nodes}, "
+        f"[deepim] wrote {path}: adj {graph.num_nodes}x{graph.num_nodes}, "
         f"inverse_pairs {tuple(pairs.shape)}, k={budget} ({seed_rate}% of N)"
     )
 

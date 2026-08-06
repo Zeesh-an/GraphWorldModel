@@ -6,8 +6,8 @@ level of the results tree, so `results/<task>/<dataset>/<run>/` and
 `research/<task>.md` always agree on spelling.
 
 Every entry here is RUNNABLE. Five further tasks were screened, reviewed and
-dropped in August 2026 — cascading failure, graph completion, influence
-estimation, network inference and temporal forecasting — and their literature
+dropped in August 2026: cascading failure, graph completion, influence
+estimation, network inference and temporal forecasting, and their literature
 reviews were removed with them; `git log` is the record. `status` and `blocker`
 survive so a future entry can be added in the un-shipped state without changing
 the dataclass or the readers that print it.
@@ -103,21 +103,21 @@ class Task:
     # TWO cascades rather than one: the planner answers a rumour with a counter-
     # cascade of its own, which needs the competitive simulator, an 8-channel state
     # and a 4-target head. Only influence blocking sets it, and it is what
-    # `TaskSpec.blocks` is built from — the difference from plain containment is that
+    # `TaskSpec.blocks` is built from: the difference from plain containment is that
     # the budget can buy something that SPREADS, not only something that deletes.
     competitive: bool = False
     # The recovered object is a TRAJECTORY rather than a set, which changes the
     # contract as much as `competitive` changes the simulator: `reconstruct()`
     # instead of `localize()`, a tree-weighted reward instead of F1, and a
     # transmission edge in the data that NDlib does not otherwise produce. It
-    # narrows `recovers` exactly as `blocks` narrows `contains` — both members of
+    # narrows `recovers` exactly as `blocks` narrows `contains`: both members of
     # the family invert something, and only this one has to name an edge.
     reconstructs: bool = False
     # FOUR EXCLUSIVE COMPARTMENTS rather than two overlapping indicators, and the
     # one task in this registry whose dynamics are not monotone: `I -> R` under
     # SIR/SEIR and `I -> S` under SIS both SHRINK the infectious set. That is what
     # `TaskSpec.immunizes` is built from, and it narrows `contains` exactly as
-    # `blocks` does — the difference from plain containment is not what the budget
+    # `blocks` does: the difference from plain containment is not what the budget
     # buys but what the process DOES, and it is why the structured heads' monotone
     # composition had to be replaced by a per-node transition matrix rather than
     # extended (research/epidemic_control.md §2.4).
@@ -208,7 +208,7 @@ class Task:
         every step, so `T_exo` is the identity, none of the five ops fire, and the
         world model degenerates from an action-conditioned simulator into a
         forecaster (research/cascade_prediction.md §2.1). That is a bad property
-        for a headline task and the exact property that makes it a stress test —
+        for a headline task and the exact property that makes it a stress test,
         conditions 3-6 still differ, because what varies down that ladder is the
         FORWARD MODEL the predictor may call, not the intervention it may choose.
         """
@@ -276,7 +276,7 @@ tasks = {
         default_budgets=(10, 20, 30, 40, 50),
         # Left None DELIBERATELY, unlike every other task's: condition 1's pool here
         # depends on the LEVER, not the task, because a lever can only emit what its
-        # own members return — `proximity` hands back node ids and
+        # own members return: `proximity` hands back node ids and
         # `kimura_link_blocking` hands back arcs. `pipeline.run.resolve_baselines`
         # therefore reads `blocking_algorithms.default_blocking_baselines[lever]`,
         # where each list leads with the row that actually has to be beaten
@@ -296,7 +296,7 @@ tasks = {
         summary="Remove k nodes to minimize the eventual spread of an outbreak.",
         # The DIFFUSION variant (research/critical_node_detection.md §2.2), not
         # the structural one. §2.1 argues at length that structural CNDP is a bad
-        # fit for a world model — its T_endo is nothing, and its ground truth
+        # fit for a world model: its T_endo is nothing, and its ground truth
         # (`nx.connected_components`, O(N+E)) is cheaper than one forward pass, so
         # a learned surrogate has nothing to amortize. The connectivity
         # functionals are still computed and reported per arm as descriptive
@@ -319,7 +319,7 @@ tasks = {
         # method that almost no learned paper reports, and omitting it would
         # reproduce the exact methodological gap that survey calls out.
         # One representative per family, and the reinserting variant wherever the
-        # published method HAS one — §8.2 trap 2 is that `X` and `X+R` are cited
+        # published method HAS one: §8.2 trap 2 is that `X` and `X+R` are cited
         # under one name and are not the same method. `bpd` and `min_sum` are the
         # message-passing pair; `corehd` and `decycling` are the greedy versions of
         # the same two stages, so the four together isolate what inference buys.
@@ -348,7 +348,7 @@ tasks = {
         # own: NDlib's SIRModel/SISModel/SEIRModel all declare an EMPTY edge
         # parameter dict and compare a draw against one scalar beta, which deletes
         # `set_edge_weight`, degenerates `GraphInput.edge_weight` to ones, and makes
-        # `structured_residual` — defined as an anchor on logit(w) — inexpressible.
+        # `structured_residual` (defined as an anchor on logit(w)) inexpressible.
         dynamics=("SIR", "SIS", "SEIR"),
         # §2.5's four levers, minus contact tracing (which changes the OBSERVATION,
         # not the graph, and belongs in a POMDP observation model we do not have).
@@ -358,8 +358,8 @@ tasks = {
         action_ops=("remove_node", "remove_edge", "set_edge_weight"),
         # Vaccination: immune, non-infectious, never counted in the outbreak. Note
         # this is a DIFFERENT thing from SIR's own Removed compartment, where a
-        # recovered node must stay counted — §8.2 trap 7's "recovered is not
-        # removed" — so the simulator keeps `blocked` (the intervention) and `R`
+        # recovered node must stay counted: §8.2 trap 7's "recovered is not
+        # removed", so the simulator keeps `blocked` (the intervention) and `R`
         # (the compartment) as separate sets and the head reads both.
         remove_semantics=blocked,
         epidemic=True,
@@ -379,7 +379,7 @@ tasks = {
         outbreak_pct=1.0,
         # Left None DELIBERATELY, like influence blocking's: condition 1's pool here
         # depends on the LEVER, not the task, because a lever can only emit what its
-        # own members return — `netshield` hands back node ids and `netmelt` hands
+        # own members return: `netshield` hands back node ids and `netmelt` hands
         # back arcs. `pipeline.run.resolve_baselines` reads
         # `immunization_algorithms.default_immunization_baselines[lever]`, where each
         # list leads with the row that actually has to be beaten
@@ -397,8 +397,8 @@ tasks = {
         # The recovered source set IS an `add_node` bag: the environment converts
         # x_hat into exactly the seed commit the generator writes at t=0 for any
         # re-simulation it needs (research/source_localization.md §2.4.1). Nothing
-        # is ever emitted as an intervention — a localize() program returns node
-        # ids — but naming the op keeps `predict_marginals` and the --compare
+        # is ever emitted as an intervention: a localize() program returns node
+        # ids, but naming the op keeps `predict_marginals` and the --compare
         # referee speaking the same action vocabulary as every other task.
         action_ops=("add_node",),
         summary="Recover the seed set s_0 from an observed diffusion state s_T.",
@@ -411,7 +411,7 @@ tasks = {
         # Diffusion-only episodes: no injected actions at any t > 0, so the
         # transition degenerates to f(G, s_t) -> s_{t+1} and every episode's whole
         # observable history is caused by its t=0 seed commit alone. That is what
-        # makes the (x, y) label pair well defined — an episode with a mid-cascade
+        # makes the (x, y) label pair well defined: an episode with a mid-cascade
         # injection has an observation its seed set did not produce (§2.1).
         default_gen_action_ops=(),
         # §2.6 arm 1, one representative per family of §3, ordered by how dangerous
@@ -421,7 +421,7 @@ tasks = {
         # [verified, §5.5], and LPSI sits INSIDE the agent's expressible space, so
         # "the search rediscovers LPSI" is the realistic floor (§2.9 risk 1).
         # `rumor_centrality` is single-source and scores near zero under a
-        # multi-source protocol by construction (§8.2) — it is here because it
+        # multi-source protocol by construction (§8.2): it is here because it
         # founded the field and because a --budgets 1 run makes it admissible.
         # `resim_greedy` is deliberately absent for the same reason `celf` and
         # `greedy_blocking` are: it re-simulates every candidate on its own private
@@ -442,7 +442,7 @@ tasks = {
         # The six-condition ladder plus arm A (§2.6): §2.2's framing, in which the
         # world model is FROZEN and a relaxed source vector is gradient-descended
         # against it. That is SL-VAE with our likelihood plugged in, which the seed
-        # paper has already declared a no-op component swap — so it is the CONTROL
+        # paper has already declared a no-op component swap, so it is the CONTROL
         # program search is measured against, not the method. 6 vs A is the
         # methodological claim this task exists to make.
         default_arms=(
@@ -463,8 +463,8 @@ tasks = {
         reconstructs=True,
         dynamics=("IC", "LT"),
         # Named for the same reason source localization names it: nothing is ever
-        # emitted as an intervention — a reconstruct() program returns
-        # `{node: (time, parent)}` — but the recovered SOURCES (the nodes whose
+        # emitted as an intervention: a reconstruct() program returns
+        # `{node: (time, parent)}`, but the recovered SOURCES (the nodes whose
         # parent is None) are an `add_node` bag, which is what the --compare
         # re-simulation referee replays. Naming the op keeps every arm speaking one
         # action vocabulary (research/cascade_reconstruction.md §2.5.1).
@@ -487,12 +487,12 @@ tasks = {
         # has to be beaten: Xiao SDM'18 gets node precision > 0.8 from an
         # O(m + k log k) BFS variant, and it sits INSIDE the agent's expressible
         # space. `personalized_pagerank` is second because §8.2 trap 4 records that
-        # it BEATS tree sampling on `ca_grqc` specifically (assortativity 0.164) —
+        # it BEATS tree sampling on `ca_grqc` specifically (assortativity 0.164),
         # if the search cannot clear it there, the result is not real.
         # `observed_only` is Rozenshtein's `Reports` control: precision 1.0 by
         # construction, and the row that proves the reward is not gameable.
         # `mcmc_decode` and `forward_backward` are deliberately absent for the same
-        # reason `celf` and `resim_greedy` are — they call the transition kernel
+        # reason `celf` and `resim_greedy` are: they call the transition kernel
         # 10^4 times per instance and would dominate startup for a table that
         # exists to set a bar. Run either as its own --baselines arm.
         default_baselines=(
@@ -510,8 +510,8 @@ tasks = {
             "random_reconstruction",
         ),
         # The six-condition ladder plus arm A (§2.9): DITTO's decoder with our
-        # kernel substituted for its mean-field beta-hat. That is §2.3's framing —
-        # the component swap the tempting move would make — so it is the CONTROL
+        # kernel substituted for its mean-field beta-hat. That is §2.3's framing,
+        # the component swap the tempting move would make, so it is the CONTROL
         # decoder SEARCH is measured against, not the method. 6 vs A is the
         # methodological claim this task exists to make, and §2.11 risk 6 is why it
         # is built well: DITTO beats a supervised model trained with the TRUE beta
@@ -580,7 +580,7 @@ tasks = {
         # rather than an obstacle: every other task here evaluates a learned model
         # against traces drawn from the same simulator that trained it, a closed loop
         # that can only measure LEARNING error and never MODELLING error. Weibo
-        # retweets break the loop — our structured head's
+        # retweets break the loop: our structured head's
         # `p_new(v) = 1 - prod(1 - q(u->v) * frontier_u)` is either an adequate
         # approximation of whatever produced them or it is not, and that is
         # measurable. `observational` is what routes the data stage into
@@ -607,7 +607,7 @@ tasks = {
         # `budget` buys nothing: a predictor emits no action and is handed no k. The
         # single point exists because the sweep axis is the OBSERVATION WINDOW
         # (--cp-observation) and the SPLIT (--cp-split), and §8.2 requires two
-        # windows rather than four budgets — "a single-window result is not
+        # windows rather than four budgets: "a single-window result is not
         # publishable in this literature".
         default_budget_pcts=(10.0,),
         # §3, one representative per family, ordered by how dangerous each is.
@@ -616,7 +616,7 @@ tasks = {
         # prints it as "Feature-S&H". `feature_linear` and `feature_gbt` are CTCP's
         # own MLP/XGBoost rows, and CasFlow's ablation records that feature models
         # "in some cases even beat deep learning models". `seismic` and `hawkes` are
-        # §3.2's generative pair — the closest classical analogue to a world model,
+        # §3.2's generative pair: the closest classical analogue to a world model,
         # and the ones that DECLINE to score supercritical cascades, which is the
         # `n_failed` column §8.4 says almost nobody publishes. `persistence` and
         # `mean_size` are the two floors MSLE rewards far more than people expect.
@@ -661,7 +661,7 @@ for _task in tasks.values():
         )
 
     # A budget op the planner may not emit is a task whose every candidate is
-    # rejected at validation — cheaper to catch here than one budget in. Guarded on
+    # rejected at validation: cheaper to catch here than one budget in. Guarded on
     # `runnable` so an entry added in the un-shipped state can carry the ops it
     # WOULD need before `budget_op` is settled.
     #

@@ -1,7 +1,7 @@
 """
 Epinions Dataset Loader
 
-Downloads and loads the SNAP signed Epinions who-trusts-whom network — Han et
+Downloads and loads the SNAP signed Epinions who-trusts-whom network: Han et
 al.'s adaptive-IM benchmark (research/adaptive_online_im.md §5.2, §6.2).
 
 Source: https://snap.stanford.edu/data/soc-sign-epinions.html
@@ -21,9 +21,9 @@ Reconciling the edge count [derived, verified against the downloaded file]:
 
     - We DROP the sign and keep the arc. Han et al. report this graph as
       `132K / 841K` with average degree 13.4, i.e. the full signed arc count
-      treated as a plain directed graph — dropping only the distrust arcs would
+      treated as a plain directed graph: dropping only the distrust arcs would
       give a different graph from the one their table describes.
-    - No inherent node features — uses log(1 + total degree) as synthetic features
+    - No inherent node features: uses log(1 + total degree) as synthetic features
     - No node labels
 
 Original paper: Leskovec, Huttenlocher & Kleinberg, "Signed Networks in Social
@@ -50,18 +50,18 @@ def download_epinions() -> Path:
     txt_path = data_dir / "soc-sign-epinions.txt"
 
     if txt_path.exists():
-        print(f"[✓] Epinions already downloaded at {txt_path}")
+        print(f"[ok] Epinions already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading Epinions from {epinions_url} ...")
+        print(f"[get] Downloading Epinions from {epinions_url} ...")
         urllib.request.urlretrieve(epinions_url, gz_path)
-        print(f"[✓] Saved to {gz_path}")
+        print(f"[ok] Saved to {gz_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with gzip.open(gz_path, "rb") as gz_file:
         txt_path.write_bytes(gz_file.read())
-    print(f"[✓] Extracted to {txt_path}")
+    print(f"[ok] Extracted to {txt_path}")
 
     return txt_path
 
@@ -90,6 +90,6 @@ def load_epinions(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, in
     node_feats = degree_features(adjacency, directed=True)  # shape: (N, 1)
     node_labels = np.zeros(num_nodes, dtype=np.int32)
 
-    print(f"[✓] Epinions loaded: {num_nodes} nodes, {adjacency.nnz} directed arcs")
+    print(f"[ok] Epinions loaded: {num_nodes} nodes, {adjacency.nnz} directed arcs")
 
     return adjacency, node_feats, node_labels, num_nodes

@@ -13,7 +13,7 @@
 # Usage: sbatch sbatch/cascade_prediction/sweep_conditions.sbatch
 #        DATASET=casflow_aps sbatch sbatch/cascade_prediction/sweep_conditions.sbatch
 #
-# research/cascade_prediction.md 2.1 warns that this task's ACTION space is empty —
+# research/cascade_prediction.md 2.1 warns that this task's ACTION space is empty,
 # `a_t` is NULL at every step, none of the five ops fire, and there is no planning
 # regret because there is no decision to plan over. It then concludes that
 # conditions 3-6 "collapse into one arm". **That is half right and the half that is
@@ -21,11 +21,11 @@
 # intervention but the FORWARD MODEL the predictor may call:
 #
 #   3 @native       no forward model at all. Feature-driven and point-process
-#                   predictors only — and 3.1 records that feature models sometimes
+#                   predictors only, and 3.1 records that feature models sometimes
 #                   BEAT deep ones on these corpora, so this arm may win outright
 #   4 @monte_carlo  NDlib rollouts, at steps x samples x mc_runs real episodes per
 #                   forecast_marginals call. Whether it completes is itself a finding
-#   5 @oracle       the analytic IC form — which is NOT the true dynamics here, and
+#   5 @oracle       the analytic IC form, which is NOT the true dynamics here, and
 #                   that is the entire point (9.1)
 #   6 @world_model  one batched matmul per kernel evaluation
 #

@@ -12,7 +12,7 @@
 # Usage: sbatch sbatch/source_localization/generate_data_cora_ml.sbatch
 #
 # One of the three graphs where every paper in this literature agrees to the
-# digit — IVGD, SL-VAE and GraphSL all report 2,810 / 7,981, and our loader
+# digit: IVGD, SL-VAE and GraphSL all report 2,810 / 7,981, and our loader
 # already applies graph2gauss `standardize()` so it reproduces that exactly
 # (research/source_localization.md §6.4). The other two are Jazz and Power Grid.
 #

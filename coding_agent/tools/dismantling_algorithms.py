@@ -1,5 +1,5 @@
 """
-Named classical NETWORK DISMANTLING baselines — the condition-1 floor for
+Named classical NETWORK DISMANTLING baselines: the condition-1 floor for
 `--task critical_node_detection`.
 
 Every algorithm has the signature
@@ -13,17 +13,17 @@ members return a seed set to maximize with.
 Read `research/critical_node_detection.md` §9.3 before treating any of these as a
 weak floor. In ascending order of danger:
 
-  1. `random_removal`, `pagerank_removal`, static `betweenness_removal` — free wins.
-  2. **`adaptive_degree` (HDA)** — MIND's Table 5 puts plain recompute-the-degree at
+  1. `random_removal`, `pagerank_removal`, static `betweenness_removal`: free wins.
+  2. **`adaptive_degree` (HDA)**: MIND's Table 5 puts plain recompute-the-degree at
      **119.9** against FINDER's **115.0** across 47 networks. A five-point gap is
      the entire published advantage of 2020-era deep RL over a ten-line heuristic,
      and a learned dismantler that does not clearly beat HDA has demonstrated
      nothing. This is the direct analogue of the BA-100 degree-triviality result
      we already hit on IM.
-  3. **`iterative_betweenness` (BI)** — Wandelt et al. found it best in 70-80% of
+  3. **`iterative_betweenness` (BI)**: Wandelt et al. found it best in 70-80% of
      cases across 13 competitors, and almost no learned dismantling paper reports
      it. Omitting it reproduces the exact methodological gap that survey calls out.
-  4. **`gnd`** — on NetScience a 2019 spectral heuristic still beats every learned
+  4. **`gnd`**: on NetScience a 2019 spectral heuristic still beats every learned
      method except SPR (§5.4).
 
 Two conventions everything here obeys:
@@ -33,7 +33,7 @@ Two conventions everything here obeys:
     view. Our directed datasets are symmetrized to be scored at all.
   * **Sequential-adaptive, unless the name says otherwise.** Removing `k` nodes at
     once and recomputing after every removal are DIFFERENT algorithms and their
-    numbers are not interconvertible (§8.2 trap 1) — NIRM's own ablation puts the
+    numbers are not interconvertible (§8.2 trap 1): NIRM's own ablation puts the
     gap at 1.96x on `UsPower`. `degree_removal` and `betweenness_removal` are the
     one-pass controls; everything else recomputes.
 """
@@ -52,7 +52,7 @@ from coding_agent.types import GraphInfo
 ei_candidates = 200
 
 # Approximate iterative betweenness recomputes every k/abi_blocks removals rather
-# than every removal — Wandelt's quality/time tradeoff, and the only reason BI is
+# than every removal: Wandelt's quality/time tradeoff, and the only reason BI is
 # affordable past a few thousand nodes
 abi_blocks = 10
 
@@ -116,7 +116,7 @@ def _pad(chosen: list[int], graph: GraphInfo, budget: int) -> list[int]:
     """
     Top up a short removal set with the highest-degree nodes not already in it.
 
-    Every structural method can run out before the budget does — CoreHD empties
+    Every structural method can run out before the budget does: CoreHD empties
     the 2-core, decycling finishes the forest, GND's cut is smaller than k. A
     short set would silently under-spend the budget and make the arm look better
     per node than it is.
@@ -211,8 +211,8 @@ def _break_trees(
 
     Once the residual graph is a forest, the giant component is a tree, and the node
     whose removal splits it most evenly is the cheapest next cut. Both Min-Sum and
-    BPD describe this stage the same way — "delete an appropriately chosen node from
-    this tree to achieve maximal decrease in the tree size" — and it is what makes
+    BPD describe this stage the same way: "delete an appropriately chosen node from
+    this tree to achieve maximal decrease in the tree size", and it is what makes
     decycling FIRST worthwhile: a forest of n nodes breaks into small components
     under few further removals.
 
@@ -257,12 +257,12 @@ def _reinsert(
     Warning: The bar is `max(threshold * N, the giant component this set already
     achieved)`, and the second term is ours. The published pass is defined only
     once the graph is dismantled below `threshold`, because its job is to shrink
-    `|S|` at a FIXED threshold — an unbounded-budget setting. Our budget is a fixed
+    `|S|` at a FIXED threshold: an unbounded-budget setting. Our budget is a fixed
     `k` that rarely reaches 1% of N (measured: on BA-500 at k=15% the giant
     component is still 21 nodes against a bar of 5), so under the published bar
     every reinserting variant was a bit-for-bit copy of its base. Holding the
     achieved size instead keeps the paper's rule wherever the paper's rule applies
-    and extends the same idea — return the nodes that were not buying anything —
+    and extends the same idea: return the nodes that were not buying anything,
     to the budgets we actually run.
     """
     kept = set(removed)
@@ -289,7 +289,7 @@ def _reinsert_and_refill(
     Reinsertion on its own returns a SHORTER set, which at a fixed budget would
     silently under-spend it and make the arm look better per node than it is. The
     freed slots go back through tree breaking, which targets whatever component is
-    now largest — so the pass reads as "stop paying for nodes that bought nothing,
+    now largest, so the pass reads as "stop paying for nodes that bought nothing,
     and re-spend on what is still standing".
     """
     neighbours = neighbour_sets(graph)
@@ -311,7 +311,7 @@ def degree_removal(
 def adaptive_degree(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
-    """HDA: remove the highest-degree node, recompute degrees, repeat — the baseline that hurts."""
+    """HDA: remove the highest-degree node, recompute degrees, repeat, the baseline that hurts."""
     neighbours = neighbour_sets(graph)
     degrees = np.array([len(group) for group in neighbours], dtype=np.int64)
     removed = set()
@@ -358,7 +358,7 @@ def _betweenness(neighbours: list[set[int]], removed: set[int]) -> np.ndarray:
     """
     Brandes betweenness over the residual undirected graph, shape (N,).
 
-    Sampled from `betweenness_pivots` sources on a large graph — exact Brandes is
+    Sampled from `betweenness_pivots` sources on a large graph: exact Brandes is
     O(N x E) per call, and the iterative variants call it once per removal.
     """
     num_nodes = len(neighbours)
@@ -432,7 +432,7 @@ def betweenness_removal(
 def iterative_betweenness(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
-    """BI (Wandelt et al. 2018): remove the highest-betweenness node, RECOMPUTE, repeat — best in 70-80% of their cases."""
+    """BI (Wandelt et al. 2018): remove the highest-betweenness node, RECOMPUTE, repeat, best in 70-80% of their cases."""
     neighbours = neighbour_sets(graph)
     removed = set()
     chosen = []
@@ -458,7 +458,7 @@ def approx_iterative_betweenness(
     blocks: int = abi_blocks,
     **_,
 ) -> list[int]:
-    """ABI (Wandelt et al. 2018): BI recomputing every k/blocks removals — their quality/time tradeoff."""
+    """ABI (Wandelt et al. 2018): BI recomputing every k/blocks removals, their quality/time tradeoff."""
     neighbours = neighbour_sets(graph)
     removed = set()
     chosen = []
@@ -536,7 +536,7 @@ def collective_influence_r(
     `collective_influence_removal` is only the first half. The paper's CI is
     "adaptive removal + greedy reinsertion", and §8.2 trap 2 is explicit that a
     method and its reinserting variant are different methods routinely cited under
-    one name — so the bare version should not be reported as "CI".
+    one name, so the bare version should not be reported as "CI".
     """
     return _reinsert_and_refill(
         graph,
@@ -555,7 +555,7 @@ def corehd(
 
     Two to four orders of magnitude faster than CI or BPD at comparable quality,
     because a node outside the 2-core is on a tree and cannot be holding the giant
-    component together. When the 2-core empties, `_pad` finishes the job — the
+    component together. When the 2-core empties, `_pad` finishes the job: the
     paper's own tree-breaking stage, minus the reinsertion pass that `corehd_r`
     adds separately (§8.2 trap 2).
     """
@@ -698,7 +698,7 @@ def bpd(
     "suitable for deletion" by BP on the FVS spin model, delete a tiny fraction of
     them, repeat until the graph is a forest; then break the surviving trees. The
     inference is what separates it from CoreHD, which makes the same kind of move
-    using degree alone — so `bpd` against `corehd` is a clean read on what the
+    using degree alone, so `bpd` against `corehd` is a clean read on what the
     message passing buys.
 
     Decimation follows the paper: iterate BP to a fixed point, delete the fraction
@@ -751,7 +751,7 @@ def decycling(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
     """
-    Greedy decycling then tree breaking — the Min-Sum / BPD pipeline with a greedy
+    Greedy decycling then tree breaking: the Min-Sum / BPD pipeline with a greedy
     stage 1 instead of message passing (§3.3).
 
     Stage 1 removes the highest-degree node of the 2-core until the residual is a
@@ -760,7 +760,7 @@ def decycling(
     this against it isolates exactly what the inference buys over greed.
 
     ponytail: greedy stage 1, so this reproduces the pipeline's SHAPE and not
-    Min-Sum's set sizes. Min-Sum itself is NOT implemented here — a reconstruction
+    Min-Sum's set sizes. Min-Sum itself is NOT implemented here: a reconstruction
     from the published equations came out erratic and worse than this greedy
     version, so `abraunst/decycler` is registered as the external route instead.
     `decycling_r` adds the third stage.
@@ -908,7 +908,7 @@ def gnd(
     `cost="unit"` is the default and the only one comparable to everything else
     here, because our budget is CARDINALITY (`k` nodes). GND's contribution is the
     generalized `cost="degree"` instantiation, which prices removal by degree and
-    so prefers many cheap separators over one expensive hub — a genuinely different
+    so prefers many cheap separators over one expensive hub: a genuinely different
     optimum that a cardinality metric scores unfairly in both directions
     (research/critical_node_detection.md §8.2 trap 4). Pass `cost="degree"` to get
     it, and report it against a cost budget or not at all.
@@ -979,7 +979,7 @@ def gndr(
     threshold: float = 0.01,
     **_,
 ) -> list[int]:
-    """GND plus reinsertion (GNDR) — a different method from `gnd`, with different numbers."""
+    """GND plus reinsertion (GNDR): a different method from `gnd`, with different numbers."""
     return _reinsert_and_refill(
         graph, gnd(graph, budget, diffusion_model), budget, threshold
     )
@@ -996,7 +996,7 @@ def egnd(
     EGND: an ensemble of GND cuts, keeping the one that damages the graph most.
 
     GND's bisection cuts at the MEDIAN of the Fiedler vector, which is one
-    arbitrary point on a continuum — a slightly unbalanced cut is often far cheaper
+    arbitrary point on a continuum: a slightly unbalanced cut is often far cheaper
     to cover. This sweeps the split quantile and keeps the removal set with the
     smallest residual giant component.
 
@@ -1039,8 +1039,8 @@ def explosive_immunization(
     one at a time, the candidate whose return grows the giant component least. Run
     it until N - k nodes are back and the k still vaccinated are the removal set.
 
-    Scored the Achlioptas way — a candidate's cost is the summed size of the
-    DISTINCT clusters it would merge — which is why it beats degree rules near the
+    Scored the Achlioptas way: a candidate's cost is the summed size of the
+    DISTINCT clusters it would merge, which is why it beats degree rules near the
     percolation transition: a low-degree node bridging two large clusters is the
     expensive one, and a high-degree node buried inside one is free.
 
@@ -1112,7 +1112,7 @@ def netshield(
     NetShield (Tong et al. ICDM 2010): greedily maximize the drop in the adjacency
     matrix's leading eigenvalue.
 
-    The only member here whose objective is EPIDEMIC rather than structural — the
+    The only member here whose objective is EPIDEMIC rather than structural: the
     epidemic threshold of both SIS and IC-like dynamics scales as 1/lambda_max, so
     shrinking lambda_max is directly shrinking the outbreak. That makes it the
     strongest non-simulation baseline for the diffusion variant this task actually
@@ -1128,7 +1128,7 @@ def netshield(
 
     sources, targets = graph.edge_index[0], graph.edge_index[1]
     # Rayleigh quotient u^T A u with u normalized. edge_index already carries both
-    # orientations of an undirected edge, so the sum over arcs IS u^T A u — no
+    # orientations of an undirected edge, so the sum over arcs IS u^T A u: no
     # factor of two, which would inflate the first term and turn the rule into
     # plain eigenvector centrality.
     eigenvalue = float(np.sum(vector[sources] * vector[targets]))
@@ -1195,7 +1195,7 @@ def acquaintance_immunization(
 def random_removal(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 42, **_
 ) -> list[int]:
-    """Uniform random removal set — the trivial floor."""
+    """Uniform random removal set: the trivial floor."""
     rng = np.random.default_rng(seed)
     count = min(budget, graph.num_nodes)
 
@@ -1221,7 +1221,7 @@ def greedy_blocking(
 
     Every other member of this library optimizes a structural proxy; this one
     optimizes the quantity the task is actually scored on, which is why it is the
-    reference — and why it is unaffordable. One pick costs
+    reference, and why it is unaffordable. One pick costs
     n_candidates x mc_runs episodes, so a k=20 run is thousands of real rollouts.
     That cost is the entire argument for replacing the simulator with f_theta.
 

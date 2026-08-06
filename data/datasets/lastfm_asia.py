@@ -7,13 +7,13 @@ Source: https://snap.stanford.edu/data/feather-lastfm-social.html
     - 7,624 nodes (users), 27,806 edges (mutual follows)
     - Undirected, unweighted, ids already contiguous 0..7623
     - Node labels: 18 country classes (the `target` column)
-    - No inherent node features — uses log(1 + degree) as synthetic features.
+    - No inherent node features: uses log(1 + degree) as synthetic features.
       The archive also ships `lastfm_asia_features.json` (a per-user list of
       liked-artist ids), which we do NOT load: densifying it would be a
       7,624 x ~7,800 float32 matrix for no IM-relevant gain. It stays in
       data/raw/lastfm_asia/ for anyone who wants it.
 
-MOEIM reports this graph in its setting-1 table at 7,624 / 27,806 — matching
+MOEIM reports this graph in its setting-1 table at 7,624 / 27,806: matching
 the raw file, so no preprocessing decision is needed.
 
 Original paper: Rozemberczki & Sarkar, "Characteristic Functions on Graphs:
@@ -44,20 +44,20 @@ def download_lastfm_asia() -> Path:
     edges_path = data_dir / archive_dir / "lastfm_asia_edges.csv"
 
     if edges_path.exists():
-        print(f"[✓] LastFM Asia already downloaded at {edges_path}")
+        print(f"[ok] LastFM Asia already downloaded at {edges_path}")
         return edges_path
 
     if not zip_path.exists():
-        print(f"[↓] Downloading LastFM Asia from {lastfm_asia_url} ...")
+        print(f"[get] Downloading LastFM Asia from {lastfm_asia_url} ...")
         urllib.request.urlretrieve(lastfm_asia_url, zip_path)
-        print(f"[✓] Saved to {zip_path}")
+        print(f"[ok] Saved to {zip_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
         # Skip the 17 MB features JSON we never read
         for member in ("lastfm_asia_edges.csv", "lastfm_asia_target.csv"):
             zip_file.extract(f"{archive_dir}/{member}", data_dir)
-    print(f"[✓] Extracted to {data_dir / archive_dir}")
+    print(f"[ok] Extracted to {data_dir / archive_dir}")
 
     return edges_path
 
@@ -103,7 +103,7 @@ def load_lastfm_asia(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray,
     degrees = np.array(adjacency.sum(axis=1)).flatten()
     n_edges_undirected = adjacency.nnz // 2
     print(
-        f"[✓] LastFM Asia loaded: {num_nodes} nodes, "
+        f"[ok] LastFM Asia loaded: {num_nodes} nodes, "
         f"{n_edges_undirected} undirected edges, "
         f"{len(np.unique(node_labels))} countries"
     )

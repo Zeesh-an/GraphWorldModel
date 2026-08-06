@@ -29,7 +29,7 @@ OUT="results/$TASK/$DATASET/$RUN/data"
 # 200 nodes matches RL4IM's default |V|. 40 graphs x 20 rollouts = 800 episodes
 # per (model, algorithm).
 #
-# NOTE the data is IDENTICAL to what influence_maximization generates — adaptive
+# NOTE the data is IDENTICAL to what influence_maximization generates: adaptive
 # IM changes the evaluation loop, not the transitions (§9.2). A checkpoint
 # trained on an IM run of the same graph family is reusable here via
 # --wm-results-json; this script exists so the results tree matches the task.

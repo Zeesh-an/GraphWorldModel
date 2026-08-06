@@ -17,7 +17,7 @@ things live here, and each one is a decision
 
   * **The negative cascade.** `S_N` is an INPUT to the episode, not an action (§2.1),
     so it is committed by `CompetitiveSimulator.reset` rather than injected as a bag
-    — which is the whole reason `add_node` can keep meaning "seed positively" and the
+, which is the whole reason `add_node` can keep meaning "seed positively" and the
     three action channels keep the meaning they have in every other task.
 
   * **Prevented influence (§8.1).** One quantity, five published names, all of them
@@ -87,7 +87,7 @@ def lever_of(task: TaskSpec) -> str:
 
 def edge_weight_caps(graph: GraphInfo) -> dict:
     """
-    `{(u, v): p}` — the transmission probability each arc starts at.
+    `{(u, v): p}`, the transmission probability each arc starts at.
 
     The cap the weight lever is validated against: DiffIM's relaxation is
     `p~(u,v) = p(u,v) * r~(u,v)` with `r~ in [0, 1]` (§2.3), so a blocker may only
@@ -164,7 +164,7 @@ def blocking_plan(
     A library selector's output as a horizon-shaped plan, whatever it returns.
 
     The node levers hand back node ids and the edge levers hand back `(u, v)` pairs,
-    so this is the single place the two shapes meet the one plan format — the same
+    so this is the single place the two shapes meet the one plan format: the same
     job `containment.removal_plan` does for a dismantler, and for the same reason:
     the published algorithms are not rewritten to know what a plan is.
     """
@@ -243,7 +243,7 @@ def blocking_metrics(
     """
     The prevented-influence block every blocking table reports (§8.1).
 
-    `unopposed` is `sigma(S_N, empty)` — the rumour with no blocker at all — measured
+    `unopposed` is `sigma(S_N, empty)` (the rumour with no blocker at all) measured
     on the same evaluator as `reward`, because a ratio of two different rulers means
     nothing. Budak's own framing is copied here deliberately: prevented influence
     counts only the nodes that WOULD have been infected, so a blocker that protects
@@ -269,7 +269,7 @@ def blocking_metrics(
         ),
         "prevented_pct_of_nodes": 100.0 * prevented / max(graph.num_nodes, 1),
         # §8.2: the informative budget axis here is |S_P| / |S_N|, not |S_P| / |V|.
-        # CLDAG's Table 2 is read entirely off this ratio — it takes 20-30x the
+        # CLDAG's Table 2 is read entirely off this ratio: it takes 20-30x the
         # attacker's seeds to cut the rumour to 10%.
         "budget_ratio": (
             task.budget / len(task.outbreak) if task.outbreak else None
@@ -285,8 +285,8 @@ def unopposed_reference(
     """
     `sigma(S_N, empty)` on this arm's own evaluator: the rumour with nobody stopping it.
 
-    One rollout, charged to the arm like every other, because the alternative —
-    computing it on a private simulator — would make the prevented-influence column
+    One rollout, charged to the arm like every other, because the alternative,
+    computing it on a private simulator: would make the prevented-influence column
     a comparison between two different measurement processes. It is also the floor
     any blocker has to beat, which is why it doubles as an anchor row.
     """
@@ -300,8 +300,8 @@ def proximity_ring(graph: GraphInfo, sources, hops: int = 1) -> list[int]:
     Nodes within `hops` of the rumour's own seeds, nearest first.
 
     §5.4's finding in one function: the degree heuristic "cannot be used for
-    influence blocking maximization at all", while proximity — the out-neighbours of
-    the negative seeds — is the strong cheap baseline that only falls behind CLDAG
+    influence blocking maximization at all", while proximity: the out-neighbours of
+    the negative seeds: is the strong cheap baseline that only falls behind CLDAG
     once the rumour is strong enough to traverse long paths. It is used by the
     library's `proximity` family, by the prompt's diagnostics, and by the anchor
     table, so it is defined once.
@@ -331,7 +331,7 @@ def exposure_scores(
     """
     A cheap "will the rumour ever get here" mass per node, by damped propagation from `S_N`.
 
-    Not a published method — it is the shared building block the proximity family and
+    Not a published method: it is the shared building block the proximity family and
     the prompt's exemplar both need, and it exists because the single most common way
     a blocking algorithm wastes its budget is protecting nodes the cascade never
     reaches (§8.1: those score exactly zero).

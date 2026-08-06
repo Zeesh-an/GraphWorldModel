@@ -105,7 +105,7 @@ def build_algorithm_sources(names: tuple = sourced_algorithms) -> str:
     )
 
     return (
-        "LIBRARY SOURCE (how these are actually written — same primitives and the "
+        "LIBRARY SOURCE (how these are actually written: same primitives and the "
         "same GraphInfo you get):\n" + blocks
     )
 
@@ -158,7 +158,7 @@ def build_dismantling_reference(exclude: tuple = ()) -> str:
     blocked_note = (
         "\n  NOT AVAILABLE (calling one raises): "
         + ", ".join(name for name in dismantling_names if name in exclude)
-        + " — it simulates the contained cascade for every candidate node, which\n"
+        + ": it simulates the contained cascade for every candidate node, which\n"
         "  bypasses the metered evaluator."
         if exclude
         else ""
@@ -202,7 +202,7 @@ def build_blocking_reference(budget_op: str = "add_node", exclude: tuple = ()) -
     blocked_note = (
         "\n  NOT AVAILABLE (calling one raises): "
         + ", ".join(name for name in names if name in exclude)
-        + " — it simulates the whole competitive cascade for every candidate node,\n"
+        + ": it simulates the whole competitive cascade for every candidate node,\n"
         "  which bypasses the metered evaluator."
         if any(name in exclude for name in names)
         else ""
@@ -210,11 +210,11 @@ def build_blocking_reference(budget_op: str = "add_node", exclude: tuple = ()) -
 
     return (
         "BLOCKING ALGORITHMS  (from coding_agent.tools.blocking_algorithms, imported\n"
-        "as `blocking_algorithms`). Each takes `negative_seeds=` — the rumour's own\n"
-        f"seed set, which is also `self.outbreak` — and returns {returns} of length\n"
+        "as `blocking_algorithms`). Each takes `negative_seeds=`: the rumour's own\n"
+        f"seed set, which is also `self.outbreak`, and returns {returns} of length\n"
         "`budget`. These are the published baselines you are being compared against:\n"
         "call one, beat one, or take its idea and improve on it. `proximity` is the\n"
-        "one that actually has to be beaten — it is 'seed the rumour's own\n"
+        "one that actually has to be beaten: it is 'seed the rumour's own\n"
         "out-neighbours' and it outscores every learned method except StratLearner on\n"
         "two of that paper's three graphs, while `degree_blocking` is on the list\n"
         "because the published finding is that plain degree FAILS at this task:\n"
@@ -262,7 +262,7 @@ def build_immunization_reference(
     blocked_note = (
         "\n  NOT AVAILABLE (calling one raises): "
         + ", ".join(name for name in names if name in exclude)
-        + " — it simulates the whole compartmental outbreak for every candidate,\n"
+        + ": it simulates the whole compartmental outbreak for every candidate,\n"
         "  which bypasses the metered evaluator."
         if any(name in exclude for name in names)
         else ""
@@ -270,13 +270,13 @@ def build_immunization_reference(
 
     return (
         "IMMUNIZATION ALGORITHMS  (from coding_agent.tools.immunization_algorithms,\n"
-        "imported as `immunization_algorithms`). Each takes `outbreak=` — the index\n"
-        f"cases, which are also `self.outbreak` — and returns {returns} of length\n"
+        "imported as `immunization_algorithms`). Each takes `outbreak=`: the index\n"
+        f"cases, which are also `self.outbreak`, and returns {returns} of length\n"
         "`budget`. These are the published baselines you are being compared against:\n"
         "call one, beat one, or take its idea and improve on it.\n"
         "\n"
         "Three things worth knowing before you pick one. `degree_immunization` is the\n"
-        "row that actually has to be beaten — a 2002 heuristic that ties learned\n"
+        "row that actually has to be beaten: a 2002 heuristic that ties learned\n"
         "methods on real graphs. `netshield` minimizes the adjacency's leading\n"
         "eigenvalue, which is a model-independent surrogate that does NOT know where\n"
         "the outbreak currently is; `dava` conditions on exactly that, and on a small\n"
@@ -311,7 +311,7 @@ def build_localization_reference(exclude: tuple = ()) -> str:
     blocked_note = (
         "\n  NOT AVAILABLE (calling one raises): "
         + ", ".join(name for name in localization_names if name in exclude)
-        + " — it re-simulates every candidate on a PRIVATE simulator, which\n"
+        + ": it re-simulates every candidate on a PRIVATE simulator, which\n"
         "  bypasses the metered evaluator. You already have the metered version:\n"
         "  `self.predict_marginals(seeds)`."
         if exclude
@@ -324,7 +324,7 @@ def build_localization_reference(exclude: tuple = ()) -> str:
         "`localization_algorithms`). Each returns a list of `budget` node ids it\n"
         "believes STARTED the observed cascade. These are the published baselines\n"
         "you are being compared against: call one, beat one, or take its idea and\n"
-        "improve on it. `lpsi` is the one that actually has to be beaten — it is a\n"
+        "improve on it. `lpsi` is the one that actually has to be beaten: it is a\n"
         "2017 label-propagation method with NO learning and it beats both SL-VAE\n"
         "and DDMSL on real cascades:\n" + "\n".join(lines) + blocked_note + "\n\n"
         "PER-NODE SCORERS  (imported as `localization_scorers`, same names). Each\n"
@@ -359,7 +359,7 @@ def build_reconstruction_reference(exclude: tuple = ()) -> str:
     blocked_note = (
         "\n  NOT AVAILABLE (calling one raises): "
         + ", ".join(name for name in reconstruction_names if name in exclude)
-        + " — each evaluates the transition kernel thousands of times per\n"
+        + ": each evaluates the transition kernel thousands of times per\n"
         "  instance. You already have the metered kernel:\n"
         "  `self.step_marginals(infected, frontier)`."
         if any(name in exclude for name in reconstruction_names)
@@ -374,8 +374,8 @@ def build_reconstruction_reference(exclude: tuple = ()) -> str:
         "for the nodes it believes were infected. These are the published "
         "baselines\nyou are being compared against: call one, beat one, or take its "
         "idea and\nimprove on it. `delayed_bfs` is the one that actually has to be "
-        "beaten — it is\nan O(m + k log k) ordered-Steiner heuristic with no learning "
-        "in it —\nand `personalized_pagerank` is on the list because the published "
+        "beaten: it is\nan O(m + k log k) ordered-Steiner heuristic with no learning "
+        "in it, \nand `personalized_pagerank` is on the list because the published "
         "finding is\nthat a plain random walker BEATS tree sampling on assortative "
         "graphs:\n" + "\n".join(lines) + blocked_note
     )
@@ -404,7 +404,7 @@ def build_prediction_reference(exclude: tuple = ()) -> str:
     blocked_note = (
         "\n  NOT AVAILABLE (calling one raises): "
         + ", ".join(name for name in prediction_names if name in exclude)
-        + " — it unrolls the forward model steps x samples times per\n"
+        + ": it unrolls the forward model steps x samples times per\n"
         "  cascade. You already have the metered oracle:\n"
         "  `self.forecast_marginals(adopters, frontier, steps)`."
         if any(name in exclude for name in prediction_names)
@@ -414,12 +414,12 @@ def build_prediction_reference(exclude: tuple = ()) -> str:
     return (
         "POPULARITY PREDICTORS  (from coding_agent.tools.prediction_algorithms,\n"
         "imported as `prediction_algorithms`). Each returns the popularity at the\n"
-        "horizon, or None to DECLINE — declining is legitimate for a generative fit\n"
+        "horizon, or None to DECLINE: declining is legitimate for a generative fit\n"
         "that diverges and is COUNTED rather than penalized as an error. These are\n"
         "the published baselines you are being compared against: call one, beat one,\n"
         "or take its idea and improve on it. `szabo_huberman` is the one that\n"
-        "actually has to be beaten — it is a 2008 one-parameter log-linear\n"
-        "regression that every paper in this literature still prints — and\n"
+        "actually has to be beaten: it is a 2008 one-parameter log-linear\n"
+        "regression that every paper in this literature still prints: and\n"
         "`mean_size` is on the list because the error is measured in LOG space,\n"
         "where ignoring the instance entirely is far stronger than it sounds:\n"
         + "\n".join(lines)
@@ -453,7 +453,7 @@ def build_api_reference(exclude: tuple = ()) -> str:
         + ", ".join(name for name in algorithm_names if name in exclude)
         + "\n  These simulate the cascade for every candidate node, which is far "
         "too slow and\n  bypasses the metered evaluator. Do not try to reimplement "
-        "them either —\n  primitives.mc_simulate_spread over all nodes has the same "
+        "them either, \n  primitives.mc_simulate_spread over all nodes has the same "
         "cost."
         if exclude
         else ""

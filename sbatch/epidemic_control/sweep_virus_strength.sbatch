@@ -26,7 +26,7 @@
 # `coding_agent/check_epidemic_control.py` verifies against NDlib), and lowering it
 # lengthens the infectious period and pushes `s` up. The lowest values put every
 # arm in the regime §5.1 describes for Portland, where the epidemic wins almost
-# everywhere and even the best policy leaves 3.7% healthy — which is the regime
+# everywhere and even the best policy leaves 3.7% healthy, which is the regime
 # §5.1 says a world model has room in, and the highest put every arm in the regime
 # where nothing was going to spread anyway and every method ties.
 

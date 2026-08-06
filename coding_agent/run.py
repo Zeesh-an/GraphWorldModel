@@ -183,7 +183,7 @@ from data.wm_competitive import (
     shared_positive_prob,
     tie_break_choices,
 )
-from data.wm_epidemic import EpidemicConfig, default_burn_in, endemic_prevalence
+from data.wm_epidemic import EpidemicConfig, default_burn_in
 from data.wm_simulator import (
     epidemic_dynamics,
     spent,
@@ -205,7 +205,7 @@ oracle = "oracle"
 wm_reeval_seeds = 3
 
 # Above this node count the per-node marginal vector is dropped from the results
-# JSON — it would dominate the file (1M nodes ~ 7MB of floats per run)
+# JSON: it would dominate the file (1M nodes ~ 7MB of floats per run)
 max_serialized_marginals = 200_000
 
 
@@ -248,13 +248,13 @@ class ExperimentConfig:
     # as a percentage of N and the rule that picks its sources. None -> the task
     # registry's own value, which is 0 for every seeding task (the planner starts
     # its own cascade there). Deterministic in --seed, so every arm in a sweep
-    # fights the SAME outbreak — an arm facing a different one would be measuring
+    # fights the SAME outbreak: an arm facing a different one would be measuring
     # the outbreak, not the method.
     outbreak_pct: float | None = None
     outbreak_selector: str = "random"
     # Influence blocking. `outbreak_pct` / `outbreak_selector` above double as |S_N|
-    # and the ATTACKER MODEL — §8.3's second experimental axis, which IM does not
-    # have — so nothing new is needed for those. What is new is the lever (which of
+    # and the ATTACKER MODEL: §8.3's second experimental axis, which IM does not
+    # have, so nothing new is needed for those. What is new is the lever (which of
     # §1.1's four interventions the budget buys), the tie-break, `p_L`, and Budak's
     # detection delay. All four are inert unless the task is competitive.
     blocking_lever: str = counter_seed
@@ -265,7 +265,7 @@ class ExperimentConfig:
     # index-case count and the OUTBREAK MODEL, so nothing new is needed for those.
     # What is new is the lever (which of §2.5's four interventions the budget buys)
     # and the three compartmental rates, which §8.2 trap 2 says must be reported
-    # rather than left implicit — beta and gamma are free parameters nobody
+    # rather than left implicit: beta and gamma are free parameters nobody
     # standardizes, so a table that fixes them without saying so is comparable only
     # to itself. All are inert unless the task registry marks the task epidemic.
     epi_lever: str = vaccinate
@@ -297,7 +297,7 @@ class ExperimentConfig:
     sl_prior_epochs: int = 300
     # §8.5.1's GRAPH axis: run the winning program of ANOTHER run, unmodified, on
     # this dataset. That comparison is the headline of the amortization claim and
-    # is one no per-instance method can even enter — SL-VAE has no artifact to
+    # is one no per-instance method can even enter: SL-VAE has no artifact to
     # transfer. Points at another arm's results JSON; its `script` field is run as
     # a canned strategy here.
     sl_transfer_from: str | None = None
@@ -342,7 +342,7 @@ class ExperimentConfig:
     cp_forecast_samples: int = default_forecast_samples
     # True when this arm is the @native condition. The evaluator has already been
     # resolved to monte_carlo with one episode by then, so the arm identity cannot
-    # be recovered from `evaluator` — and it decides whether `predict_marginals`
+    # be recovered from `evaluator`, and it decides whether `predict_marginals`
     # exists at all (§2.4.3).
     native_arm: bool = False
     outer_iters: int = 3
@@ -368,7 +368,7 @@ class ExperimentConfig:
     strategy_timeout: float = executor.strategy_timeout_seconds
     # USD per 1M tokens, for the cost line in the results JSON. The lab gateway
     # bills nothing per token (it fronts Pro subscriptions), so there is no rate
-    # to hardcode — supply your own or the cost stays null while tokens are
+    # to hardcode: supply your own or the cost stays null while tokens are
     # still counted exactly.
     llm_price_in: float | None = None
     llm_price_out: float | None = None
@@ -430,14 +430,14 @@ def build_method(
 
     `strategy_mode` / `allow_mc_algorithms` are the resolved values, not
     config's: a canned script overrides both. Only the two methods with a
-    refinement loop take a checkpoint — per_step and windowed have nothing to
+    refinement loop take a checkpoint: per_step and windowed have nothing to
     resume, and `gradient` is a single deterministic pass.
     """
     if config.method == "decode":
         # Arm A for cascade reconstruction. No agent, no population, no
         # refinement: Metropolis-Hastings over histories against the frozen
         # kernel, reporting DITTO's posterior-mean barycenter rather than the MAP
-        # sample — the component swap §2.3 warns against, hence a CONTROL.
+        # sample: the component swap §2.3 warns against, hence a CONTROL.
         return BarycenterDecoding(
             instances=instances or [],
             proposals=config.cr_mcmc_proposals,
@@ -449,7 +449,7 @@ def build_method(
     if config.method == "gradient":
         # Arm A. No agent, no population, no refinement: Adam on a relaxed source
         # vector against a frozen f_theta, which is SL-VAE's own procedure with our
-        # likelihood plugged in — the control program search is measured against
+        # likelihood plugged in: the control program search is measured against
         # (research/source_localization.md §2.6 arm A).
         if config.evaluator in (monte_carlo,):
             raise ValueError(
@@ -487,7 +487,7 @@ def build_method(
             checkpoint_fingerprint=checkpoint_fingerprint,
         )
 
-    # per_step has no refinement loop — it is one episode with an LLM call per
+    # per_step has no refinement loop: it is one episode with an LLM call per
     # (sample, timestep), so outer_iters and credit do not apply to it
     if config.method == "per_step":
         return PerStepReprompt(allow_mc_algorithms=allow_mc_algorithms)
@@ -716,7 +716,7 @@ def run_experiment(
     # The exogenous cascade, resolved BEFORE the environment so both the simulator and
     # the arm face the same one, and derived only from (graph, size, selector, seed).
     # For influence blocking this IS S_N, and `--outbreak-selector` is §8.3's
-    # attacker model rather than an outbreak rule — the same machinery, because the
+    # attacker model rather than an outbreak rule: the same machinery, because the
     # published attacker models (degree, PageRank, random, IMM) are exactly the
     # selectors that machinery already has.
     outbreak_pct = (
@@ -798,15 +798,15 @@ def run_experiment(
             f"{protocol['observed_steps']} step(s), "
             f"t_p={protocol['horizon']} {protocol['time_unit']}(s), "
             f"split={protocol['split_protocol']}, metric={config.cp_metric}) "
-            f"— MINIMIZING the error"
+            f", MINIMIZING the error"
         )
         if protocol["split_protocol"] != "chronological":
             print(
                 "[run] WARNING: this dataset used a RANDOM split over cascades. "
                 "research/cascade_prediction.md §8.3 shows that protocol leaks the "
-                "future — cascades overlap in wall-clock time, so a training "
+                "future: cascades overlap in wall-clock time, so a training "
                 "cascade's prediction window can sit inside a test cascade's "
-                "observation window — and that two 2021-24 SOTA models fell BELOW a "
+                "observation window, and that two 2021-24 SOTA models fell BELOW a "
                 "plain MLP once it was fixed. Numbers from this run are comparable "
                 "to the published tables and not to a leak-free one."
             )
@@ -969,7 +969,7 @@ def run_experiment(
             f"lever={config.blocking_lever} (budget buys {budget_op}) | "
             f"{competitive_model_name(config.positive_prob)}, "
             f"tie_break={task.tie_break}, detection_delay={config.detection_delay} "
-            f"— MINIMIZING the rumour's final size"
+            f", MINIMIZING the rumour's final size"
         )
     elif outbreak and registry.epidemic:
         print(
@@ -979,13 +979,13 @@ def run_experiment(
             f"gamma={config.epi_gamma}"
             + (f" alpha={config.epi_alpha}" if config.diffusion_model == "SEIR" else "")
             + f" | lever={config.epi_lever} (budget buys {budget_op}) "
-            f"— MINIMIZING the attack rate"
+            f", MINIMIZING the attack rate"
         )
     elif outbreak:
         print(
             f"[run] outbreak: {len(outbreak)} source(s) "
             f"({outbreak_pct:g}% of N, selector={config.outbreak_selector}, "
-            f"seed={config.seed}) — MINIMIZING final infected count"
+            f"seed={config.seed}): MINIMIZING final infected count"
         )
 
     batches = (
@@ -1073,7 +1073,7 @@ def run_experiment(
     if canned_script is not None:
         provider_label = "canned"
     elif config.baseline is not None:
-        # Classical-library baseline: same pipeline, envs, and metrics — no LLM
+        # Classical-library baseline: same pipeline, envs, and metrics, no LLM
         if config.baseline not in (
             algorithm_names
             + list(adaptive_algorithms)
@@ -1199,7 +1199,7 @@ class LocalizationBaseline(Strategy):
 """
         elif config.baseline in all_blocking_algorithms:
             # A published blocker is handed the RUMOUR's own seeds and returns the
-            # intervention this lever buys — node ids on three levers, `(u, v)` arcs
+            # intervention this lever buys: node ids on three levers, `(u, v)` arcs
             # on the fourth. `blocking.blocking_plan` reconciles the two shapes into
             # one plan, which is what keeps a library algorithm runnable without
             # rewriting it to know what a plan is.
@@ -1210,7 +1210,7 @@ class LocalizationBaseline(Strategy):
                     f"({config.blocking_lever!r}) spends its budget on "
                     f"{lever_shape[config.blocking_lever]}s, so its output is not "
                     f"something this arm may emit. It is a "
-                    f"{blocking_levers[config.baseline]} method — run it with "
+                    f"{blocking_levers[config.baseline]} method: run it with "
                     f"--blocking-lever {blocking_levers[config.baseline]}, or pick a "
                     f"{config.blocking_lever} member."
                 )
@@ -1229,12 +1229,20 @@ class BlockingBaseline(Strategy):
             picks, graph, budget, "{config.blocking_lever}", horizon
         )
 """
-        elif config.baseline in immunization_algorithms:
+        elif config.baseline in immunization_algorithms and get_task(config.task).epidemic:
+            # Gated on the task, NOT on pool membership alone. `netshield` and
+            # `acquaintance_immunization` exist in BOTH this pool and the
+            # dismantling one as genuinely different functions (the immunization
+            # forms take the outbreak and refuse to dose an index case), so an
+            # order-dependent chain would hand every critical-node-detection arm
+            # asking for `netshield` the epidemic implementation and silently
+            # score the wrong node set. Both accept **_, so it would never crash.
+            #
             # A published immunizer is a static DOSE allocation, committed at t=0.
             # It is handed the outbreak because the data-aware members (dava,
             # frontier_immunization) condition on it; the structural ones take **kw
             # and ignore it. `immunization_plan` then reconciles the two output
-            # shapes — node ids on the node levers, `(u, v)` arcs on the edge ones —
+            # shapes: node ids on the node levers, `(u, v)` arcs on the edge ones,
             # and drops any index case the algorithm picked anyway.
             if not immunization_emittable(config.baseline, config.epi_lever):
                 raise ValueError(
@@ -1243,7 +1251,7 @@ class BlockingBaseline(Strategy):
                     f"({config.epi_lever!r}) spends its budget on "
                     f"{epidemic_lever_shape[config.epi_lever]}s, so its output is not "
                     f"something this arm may emit. It is a "
-                    f"{immunization_levers[config.baseline]} method — run it with "
+                    f"{immunization_levers[config.baseline]} method: run it with "
                     f"--epi-lever {immunization_levers[config.baseline]}, or pick a "
                     f"{config.epi_lever} member."
                 )
@@ -1309,7 +1317,7 @@ class Baseline(Strategy):
     effective_mode = "free" if canned_script is not None else config.strategy_mode
 
     # A declared baseline (condition 1) or a routing pick (condition 2) IS the
-    # expensive algorithm — blocking it would delete the arm rather than speed it
+    # expensive algorithm: blocking it would delete the arm rather than speed it
     # up, and its cost is honestly attributed to that arm. The block governs what
     # the agent SYNTHESIZES, not what the harness was told to run.
     effective_allow_mc = config.allow_mc_algorithms or canned_script is not None
@@ -1403,7 +1411,7 @@ class Baseline(Strategy):
         print(
             f"[run] held-out {config.cp_metric.upper()}={heldout.reward:.4f} "
             f"(selection {trajectory.reward:.4f}, "
-            f"generalization gap {heldout.reward - trajectory.reward:+.4f} — "
+            f"generalization gap {heldout.reward - trajectory.reward:+.4f}, "
             f"POSITIVE means it did worse on cascades the search never saw)"
         )
     elif task.decodes and evaluate_instances:
@@ -1446,7 +1454,7 @@ class Baseline(Strategy):
     # One closing turn on the generation thread: what it tried each iteration and
     # how the winner works. Canned arms (classical baselines, routing picks) are
     # library algorithms nobody synthesized, and _CannedProvider would answer any
-    # question with the script itself — so they get no write-up.
+    # question with the script itself, so they get no write-up.
     explanation = None
     if canned_script is None and hasattr(method, "conversation"):
         print("[run] requesting the plain-English algorithm write-up...")
@@ -1487,7 +1495,7 @@ class Baseline(Strategy):
         "budget": config.budget,
         "budget_pct": round(100.0 * config.budget / graph.num_nodes, 3),
         # Seeds actually committable per episode. Equals `budget` for every method
-        # except windowed, whose budget is per window call by design — without
+        # except windowed, whose budget is per window call by design, without
         # this the sweep table reads two different budgets as the same k.
         "effective_budget": getattr(method, "effective_budget", None) or config.budget,
         "reward": trajectory.reward,
@@ -1499,7 +1507,7 @@ class Baseline(Strategy):
         "explanation": explanation,
         # Every turn verbatim, prose and all. The code extractor keeps only the
         # fenced block, but the prose around it is where the model says what it
-        # was trying to do — irrecoverable afterwards, and the first thing worth
+        # was trying to do: irrecoverable afterwards, and the first thing worth
         # reading when a run goes wrong. Empty for canned arms.
         "llm_transcript": (
             []
@@ -1518,7 +1526,7 @@ class Baseline(Strategy):
         # Per-outer-iteration rewards (empty for baseline/routing arms)
         "history": getattr(method, "history", []),
         # Per-node P(infected at end) across the ensemble. Costs n_samples
-        # rollouts to produce, so it is serialized rather than recomputed — it
+        # rollouts to produce, so it is serialized rather than recomputed: it
         # is what any post-hoc spatial analysis (coverage, per-community reach)
         # needs. Suppressed on very large graphs where the list dominates the file.
         "final_marginals": (
@@ -1620,7 +1628,7 @@ class Baseline(Strategy):
         # The two floors a reader needs to interpret a number at all: under a
         # LOG-space error an instance-blind constant is far stronger than intuition
         # suggests, and "predict what you already see" is right whenever a cascade
-        # is finished — which most are.
+        # is finished, which most are.
         result |= trivial_predictor_error(
             evaluate_instances or select_instances,
             select_instances,
@@ -1686,7 +1694,7 @@ class Baseline(Strategy):
         # comparable across conditions: it is measured against a source set we
         # know, so it carries no evaluator noise at all. That is unusual for this
         # pipeline and is why `mc_reward` is filled from the held-out score rather
-        # than from a Monte-Carlo replay — every reader that asks for "the number
+        # than from a Monte-Carlo replay: every reader that asks for "the number
         # comparable across arms" then gets the right one unchanged.
         selection = trajectory.cost.get("metrics", {})
         reported = heldout if heldout is not None else trajectory
@@ -1744,7 +1752,7 @@ class Baseline(Strategy):
         )
         print(
             f"[run] blocking: rumour {trajectory.reward:.2f} vs unopposed "
-            f"{unopposed:.2f} — prevented "
+            f"{unopposed:.2f}, prevented "
             f"{result['prevented_influence']:+.2f} "
             f"({result['prevented_pct_of_unopposed']:.1f}% of the cascade, "
             f"lever={result['lever']}, |S_P|/|S_N|={result['budget_ratio']})"
@@ -1787,7 +1795,7 @@ class Baseline(Strategy):
         spectral = result.get("spectral") or {}
         print(
             f"[run] epidemic: attack {trajectory.reward:.2f} vs unprotected "
-            f"{unprotected:.2f} — prevented "
+            f"{unprotected:.2f}, prevented "
             f"{result['prevented_infections']:+.2f} "
             f"({result['prevented_pct_of_unprotected']:.1f}% of the outbreak, "
             f"lever={result['lever']}, peak "
@@ -1799,7 +1807,7 @@ class Baseline(Strategy):
                 f"[run] spectral: lambda1 {spectral['lambda1_intact']:.3f} -> "
                 f"{spectral['lambda1']:.3f} "
                 f"(eigendrop {spectral['eigendrop']:.3f} = "
-                f"{spectral['eigendrop_pct']:.1f}%) — CONTEXT, not the score"
+                f"{spectral['eigendrop_pct']:.1f}%), CONTEXT, not the score"
             )
 
     if task.contains and not task.blocks and not task.immunizes:
@@ -1808,7 +1816,7 @@ class Baseline(Strategy):
         result["outbreak_pct"] = outbreak_pct
         result["outbreak_selector"] = config.outbreak_selector
         # §8.3: the connectivity functionals reported ALONGSIDE the diffusion
-        # number, computed exactly, as context — never as the learned target.
+        # number, computed exactly, as context: never as the learned target.
         # Read off the executed bags rather than re-planning, for the same reason
         # --compare replays them: a randomized strategy returns a different set on
         # a second call, and this has to describe the set that earned the reward.
@@ -1879,7 +1887,7 @@ class Baseline(Strategy):
     if config.compare and task.forecasts:
         # THE number §9.1 is actually about, and the one no other task in this repo
         # can produce. The reward already measures how good a PROGRAM is; this
-        # measures how good the MODEL is — roll the arm's own forward model forward
+        # measures how good the MODEL is: roll the arm's own forward model forward
         # from each observed prefix with no program in the loop, and compare its
         # expected popularity against what the log says happened. That difference is
         # MODELLING error against a process that is not IC, which is exactly the
@@ -1893,7 +1901,7 @@ class Baseline(Strategy):
         # Only for arms that actually HAVE a forward model in their search loop.
         # A condition-1 baseline's "own forward model" is just the shared evaluator,
         # so the number would be identical across every classical row and computing
-        # it once per row is pure waste — on a 30K-node graph under @monte_carlo it
+        # it once per row is pure waste: on a 30K-node graph under @monte_carlo it
         # is `instances x samples x steps x mc_runs` real episodes, which is millions.
         if task.forward_model and canned_script is None and config.baseline is None:
             print("[run] modelling-error referee (the arm's own forward model, no program)...")
@@ -1911,14 +1919,14 @@ class Baseline(Strategy):
             if model_msle is not None:
                 print(
                     f"[run] model_msle={model_msle:.4f} against the program's "
-                    f"{result['reward']:.4f} — the gap is what the SEARCH bought on "
+                    f"{result['reward']:.4f}, the gap is what the SEARCH bought on "
                     f"top of the kernel; the LEVEL is how far an IC-shaped kernel is "
                     f"from a real adoption process"
                 )
         elif not task.forward_model:
             print(
                 "[run] @native has no forward model, so there is no modelling error "
-                "to measure — that is the condition, not a gap"
+                "to measure: that is the condition, not a gap"
             )
     elif config.compare and task.decodes:
         # A decoder's score is already ground truth (it is measured against a
@@ -2018,7 +2026,7 @@ class Baseline(Strategy):
         # Replay the actions that EARNED the reward rather than re-planning. A
         # generated script that samples (RIS with a live seed, a randomized local
         # search) returns a different seed set on a second call, so re-planning
-        # would referee a strategy that never ran — and for per_step it would fire
+        # would referee a strategy that never ran, and for per_step it would fire
         # a fresh LLM call per (run, timestep) of the replay.
         action_fn = partial(planned_action, trajectory.actions)
 
@@ -2097,7 +2105,7 @@ class Baseline(Strategy):
             )
 
             # `reward` is the max over outer iterations, all evaluated at rollout
-            # seed 0 — it carries selection optimism (winner's curse) plus that one
+            # seed 0: it carries selection optimism (winner's curse) plus that one
             # seed's persistent luck. Re-evaluating the winner on fresh seeds gives
             # the unbiased WM estimate: judge evaluator fidelity by
             # wm_reeval_minus_mc, not wm_minus_mc.
@@ -2359,7 +2367,7 @@ if __name__ == "__main__":
         "--detection-delay",
         type=int,
         default=0,
-        help="influence blocking: Budak's r — the rumour is detected r steps late "
+        help="influence blocking: Budak's r, the rumour is detected r steps late "
         "and anything the blocker emits before then is dropped. This is the axis "
         "that makes the first-mover advantage measurable (default: 0).",
     )
@@ -2395,7 +2403,7 @@ if __name__ == "__main__":
         "--epi-gamma",
         type=float,
         default=0.3,
-        help="epidemic control: rate of LEAVING I — recovery under SIR/SEIR, "
+        help="epidemic control: rate of LEAVING I, recovery under SIR/SEIR, "
         "return-to-susceptible under SIS. 1.0 under SIR reproduces IC exactly "
         "(default: 0.3).",
     )
@@ -2532,7 +2540,7 @@ if __name__ == "__main__":
         type=float,
         default=default_observation_rate,
         help="cascade reconstruction: probability an infected node IS REPORTED. "
-        "Stated in that direction on purpose — this literature uses the symbol "
+        "Stated in that direction on purpose: this literature uses the symbol "
         "sigma for both the report rate and its complement, so a curve read "
         f"backwards is a real hazard (default: {default_observation_rate}).",
     )
@@ -2595,7 +2603,7 @@ if __name__ == "__main__":
         default=0,
         help="cascade prediction: replayed timesteps of each cascade the predictor "
         "sees. 0 reads it off the dataset's own `observed` block, which is where "
-        "the corpus's published window landed after binning — research/"
+        "the corpus's published window landed after binning: research/"
         "cascade_prediction.md 8.2 pairs TWO windows per corpus deliberately, so "
         "sweep this rather than picking one (default: 0).",
     )

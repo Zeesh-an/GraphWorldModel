@@ -7,7 +7,7 @@ Source: http://konect.cc/networks/maayan-vidal/
       that `edges_to_adjacency` drops, and 110 proteins appear only in a
       self-loop. State which of the two a number belongs to before comparing.
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Reported by DCRS and SPR (research/critical_node_detection.md §7), the two

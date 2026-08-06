@@ -16,7 +16,7 @@ mkdir -p results logs
 # Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
 # logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
 # transitions. Set RUN_JOBID=0 for a stable
-# results/<task>/<dataset>/<run>/data — which is what
+# results/<task>/<dataset>/<run>/data, which is what
 # the train/agent scripts downstream expect to be told about.
 TASK="${TASK:-influence_maximization}"
 DATASET=ba

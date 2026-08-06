@@ -7,7 +7,7 @@ implementation of DHREC-PCDSVC for SI and SIR, which the original code does not
 cover) or `cri.py`/`cri_run` (its implementation of CRI, whose authors published
 none). All three end in the same three driver lines and all three take one `data`
 object, so one driver serves them and the three rows are produced under identical
-conditions — which is the whole reason to run the authors' versions beside our own
+conditions, which is the whole reason to run the authors' versions beside our own
 `dhrec` and `cri`.
 
 Run inside the DITTO clone with our work directory as argv[1]. Reads `graph.npz`
@@ -25,7 +25,7 @@ number we are trying to measure.
 The hook is that `ditto.py` defines `main(data)` BEFORE the three driver lines, so
 splitting its source on `args = get_args()` and exec'ing the prefix gives the whole
 method with none of the CLI. `main` reads `args` as a global, which we inject
-afterwards — Python resolves globals at call time, so this is a supported use
+afterwards: Python resolves globals at call time, so this is a supported use
 rather than a trick.
 
 WHAT DITTO IS AND IS NOT GIVEN, verified by reading every `data.*` access in
@@ -42,7 +42,7 @@ WHAT DITTO IS AND IS NOT GIVEN, verified by reading every `data.*` access in
 That means DITTO always solves the DASH (final-snapshot) problem, whatever
 `--cr-setting` the sweep is running. Under `partial_times` it is therefore solving
 a strictly harder instance than every other arm, and the results table has to say
-so — which is what `notes` in the registry entry does.
+so, which is what `notes` in the registry entry does.
 
 Output is a TIME ASSIGNMENT, not a tree: DITTO emits per-step node states and no
 who-infected-whom edges, so the parents come out null and `run_baseline` builds
@@ -156,7 +156,7 @@ def decode(y_pred: torch.Tensor, observation: np.ndarray, horizon: int) -> dict:
     `{node: [activation step, null]}` from DITTO's per-step state matrix.
 
     `main` returns `y_pred[:, :T]` after a cummax, and `inc/test.py::test_fix_obs`
-    pins the observed final column back on — reproduced here, so a node DITTO only
+    pins the observed final column back on: reproduced here, so a node DITTO only
     commits to at the end lands at `t = T` rather than being dropped.
     """
     states = np.concatenate(

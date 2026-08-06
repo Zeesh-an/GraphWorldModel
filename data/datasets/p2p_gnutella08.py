@@ -4,7 +4,7 @@ p2p-Gnutella08 Dataset Loader
 Source: https://snap.stanford.edu/data/p2p-Gnutella08.html
     - 6,301 nodes, 20,777 arcs
     - Directed (Gnutella peer-to-peer hosts, August 2002)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 NIE's smallest real network (`research/influence_blocking.md` §5.5, Table II:

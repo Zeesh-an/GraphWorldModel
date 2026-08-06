@@ -4,10 +4,10 @@ web-Stanford Dataset Loader
 Source: https://snap.stanford.edu/data/web-Stanford.html
     - 281,903 nodes, 2,312,497 arcs
     - Directed (Stanford.edu web hyperlinks)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-Reported by SandIMIN, both Xie papers and NIE (§7) — the only large graph shared by
+Reported by SandIMIN, both Xie papers and NIE (§7): the only large graph shared by
 the node-blocking line and the counter-seeding line, which makes it the one place the
 two halves of this literature can be put on the same axis (§7 notes they otherwise
 share no metric at all).

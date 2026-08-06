@@ -27,7 +27,7 @@ OUT="results/$TASK/$DATASET/$RUN/data"
 #
 # ONE real graph, so episode diversity comes from rollouts rather than graph
 # count: 60 rollouts x 2 models x 4 selectors = 480 episodes. Budget the wall
-# clock — 30 MC marginals on a 15K-node graph is the expensive part.
+# clock: 30 MC marginals on a 15K-node graph is the expensive part.
 
 export OUT
 

@@ -19,13 +19,13 @@ Source: https://www.aminer.cn/influencelocality (manual; registration-gated)
 DeepHawkes-release preprocessing that carries every published number (119,313
 cascades after an 08:00-18:00 publication filter and a `< 10` participant filter).
 This loader reads the same underlying traces before any of that, so its counts are
-its own — a fifth artefact for a name §6.4 already lists four of. Use it when the
+its own: a fifth artefact for a name §6.4 already lists four of. Use it when the
 bundle is unavailable or when you want the unfiltered corpus; use `casflow_weibo`
 for anything compared against §5.1.
 
 **Warning: `--dataset weibo` is a different object again.** That is the FOLLOWER
 GRAPH with no traces at all, and §6.1 records the pair explicitly: "same source,
-different artefact — we load the graph, they load the traces".
+different artefact: we load the graph, they load the traces".
 
 **Format of `total.txt`** (the Influence-Locality release's own, four lines per
 cascade):
@@ -58,7 +58,7 @@ weibo_page_url = "https://www.aminer.cn/influencelocality"
 
 instructions = f"""\
 AMiner gates the Influence-Locality archive behind registration, so total.txt must
-be downloaded by hand — the same manual step data/datasets/weibo.py already
+be downloaded by hand: the same manual step data/datasets/weibo.py already
 documents for the follower graph:
 
   1. Register at {weibo_page_url}

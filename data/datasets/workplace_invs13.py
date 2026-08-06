@@ -12,7 +12,7 @@ Thiers years are: two waves of one protocol on one building is a variance estima
 rather than a single draw.
 
 Warning: shipped as a ZIP rather than a `.gz`, and the member inside is named
-`tij_InVS.dat` — no `15`, no year. That is the only thing separating it from its
+`tij_InVS.dat`: no `15`, no year. That is the only thing separating it from its
 own successor on disk, which is why the extraction names the member explicitly.
 """
 

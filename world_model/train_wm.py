@@ -119,7 +119,7 @@ def compute_pos_weight(
     dataset: TransitionDataset, device: torch.device
 ) -> list[torch.Tensor]:
     """
-    One positive-class weight per target column — 2 single-cascade, 4 competitive.
+    One positive-class weight per target column: 2 single-cascade, 4 competitive.
 
     Diffusion changes are sparse (few infected/frontier nodes per step), so a plain
     BCE would collapse to predicting all zeros. Blocking makes that WORSE rather than
@@ -470,8 +470,8 @@ def train_world_model(config: TrainConfig) -> dict:
         ),
     }
 
-    # Both halves fork on the same flag, and both forks measure the SAME quantity —
-    # the negative cascade — so the two tasks' rollout and planning numbers sit in
+    # Both halves fork on the same flag, and both forks measure the SAME quantity,
+    # the negative cascade, so the two tasks' rollout and planning numbers sit in
     # one report column without being silently different things
     competitive_config = (
         CompetitiveConfig(

@@ -6,11 +6,11 @@ Downloads and loads the SNAP ego-Facebook combined friendship network.
 Source: https://snap.stanford.edu/data/ego-Facebook.html
     - 4,039 nodes (users), 88,234 edges (friendships)
     - Undirected, unweighted; the union of 10 ego networks
-    - Already a single connected component, so no LCC decision to make — the
+    - Already a single connected component, so no LCC decision to make: the
       one graph in the suite where our numbers and MOEIM's agree with no
       preprocessing at all
     - Strong community structure (avg degree 43.7, high clustering)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Original paper: McAuley & Leskovec, "Learning to Discover Social Circles in Ego
@@ -37,18 +37,18 @@ def download_facebook() -> Path:
     txt_path = data_dir / "facebook_combined.txt"
 
     if txt_path.exists():
-        print(f"[✓] Facebook already downloaded at {txt_path}")
+        print(f"[ok] Facebook already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading Facebook from {facebook_url} ...")
+        print(f"[get] Downloading Facebook from {facebook_url} ...")
         urllib.request.urlretrieve(facebook_url, gz_path)
-        print(f"[✓] Saved to {gz_path}")
+        print(f"[ok] Saved to {gz_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with gzip.open(gz_path, "rb") as gz_file:
         txt_path.write_bytes(gz_file.read())
-    print(f"[✓] Extracted to {txt_path}")
+    print(f"[ok] Extracted to {txt_path}")
 
     return txt_path
 
@@ -78,7 +78,7 @@ def load_facebook(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, in
     degrees = np.array(adjacency.sum(axis=1)).flatten()
     n_edges_undirected = adjacency.nnz // 2
     print(
-        f"[✓] Facebook loaded: {num_nodes} nodes, {n_edges_undirected} undirected edges"
+        f"[ok] Facebook loaded: {num_nodes} nodes, {n_edges_undirected} undirected edges"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")
 

@@ -1,5 +1,5 @@
 """
-Shared machinery for the REAL cascade corpora — the only datasets in this repo
+Shared machinery for the REAL cascade corpora: the only datasets in this repo
 that carry diffusion traces rather than topology alone.
 
 Every other loader here answers one question ("what is the graph"). A cascade
@@ -17,7 +17,7 @@ So a corpus loader exposes THREE functions instead of two:
 and `load_<name>` is built FROM the cascades rather than beside them, so a node id
 means the same thing in both. That is not a convenience: the underlying social
 graph published with these corpora is usually far too large to simulate on (Weibo
-is 6.7M nodes), and §6.5 records the way out — the union of the observed diffusion
+is 6.7M nodes), and §6.5 records the way out: the union of the observed diffusion
 paths IS a graph, it is the one CasFlow's own `generate_global_graph` builds, and
 it is small enough to run.
 
@@ -30,7 +30,7 @@ starts from it. One line per cascade, five tab-separated fields:
 
 where a path is `u1/u2/u3` meaning `u3` adopted from `u2` who adopted from `u1`,
 and `t` is elapsed seconds since publication. `parse_casflow_line` reads it, and
-every corpus here is normalized INTO it — including the ones (Digg, MemeTracker)
+every corpus here is normalized INTO it: including the ones (Digg, MemeTracker)
 whose native format is a flat `(item, user, time)` log, where the diffusion tree is
 unobserved and every adopter is attributed to the root. That attribution is stated
 on each loader rather than hidden: it makes the path length 2 for every adopter,
@@ -83,7 +83,7 @@ class Cascade:
     `events` is `(adopter, elapsed, parent)` sorted by elapsed time, with `parent`
     None for the root. `parent` is the second-to-last id of the corpus's own path
     string, so it is a REAL transmission edge where the corpus records one and the
-    root everywhere else — which is exactly the distinction
+    root everywhere else, which is exactly the distinction
     `research/cascade_reconstruction.md` spends its §2.6 on, arriving here for free.
     """
 
@@ -113,7 +113,7 @@ def parse_casflow_line(line: str) -> Cascade | None:
 
     Returns None for a blank or malformed line rather than raising: these files run
     to millions of lines and a single truncated one at the end of a partial
-    download is not worth losing the corpus over — `load_casflow_file` counts them
+    download is not worth losing the corpus over: `load_casflow_file` counts them
     and prints the total, so a systematically wrong parse is loud and a stray one is
     not fatal.
 
@@ -230,7 +230,7 @@ def events_to_cascade(
     A flat `(user, elapsed)` adoption log as a `Cascade` rooted at its first adopter.
 
     The bridge for every corpus whose native format records WHEN each user adopted
-    but not FROM WHOM — Digg's vote log and MemeTracker's phrase-cluster time series
+    but not FROM WHOM: Digg's vote log and MemeTracker's phrase-cluster time series
     are both like this, and §6.2 lists them as first-`k`-adopters (microscopic)
     corpora for exactly that reason. Attributing every adopter to the root is the
     honest reading: it is what the data supports, it makes the observed diffusion
@@ -280,7 +280,7 @@ def filter_cascades(
     participants of what survives (CasFlow keeps 100). Both are §8.4 landmines and
     both are recorded in `data/metadata.json`, because a `< 10` versus `< 50`
     threshold moves MSLE by more than the gap between any two consecutive rows of
-    §5.1 — so a number quoted without them is comparable to nothing.
+    §5.1, so a number quoted without them is comparable to nothing.
     """
     kept = []
 
@@ -309,8 +309,8 @@ def relabel_cascades(
 
     `max_nodes` is what makes a 6.7M-node corpus runnable at all (§6.5): keep the
     `max_nodes` most frequently appearing participants and drop every cascade left
-    with fewer than two events. That is CoupledGNN's own move — it samples the
-    1.78M-user AMiner following network down to 23,681 users [verified, §5.5] — and
+    with fewer than two events. That is CoupledGNN's own move: it samples the
+    1.78M-user AMiner following network down to 23,681 users [verified, §5.5], and
     like every reduction here it is reported rather than silent, since a corpus
     reduced this way is a fifth version of a name that already has four.
 
@@ -369,12 +369,12 @@ def cascade_adjacency(
     cascades: list[Cascade], num_nodes: int
 ) -> sp.csr_matrix:
     """
-    The union of the observed diffusion paths, symmetrized — the corpus's graph.
+    The union of the observed diffusion paths, symmetrized: the corpus's graph.
 
     CasFlow's `generate_global_graph` builds exactly this and calls it the global
     graph; CoupledGNN uses the published following network instead and samples it
     down. We build it from the paths because it is the only construction that
-    guarantees every cascade is realizable ON the graph we hand the world model —
+    guarantees every cascade is realizable ON the graph we hand the world model,
     a following network sampled independently leaves adopters with no in-edge at
     all, which our structured head reads as `p_new = 0` and would score as an
     impossible transition rather than as a hard one.
@@ -451,7 +451,7 @@ def manual_download(name: str, directory: Path, expected: str, instructions: str
     request form, the CasFlow bundle behind a Google Drive interstitial, and the
     AMiner release behind a registration wall [verified, §6.3]. Guessing a URL that
     404s is worse than not shipping a loader, so this raises with the exact steps
-    instead — the same standard `data/datasets/weibo.py` already sets.
+    instead: the same standard `data/datasets/weibo.py` already sets.
     """
     os.makedirs(directory, exist_ok=True)
     path = directory / expected

@@ -7,7 +7,7 @@ Source: https://datasets.syr.edu/datasets/Digg.html
     - 116,893 core users, ~2.6M friendship edges (undirected)
     - Undirected: mutual friendships
     - Edges to users outside the core set are dropped
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 """
 
@@ -30,19 +30,19 @@ def download_digg() -> Path:
     nodes_path = data_dir / "Digg-dataset" / "data" / "nodes.csv"
 
     if nodes_path.exists():
-        print(f"[✓] Digg already downloaded at {data_dir}")
+        print(f"[ok] Digg already downloaded at {data_dir}")
         return data_dir / "Digg-dataset" / "data"
 
     if not zip_path.exists():
-        print(f"[↓] Downloading Digg from {digg_url} ...")
+        print(f"[get] Downloading Digg from {digg_url} ...")
         urllib.request.urlretrieve(digg_url, zip_path)
-        print(f"[✓] Saved to {zip_path}")
+        print(f"[ok] Saved to {zip_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
         zip_file.extractall(data_dir)
 
-    print(f"[✓] Extracted to {data_dir / 'Digg-dataset'}")
+    print(f"[ok] Extracted to {data_dir / 'Digg-dataset'}")
 
     return data_dir / "Digg-dataset" / "data"
 
@@ -117,7 +117,7 @@ def load_digg(data_path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, i
     node_labels = np.zeros(num_nodes, dtype=np.int32)
 
     n_edges_undirected = adjacency.nnz // 2
-    print(f"[✓] Digg loaded: {num_nodes} nodes, {n_edges_undirected} undirected edges")
+    print(f"[ok] Digg loaded: {num_nodes} nodes, {n_edges_undirected} undirected edges")
     print(f"    Dropped {n_dropped} edges to external nodes")
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")
 

@@ -14,7 +14,7 @@ are shaped rather than of the task:
 
   * The budget is enforced STRUCTURALLY, by capping each round's bag at its own
     batch size. Sum of batches == k by construction, so no cross-call counter is
-    needed — which matters because MonteCarloEnvironment loops (episode, then
+    needed, which matters because MonteCarloEnvironment loops (episode, then
     timestep) while WorldModelEnvironment loops (timestep, then sample), so any
     cumulative state carried between action_fn calls would mean different things
     under the two.
@@ -99,7 +99,7 @@ def observed_state(state: State, feedback_model: str) -> State:
     What the policy is allowed to read at a round boundary.
 
     full_adoption hands over the realized state as-is. myopic hides `infected`,
-    leaving only the wave activated since the last step — the information state
+    leaving only the wave activated since the last step: the information state
     Peng & Chen analyse, and the one where adaptive submodularity fails. The
     harness still checks proposals against the true state, so hiding it costs
     the policy information without letting it spend budget on an active node.
@@ -130,9 +130,9 @@ def prepare_round_bag(
     Re-seeding an already-active node is handled differently under the two
     feedback models, and the asymmetry is forced rather than chosen:
 
-      * full_adoption — the policy was handed the infected set, so proposing a
+      * full_adoption: the policy was handed the infected set, so proposing a
         node from it is a bug in the policy. Raise, and let the repair loop see it.
-      * myopic — the policy was NOT handed the infected set and cannot check.
+      * myopic: the policy was NOT handed the infected set and cannot check.
         Erroring would make the arm unrunnable; letting the op through would be
         worse, because add_node writes status 1 over NDlib's status 2 and hands a
         spent IC spreader a second round of transmission. So the seed is DROPPED:

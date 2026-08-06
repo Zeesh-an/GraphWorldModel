@@ -7,24 +7,24 @@ and each is a decision `research/epidemic_control.md` §2.5 forces rather than a
 convenience:
 
   * **The four levers.** §2.5's table maps the intervention vocabulary of this
-    literature onto our action ops, and the map is not one-to-one — two different
+    literature onto our action ops, and the map is not one-to-one: two different
     interventions both spend `remove_node`:
 
-      - `vaccinate`  — the node is IMMUNE. It leaves the graph, cannot be infected,
+      - `vaccinate`: the node is IMMUNE. It leaves the graph, cannot be infected,
         and is never counted in the attack set. This is NetShield's, DAVA's,
         Pastor-Satorras & Vespignani's and Cohen et al.'s intervention, and under
         `blocked` semantics it is exactly what `remove_node` already means.
-      - `quarantine` — the node is ISOLATED, not immune. Its incident arcs are cut
+      - `quarantine`: the node is ISOLATED, not immune. Its incident arcs are cut
         but the node stays in the graph, stays susceptible, and stays counted. §8.2
         trap 7 is why the distinction is worth a lever rather than a footnote:
         "Recovered is not removed", and papers that report nodes-saved against
         "no intervention" versus against "random vaccination" differ by a large
         constant for precisely this reason. A quarantined node also cannot be
         infected in practice (nothing reaches it), so the two levers differ in the
-        DOSE ACCOUNTING rather than in the epidemic — which is the honest version of
+        DOSE ACCOUNTING rather than in the epidemic, which is the honest version of
         the difference and is measurable.
-      - `edge_cut` — `remove_edge`, the Van Mieghem / NetMelt / Kimura lever.
-      - `contact_reduce` — `set_edge_weight`, and the reason §2.2 says to write our
+      - `edge_cut`: `remove_edge`, the Van Mieghem / NetMelt / Kimura lever.
+      - `contact_reduce`: `set_edge_weight`, and the reason §2.2 says to write our
         own stepper: NDlib's SIR/SIS/SEIR carry no per-edge parameter, so this
         entire branch of the literature (social distancing, DURLECA's mobility
         multiplier, Fractional Immunization's continuous allocation) is
@@ -35,7 +35,7 @@ convenience:
     arm can never be budgeted for one op and permitted another.
 
   * **The outbreak.** Exogenous, injected at t=0 as `add_node` index cases the
-    planner neither chooses nor pays for — identical to critical node detection, and
+    planner neither chooses nor pays for: identical to critical node detection, and
     it reuses `containment.Outbreak` for the seeding half.
 
   * **Prevented infections (§8.3).** `|R(inf)| unprotected - |R(inf)| with doses`.
@@ -44,7 +44,7 @@ convenience:
     from the unprotected reference, which is what an immunization table reports.
 
 Warning: WHAT THIS DELIBERATELY DOES NOT DO. §2.5 lists two more rows and both are
-out of scope with a stated reason. **Contact tracing is not an action** — it changes
+out of scope with a stated reason. **Contact tracing is not an action**: it changes
 the OBSERVATION, not the graph or the state, and belongs in a POMDP observation
 model we do not have. **Quarantine with a DURATION** is not expressible either: a
 release timer is hidden state, the compartment head is Markov in (state, action),
@@ -55,7 +55,7 @@ episode, which is what every static immunization baseline in §3 does anyway.
 
 from dataclasses import dataclass
 
-from coding_agent.containment import delete_node_ops, expand_removals
+from coding_agent.containment import expand_removals
 from coding_agent.types import ActionFn, ActionOp, GraphInfo, State, TaskSpec
 from world_model.wm_metrics import epidemic_curve_metrics, immunization_metrics
 
@@ -107,7 +107,7 @@ def resolve_lever(lever: str) -> tuple[str, tuple]:
 
 def isolate_node_ops(graph: GraphInfo, node: int) -> list[ActionOp]:
     """
-    Every incident arc of `node`, and NOT the node itself — quarantine as a bag.
+    Every incident arc of `node`, and NOT the node itself: quarantine as a bag.
 
     The one-line difference from `containment.delete_node_ops`, and the whole
     content of the vaccinate/quarantine distinction: the node stays in the graph,
@@ -131,8 +131,8 @@ def expand_immunization(
     """
     Rewrite every bare `remove_node` in `bag` as the bag its LEVER means.
 
-    Under `vaccinate` that is `containment.expand_removals` unchanged — the node
-    plus its incident arcs — because both structured heads document that a blocked
+    Under `vaccinate` that is `containment.expand_removals` unchanged: the node
+    plus its incident arcs, because both structured heads document that a blocked
     node's edges are gone from `edge_index` and rely on it. Under `quarantine` it is
     the incident arcs ALONE. The edge levers pass through untouched.
 
@@ -186,7 +186,7 @@ class Immunization:
         intervention to be charged for.
 
         Order matters and this is the right one: the index cases go in FIRST, so a
-        policy that doses a source node at t=0 still wins — `apply_actions` walks
+        policy that doses a source node at t=0 still wins: `apply_actions` walks
         the bag in order, so the later `remove_node` overwrites the earlier
         `add_node` and the node ends up immunized rather than infectious. Whether
         that is ALLOWED is a separate question the validator answers, and the
@@ -209,7 +209,7 @@ def build_immunization(graph: GraphInfo, task: TaskSpec) -> Immunization | None:
     None for every task that is not compartmental.
 
     Returned even with an EMPTY outbreak, for the same reason `build_outbreak` is:
-    the wrapper does two jobs, and the dose expansion is not optional — both the
+    the wrapper does two jobs, and the dose expansion is not optional: both the
     compartment head and the simulator assume a vaccinated node's arcs are gone
     from `edge_index`.
     """
@@ -236,7 +236,7 @@ def immunization_plan(
     A library selector's output as a horizon-shaped plan, whatever shape it returns.
 
     The node levers hand back node ids and the edge levers hand back `(u, v)` arcs,
-    so this is the single place the two meet the one plan format — the same job
+    so this is the single place the two meet the one plan format: the same job
     `blocking.blocking_plan` does, and for the same reason: the published algorithms
     are not rewritten to know what a plan is.
 
@@ -330,15 +330,15 @@ def epidemic_metrics(
 
     Four groups, and the order is the argument this task makes:
 
-      1. **The attack rate and prevented infections** — the objective, directly, on
+      1. **The attack rate and prevented infections**: the objective, directly, on
          the same evaluator that produced `reward`. A ratio of two different rulers
          means nothing, which is why `unprotected` is measured on this arm's own
          evaluator and `--compare` re-measures both on the shared referee.
-      2. **The outbreak SHAPE** — peak prevalence, time to peak, AUC, endemic
+      2. **The outbreak SHAPE**: peak prevalence, time to peak, AUC, endemic
          prevalence. §8.2 trap 4 is the reason these are not optional: a good policy
          flattens rather than eliminates, so a terminal-state number alone can rank
          two policies backwards.
-      3. **The eigendrop** — `lambda_1(A) - lambda_1(A - S)`, which is what the
+      3. **The eigendrop**: `lambda_1(A) - lambda_1(A - S)`, which is what the
          spectral line optimizes and therefore the only column our table and theirs
          share. Reported as CONTEXT beside the simulated number, never as the score:
          §8.2 trap 1 records that a method can win here and lose on final size, and
@@ -399,7 +399,7 @@ def unprotected_reference(
     counterpart can hand the environment a bare `lambda: []` because `S_N` is
     committed by the simulator's own `reset`; here the outbreak is INJECTED by the
     wrapper as `add_node` index cases at t=0, so an unwrapped empty plan seeds
-    nothing, the epidemic never starts, and the reference comes back 0 — which
+    nothing, the epidemic never starts, and the reference comes back 0, which
     silently turns every prevented-infections number negative.
     """
     immunization = build_immunization(graph, task)

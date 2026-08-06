@@ -18,7 +18,7 @@ CasFT's own row at `t_o = 0.5 h` is **MSLE 2.1728 / MAPE 0.2448**, against CasFl
 2.3370 / 0.2665 [verified, §5.1 Table 2].
 
 **Warning: three other things are called Weibo.** CTCP's re-preprocessing is 39,076
-cascades, CasTemp's 48,693, CoupledGNN's coverage-sampled subset 3,228 — and our own
+cascades, CasTemp's 48,693, CoupledGNN's coverage-sampled subset 3,228, and our own
 `--dataset weibo` is the AMiner FOLLOWING NETWORK with no cascades at all (§6.1).
 A row is comparable only to rows on the same one.
 

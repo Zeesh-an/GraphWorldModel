@@ -3,7 +3,7 @@ Aggregate structural statistics describing the graph in the agent's prompt.
 
 Deliberately NOT the adjacency list. The generated code reads the real topology
 through `graph` when it runs, so serializing edges into the prompt would only ask
-the model to eyeball what its own program computes exactly — and would let it
+the model to eyeball what its own program computes exactly, and would let it
 hardcode node ids for one instance instead of writing an algorithm that
 generalizes. These statistics are what a human expert actually uses to choose an
 approach: is it hub-dominated or uniform, one component or many, community-
@@ -43,9 +43,9 @@ def _degree_line(degrees: np.ndarray) -> str:
     # CV separates BA-style hub graphs from ER/SBM-style uniform ones
     coefficient_of_variation = float(degrees.std() / mean) if mean > 0 else 0.0
     tail = (
-        "heavy-tailed, hub-dominated — degree-based seeding is strong"
+        "heavy-tailed, hub-dominated: degree-based seeding is strong"
         if coefficient_of_variation > heavy_tail_cv
-        else "fairly uniform — degree carries little seed signal"
+        else "fairly uniform: degree carries little seed signal"
     )
 
     return (
@@ -74,17 +74,17 @@ def _transmission_lines(graph: GraphInfo) -> list[str]:
     if active.size:
         # The MEAN is pinned to ~1.0 by the weighted-cascade construction
         # (p = 1/in_degree makes every node's in-sum exactly 1), so it carries no
-        # information about this graph — the median and the supercritical
+        # information about this graph: the median and the supercritical
         # fraction are what distinguish one graph from another
         median_transmission = float(np.median(active))
         supercritical = 100.0 * float((active >= 1.0).mean())
-        # Exactly 1.0 is critical, not subcritical — and under weighted cascade a
+        # Exactly 1.0 is critical, not subcritical, and under weighted cascade a
         # median of exactly 1.0 is common, so the boundary has to fall this way
         regime = (
-            "the typical node at least replaces itself — cascades sustain themselves"
+            "the typical node at least replaces itself: cascades sustain themselves"
             if median_transmission >= 1.0
             else "the typical node is subcritical, so cascades run on the "
-            "supercritical minority — reaching those hubs is what decides spread"
+            "supercritical minority: reaching those hubs is what decides spread"
         )
         lines.append(
             f"expected out-transmission per node (sum of p over out-edges): "
@@ -107,7 +107,7 @@ def _component_lines(view: nx.Graph, degrees: np.ndarray, num_nodes: int) -> lis
 
     if len(components) > 1:
         lines.append(
-            "  budget spent inside one component cannot reach the others — spread "
+            "  budget spent inside one component cannot reach the others: spread "
             "is capped by which components you seed"
         )
 
@@ -176,7 +176,7 @@ def build_graph_profile(graph: GraphInfo) -> str:
         )
         if modularity > 0.3:
             lines.append(
-                "  strong community structure — allocating budget ACROSS communities "
+                "  strong community structure: allocating budget ACROSS communities "
                 "usually beats picking globally top-scoring nodes"
             )
     else:

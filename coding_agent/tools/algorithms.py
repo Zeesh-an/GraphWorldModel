@@ -833,7 +833,7 @@ def community_celf(
     horizon: int = 20,
     **_,
 ) -> list[int]:
-    """Community-scoped marginal-gain greedy (no CELF lazy heap — simplified)."""
+    """Community-scoped marginal-gain greedy (no CELF lazy heap: simplified)."""
     communities = primitives.detect_communities(graph)
     allocation = primitives.allocate_budget(communities, budget)
     members = {}
@@ -879,7 +879,7 @@ def _neighbor_sets(graph: GraphInfo) -> list[set[int]]:
 def voterank(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
-    """VoteRank (Zhang et al. 2016): iterative voting where a winner's neighbors lose voting power — anti-overlap seed selection."""
+    """VoteRank (Zhang et al. 2016): iterative voting where a winner's neighbors lose voting power, anti-overlap seed selection."""
     neighbors = _neighbor_sets(graph)
     voting_ability = np.ones(graph.num_nodes)
     average_degree = max(
@@ -912,7 +912,7 @@ def voterank(
 def kshell_seeds(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
-    """k-shell seeding (Kitsak et al. 2010): top-k by core number (degree breaks ties) — core position beats raw degree for spreading."""
+    """k-shell seeding (Kitsak et al. 2010): top-k by core number (degree breaks ties), core position beats raw degree for spreading."""
     neighbors = _neighbor_sets(graph)
     degrees = np.array([len(nbrs) for nbrs in neighbors], dtype=np.int64)
 
@@ -1028,7 +1028,7 @@ def irie(
 def random_seeds(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 42, **_
 ) -> list[int]:
-    """Uniform random seed set — the trivial floor baseline."""
+    """Uniform random seed set: the trivial floor baseline."""
     rng = np.random.default_rng(seed)
     count = min(budget, graph.num_nodes)
 

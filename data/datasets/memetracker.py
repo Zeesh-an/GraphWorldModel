@@ -14,8 +14,8 @@ Source: https://snap.stanford.edu/data/memetracker9.html
 
 Topo-LSTM's Table II reports Memes at 5,000 nodes / 313,669 edges / 54,847
 cascades, avg size 17.0 [verified, §6.2]. **We do not reproduce those counts and
-say so here rather than in a footnote:** that row is Topo-LSTM's own extraction —
-top-5,000 hosts, their own phrase filter, their own month selection — and the
+say so here rather than in a footnote:** that row is Topo-LSTM's own extraction,
+top-5,000 hosts, their own phrase filter, their own month selection, and the
 authors publish the extraction script for none of it. Ours is the same construction
 applied to one month with `--cp-max-nodes` deciding the host cap, so a Memes number
 from this loader is comparable to itself and to nothing published. §6.4 already
@@ -25,7 +25,7 @@ different name, and the honest response is a loader that states its own version.
 **The diffusion tree is not observed.** A quote record says a host carried a phrase
 at a time, never which host it took it from. MemeTracker's `L` (link) lines DO
 record hyperlinks, but between POSTS and often to hosts that never carried the
-phrase, so they are not a transmission tree for the cascade — using them as one is
+phrase, so they are not a transmission tree for the cascade: using them as one is
 exactly the network-inference mistake: an observed link is not a transmission. Every adopter is
 therefore attributed to the phrase's first host and the observed path has length 2,
 identical to Digg's convention and stated for the same reason.
@@ -65,7 +65,7 @@ default_month = "2009-01"
 
 # A phrase carried by fewer hosts than this is not a cascade, it is a quotation.
 # Deliberately looser than CasFlow's observation-window filter, which is applied
-# LATER by `filter_cascades` — this one only decides what is worth keeping in RAM
+# LATER by `filter_cascades`: this one only decides what is worth keeping in RAM
 # while streaming 1.3 GB.
 min_phrase_hosts = 5
 

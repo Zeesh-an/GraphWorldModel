@@ -6,8 +6,8 @@ Downloads and loads the Network Science coauthorship network.
 Source: https://networks.skewed.de/net/netscience
     - 1,589 nodes (authors), 2,742 edges (coauthorships)
     - Undirected, weighted (collaboration strength)
-    - Weights are discarded — we use binary adjacency
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - Weights are discarded: we use binary adjacency
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Original paper: M. E. J. Newman, Phys. Rev. E 74, 036104 (2006)
@@ -32,18 +32,18 @@ def download_netscience() -> Path:
     edges_path = data_dir / "edges.csv"
 
     if edges_path.exists():
-        print(f"[✓] NetScience already downloaded at {data_dir}")
+        print(f"[ok] NetScience already downloaded at {data_dir}")
         return data_dir
 
     if not zip_path.exists():
-        print(f"[↓] Downloading NetScience from {netscience_url} ...")
+        print(f"[get] Downloading NetScience from {netscience_url} ...")
         urllib.request.urlretrieve(netscience_url, zip_path)
-        print(f"[✓] Saved to {zip_path}")
+        print(f"[ok] Saved to {zip_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
         zip_file.extractall(data_dir)
-    print(f"[✓] Extracted to {data_dir}")
+    print(f"[ok] Extracted to {data_dir}")
 
     return data_dir
 
@@ -68,7 +68,7 @@ def load_netscience(
     if nodes_path.exists():
         with open(nodes_path) as file:
             reader = csv.DictReader(file)
-            # Header lines look like "# index, label, _pos" — strip the comment marker and padding
+            # Header lines look like "# index, label, _pos": strip the comment marker and padding
             reader.fieldnames = [name.strip(" #") for name in reader.fieldnames]
             for row in reader:
                 node_ids.add(int(row["index"]))
@@ -126,7 +126,7 @@ def load_netscience(
     n_edges_undirected = adjacency.nnz // 2
     n_isolates = int((degrees == 0).sum())
     print(
-        f"[✓] NetScience loaded: {num_nodes} nodes, "
+        f"[ok] NetScience loaded: {num_nodes} nodes, "
         f"{n_edges_undirected} undirected edges"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")

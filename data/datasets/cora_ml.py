@@ -17,7 +17,7 @@ to True:
     binarize -> symmetrize -> drop self-loops -> keep largest component
 
 DeepIM and MOEIM load this same `cora_ml.npz` through that class, so their
-published "2,810 / 7,981" is exactly what this loader produces — which is the
+published "2,810 / 7,981" is exactly what this loader produces, which is the
 whole reason Cora-ML is in this repo. The raw 2,995-node graph is not comparable
 to any published table, and its 185 extra nodes sit in ~60 tiny fragments that
 only add noise to a spread metric. See research/influence_maximization.md §6.4.2.
@@ -43,17 +43,17 @@ def download_cora_ml() -> Path:
     destination = data_dir / "cora_ml.npz"
 
     if destination.exists():
-        print(f"[✓] Cora-ML already downloaded at {destination}")
+        print(f"[ok] Cora-ML already downloaded at {destination}")
         return destination
 
-    # 85 MB — the slowest download in the suite. A run killed part-way leaves a
+    # 85 MB: the slowest download in the suite. A run killed part-way leaves a
     # truncated file that later fails with BadZipFile, so write to a .part file
     # and only rename once it is complete.
-    print(f"[↓] Downloading Cora-ML from {cora_ml_url} (85 MB) ...")
+    print(f"[get] Downloading Cora-ML from {cora_ml_url} (85 MB) ...")
     partial = destination.with_suffix(".npz.part")
     urllib.request.urlretrieve(cora_ml_url, partial)
     partial.rename(destination)
-    print(f"[✓] Saved to {destination}")
+    print(f"[ok] Saved to {destination}")
 
     return destination
 
@@ -93,7 +93,7 @@ def load_cora_ml(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
     adjacency.setdiag(0)
     adjacency.eliminate_zeros()
 
-    # standardize(): select_lcc — features and labels take the same indices
+    # standardize(): select_lcc, features and labels take the same indices
     adjacency, keep = largest_connected_component(adjacency)
     features = features[keep]
     labels = labels[keep]
@@ -101,7 +101,7 @@ def load_cora_ml(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
 
     degrees = np.array(adjacency.sum(axis=1)).flatten()
     print(
-        f"[✓] Cora-ML loaded: {num_nodes} nodes, {adjacency.nnz // 2} undirected "
+        f"[ok] Cora-ML loaded: {num_nodes} nodes, {adjacency.nnz // 2} undirected "
         f"edges, {features.shape[1]} features, {len(np.unique(labels))} classes"
     )
     print(

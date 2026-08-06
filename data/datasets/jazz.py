@@ -6,7 +6,7 @@ Downloads and loads the Jazz musicians collaboration network.
 Source: https://networkrepository.com/arenas-jazz.php
     - 198 nodes (musicians), 2,742 edges (collaborations)
     - Undirected, unweighted
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Original paper: Gleiser & Danon, "Community Structure in Jazz",
@@ -31,18 +31,18 @@ def download_jazz() -> Path:
     edges_path = data_dir / "arenas-jazz.edges"
 
     if edges_path.exists():
-        print(f"[✓] Jazz already downloaded at {edges_path}")
+        print(f"[ok] Jazz already downloaded at {edges_path}")
         return edges_path
 
     if not zip_path.exists():
-        print(f"[↓] Downloading Jazz from {jazz_url} ...")
+        print(f"[get] Downloading Jazz from {jazz_url} ...")
         urllib.request.urlretrieve(jazz_url, zip_path)
-        print(f"[✓] Saved to {zip_path}")
+        print(f"[ok] Saved to {zip_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
         zip_file.extractall(data_dir)
-    print(f"[✓] Extracted to {data_dir}")
+    print(f"[ok] Extracted to {data_dir}")
 
     return edges_path
 
@@ -110,7 +110,7 @@ def load_jazz(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
     node_labels = np.zeros(num_nodes, dtype=np.int32)
 
     n_edges_undirected = adjacency.nnz // 2
-    print(f"[✓] Jazz loaded: {num_nodes} nodes, {n_edges_undirected} undirected edges")
+    print(f"[ok] Jazz loaded: {num_nodes} nodes, {n_edges_undirected} undirected edges")
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")
 
     return adjacency, node_feats, node_labels, num_nodes

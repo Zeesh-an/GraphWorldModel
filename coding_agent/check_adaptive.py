@@ -532,7 +532,7 @@ def multi_round_unions_separate_campaigns() -> None:
     # `infected` carries the union into the next campaign (§2.4e), so the policy
     # sees a growing set at t=0 of each campaign. The MC environment loops
     # (episode, then timestep), so t=0 fires once per episode and each campaign
-    # contributes mc_runs entries — the union is a per-campaign constant, which
+    # contributes mc_runs entries: the union is a per-campaign constant, which
     # is what makes it safe to read under either environment's loop order.
     per_campaign = 6
     starts = [seen_unions[index * per_campaign] for index in range(3)]
@@ -566,7 +566,7 @@ def the_spread_curve_makes_sigma_s_t_readable() -> None:
     curve = trajectory.spread_curve
 
     # Always horizon + 2 long, whatever the cascade did, so index t means the
-    # same t across arms — the ragged infected_counts is what made sigma(S, T)
+    # same t across arms: the ragged infected_counts is what made sigma(S, T)
     # unreadable before
     assert len(curve) == horizon + 2, len(curve)
     assert len(trajectory.infected_counts) <= len(curve)
@@ -597,7 +597,7 @@ def adaptive_runs_under_the_world_model_loop_order() -> None:
     Every other check here drives the MC environment, which loops (episode, then
     timestep). WorldModelEnvironment loops the other way and calls action_fn once
     per sample per timestep, so a round schedule that quietly depended on call
-    order would pass all of them and fail on condition 6 — the arm the whole
+    order would pass all of them and fail on condition 6: the arm the whole
     project is about. The oracle head needs no checkpoint, so this pins the loop
     order without a trained model.
     """

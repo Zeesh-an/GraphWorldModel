@@ -268,7 +268,7 @@ class _EdgeTransmission(nn.Module):
     Exactly `ICTransmissionHead`'s edge model, factored out because a competitive
     head needs TWO of them off one shared encoding (§2.2). `oracle` pins q to the
     true probability, `residual` anchors it there and learns only a correction, and
-    `positive_prob` overrides the anchor for the limiting campaign under MCICM —
+    `positive_prob` overrides the anchor for the limiting campaign under MCICM,
     where `p_L` is a constant the edge weight does not carry.
     """
 
@@ -334,7 +334,7 @@ def _arrival_probability(
     destinations: torch.Tensor,
     num_nodes: int,
 ) -> torch.Tensor:
-    """`1 - prod_{u->v} (1 - q_uv * frontier_u)` — the IC infection form, per node."""
+    """`1 - prod_{u->v} (1 - q_uv * frontier_u)`: the IC infection form, per node."""
     gated = (transmission * frontier[sources]).clamp(0.0, 1.0 - prob_epsilon)
     log_survival = torch.log1p(-gated)  # shape: (E,)
     survival = torch.zeros(num_nodes, device=transmission.device).scatter_add_(
@@ -368,7 +368,7 @@ def _resolve_tie(
 
     if tie_break == fixed_dominance:
         # gamma_v is drawn per node per EPISODE and never stored, exactly like the LT
-        # threshold — so the head can only learn E[gamma_v], and this is where fixed
+        # threshold, so the head can only learn E[gamma_v], and this is where fixed
         # dominance pays its own partial-observability tax
         gamma = priority if priority is not None else 0.5
         return (
@@ -396,7 +396,7 @@ class CompetitiveICHead(nn.Module):
     head predicts: a node activates in at most one campaign, so each arc is ever
     attempted by exactly one of them, and the two arrival probabilities at a
     susceptible `v` are products over DISJOINT in-edge sets. The factorization is
-    therefore exact under both models — see data/wm_competitive.py for the full
+    therefore exact under both models: see data/wm_competitive.py for the full
     argument, which is also why `positive_prob` (COICM vs MCICM) is the only thing
     that separates them here.
 
@@ -484,7 +484,7 @@ class CompetitiveLTHead(nn.Module):
 
     He et al.'s competitive linear threshold gives every node TWO hidden thresholds
     (SDM'12 §3), so this head pays the single-cascade LT partial-observability tax
-    twice — which is exactly why research/influence_blocking.md §2.2 predicts IC
+    twice, which is exactly why research/influence_blocking.md §2.2 predicts IC
     carries this task and LT is the weaker demonstration. It is implemented anyway
     because the registry declares both dynamics and a `--diffusion-model LT` run
     otherwise has no head at all.
@@ -586,8 +586,8 @@ class CompartmentTransitionHead(nn.Module):
     `y_inf >= infected` for every assignment of encoder weights and every value of
     `q(u -> v)`. There is no way to make that expression predict a node LEAVING the
     infected set, and `LTThresholdHead` has the identical shape. That monotonicity
-    is load-bearing rather than incidental — `RESULTS.md` records it as what fixed
-    rollout saturation (`count_bias` +49 -> +0.27) — and it is exactly the
+    is load-bearing rather than incidental: `RESULTS.md` records it as what fixed
+    rollout saturation (`count_bias` +49 -> +0.27), and it is exactly the
     assumption `I -> R` and `I -> S` violate. So this is a NEW head reusing the
     per-edge transmission model, not an edit to the existing ones, and IC/LT keep
     theirs untouched.
@@ -609,7 +609,7 @@ class CompartmentTransitionHead(nn.Module):
         penalty is needed.
       * **Self-termination survives.** A susceptible node with no infectious
         in-neighbour has `p_inf = 0`, and `I` decays geometrically at `gamma`, so a
-        free-running rollout still cannot saturate — under SIS too, where nothing
+        free-running rollout still cannot saturate: under SIS too, where nothing
         else would stop it.
 
     Columns 0-1 of the output are the EVER-infected marginal and the INCIDENCE,
@@ -726,7 +726,7 @@ class CompartmentTransitionHead(nn.Module):
         # simulator: a seeded outbreak is already infectious, and under SEIR putting
         # it in E instead would delay every episode's first wave by one step.
         # `remove_node` is a DOSE and under `blocked` empties every compartment
-        # including S, so the node's five targets are all zero — which is what the
+        # including S, so the node's five targets are all zero, which is what the
         # simulator writes for it.
         keep = 1.0 - X[:, ch_epi_remove] if self.remove_semantics == blocked else 1.0
         seeded = X[:, ch_epi_add]
@@ -804,7 +804,7 @@ def competitive_exogenous(
     T_exo for a two-cascade state: apply the action bag, return both (infected, frontier).
 
     `add_node` seeds the POSITIVE cascade and only where the negative one has not
-    already committed the node — re-seeding a rumour-owned node is a no-op in the
+    already committed the node: re-seeding a rumour-owned node is a no-op in the
     simulator, and a head that let it flip would be fit against a transition that
     never happens. `remove_node` under `blocked` deletes the node from both cascades;
     its incident edges are gone from `edge_index` because the deletion bag carries
@@ -904,7 +904,7 @@ class WorldModel(nn.Module):
         # `linear` variant, for a sharper version of the competitive reason: an
         # unstructured (N, 5) head has nothing making the four compartments a
         # simplex, nothing stopping `I` from growing without an infectious
-        # neighbour, and — the point of the task — nothing that represents
+        # neighbour, and (the point of the task) nothing that represents
         # recovery as a transition rather than as a coincidence
         # (research/epidemic_control.md §2.4).
         if epidemic:
@@ -1009,7 +1009,7 @@ class WorldModel(nn.Module):
             return self.head(hidden)  # (N, 2) logits
 
         # (N, 2) single-cascade, (N, 4) competitive, (N, 5) compartmental; columns
-        # 0-1 are the same PAIR of quantities under all three — the set being scored
-        # and who newly joined it — which is what keeps every downstream reader
+        # 0-1 are the same PAIR of quantities under all three: the set being scored
+        # and who newly joined it, which is what keeps every downstream reader
         # working with no branch
         return self.head(hidden, X, graph)

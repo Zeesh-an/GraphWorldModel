@@ -6,7 +6,7 @@ Source: https://networkrepository.com/inf-openflights.php (Opsahl snapshot)
       symmetrized, which is the count GND and MIND report
     - Loaded UNDIRECTED: the whole dismantling literature treats it that way
       (research/critical_node_detection.md §8.2 trap 9)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Warning: Name collision (§6.4). KONECT publishes a bigger, later `openflights`

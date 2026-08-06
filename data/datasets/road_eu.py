@@ -4,12 +4,12 @@ RoadEU Dataset Loader
 Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
     - 1,039 nodes, 1,305 undirected edges
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 The European E-road network's giant component, as GND uses it. CoreHD and BPD's
 Table I print the RAW `subelj_euroroad` counts (1,174 / 1,417) under the same
-name, so the two are not interchangeable — `--dataset euroroad` is the raw one.
+name, so the two are not interchangeable: `--dataset euroroad` is the raw one.
 
 Mesh-like and near-planar (mean degree 2.5), which is the graph class
 research/critical_node_detection.md §9.4 predicts learned dismantlers lose on.
@@ -24,7 +24,7 @@ import scipy.sparse as sp
 
 from data.datasets.dismantling_common import download_plain, load_edge_list
 
-# Upstream filename really is `RodeEU` — a typo in the GND repository
+# Upstream filename really is `RodeEU`: a typo in the GND repository
 road_eu_url = (
     "https://raw.githubusercontent.com/renxiaolong/Generalized-Network-Dismantling/"
     "master/Datasets_SI/RodeEU_gcc.txt"

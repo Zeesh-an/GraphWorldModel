@@ -10,14 +10,14 @@ problem,
 and differs only in HOW it inverts. SL-VAE relaxes `x` to `x~ in [0,1]^N` and runs
 Adam on it; IVGD runs its network backwards and projects; DDMSL runs a reverse
 denoising chain. The forward model `p_psi` is a component, and SL-VAE is explicit
-that it is a REPLACEABLE one — the paper plugs in GAT, MONSTOR and DeepIS and
+that it is a REPLACEABLE one: the paper plugs in GAT, MONSTOR and DeepIS and
 reports no significant difference [verified, §4]. So "SL-VAE, but with our world
 model as p_psi" is a paper the seed authors already wrote.
 
 **It is therefore the CONTROL, not the method.** §2.3 contributes the argmax
 instead: search the space of inversion PROGRAMS once, offline, and run the winner
 on every instance. Arm 6 vs arm A is the methodological claim, and a control that
-is strawmanned proves nothing — hence the VAE prior here rather than descent
+is strawmanned proves nothing: hence the VAE prior here rather than descent
 alone. SL-VAE's own ablation (§5.1, Table 4) puts the prior at +0.19 F1 on Jazz
 and +0.26 on Network Science, so `--sl-prior none` reproduces `SL-VAE (a)` and
 `--sl-prior vae` reproduces the full method.
@@ -27,7 +27,7 @@ only reason this file is short:
 
   * `ICTransmissionHead` composes `p_new = 1 - prod(1 - q * frontier_u)` from
     continuous channels, so feeding it a SOFT `(infected, frontier, add)` state is
-    already well defined — no relaxation of the head is needed.
+    already well defined: no relaxation of the head is needed.
   * The action enters through channel `CH_ADD`, so the decision variable is one
     column of `X` and `torch.autograd` reaches it through the whole unrolled
     rollout without a single line of custom backward code.
@@ -100,7 +100,7 @@ probability_floor = 1e-6
 def build_graph_tensors(
     graph: GraphInfo, diffusion_model: str, device: torch.device
 ) -> tuple:
-    """(GraphInput, degree channel) for one graph — everything the unroll reuses."""
+    """(GraphInput, degree channel) for one graph: everything the unroll reuses."""
     graph_input = build_graph_input(
         graph.edge_index,
         graph.ic_probs,
@@ -130,7 +130,7 @@ def soft_rollout(
     The deterministic twin of `WorldModelEnvironment.rollout`: identical state
     recursion, with the per-timestep Bernoulli draw replaced by the marginal
     itself. That substitution is a mean-field approximation and it is the standard
-    one for this construction, but it is worth naming — the sampled ensemble and
+    one for this construction, but it is worth naming: the sampled ensemble and
     this unroll agree in expectation only when the head is locally linear, and the
     IC head is not.
 
@@ -170,7 +170,7 @@ class SourceVAE(nn.Module):
 
     SL-VAE's second half, and the ablation row that matters: its Table 4 shows the
     prior is worth +0.19 F1 on Jazz over descent alone. Deliberately a plain
-    Bernoulli-decoder VAE rather than anything clever — the point is a fair control,
+    Bernoulli-decoder VAE rather than anything clever: the point is a fair control,
     and a prior the agent's PROGRAM cannot express is exactly what §2.3.1 argues
     the trade is ("a VAE prior cannot express 'at most one source per 3-hop ball';
     ten lines of Python can").
@@ -208,7 +208,7 @@ class SourceVAE(nn.Module):
 
     def negative_log_prior(self, x: torch.Tensor) -> torch.Tensor:
         """
-        -log p(x) at the posterior mean — the term added to the inversion loss.
+        -log p(x) at the posterior mean: the term added to the inversion loss.
 
         The mean rather than a sample, because the inversion is a deterministic
         optimization and resampling `z` every Adam step would make the objective
@@ -280,7 +280,7 @@ def invert(
     Recover one source set by Adam on the relaxed vector. Returns (sources, scores, info).
 
     `scores` is the converged `x~`, which is a genuine continuous ranking over all
-    N nodes — so this arm gets the AUC column the literature reports rather than
+    N nodes, so this arm gets the AUC column the literature reports rather than
     the rank-derived stand-in a set-only method falls back to.
     """
     device = degree_channel.device
@@ -362,7 +362,7 @@ def load_world_model(results_json: str, device: str = "cpu") -> tuple[nn.Module,
     model.to(device).eval()
 
     # Frozen: §2.5's fifth row. The world model is never differentiated INTO here,
-    # only through — the gradient flows to x~ and stops.
+    # only through: the gradient flows to x~ and stops.
     for parameter in model.parameters():
         parameter.requires_grad_(False)
 

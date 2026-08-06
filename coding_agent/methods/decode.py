@@ -4,23 +4,23 @@ Arm A for cascade reconstruction: DITTO's decoder over our kernel, no LLM anywhe
 The control that program search is measured against
 (`research/cascade_reconstruction.md` §2.9 arm A, §2.3). It implements the same
 `OuterLoopMethod` contract as `one_shot` and `evolve` so it lands in the same
-results table, the same summary row and the same figures — but it has no
+results table, the same summary row and the same figures, but it has no
 conversation, no population and no refinement: the "program" it returns is a fixed
 Metropolis-Hastings sampler, and its only iteration is inside `barycenter_decode`.
 
 Two properties keep the comparison honest and both are worth stating:
 
   * **It needs a transition KERNEL, not merely an evaluator.** Every accept/reject
-    decision is a ratio of trajectory log-likelihoods, so the `@native` binding —
-    which has no kernel by design — cannot run it, and requesting that raises
+    decision is a ratio of trajectory log-likelihoods, so the `@native` binding,
+    which has no kernel by design: cannot run it, and requesting that raises
     rather than silently substituting something else. `@monte_carlo` can run it and
     is the honest sampling comparison; §2.11 records that it may not COMPLETE at a
     useful proposal count, and that finding needs stating as one rather than as a
     missing row.
   * **It is built to be strong.** §2.11 risk 6: DITTO beats a supervised model
     trained with the true `beta` on two of eight rows, so a weak arm A makes 6-vs-A
-    meaningless. The one respect in which this is weaker than the paper — the
-    hand-written proposal rather than DITTO's learned `Q_theta` — is documented in
+    meaningless. The one respect in which this is weaker than the paper: the
+    hand-written proposal rather than DITTO's learned `Q_theta`: is documented in
     `world_model/wm_reconstruct.py` rather than buried.
 """
 

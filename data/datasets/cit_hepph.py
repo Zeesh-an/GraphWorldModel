@@ -3,13 +3,13 @@ cit-HepPh Dataset Loader
 
 Source: https://snap.stanford.edu/data/cit-HepPh.html
     - 34,546 nodes [verified, matches Tong & Wu's own count], 421,534 arcs
-      [derived] — SNAP publishes 421,578; we drop 44 self-citations
+      [derived]: SNAP publishes 421,578; we drop 44 self-citations
     - Directed (arXiv hep-ph citations)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Tong & Wu's `HepPh` (NeurIPS 2018, §5.8), which they quote as 34,546 PAPERS and
-run under weighted-cascade 1/deg(v) — the same probability model as our
+run under weighted-cascade 1/deg(v): the same probability model as our
 `--prob-model weighted`. They give no edge count, so ours is the file's own.
 """
 

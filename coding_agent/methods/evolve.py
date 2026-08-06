@@ -1,5 +1,5 @@
 """
-Method 4: EvoX-lite population evolution — every generation is an EDIT of a
+Method 4: EvoX-lite population evolution, every generation is an EDIT of a
 parent from the population (refine or restructure), never a fresh program.
 Stagnation switches the operator from refine to restructure.
 """
@@ -56,7 +56,7 @@ class EvolveSearch(OuterLoopMethod):
         self.label = label
         self.allow_mc_algorithms = allow_mc_algorithms
         # Canned arms never read a prompt, so the anchor rollouts would be pure
-        # cost — five real episodes under an MC evaluator, informing nothing
+        # cost: five real episodes under an MC evaluator, informing nothing
         self.use_anchor = use_anchor
         self.checkpoint_path = checkpoint_path
         self.checkpoint_fingerprint = checkpoint_fingerprint

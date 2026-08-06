@@ -14,7 +14,7 @@ family's scaling target.
 Warning: THIS IS NOT `infectious`. That dataset key is Xiao ICDM'18's 410-node /
 2,765-edge extraction of the SAME study, loaded for cascade reconstruction and
 matching that paper's Table I to the digit. This is the full aggregated contact
-graph at 10,972 nodes — a 27x difference in node count under one name, and the
+graph at 10,972 nodes: a 27x difference in node count under one name, and the
 same collision hazard `research/epidemic_control.md` §6.4 documents for
 Hamsterster, PGP and Oregon. Each loader states which version it is.
 

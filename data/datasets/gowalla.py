@@ -4,11 +4,11 @@ loc-Gowalla Dataset Loader
 Source: https://snap.stanford.edu/data/loc-gowalla.html
     - 196,591 nodes, 950,327 undirected edges
     - Undirected (Gowalla location-based friendships)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Used by both fair IBM 2026 and the proactive-rumour-control paper (§6.2), and the
-only large graph in this literature with a geographic embedding — its communities are
+only large graph in this literature with a geographic embedding: its communities are
 spatial, so a blocker that separates regions behaves differently here than on a
 social graph whose communities are interest-based.
 """

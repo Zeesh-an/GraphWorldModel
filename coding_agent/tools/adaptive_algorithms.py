@@ -12,13 +12,13 @@ alone (research/adaptive_online_im.md §1.1).
 
 These are the condition-1 floor for `--task adaptive_online_im`. Without them the
 task's `--baselines` arms are all static sets dealt at t=0, i.e. the CONTROL side
-of the adaptivity gap with nothing on the adaptive side — the published adaptive
+of the adaptivity gap with nothing on the adaptive side: the published adaptive
 algorithms would be missing from their own table.
 
 Two conventions every member obeys, because the harness enforces them anyway
 (`coding_agent/rounds.py::prepare_round_bag`):
 
-  * never return an already-active node — under full-adoption feedback that
+  * never return an already-active node: under full-adoption feedback that
     raises, and under myopic it silently wastes the slot;
   * never return more than `batch` nodes.
 
@@ -149,7 +149,7 @@ def adapt_greedy(
     The reference adaptive-IM algorithm, and the reason the task is expensive.
     `compute_marginal_gain` conditions on the already-active set by including it
     in the seed list, so a candidate is scored by what it adds ON TOP of what the
-    cascade has already reached — which is exactly the quantity that changes
+    cascade has already reached, which is exactly the quantity that changes
     between rounds and invalidates CELF's cached gains (§2.3).
 
     ponytail: candidates are pre-filtered to the top `n_candidates` by degree

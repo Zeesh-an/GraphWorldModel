@@ -16,7 +16,7 @@ mkdir -p results logs
 # Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
 # logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
 # transitions. Set RUN_JOBID=0 for a stable
-# results/<task>/<dataset>/<run>/data — which is what
+# results/<task>/<dataset>/<run>/data, which is what
 # the train/agent scripts downstream expect to be told about.
 TASK="${TASK:-influence_maximization}"
 DATASET=netscience
@@ -26,7 +26,7 @@ RUN_JOBID="${RUN_JOBID:-1}"
 OUT="results/$TASK/$DATASET/$RUN/data"
 
 # NetScience coauthorship network (1,589 nodes, 2,742 edges, heavily fragmented:
-# 128 isolates + many small components — budget allocation across components is
+# 128 isolates + many small components: budget allocation across components is
 # the decision that matters). Auto-downloads on first use. ONE real graph, so
 # episode diversity comes from rollouts: 100 x 2 models x 4 algos = 800 episodes.
 

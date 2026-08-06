@@ -26,11 +26,11 @@ spine_algorithms = (
 # influence blocking maximization at all", while PROXIMITY (out-neighbours of the
 # negative seeds) is the strong cheap baseline. `degree` is kept so the data
 # contains the failure mode too, and `none` so some episodes carry an unopposed
-# rumour — the sigma(S_N, empty) reference every prevented-influence number needs.
+# rumour: the sigma(S_N, empty) reference every prevented-influence number needs.
 blocking_selectors = ("none", "random", "proximity", "degree", "pagerank")
 
-# Epidemic control's t=0 dose allocation is the SAME shape as a blocker set —
-# "given the outbreak's own sources, choose k nodes that are not sources" — so the
+# Epidemic control's t=0 dose allocation is the SAME shape as a blocker set,
+# "given the outbreak's own sources, choose k nodes that are not sources", so the
 # five rules and `select_blockers` cover both tasks rather than each needing its
 # own. `proximity` is the ring the outbreak reaches first, which is the family DAVA
 # belongs to (research/epidemic_control.md §3.3), and `none` leaves the outbreak
@@ -227,8 +227,8 @@ def select_blockers(
         return sorted(int(candidates[int(index)]) for index in chosen)
 
     if algorithm == "proximity":
-        # §5.4: pick the out-neighbours of the negative seeds — the nodes the rumour
-        # reaches FIRST — ranked by degree, topped up by hop 2 and then by degree
+        # §5.4: pick the out-neighbours of the negative seeds, the nodes the rumour
+        # reaches FIRST: ranked by degree, topped up by hop 2 and then by degree
         degrees = _out_degree(graph)
         ring = []
         for node in sorted(excluded):
@@ -443,12 +443,12 @@ def counterfactual_actions(
     random add_node, and a random remove_node.
 
     Under `blocked` the removal fork is a full node-deletion bag, so it mutates
-    the graph as well as the status — `Simulator.restore()` rewinds status and the
+    the graph as well as the status: `Simulator.restore()` rewinds status and the
     blocked set but not the graph. The caller must therefore pair every fork with
     `Simulator.revert_edges(bag)`, which re-adds the stripped arcs at their
     original probabilities. Skipping the fork instead (what this used to do) left
     a containment dataset with NO two actions from the same state, which is
-    exactly what `action_sensitivity` measures — it read 0.0.
+    exactly what `action_sensitivity` measures: it read 0.0.
     """
     num_nodes = graph.number_of_nodes()
     infected = set(state.infected) | set(state.pos_infected)

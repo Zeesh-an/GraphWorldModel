@@ -13,14 +13,14 @@ Source: https://github.com/abojchevski/graph2gauss
     - Node labels: topic classes
 
 DIPT's third graph (`research/cascade_reconstruction.md` §5.2), reported at Path
-Precision 0.593 and Jaccard 0.421 — between its Cora-ML (0.622) and its Power Grid
+Precision 0.593 and Jaccard 0.421: between its Cora-ML (0.622) and its Power Grid
 (0.680), both of which we already load. Adding it makes THREE of DIPT's five rows
 reachable.
 
 Warning: OUR COUNT IS NOT THE ONE THAT CIRCULATES, and the gap is large. DIPT
 publishes NO dataset table (§11), and the "3,327 / 4,732" quoted for CiteSeer
 everywhere is the LINQS release without a largest-component filter. graph2gauss's
-file standardized the way `cora_ml` is standardized gives 1,681 / 2,902 — half the
+file standardized the way `cora_ml` is standardized gives 1,681 / 2,902: half the
 nodes, because CiteSeer is unusually fragmented and 2,549 of its 4,230 nodes sit
 outside the giant component. Both numbers are right about different objects.
 
@@ -50,16 +50,16 @@ def download_citeseer() -> Path:
     destination = data_dir / "citeseer.npz"
 
     if destination.exists():
-        print(f"[✓] CiteSeer already downloaded at {destination}")
+        print(f"[ok] CiteSeer already downloaded at {destination}")
         return destination
 
     # Written to a .part file and renamed, so a run killed part-way does not leave
     # a truncated archive that later fails with BadZipFile
-    print(f"[↓] Downloading CiteSeer from {citeseer_url} ...")
+    print(f"[get] Downloading CiteSeer from {citeseer_url} ...")
     partial = destination.with_suffix(".npz.part")
     urllib.request.urlretrieve(citeseer_url, partial)
     partial.rename(destination)
-    print(f"[✓] Saved to {destination}")
+    print(f"[ok] Saved to {destination}")
 
     return destination
 
@@ -97,7 +97,7 @@ def load_citeseer(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, in
     adjacency.setdiag(0)
     adjacency.eliminate_zeros()
 
-    # standardize(): select_lcc — features and labels take the same indices
+    # standardize(): select_lcc, features and labels take the same indices
     adjacency, keep = largest_connected_component(adjacency)
     features = features[keep]
     labels = labels[keep]
@@ -105,7 +105,7 @@ def load_citeseer(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, in
 
     degrees = np.array(adjacency.sum(axis=1)).flatten()
     print(
-        f"[✓] CiteSeer loaded: {num_nodes} nodes, {adjacency.nnz // 2} undirected "
+        f"[ok] CiteSeer loaded: {num_nodes} nodes, {adjacency.nnz // 2} undirected "
         f"edges, {features.shape[1]} features, {len(np.unique(labels))} classes"
     )
     print(

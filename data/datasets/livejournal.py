@@ -1,24 +1,24 @@
 """
 LiveJournal Dataset Loader
 
-Downloads and loads the SNAP soc-LiveJournal1 friendship network — the second
+Downloads and loads the SNAP soc-LiveJournal1 friendship network: the second
 largest of Han et al.'s adaptive-IM benchmarks
 (research/adaptive_online_im.md §5.2, §6.2).
 
 Source: https://snap.stanford.edu/data/soc-LiveJournal1.html
     - 4,847,571 nodes (members), 68,993,773 arcs (friendship declarations)
     - Directed: friendship is declared one way and need not be reciprocated
-    - Han et al. quote `4.85M / 69.0M`, average degree 28.5 — agrees with SNAP
+    - Han et al. quote `4.85M / 69.0M`, average degree 28.5: agrees with SNAP
       to the digit, so there is no version collision here
-    - No inherent node features — uses log(1 + total degree) as synthetic features
+    - No inherent node features: uses log(1 + total degree) as synthetic features
     - No node labels
 
 SCALE WARNING. This graph loads but is far beyond what the NDlib rollout and
-selector pipeline can simulate in reasonable time — the same standing caveat
+selector pipeline can simulate in reasonable time: the same standing caveat
 that applies to `twitter`, `digg`, `youtube` and `weibo` (see CLAUDE.md). It is
 here because Han et al. report on it and because their own AdaptIM-1 "cannot
 finish under the case of b < 5 for the largest datasets LiveJournal and Orkut,
-due to the memory overflow" — that sentence is the cost argument this task
+due to the memory overflow": that sentence is the cost argument this task
 exists to make, so the graph is worth having a loader for even before the
 simulation side can reach it.
 
@@ -46,18 +46,18 @@ def download_livejournal() -> Path:
     txt_path = data_dir / "soc-LiveJournal1.txt"
 
     if txt_path.exists():
-        print(f"[✓] LiveJournal already downloaded at {txt_path}")
+        print(f"[ok] LiveJournal already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading LiveJournal from {livejournal_url} ...")
+        print(f"[get] Downloading LiveJournal from {livejournal_url} ...")
         urllib.request.urlretrieve(livejournal_url, gz_path)
-        print(f"[✓] Saved to {gz_path}")
+        print(f"[ok] Saved to {gz_path}")
 
-    print("[↓] Extracting (this file is large) ...")
+    print("[get] Extracting (this file is large) ...")
     with gzip.open(gz_path, "rb") as gz_file:
         txt_path.write_bytes(gz_file.read())
-    print(f"[✓] Extracted to {txt_path}")
+    print(f"[ok] Extracted to {txt_path}")
 
     return txt_path
 
@@ -83,6 +83,6 @@ def load_livejournal(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray,
     node_feats = degree_features(adjacency, directed=True)  # shape: (N, 1)
     node_labels = np.zeros(num_nodes, dtype=np.int32)
 
-    print(f"[✓] LiveJournal loaded: {num_nodes} nodes, {adjacency.nnz} directed arcs")
+    print(f"[ok] LiveJournal loaded: {num_nodes} nodes, {adjacency.nnz} directed arcs")
 
     return adjacency, node_feats, node_labels, num_nodes

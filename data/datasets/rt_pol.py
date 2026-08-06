@@ -6,7 +6,7 @@ Source: https://networkrepository.com/rt-pol.php
     - Undirected, unweighted; the raw file is `fr,to,unix_timestamp` per RETWEET,
       so an edge repeats once per retweet and the deduplicated count is what is
       quoted
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 DITTO's `Pol` row [verified, Table 2], and one of its four REAL-diffusion
@@ -16,7 +16,7 @@ supervised imputers OOM entirely (§5.1.2). That makes it the single most useful
 scale reference in this literature.
 
 Warning: we load the GRAPH only. The timestamps are dropped here, because our
-episodes are simulated on the topology — using its real retweet times would be the
+episodes are simulated on the topology: using its real retweet times would be the
 logged-trajectory experiment `research/cascade_reconstruction.md` §2.11 risk 4
 calls the untested claim, not this loader.
 """

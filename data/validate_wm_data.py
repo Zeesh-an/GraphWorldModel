@@ -84,7 +84,7 @@ def compute_checks(out_dir: Path) -> dict:
                 if by_action[actions[first]] != by_action[actions[second]]:
                     sensitivity_pairs += 1
 
-    # per-algorithm mean final spread (terminal infected_count, main branch) —
+    # per-algorithm mean final spread (terminal infected_count, main branch),
     # reported (not strictly asserted) so the ranking random < degree/pagerank
     # < celf/local_search can be eyeballed without MC-flaky test failures.
     episode_final = {}

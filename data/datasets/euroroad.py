@@ -4,7 +4,7 @@ Euroroad Dataset Loader (raw)
 Source: http://konect.cc/networks/subelj_euroroad/
     - 1,174 nodes (cities), 1,417 undirected edges (E-road segments)
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 The RAW file, which is what CoreHD and BPD's Table I print (1,177 / 1,417 there;

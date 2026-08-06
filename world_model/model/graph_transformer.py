@@ -1,5 +1,5 @@
 """
-Graph Transformer — Forward Diffusion Model
+Graph Transformer: Forward Diffusion Model
 
 Replaces the SpGAT in DeepIM with a proper Graph Transformer.
 
@@ -43,7 +43,7 @@ class GraphTransformerLayer(nn.Module):
         - 2-layer FFN (d_model → ffn_dim → d_model)
         - Residual + LayerNorm
 
-    Pre-norm variant (norm before sublayer — more stable).
+    Pre-norm variant (norm before sublayer: more stable).
     """
 
     def __init__(
@@ -92,7 +92,7 @@ class GraphTransformerLayer(nn.Module):
     ) -> torch.Tensor:
         """
         features: (N, d_model)
-        edge_index: (2, E) long — [src, dst]
+        edge_index: (2, E) long, [src, dst]
         edge_weight: (E,) float edge weights added as log-bias to attention scores, or None for unweighted
         returns: (N, d_model)
         """
@@ -292,7 +292,7 @@ class GraphTransformerEncoder(nn.Module):
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
         X: (N, in_channels) node feature matrix
-        graph: GraphInput — uses graph.edge_index (2, E) and graph.edge_weight (E,)
+        graph: GraphInput, uses graph.edge_index (2, E) and graph.edge_weight (E,)
         returns: (N, hidden_dim) node embeddings
         """
         # Add self-loops so each node attends to itself (weight 1 -> neutral log-bias)

@@ -44,7 +44,7 @@ def _arm_style(index: int) -> dict:
 
 
 def _sorted_arms(results: list[dict]) -> list[str]:
-    """Condition order (1..6), then alphabetical — the paper's table order."""
+    """Condition order (1..6), then alphabetical: the paper's table order."""
     ranked = {}
     for result in results:
         ranked[result["arm"]] = (result.get("condition", 99), result["arm"])
@@ -91,24 +91,24 @@ def _reward_label(results: list[dict], normalize: bool = False) -> str:
         for result in results:
             metric = result.get("prediction_metric")
             if metric:
-                return f"{metric.upper()} — LOWER IS BETTER (held-out cascades)"
+                return f"{metric.upper()}: LOWER IS BETTER (held-out cascades)"
 
-        return "MSLE — LOWER IS BETTER (held-out cascades)"
+        return "MSLE: LOWER IS BETTER (held-out cascades)"
 
     if is_reconstruct(results):
         return (
-            "tree-weighted reconstruction score — higher is better "
+            "tree-weighted reconstruction score: higher is better "
             "(held-out cascades)"
         )
 
     if is_recover(results):
-        return "F1 against the true sources — higher is better (held-out episodes)"
+        return "F1 against the true sources: higher is better (held-out episodes)"
 
     unit = "% of nodes" if normalize else "nodes"
     judge = "ground-truth MC" if is_ground_truth(results) else "mixed evaluators"
 
     if result_sense(results) == minimize:
-        return f"final infected ({unit}, {judge}) — LOWER IS BETTER"
+        return f"final infected ({unit}, {judge}): LOWER IS BETTER"
 
     return f"final spread ({unit}, {judge})"
 
@@ -218,13 +218,13 @@ def plot_ours_vs_baselines(
 
         if condition == 6:
             style = {"linewidth": 3.0, "linestyle": "-", "zorder": 5, "alpha": 1.0}
-            label = f"OURS — {arm}"
+            label = f"OURS: {arm}"
         elif condition == 7:
             style = {"linewidth": 2.0, "linestyle": "--", "zorder": 4, "alpha": 0.95}
-            label = f"published — {arm.replace('external_', '')}"
+            label = f"published: {arm.replace('external_', '')}"
         elif condition == 1:
             style = {"linewidth": 1.2, "linestyle": ":", "zorder": 2, "alpha": 0.7}
-            label = f"classical — {arm.replace('baseline_', '')}"
+            label = f"classical: {arm.replace('baseline_', '')}"
         else:
             style = {"linewidth": 1.5, "linestyle": "-.", "zorder": 3, "alpha": 0.8}
             label = arm
@@ -450,7 +450,7 @@ def plot_evaluator_fidelity(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    Model estimate vs the Monte Carlo referee — points off the diagonal are model error.
+    Model estimate vs the Monte Carlo referee: points off the diagonal are model error.
 
     Only the model-based conditions (oracle, world_model) belong here: a
     monte_carlo arm's estimate IS the simulator, so it sits on the diagonal by
@@ -686,7 +686,7 @@ def plot_wm_one_step(
 
 
 def plot_wm_rollout(wm_results: dict, out_path: Path, title_prefix: str) -> Path | None:
-    """Final cascade size, model vs truth — the saturation check."""
+    """Final cascade size, model vs truth: the saturation check."""
     rollout = wm_results.get("rollout") or {}
     model_count = rollout.get("ens_final_count_model")
     true_count = rollout.get("ens_final_count_true")
@@ -724,7 +724,7 @@ def plot_dismantling_curve(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    s(q) = |GCC| / N after each sequential removal — the physics branch's own figure.
+    s(q) = |GCC| / N after each sequential removal: the physics branch's own figure.
 
     None for every sweep that removes nothing. This is the curve the published
     dismantling numbers collapse to a scalar, so plotting it is what lets a reader
@@ -771,7 +771,7 @@ def plot_dismantling_curve(
     )
 
     axes.set_xlabel("nodes removed (% of N), sequentially")
-    axes.set_ylabel("|GCC| / N — LOWER IS BETTER")
+    axes.set_ylabel("|GCC| / N: LOWER IS BETTER")
     axes.set_title(f"{title_prefix}: dismantling curve at k={largest}")
     axes.set_ylim(0, 1.02)
     axes.grid(alpha=0.3)
@@ -824,8 +824,8 @@ def plot_structural_vs_spread(
             textcoords="offset points",
         )
 
-    axes.set_xlabel("giant-component drop (%) — structural objective, higher is better")
-    axes.set_ylabel("final infected (% of N) — diffusion objective, lower is better")
+    axes.set_xlabel("giant-component drop (%): structural objective, higher is better")
+    axes.set_ylabel("final infected (% of N): diffusion objective, lower is better")
     axes.set_title(
         f"{title_prefix}: connectivity vs containment at k={largest} "
         f"(bottom-right is best on both)"
@@ -839,7 +839,7 @@ def plot_prevented_influence(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    Prevented influence per arm across the budget sweep — this literature's own figure.
+    Prevented influence per arm across the budget sweep: this literature's own figure.
 
     None for every sweep that is not two-cascade. The y-axis is
     `sigma(S_N, empty) - sigma(S_N | blockers)` on the SHARED referee, which is the
@@ -880,8 +880,8 @@ def plot_prevented_influence(
 
     lever = scored[0].get("lever", "?")
     negative = scored[0].get("n_negative_seeds", "?")
-    axes.set_xlabel("blocker budget k (absolute — this literature's own convention)")
-    axes.set_ylabel("prevented influence (nodes) — HIGHER IS BETTER")
+    axes.set_xlabel("blocker budget k (absolute: this literature's own convention)")
+    axes.set_ylabel("prevented influence (nodes): HIGHER IS BETTER")
     axes.set_title(
         f"{title_prefix}: prevented influence, lever={lever}, |S_N|={negative}"
     )
@@ -895,11 +895,11 @@ def plot_blocking_ratio(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    Prevented fraction against the `|S_P| / |S_N|` ratio — CLDAG's Table 2 as a figure.
+    Prevented fraction against the `|S_P| / |S_N|` ratio: CLDAG's Table 2 as a figure.
 
     §8.2: the informative budget axis here is the ratio to the ATTACKER's budget, not
     the fraction of the graph. CLDAG's own reading of this curve is the design fact
-    the whole task is configured around — it takes 20-30x the rumour's seeds to cut it
+    the whole task is configured around: it takes 20-30x the rumour's seeds to cut it
     to 10%, and "first mover has a clear advantage".
     """
     scored = [
@@ -924,8 +924,8 @@ def plot_blocking_ratio(
             **_arm_style(index),
         )
 
-    axes.set_xlabel("|S_P| / |S_N| — blockers per rumour seed")
-    axes.set_ylabel("% of the cascade prevented — HIGHER IS BETTER")
+    axes.set_xlabel("|S_P| / |S_N|: blockers per rumour seed")
+    axes.set_ylabel("% of the cascade prevented: HIGHER IS BETTER")
     axes.set_title(f"{title_prefix}: prevented fraction vs the attacker's budget")
     axes.set_ylim(0, 100)
     axes.grid(alpha=0.3)
@@ -941,7 +941,7 @@ def plot_epidemic_curve(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    `|I(t)|` per arm — the epidemic curve, and the figure this literature is about.
+    `|I(t)|` per arm: the epidemic curve, and the figure this literature is about.
 
     None for every non-compartmental sweep. The y-axis is the CURRENTLY-infectious
     count, not the cumulative one, and that is the whole reason the figure exists:
@@ -999,7 +999,7 @@ def plot_epidemic_curve(
 
     head = at_largest[0]
     axes.set_xlabel("timestep")
-    axes.set_ylabel("infectious nodes |I(t)| — LOWER AND FLATTER IS BETTER")
+    axes.set_ylabel("infectious nodes |I(t)|: LOWER AND FLATTER IS BETTER")
     axes.set_title(
         f"{title_prefix}: epidemic curve at k={largest}, "
         f"{head.get('compartments', '?')} "
@@ -1016,7 +1016,7 @@ def plot_eigendrop_vs_attack(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    Eigendrop against prevented infections, one point per arm — §8.2 trap 1, drawn.
+    Eigendrop against prevented infections, one point per arm: §8.2 trap 1, drawn.
 
     None for every sweep without a NODE lever (the edge levers spend arcs and have
     no spectral column). The x-axis is what the spectral line optimizes and the
@@ -1062,9 +1062,9 @@ def plot_eigendrop_vs_attack(
         )
 
     axes.set_xlabel(
-        "eigendrop % — what the SPECTRAL line optimizes (NetShield, NetMelt)"
+        "eigendrop %: what the SPECTRAL line optimizes (NetShield, NetMelt)"
     )
-    axes.set_ylabel("prevented infections — what we score")
+    axes.set_ylabel("prevented infections: what we score")
     axes.set_title(
         f"{title_prefix}: surrogate vs objective at k={largest} "
         f"(a point high-left beat the surrogate on the real thing)"
@@ -1079,7 +1079,7 @@ def plot_localization_metrics(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    PR / RE / F1 / AUC per arm, on held-out episodes — the SL literature's own figure.
+    PR / RE / F1 / AUC per arm, on held-out episodes: the SL literature's own figure.
 
     None for every sweep that does not invert. Four bars per arm rather than one,
     because the split between precision and recall is where this literature's
@@ -1121,7 +1121,7 @@ def plot_localization_metrics(
 
     # Proxy patches, because each bar carries a LIST of colours (one per arm) and
     # matplotlib would draw the legend swatch in whichever arm happened to be
-    # first — saying "precision is grey" on a figure where it is also blue
+    # first: saying "precision is grey" on a figure where it is also blue
     legend_handles = [
         plt.Rectangle(
             (0, 0), 1, 1, facecolor="white", edgecolor="#444444",
@@ -1132,13 +1132,13 @@ def plot_localization_metrics(
 
     axes.set_xticks(positions)
     axes.set_xticklabels(arms, rotation=30, ha="right", fontsize=7)
-    axes.set_ylabel("score on held-out episodes — HIGHER IS BETTER")
+    axes.set_ylabel("score on held-out episodes: HIGHER IS BETTER")
     axes.set_ylim(0, 1.02)
     axes.axhline(0.5, color="#888888", linestyle=":", linewidth=0.8)
 
     # PR = RE = F1 whenever every arm spends its whole budget at the instance's own
     # k, which is the published given-k convention and the default. Stated on the
-    # figure rather than left to look like a plotting bug — and `--sl-budget-mode
+    # figure rather than left to look like a plotting bug, and `--sl-budget-mode
     # sweep` genuinely separates them, so it cannot just be dropped.
     given_k = all(
         abs(
@@ -1149,7 +1149,7 @@ def plot_localization_metrics(
         for arm in arms
     )
     note = (
-        "  —  PR = RE = F1 by construction: each arm is given the instance's own k"
+        ": PR = RE = F1 by construction: each arm is given the instance's own k"
         if given_k
         else ""
     )
@@ -1178,7 +1178,7 @@ def plot_localization_cost(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    F1 against what each arm spent to get it — the cost claim, as one figure.
+    F1 against what each arm spent to get it: the cost claim, as one figure.
 
     The load-bearing claim of §2.3.2 is a SEARCH-time one: with `P ~ 100` programs,
     `M ~ 100` instances and `C ~ 100` candidate evaluations the product is a
@@ -1223,8 +1223,8 @@ def plot_localization_cost(
         )
 
     axes.set_xscale("log")
-    axes.set_xlabel("seconds inside the evaluator (log scale) — lower is cheaper")
-    axes.set_ylabel("held-out F1 — higher is better")
+    axes.set_xlabel("seconds inside the evaluator (log scale): lower is cheaper")
+    axes.set_ylabel("held-out F1: higher is better")
     axes.set_title(
         f"{title_prefix}: recovery quality against search cost (top-left is best)"
     )
@@ -1237,7 +1237,7 @@ def plot_generalization_gap(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    Selection score against held-out score — did the program learn an algorithm or memorize?
+    Selection score against held-out score: did the program learn an algorithm or memorize?
 
     §8.5.1's episode axis, plotted. A point on the diagonal transferred perfectly;
     a point far below it scored well on the episodes the outer loop optimized
@@ -1425,10 +1425,10 @@ def plot_reconstruction_metrics(
 
     axes.set_xticks(positions)
     axes.set_xticklabels(arms, rotation=30, ha="right", fontsize=7)
-    axes.set_ylabel("score on held-out cascades — HIGHER IS BETTER")
+    axes.set_ylabel("score on held-out cascades: HIGHER IS BETTER")
     axes.set_ylim(0, 1.02)
     axes.set_title(
-        f"{title_prefix}: trajectory recovery — the tree half against the node half",
+        f"{title_prefix}: trajectory recovery, the tree half against the node half",
         fontsize=10,
     )
     axes.grid(alpha=0.3, axis="y")
@@ -1496,8 +1496,8 @@ def plot_tree_vs_node(
     axes.text(
         0.62, 0.66, "equal difficulty", fontsize=7, color="#888888", rotation=45
     )
-    axes.set_xlabel("node F1 — WHICH nodes were infected (the easy half)")
-    axes.set_ylabel("path precision — WHO infected whom (the hard half)")
+    axes.set_xlabel("node F1, WHICH nodes were infected (the easy half)")
+    axes.set_ylabel("path precision, WHO infected whom (the hard half)")
     axes.set_xlim(0, 1.02)
     axes.set_ylim(0, 1.02)
     axes.set_title(
@@ -1525,7 +1525,7 @@ def plot_prediction_metrics(
 
     The two horizontal lines are the point of the figure. Under a LOG-space error an
     instance-blind constant is far stronger than intuition suggests, and "predict
-    what you already see" is right whenever a cascade is finished — which most are.
+    what you already see" is right whenever a cascade is finished, which most are.
     An arm that does not clear both has not used the instance, and no arrangement of
     the bars alone would show that.
     """
@@ -1590,7 +1590,7 @@ def plot_prediction_metrics(
 
     axes.set_xticks(positions)
     axes.set_xticklabels(arms, rotation=30, ha="right", fontsize=7)
-    axes.set_ylabel("prediction error on held-out cascades — LOWER IS BETTER")
+    axes.set_ylabel("prediction error on held-out cascades: LOWER IS BETTER")
     axes.set_title(
         f"{title_prefix}: popularity prediction error, and the floors to clear",
         fontsize=10,
@@ -1697,7 +1697,7 @@ def plot_prediction_cost(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    Error against evaluator seconds — the cost claim, as one figure.
+    Error against evaluator seconds: the cost claim, as one figure.
 
     The axis research/cascade_prediction.md §2.4 says the whole comparison is read
     on. An @monte_carlo arm pays `mc_runs` real episodes per kernel evaluation and a
@@ -1743,7 +1743,7 @@ def plot_prediction_cost(
         )
 
     axes.set_xscale("log")
-    axes.set_xlabel("evaluator seconds (log) — what the search spent inside its model")
+    axes.set_xlabel("evaluator seconds (log): what the search spent inside its model")
     axes.set_ylabel(_reward_label(scored))
     axes.set_title(
         f"{title_prefix}: prediction error against forward-model cost "
@@ -1765,7 +1765,7 @@ def build_plots(
 
     # Every figure below whose y-axis is a NODE COUNT. An inverse task's reward is
     # an F1 in [0, 1], and drawing it under a "spread (nodes)" axis would be off by
-    # three orders of magnitude with a label that hides it — so those builders are
+    # three orders of magnitude with a label that hides it, so those builders are
     # skipped outright rather than relabelled.
     spread_figures = (
         []

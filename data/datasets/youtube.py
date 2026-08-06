@@ -6,7 +6,7 @@ Downloads and loads the SNAP com-Youtube social network.
 Source: https://snap.stanford.edu/data/com-Youtube.html
     - 1,134,890 nodes (users), 2,987,624 edges (friendships)
     - Undirected: mutual friendships
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Original paper: Yang & Leskovec, "Defining and Evaluating Network
@@ -33,19 +33,19 @@ def download_youtube() -> Path:
     txt_path = data_dir / "com-youtube.ungraph.txt"
 
     if txt_path.exists():
-        print(f"[✓] YouTube already downloaded at {txt_path}")
+        print(f"[ok] YouTube already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading YouTube from {youtube_url} ...")
+        print(f"[get] Downloading YouTube from {youtube_url} ...")
         urllib.request.urlretrieve(youtube_url, gz_path)
-        print(f"[✓] Saved to {gz_path}")
+        print(f"[ok] Saved to {gz_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with gzip.open(gz_path, "rb") as gz_file:
         with open(txt_path, "wb") as txt_file:
             txt_file.write(gz_file.read())
-    print(f"[✓] Extracted to {txt_path}")
+    print(f"[ok] Extracted to {txt_path}")
 
     return txt_path
 
@@ -92,7 +92,7 @@ def load_youtube(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
 
     n_edges_undirected = adjacency.nnz // 2
     print(
-        f"[✓] YouTube loaded: {num_nodes} nodes, "
+        f"[ok] YouTube loaded: {num_nodes} nodes, "
         f"{n_edges_undirected} undirected edges"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")

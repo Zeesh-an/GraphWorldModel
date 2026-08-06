@@ -4,7 +4,7 @@ Crime Dataset Loader (dismantling version)
 Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
     - 754 nodes, 2,127 undirected edges
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Warning: Name collision (research/critical_node_detection.md §6.4). KONECT's

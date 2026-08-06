@@ -2,14 +2,14 @@
 email-EuAll Dataset Loader
 
 Source: https://snap.stanford.edu/data/email-EuAll.html
-    - 265,009 nodes, 418,956 arcs [derived] — SNAP publishes 265,214 / 420,045;
+    - 265,009 nodes, 418,956 arcs [derived]: SNAP publishes 265,214 / 420,045;
       we drop self-loops and the nodes left with no incident arc
     - Directed (EU research-institution email, all addresses)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 One of the eight-graph suite the Xie / SandIMIN node-blocking line reports across
-four papers (§7), and the large sibling of our `email_eu_core` — same institution, all
+four papers (§7), and the large sibling of our `email_eu_core`: same institution, all
 addresses rather than the 1,005-member core. SandIMIN's Table 5 reports decreased
 spread on it at k = 10..50 as `EmailAll`, which is directly our metric.
 """

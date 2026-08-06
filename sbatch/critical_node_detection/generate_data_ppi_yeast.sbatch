@@ -11,9 +11,9 @@
 #
 # Usage: sbatch sbatch/critical_node_detection/generate_data_ppi_yeast.sbatch
 #
-# The most widely shared benchmark in this literature — CoreHD, BPD, GND, FINDER,
+# The most widely shared benchmark in this literature: CoreHD, BPD, GND, FINDER,
 # NIRM, DCRS, SPR and BPHD all report it (research/critical_node_detection.md §7)
-# — and unlike `power_grid` it is a graph class message passing handles well
+#, and unlike `power_grid` it is a graph class message passing handles well
 # (mean degree 5.9, small diameter). If the world model is going to win anywhere,
 # it is here, which makes this the natural companion run to the power-grid one.
 #

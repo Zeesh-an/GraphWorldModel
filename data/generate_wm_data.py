@@ -302,7 +302,7 @@ class GenConfig:
     outbreak_selectors: tuple = ("random", "degree", "pagerank")
     immunizer_selectors: tuple = default_immunizer_selectors
     # Cascade prediction: REPLAY a real logged corpus instead of simulating. The one
-    # flag here that changes where the data comes from at all — when it is set,
+    # flag here that changes where the data comes from at all: when it is set,
     # `run_generation` hands the whole stage to `data/wm_cascades.py` and no
     # simulator runs. research/cascade_prediction.md §9.4: these corpora are the
     # concrete, downloadable form of the "logged trajectories" our methodology note
@@ -523,7 +523,7 @@ def _competitive_episode_transitions(
     """
     One two-cascade episode: commit `S_N`, let a blocker answer it, record 4 targets.
 
-    `algorithm` is a PAIR here — "<negative selector>+<blocker selector>" — because
+    `algorithm` is a PAIR here ("<negative selector>+<blocker selector>") because
     a blocking transition is only labelled by both. The attacker model is the second
     experimental axis this literature has and IM does not
     (research/influence_blocking.md §8.3), and the blocker selector is what supplies
@@ -564,8 +564,8 @@ def _competitive_episode_transitions(
     )
     simulator.reset(model, negative_seeds)
 
-    # S_N is already committed at t=0 — the rumour moved first, which is the whole
-    # premise (§5.4: "first mover has a clear advantage") — so s_0 is NOT empty here
+    # S_N is already committed at t=0: the rumour moved first, which is the whole
+    # premise (§5.4: "first mover has a clear advantage"), so s_0 is NOT empty here
     s_t = simulator.current_state()
     blocker_bag = [ActionOp("add_node", node) for node in blockers]
 
@@ -672,7 +672,7 @@ def _epidemic_episode_transitions(
     One compartmental episode: seed the outbreak, let a dose allocation answer it,
     record five targets.
 
-    `algorithm` is a PAIR here — "<outbreak selector>+<immunizer selector>" — for
+    `algorithm` is a PAIR here ("<outbreak selector>+<immunizer selector>") for
     the same reason a blocking episode's is: an intervention transition is only
     labelled by both, and the outbreak model is a second experimental axis a seeding
     task does not have. The `none` immunizer leaves the outbreak unopposed and its
@@ -687,7 +687,7 @@ def _epidemic_episode_transitions(
         path commit the outbreak the same way.
       * **The doses ride in the SAME t=0 bag** as full deletion bags
         (`delete_node_bag`), because a vaccinated node's incident arcs have to be
-        gone from `edge_index` for the head's T_exo to be right — the identical
+        gone from `edge_index` for the head's T_exo to be right: the identical
         requirement critical node detection has, and the reason `expand_removals`
         exists on the inference side.
     """
@@ -845,7 +845,7 @@ def run_generation(config: GenConfig) -> dict[str, object]:
     # A REPLAYED corpus never touches this function's simulator loop: there is no
     # seed selector, no injection, no counterfactual fork and no MC marginal,
     # because the cascade happened once and we are reading it back. Delegating
-    # rather than branching keeps the two paths honestly separate — a reader of
+    # rather than branching keeps the two paths honestly separate: a reader of
     # either one can see which artifacts it writes without tracing a flag through
     # 300 lines (research/cascade_prediction.md §2.4).
     if config.cascade_corpus:
@@ -1006,7 +1006,7 @@ def run_generation(config: GenConfig) -> dict[str, object]:
 
     # The competitive dynamics parameters, RESOLVED. `auto` is not a value anything
     # downstream can act on, and §8.4's whole point is that the tie-break is a
-    # reported hyperparameter rather than an implementation detail — so what was
+    # reported hyperparameter rather than an implementation detail, so what was
     # actually simulated is written per dynamics, not what was typed.
     if config.competitive:
         competitive = CompetitiveConfig(
@@ -1268,7 +1268,7 @@ def parse_args() -> GenConfig:
         nargs="+",
         default=["random", "degree", "pagerank"],
         choices=list(spine_algorithms),
-        help="competitive only: how S_N is chosen — the attacker model, which is a "
+        help="competitive only: how S_N is chosen, the attacker model, which is a "
         "second experimental axis IM does not have (default: random degree pagerank).",
     )
     parser.add_argument(
@@ -1294,7 +1294,7 @@ def parse_args() -> GenConfig:
         "--epi-gamma",
         type=float,
         default=0.3,
-        help="compartmental only: rate of LEAVING I — recovery under SIR/SEIR, "
+        help="compartmental only: rate of LEAVING I, recovery under SIR/SEIR, "
         "return-to-susceptible under SIS. One parameter for both because the "
         "lambda1 * beta / delta < 1 threshold uses one. 1.0 under SIR reproduces IC "
         "exactly (default: 0.3).",
@@ -1325,7 +1325,7 @@ def parse_args() -> GenConfig:
         nargs="+",
         default=["random", "degree", "pagerank"],
         choices=list(spine_algorithms),
-        help="compartmental only: how each episode's index cases are chosen — the "
+        help="compartmental only: how each episode's index cases are chosen, the "
         "outbreak model, a second experimental axis a seeding task does not have "
         "(default: random degree pagerank).",
     )

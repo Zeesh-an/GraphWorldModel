@@ -6,7 +6,7 @@ single action removed; delta = base_reward - ablated_reward is the final spread
 that action is responsible for (~0 = wasted budget). All rollouts share one seed
 so the comparison is paired. For state-dependent strategies (per_step / windowed)
 the recorded trajectory bags are replayed as a fixed plan, so credit is an
-approximation there — the live policy would have reacted to the ablated cascade.
+approximation there: the live policy would have reacted to the ablated cascade.
 """
 
 from functools import partial

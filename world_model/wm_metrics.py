@@ -6,12 +6,12 @@ Three blocks, answering three different questions; confusing them is how a table
 ends up reporting one thing under another's name.
 
   * Everything above `roc_auc` scores the LEARNED TRANSITION against the
-    simulator — one-step forward prediction.
+    simulator: one-step forward prediction.
   * `roc_auc` through `resimulation_error` score an INVERSE prediction: a
     recovered source set against the true one, in the PR / RE / F1 / AUC form the
     source-localization literature reports (`research/source_localization.md` §8.1).
   * Everything from `gcc_threshold` down is computed exactly by BFS on the
-    residual graph and is never a training target —
+    residual graph and is never a training target,
     `research/critical_node_detection.md` §2.1 argues at length that a k-layer
     message-passing model provably cannot represent giant-component membership on
     a diameter-46 graph, and §8.3 therefore puts the connectivity functionals in
@@ -75,7 +75,7 @@ def accuracy(pred: np.ndarray, target: np.ndarray) -> float:
 
 
 def brier_score(prob: np.ndarray, target: np.ndarray) -> float:
-    # Mean squared error between predicted probability and the (soft) target marginal — lower = better calibrated
+    # Mean squared error between predicted probability and the (soft) target marginal: lower = better calibrated
     if prob.size == 0:
         return 0.0
 
@@ -118,7 +118,7 @@ def roc_auc(scores: np.ndarray, target: np.ndarray) -> float:
     Ties matter more here than anywhere else in this file. Source localization is
     scored over ALL of V with a positive class of 1-10% of nodes, and an arm that
     supplies no per-node scores gets a rank-derived vector in which every
-    un-nominated node ties — so an implementation that broke ties arbitrarily
+    un-nominated node ties, so an implementation that broke ties arbitrarily
     would report a number that depended on node ordering.
     """
     scores = np.asarray(scores, dtype=np.float64)
@@ -156,7 +156,7 @@ def localization_metrics(
     scores: np.ndarray | None = None,
 ) -> dict[str, float]:
     """
-    PR / RE / F1 / AUC / ACC for one recovered source set — the SL literature's set.
+    PR / RE / F1 / AUC / ACC for one recovered source set: the SL literature's set.
 
     Node-level binary classification over V with the source set as the positive
     class (research/source_localization.md §8.1). Four notes on the columns, each
@@ -169,9 +169,9 @@ def localization_metrics(
         It is reported only beside F1.
       * **AUC needs a RANKING, not a set.** When `scores` is None the ranking is
         derived from the returned list's order, which leaves every un-nominated
-        node tied — a real, monotone number, but not the continuous AUC SL-VAE
+        node tied: a real, monotone number, but not the continuous AUC SL-VAE
         reports. Which rule an arm used is recorded per result.
-      * **`RE` is an overloaded column name in this literature** — Recall in
+      * **`RE` is an overloaded column name in this literature**: Recall in
         SL-Diff and SIDSL, re-simulated error elsewhere (§8.1). Here `recall` is
         recall, and the re-simulated error has its own key.
     """
@@ -215,7 +215,7 @@ def resimulation_error(predicted_marginal: np.ndarray, observation: np.ndarray) 
     The metric this literature should report and does not: §11 records that no
     surveyed paper reports a genuine re-simulated error, so this column is
     self-contained and must not be presented as a cross-paper comparison. It is
-    also NOT the outer loop's reward — diffusion is many-to-one, so a program that
+    also NOT the outer loop's reward: diffusion is many-to-one, so a program that
     systematically recovers the wrong member of an equivalence class scores well
     here and badly on F1, which is exactly why §2.3.3 selects on F1.
     """
@@ -227,7 +227,7 @@ def resimulation_error(predicted_marginal: np.ndarray, observation: np.ndarray) 
 
 def matthews_corrcoef(predicted: np.ndarray, truth: np.ndarray) -> float:
     """
-    MCC over a binary node labelling — Rozenshtein KDD'16's ONLY reported measure.
+    MCC over a binary node labelling: Rozenshtein KDD'16's ONLY reported measure.
 
     Kept beside F1 rather than instead of it: MCC uses the true negatives, so on a
     cascade that reached 5% of the graph it is far less flattering than accuracy
@@ -267,20 +267,20 @@ def reconstruction_metrics(
     horizon: int,
 ) -> dict[str, float]:
     """
-    The metric suite for one reconstructed trajectory — §8.1's whole table.
+    The metric suite for one reconstructed trajectory: §8.1's whole table.
 
     `predicted` and the two truth maps are `node -> activation step` and
     `node -> (activation step, inferred parent)`; a node absent from either was
     never infected. Three blocks, and confusing them is how a paper reports the
     easy half under the hard half's name:
 
-      * **NODE level** (`node_f1`, `mcc`) — the infected SET, ignoring time. Zong
+      * **NODE level** (`node_f1`, `mcc`): the infected SET, ignoring time. Zong
         ICDM'12 reports `prec_v = 100%` here [verified] and DIPT's best path
         precision thirteen years later is `0.680`, which is the same message twice:
         THE NODE SET IS EASY.
-      * **EVENT level** (`event_f1`) — the `(node, t)` pairs, so a node recovered
+      * **EVENT level** (`event_f1`): the `(node, t)` pairs, so a node recovered
         at the wrong step is a miss. DITTO's `F1` column.
-      * **TREE level** (`path_precision`, `jaccard`, `order_accuracy`) — the
+      * **TREE level** (`path_precision`, `jaccard`, `order_accuracy`): the
         who-infected-whom edges. DIPT's `Path Precision` + `Jaccard Index`. This is
         the hard half, and §2.6 is why it must carry the outer loop's reward:
         rewarded on the node set alone, a program SEARCH discovers the tree
@@ -288,7 +288,7 @@ def reconstruction_metrics(
         attempt it.
 
     `true_parents` is None when the dataset was generated without `--trace-parents`
-    — NDlib does not emit a transmission edge — and every tree column is then NaN
+: NDlib does not emit a transmission edge, and every tree column is then NaN
     rather than 0.0, so a missing capability never reads as a failed one.
 
     A parent set (LT, where activation is a threshold crossing over the whole
@@ -401,7 +401,7 @@ def reconstruction_metrics(
     #
     # Warning: it reads 1.0 for every LIBRARY decoder by construction, because
     # `reconstruction_algorithms.finalize` only ever attaches a parent that
-    # activated earlier. That is not a bug and not a strong result — it is the
+    # activated earlier. That is not a bug and not a strong result: it is the
     # column doing its job on a GENERATED decoder, which assigns its own parents
     # and can produce an incoherent tree. Read it as a validity check on synthesis,
     # not as a quality measure across the classical pool.
@@ -436,7 +436,7 @@ default_tree_weight = 0.6
 
 def reconstruction_reward(metrics: dict[str, float], tree_weight: float) -> float:
     """
-    `lambda * PathPrecision + (1 - lambda) * EventF1` — §2.6's Score, verbatim.
+    `lambda * PathPrecision + (1 - lambda) * EventF1`: §2.6's Score, verbatim.
 
     Falls back to Event F1 alone when the dataset carries no transmission edge
     (LT-set-valued truth still has one; a dataset generated without
@@ -468,7 +468,7 @@ def reconstruction_reward(metrics: dict[str, float], tree_weight: float) -> floa
 #
 # research/cascade_prediction.md §8.1 opens with "Get MSLE right or nothing else
 # matters", and it means three independent choices that all hide inside one name:
-# the log BASE (2 in CasFlow and CasFT, natural in CTCP's loss — a constant factor
+# the log BASE (2 in CasFlow and CasFT, natural in CTCP's loss: a constant factor
 # of (ln 2)^2 ~ 0.48 between them), the QUANTITY (total `P(t_p)` versus the
 # increment `dP`), and the SMOOTHING offset (CasFlow's code clamps to >= 1 and adds
 # nothing; CasFT's stated definition adds 1). §5.7 difference 4 records that §5.1
@@ -479,7 +479,7 @@ def reconstruction_reward(metrics: dict[str, float], tree_weight: float) -> floa
 #     predictions = [1 if p < 1 else p for p in predictions]
 #     msle  = mean((log2(pred) - log2(label))^2)
 #     mape  = mean(|log2(pred + 1) - log2(label + 1)| / log2(label + 2))
-# Note the asymmetry in MAPE — +1 inside the absolute value, +2 in the denominator.
+# Note the asymmetry in MAPE: +1 inside the absolute value, +2 in the denominator.
 # §8.1 quotes CasFT's caption as `|log2(P+2) - log2(P_hat+2)| / log2(P+2)`, which is
 # a THIRD form. Both are computed; `mape` is the code's and `mape_casft` the
 # caption's, and a table has to say which.
@@ -491,7 +491,7 @@ popularity_floor = 1.0
 wroperc_epsilon = 0.5
 
 # COV-k's k, as a fraction of the scored set. CasFlow reports Coverage at
-# `k = floor(N/10)` — "did we find the viral ones" [verified, §8.1].
+# `k = floor(N/10)`: "did we find the viral ones" [verified, §8.1].
 coverage_fraction = 0.1
 
 
@@ -545,7 +545,7 @@ def popularity_metrics(
         actual_increment + 1.0
     )
 
-    # Genuinely relative, on RAW counts — CoupledGNN's units, and the only ones here
+    # Genuinely relative, on RAW counts: CoupledGNN's units, and the only ones here
     # that are not log-space
     relative = (predicted - actual) / np.maximum(actual, 1.0)
 
@@ -560,7 +560,7 @@ def popularity_metrics(
         "msle_offset": float(
             np.mean((np.log2(predicted + 1.0) - np.log2(actual + 1.0)) ** 2)
         ),
-        # CTCP's loss, natural log — a factor of (ln 2)^2 from `msle`, and §8.1's
+        # CTCP's loss, natural log: a factor of (ln 2)^2 from `msle`, and §8.1's
         # warning that the two are printed under one name
         "msle_natural": float(np.mean((np.log(np.maximum(predicted, popularity_floor))
                                        - np.log(np.maximum(actual, popularity_floor))) ** 2)),
@@ -615,7 +615,7 @@ def popularity_metrics(
 
 def coverage_at_k(predicted: np.ndarray, actual: np.ndarray) -> float:
     """
-    `|top-k predicted ∩ top-k true| / k` at `k = floor(N/10)` — CasFlow's COV-k.
+    `|top-k predicted ∩ top-k true| / k` at `k = floor(N/10)`: CasFlow's COV-k.
 
     "Did we find the viral ones", and the one metric here that asks a question MSLE
     cannot: a model can be well calibrated on the bulk and rank the tail wrong,
@@ -678,7 +678,7 @@ def doubling_accuracy(
 
     §1.3 and §5.6: the WWW'14 paper reframed size prediction as "given `k` observed
     reshares, will it reach `2k`" precisely because that holds the base rate at 50%
-    and makes accuracy interpretable — their own numbers are 0.795 accuracy / 0.877
+    and makes accuracy interpretable: their own numbers are 0.795 accuracy / 0.877
     AUC at `k = 5`. Reported rather than optimized, because our reward is MSLE and a
     balanced-accuracy reward would select for a different program entirely.
     """
@@ -702,7 +702,7 @@ gcc_threshold = 0.01
 
 
 def adjacency_sets(edge_index: np.ndarray, num_nodes: int) -> list[set[int]]:
-    """Undirected adjacency as sets — every connectivity functional here is undirected."""
+    """Undirected adjacency as sets: every connectivity functional here is undirected."""
     groups = [set() for _ in range(num_nodes)]
 
     for edge in range(edge_index.shape[1]):
@@ -811,7 +811,7 @@ def accumulated_normalized_connectivity(
     """
     FINDER's ANC over one connectivity measure: mean of sigma(G - S_q) / sigma(G).
 
-    Parametric in sigma on purpose — FINDER instantiates pairwise connectivity,
+    Parametric in sigma on purpose: FINDER instantiates pairwise connectivity,
     GCC size and component count, and the three are different scales. A paper
     quoting "ANC" without naming sigma is unusable as a baseline (§8.2 trap 3), so
     every caller here records which sigma it passed.
@@ -829,7 +829,7 @@ def dismantling_set_size(
     rho: removals needed to push the GCC below `threshold * N`, as a fraction of N.
 
     None when the budget ran out before the threshold was crossed, which is the
-    common case for us — our budgets top out at 20% of N and the published rho for
+    common case for us: our budgets top out at 20% of N and the published rho for
     a hard graph exceeds that. Reporting None is the honest answer; reporting the
     budget would read as "dismantled at k" when it was not.
     """
@@ -884,13 +884,13 @@ def spectral_radius(
     (research/epidemic_control.md §1.2): for essentially every propagation model,
     the epidemic dies out iff `lambda_1 * beta / delta < 1`, which is what
     NetShield, NetMelt, Gelling, GreedyWalk and Preciado are all actually
-    optimizing. It needs no simulator at all, which is exactly §9.9's point —
+    optimizing. It needs no simulator at all, which is exactly §9.9's point,
     computing it costs one `eigsh` call on a graph we already hold, and it is the
     only bridge between our simulated-outbreak table and the spectral line's.
 
     Warning: it is a SURROGATE and §8.2 trap 1 is emphatic that reporting only the
     eigendrop grades us on the quantity the classical methods were built to
-    optimize — a comparison we cannot win and that does not test the world model.
+    optimize: a comparison we cannot win and that does not test the world model.
     It is reported BESIDE the simulated attack rate, never instead of it.
     """
     if num_nodes <= 0:
@@ -942,18 +942,18 @@ def epidemic_curve_metrics(
     burn_in: float = 0.5,
 ) -> dict:
     """
-    The SHAPE of an outbreak, from its `|I(t)|` curve — §2.6's four new quantities.
+    The SHAPE of an outbreak, from its `|I(t)|` curve: §2.6's four new quantities.
 
     The attack rate says how many were infected; none of these do, and §8.3 lists
     them because flattening a curve without shrinking its integral is precisely
     what an epidemic-control policy is judged on:
 
-      * **peak prevalence** `max_t |I(t)| / N` — the health-system-capacity metric,
+      * **peak prevalence** `max_t |I(t)| / N`: the health-system-capacity metric,
         and the one "flatten the curve" names.
-      * **time to peak** `argmax_t |I(t)|` — a policy that delays the peak buys
+      * **time to peak** `argmax_t |I(t)|`: a policy that delays the peak buys
         response time even when it saves nobody.
-      * **AUC** `sum_t |I(t)|` — the integrated load.
-      * **endemic prevalence** — the time average after burn-in, which is the ONLY
+      * **AUC** `sum_t |I(t)|`: the integrated load.
+      * **endemic prevalence**: the time average after burn-in, which is the ONLY
         one of the four that is defined for SIS. §8.2 trap 6: SIS has no terminal
         state, so final size is undefined there and every rollout metric that
         assumes one is silently wrong.
@@ -998,8 +998,8 @@ def immunization_metrics(
 
     §8.3's context columns, and the same role `containment_metrics` plays for
     dismantling: never a training target and never the arm's reward, which is the
-    simulated attack rate. What this adds over that function is the EIGENDROP —
-    `lambda_1(A) - lambda_1(A - S)` — because that is the quantity NetShield,
+    simulated attack rate. What this adds over that function is the EIGENDROP,
+    `lambda_1(A) - lambda_1(A - S)`, because that is the quantity NetShield,
     NetMelt, Gelling and GreedyWalk report and therefore the only number our table
     and theirs share.
 
@@ -1050,7 +1050,7 @@ def containment_metrics(
     threshold: float = gcc_threshold,
 ) -> dict:
     """
-    The structural description of one arm's removal set — §8.3's context column.
+    The structural description of one arm's removal set: §8.3's context column.
 
     Never a training target and never the arm's reward. The reward is the
     ground-truth MC spread; this says what the same set did to the graph's

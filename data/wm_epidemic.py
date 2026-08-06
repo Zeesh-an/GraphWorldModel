@@ -3,13 +3,13 @@ Compartmental SIR / SIS / SEIR simulator: the dynamics `epidemic_control` runs o
 
 Written rather than borrowed, and `research/epidemic_control.md` §2.2 and §9.2 are
 the argument. NDlib DOES ship `SIRModel`, `SISModel` and `SEIRModel`, and reusing
-them would have been ~60 lines — but all three declare an EMPTY edge-parameter dict
+them would have been ~60 lines, but all three declare an EMPTY edge-parameter dict
 and compare a uniform draw against the single scalar `params['model']['beta']` for
 every susceptible neighbour. There is no per-arc transmission probability at all,
 and three things die with it:
 
   * `set_edge_weight` becomes a no-op, which deletes the graded contact-reduction
-    lever — the entire social-distancing branch of §3 and DURLECA's whole action
+    lever: the entire social-distancing branch of §3 and DURLECA's whole action
     space.
   * `GraphInput.edge_weight` degenerates to ones, so the encoder and both anchored
     heads lose the one continuous input they have.
@@ -48,7 +48,7 @@ asserting it, and it is the cheapest correctness check this file has.
 `beta_uv = clip(beta_scale * p(u -> v), 0, 1)`, where `p` is the graph's own
 weighted-cascade probability `1 / in_deg(v)`. So `--epi-beta 1.0` is the IC
 probability unchanged, `--prob-model uniform` recovers the literature's scalar-beta
-regime, and `set_edge_weight` writes `beta_uv` directly — which is what makes
+regime, and `set_edge_weight` writes `beta_uv` directly, which is what makes
 graded contact reduction expressible at all.
 """
 
@@ -138,7 +138,7 @@ class EpidemicSimulator:
     `remove_node` is VACCINATION and is `blocked` throughout, as every containment
     task needs: the node leaves the graph, is not counted in the attack set, and
     can neither transmit nor be infected. §8.2 trap 7 is why that matters here more
-    than elsewhere — a node in `R` is still in the graph and still occupied a dose
+    than elsewhere: a node in `R` is still in the graph and still occupied a dose
     it did not need, so "recovered" and "removed" are different objects and the
     simulator keeps them apart.
     """
@@ -165,7 +165,7 @@ class EpidemicSimulator:
         self.num_nodes = graph.number_of_nodes()
         self.model_name = None
 
-        # {(u, v): beta} — the per-arc transmission probability the edge ops
+        # {(u, v): beta}, the per-arc transmission probability the edge ops
         # mutate. Copied per reset so an episode's edits never reach the bundle.
         self.base_edges = {
             (int(source), int(target)): self._beta(probability)
@@ -311,7 +311,7 @@ class EpidemicSimulator:
         arrivals = self._arrivals()
 
         # I -> R (SIR/SEIR) or I -> S (SIS). Drawn against the SAME I_t that
-        # transmitted, so a node can transmit and leave in one step — the standard
+        # transmitted, so a node can transmit and leave in one step: the standard
         # discrete-time convention and the one NDlib's own SIR uses.
         leaving = {
             node
@@ -357,7 +357,7 @@ class EpidemicSimulator:
 
         Same shape as `Simulator.advance_marginal` with five count dicts instead of
         two: `ever`, `incidence` (who left `S` this step), and the three current
-        compartments. The action is applied ONCE — it is deterministic — and only
+        compartments. The action is applied ONCE (it is deterministic) and only
         the compartment update is redrawn.
 
         All three dynamics are stochastic (they draw against `beta`, `gamma` and
@@ -375,7 +375,7 @@ class EpidemicSimulator:
         # "who newly joined `ever`": a node that recovered back to susceptible and
         # is re-infected leaves S again while `ever` does not move. The
         # epidemiological definition is the one the head composes
-        # (`susceptible * p_inf`), so it is the one recorded here — measured at 0.33
+        # (`susceptible * p_inf`), so it is the one recorded here: measured at 0.33
         # max error against the head before the distinction was made.
         susceptible_before = self.susceptible_nodes()
 
@@ -471,7 +471,7 @@ class EpidemicSimulator:
 
 def endemic_prevalence(curve: list[float], burn_in: float = default_burn_in) -> float:
     """
-    Time-averaged `|I(t)|` after burn-in — the metric SIS needs and final size is not.
+    Time-averaged `|I(t)|` after burn-in: the metric SIS needs and final size is not.
 
     §8.2 trap 6: SIS has no terminal state, so "final epidemic size" is undefined
     and the quantity the literature reports is `lim_t |I(t)| / N`, estimated by

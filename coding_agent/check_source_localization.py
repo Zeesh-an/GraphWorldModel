@@ -3,7 +3,7 @@ Self-check for source localization: the contract, the metrics, the label
 extraction, the four oracle bindings, and the differentiable inversion.
 
 Everything here runs on graphs where the answer is known by hand, so a regression
-fails as an assertion rather than as a quietly wrong results table — which is the
+fails as an assertion rather than as a quietly wrong results table, which is the
 specific failure mode an inverse task invites, because the reward is an F1 in
 [0, 1] and every other task in this repo reports a node count. A harness that
 mixed the two would print `0.83` under a column header that means "nodes" and
@@ -297,12 +297,12 @@ def lpsi_finds_the_planted_source() -> None:
     which is a CENTRE-of-the-infected-region estimator: on a path 0-1-2 with all
     three infected, node 1 accumulates more field than either endpoint and LPSI
     names it, even though the cascade started at an endpoint. That is the
-    ill-posedness §1 describes, showing up on a seven-node graph — not a bug, and
+    ill-posedness §1 describes, showing up on a seven-node graph, not a bug, and
     exactly why §2.9 risk 3 says the achievable ceiling is uncharacterized.
 
     So the two things asserted here are the two LPSI actually promises: it never
     names a node the observation says was uninfected, and on a star seeded at the
-    hub — where the source IS the field maximum — it recovers it exactly.
+    hub (where the source IS the field maximum) it recovers it exactly.
     """
     graph = _graph(spider, 7)
     observation = _observation([0, 1, 2], 7)
@@ -363,7 +363,7 @@ def a_missing_localize_is_a_repair_turn() -> None:
 
     Both shapes are checked, and the second is the one that actually happens.
     Generated code writes `class MyStrategy(Strategy)`, and `Strategy` is a
-    Protocol whose method bodies are `...` — so subclassing it INHERITS a
+    Protocol whose method bodies are `...`, so subclassing it INHERITS a
     `localize` that returns None. `hasattr` says yes, and without an identity
     check against the Protocol the contract error becomes an opaque "returned
     None" from inside validation instead.

@@ -9,24 +9,24 @@ primitive is the raw kernel evaluated at arbitrary proposed states rather than a
 seed-set forward pass, and the reward is weighted toward the half of the problem
 that is actually hard. Four pieces:
 
-  * **`load_cascades`** — the labelled `(G, O, Y)` episodes, regrouped from
+  * **`load_cascades`**: the labelled `(G, O, Y)` episodes, regrouped from
     transitions that already exist (§2.2). No new simulator, no new action op, no
-    regeneration run — but they must have been generated with `--trace-parents`,
+    regeneration run, but they must have been generated with `--trace-parents`,
     because NDlib emits no transmission edge and §2.6 makes one a precondition
     rather than an enhancement.
 
-  * **`mask_observation`** — the four settings of §2.7 as four masks over data
+  * **`mask_observation`**: the four settings of §2.7 as four masks over data
     already on disk. Which one is running is a PROTOCOL parameter and the four are
     four separate experiments, never pooled (§8.3).
 
-  * **`bind_step_marginals`** — the ONE new primitive (§2.5.2), and its four
+  * **`bind_step_marginals`**: the ONE new primitive (§2.5.2), and its four
     bindings. `@native` gets a raiser; `@monte_carlo` / `@oracle` / `@world_model`
     each get their own environment's `step_marginals`. The generated decoder is
     byte-identical across arms 3-6 and only its oracle changes, which is what
-    makes conditions 3-6 an ablation on one variable — and at ~10^4 kernel calls
+    makes conditions 3-6 an ablation on one variable, and at ~10^4 kernel calls
     per instance it is where the cost claim of §2.4.2 is measured.
 
-  * **`evaluate_reconstructor`** — the outer loop's reward,
+  * **`evaluate_reconstructor`**: the outer loop's reward,
     `lambda * PathPrecision + (1 - lambda) * EventF1`. §2.6 is the section to read
     twice: the obvious reward (Event F1 alone) is actively dangerous here, because
     the node set is nearly free and a program SEARCH rewarded on it discovers that
@@ -36,7 +36,7 @@ that is actually hard. Four pieces:
 Like source localization, the reward is EXACT: it is computed against a history we
 stored, so it carries no evaluator noise and is comparable across conditions
 without the `--compare` referee. The referee still runs and measures something
-else — re-simulating the RECOVERED sources against what was observed (§8.5.5's
+else: re-simulating the RECOVERED sources against what was observed (§8.5.5's
 analogue), which is the column no paper in this literature reports.
 """
 
@@ -61,12 +61,12 @@ from world_model.wm_metrics import (
 # never pooled (§8.3).
 partial_nodes = "partial_nodes"  # (a) a subsample of the infected set, NO times
 partial_times = "partial_times"  # (c-i) the same subsample, WITH activation times
-final_snapshot = "final_snapshot"  # (c-ii) the terminal state only — DITTO's DASH
+final_snapshot = "final_snapshot"  # (c-ii) the terminal state only: DITTO's DASH
 hidden_nodes = "hidden_nodes"  # (d) nodes deleted from the graph, not merely unobserved
 valid_settings = (partial_nodes, partial_times, final_snapshot, hidden_nodes)
 
 # Fraction of the infected set that is REPORTED. §8.2 trap 1: this literature
-# cannot agree on the direction of its own masking parameter — Xiao sweeps report
+# cannot agree on the direction of its own masking parameter: Xiao sweeps report
 # probability, Sadikov sweeps sample ratio, and Zong sweeps UNCERTAINTY, which is
 # the complement of Sadikov's under the same symbol. Ours is the report
 # probability (higher = more observed) and every table has to say so.
@@ -86,7 +86,7 @@ default_instances = 20
 @dataclass()
 class Observation:
     """
-    What a decoder is allowed to see — §2.5.1's dataclass, verbatim.
+    What a decoder is allowed to see: §2.5.1's dataclass, verbatim.
 
     `reported` maps an observed node to its activation time, or to None for
     "known infected, time unknown". `final_state` is the terminal snapshot, which
@@ -164,8 +164,8 @@ class StepOracle:
 
     Held as an object rather than a bare closure for the same reason
     `localization.ForwardOracle` is: the call count is the whole cost claim.
-    §2.4.2 puts a trajectory decoder two orders of magnitude above a localizer —
-    10^4 kernel evaluations per instance against 10^2 — and §11 records that the
+    §2.4.2 puts a trajectory decoder two orders of magnitude above a localizer,
+    10^4 kernel evaluations per instance against 10^2, and §11 records that the
     sampling arm's budget is dominated by a constant nobody has published, so it
     has to be measured rather than assumed.
     """
@@ -192,7 +192,7 @@ def unavailable_step_marginals(_infected, _frontier) -> np.ndarray:
     Raising rather than being absent for the same reason
     `localization.unavailable_forward_oracle` does: an AttributeError traceback
     costs a whole refinement iteration, a message that names the condition costs
-    one repair turn. The experimental condition is identical either way — §2.9
+    one repair turn. The experimental condition is identical either way: §2.9
     arm 3 exists to answer whether a kernel in the decode loop is worth anything
     at all, so the program must be a pure structural or temporal heuristic.
     """
@@ -200,7 +200,7 @@ def unavailable_step_marginals(_infected, _frontier) -> np.ndarray:
         "self.step_marginals is not available in this condition (@native): this "
         "arm has NO transition kernel, by design. It exists to measure whether a "
         "kernel in the decode loop is worth anything at all. Write a purely "
-        "structural or temporal decoder instead — Steiner trees over the reported "
+        "structural or temporal decoder instead: Steiner trees over the reported "
         "nodes, BFS/shortest-path orderings that respect the observed times, "
         "personalized PageRank from the reports, per-component centres."
     )
@@ -218,7 +218,7 @@ def transition_logprob(
     `log p_v` over the nodes that did activate and `log(1 - p_v)` over the
     susceptible ones that did not.
 
-    §8.1 marks trajectory log-likelihood "nobody — this is ours to add": it is the
+    §8.1 marks trajectory log-likelihood "nobody: this is ours to add": it is the
     one metric in this literature that needs a kernel to evaluate under, which is
     exactly why it is the natural INTERNAL signal for a decoder on unlabelled data
     (§2.8). Labels select the program; the program itself may run on this.
@@ -245,19 +245,19 @@ def mask_observation(
     """
     One episode's stored history, masked into the observation a decoder gets.
 
-    Zero generator changes — §2.2's whole asset is that the ground truth these
+    Zero generator changes: §2.2's whole asset is that the ground truth these
     papers spend sections approximating is something we can read back. The mask is
     a PROTOCOL parameter and the four settings are four experiments (§8.3):
 
-      * `partial_nodes` — each infected node is reported w.p. `observation_rate`,
+      * `partial_nodes`: each infected node is reported w.p. `observation_rate`,
         with its time withheld. The Xiao/Sadikov/NetFill regime.
-      * `partial_times` — the same subsample, times included. Xiao SDM'18's
+      * `partial_times`: the same subsample, times included. Xiao SDM'18's
         `OrderedSteinerTree` input exactly.
-      * `final_snapshot` — no reports at all, only the terminal state. DITTO's
+      * `final_snapshot`: no reports at all, only the terminal state. DITTO's
         DASH formulation, the hardest published one, and the one worth leading
         with because it is where a learned kernel should beat a mean-field
         beta-hat.
-      * `hidden_nodes` — `partial_times` plus a node mask. A hidden node is gone
+      * `hidden_nodes`: `partial_times` plus a node mask. A hidden node is gone
         from the ADJACENCY rather than merely unobserved, which is what makes it a
         different problem from a low observation rate; it is excluded from the
         truth as well, since a decoder cannot name a node that is not there.
@@ -377,7 +377,7 @@ def load_cascades(
     if require_parents and episodes[0]["parents"] is None:
         raise ValueError(
             f"{data_dir} carries no transmission edge, so PathPrecision cannot be "
-            f"scored and the outer loop's reward would collapse onto Event F1 — "
+            f"scored and the outer loop's reward would collapse onto Event F1: "
             f"which research/cascade_reconstruction.md §2.6 shows makes a program "
             f"search discard the tree half entirely. Regenerate with "
             f"`data/generate_wm_data.py --trace-parents` (the pipeline sets it "
@@ -507,7 +507,7 @@ def validate_reconstruction(
             raise StrategyError(
                 f"reconstruct() named node {node}, which is HIDDEN in this setting: "
                 f"it is absent from the graph, not merely unobserved. "
-                f"`observation.visible` is the mask — filter your candidates by it."
+                f"`observation.visible` is the mask: filter your candidates by it."
             )
 
         if not 0 <= time <= instance.horizon:
@@ -522,7 +522,7 @@ def validate_reconstruction(
                 raise StrategyError(
                     f"reconstruct() gave node {node} no parent but put it at "
                     f"timestep {time}. `parent = None` means SOURCE, and a source "
-                    f"activates at t = 0 — a node infected later was infected BY "
+                    f"activates at t = 0: a node infected later was infected BY "
                     f"someone, so name them."
                 )
 
@@ -556,7 +556,7 @@ def validate_reconstruction(
 
     if not result:
         raise StrategyError(
-            "reconstruct() returned an empty trajectory — no node was inferred to "
+            "reconstruct() returned an empty trajectory: no node was inferred to "
             "have been infected at all. At minimum the nodes the observation "
             "REPORTS were infected, so returning fewer than those is always wrong."
         )
@@ -738,7 +738,7 @@ def trivial_decoder_reward(
         step = 0
 
         # BFS out of the reports, giving every node the hop it was reached at and
-        # the neighbour that reached it — the laziest decoder that type-checks
+        # the neighbour that reached it: the laziest decoder that type-checks
         while queue and step < instance.horizon:
             step += 1
             wave = []
@@ -841,7 +841,7 @@ def summarize_reconstruction(
     next) nor `localization.summarize_localization` (which describes a recovered
     set) answers the question here. The split that matters is §2.6's: the node set
     against the tree, printed side by side, so the model can see that its Event F1
-    is high while its Path Precision is not — which is the exact failure the
+    is high while its Path Precision is not, which is the exact failure the
     reward is weighted to prevent it from settling into.
     """
     cost = trajectory.cost
@@ -856,11 +856,11 @@ def summarize_reconstruction(
         f"{1.0 - tree_weight:.2f} * EventF1, over "
         f"{cost.get('n_instances', 0)} labelled cascades "
         f"({cost.get('setting', '?')} observation)",
-        f"THE HARD HALF — tree: path_precision={path_precision:.4f}  "
+        f"THE HARD HALF: tree: path_precision={path_precision:.4f}  "
         f"jaccard={means.get('jaccard', float('nan')):.4f}  "
         f"order_accuracy={means.get('order_accuracy', float('nan')):.4f}  "
         f"({means.get('n_tree_edges', 0.0):.0f} edges named per cascade)",
-        f"THE EASY HALF — events: event_f1={means.get('event_f1', 0.0):.4f} "
+        f"THE EASY HALF: events: event_f1={means.get('event_f1', 0.0):.4f} "
         f"(PR {means.get('event_precision', 0.0):.4f} / "
         f"RE {means.get('event_recall', 0.0):.4f})  "
         f"node_f1={means.get('node_f1', 0.0):.4f}  "
@@ -877,7 +877,7 @@ def summarize_reconstruction(
     if np.isfinite(path_precision) and means.get("event_f1", 0.0) - path_precision > 0.2:
         lines.append(
             "DIAGNOSIS: your event F1 is far above your path precision, which is "
-            "the known failure mode of this task — you are recovering WHICH nodes "
+            "the known failure mode of this task: you are recovering WHICH nodes "
             "were infected and WHEN, and guessing who infected them. The score is "
             "weighted toward the tree precisely because the node half is nearly "
             "free; spend your next edit on the parent assignment."
@@ -897,7 +897,7 @@ def summarize_reconstruction(
             f"~{truth:.0f} real ones, so your path precision "
             f"({path_precision:.4f}) is measured on a small fraction of the tree "
             f"and your path RECALL is {means.get('path_recall', 0.0):.4f}. "
-            f"Precision on three lucky edges is not a reconstruction — predicting "
+            f"Precision on three lucky edges is not a reconstruction: predicting "
             f"fewer nodes is the cheapest way to make this number look good and it "
             f"is the corner to avoid, not to find. Jaccard "
             f"({means.get('jaccard', 0.0):.4f}) is the honest summary of the tree."

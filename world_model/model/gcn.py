@@ -92,7 +92,7 @@ class GCNForwardModel(nn.Module):
     def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
+        adjacency: sparse COO (N, N), normalized D^-1/2 (A+I) D^-1/2
         returns: (N, 1) predicted outcome probabilities in [0, 1]
         """
         device = seed_vec.device
@@ -146,7 +146,7 @@ class GCNEncoder(nn.Module):
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
         X: (N, in_channels) node feature matrix
-        graph: GraphInput — uses graph.adj_norm (sparse COO, normalized)
+        graph: GraphInput, uses graph.adj_norm (sparse COO, normalized)
         returns: (N, hidden_dim) node embeddings
         """
         hidden = F.gelu(self.input_proj(X))  # shape: (N, hidden_dim)

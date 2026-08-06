@@ -136,7 +136,7 @@ def blocked_forks_are_deletion_bags() -> None:
 
     Skipping the fork instead (what this used to assert) left a containment
     dataset with no two actions from the same state, which is exactly what
-    `action_sensitivity` measures — it read 0.0.
+    `action_sensitivity` measures: it read 0.0.
     """
     graph = nx.DiGraph([(0, 1), (1, 2)])
     rng = np.random.default_rng(0)

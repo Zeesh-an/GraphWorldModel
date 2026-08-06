@@ -16,7 +16,7 @@ mkdir -p results logs
 # Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
 # logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
 # transitions. Set RUN_JOBID=0 for a stable
-# results/<task>/<dataset>/<run>/data — which is what
+# results/<task>/<dataset>/<run>/data, which is what
 # the train/agent scripts downstream expect to be told about.
 TASK="${TASK:-influence_maximization}"
 DATASET=nethept
@@ -25,9 +25,9 @@ RUN_JOBID="${RUN_JOBID:-1}"
 [ "$RUN_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && RUN="${RUN}_${SLURM_JOB_ID}"
 OUT="results/$TASK/$DATASET/$RUN/data"
 
-# NetHEPT citation network (15,229 nodes, 62,752 directed edges) — the standard
+# NetHEPT citation network (15,229 nodes, 62,752 directed edges): the standard
 # IM scale benchmark. Auto-downloads on first use. ONE real graph: 50 rollouts
-# x 2 models x 3 algos = 300 episodes (fewer rollouts than the small graphs —
+# x 2 models x 3 algos = 300 episodes (fewer rollouts than the small graphs,
 # each 15K-node episode with 30 marginal draws per step is expensive).
 #
 # NO betweenness: exact Brandes is O(V*E) ~ 10^9 in pure networkx at this size

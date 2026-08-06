@@ -10,7 +10,7 @@ WHY THE MODEL AND NOT `experiments/run_imputation.py`. SPIN's own entry point is
 datasets, none of which is a cascade. `spin.models.SPINModel` itself needs only
 `torch`, `torch_geometric` and three `tsl.nn` pieces (`StaticGraphEmbedding`,
 `MLP`, and the repo's own `spin/layers/`), so this imports the published
-ARCHITECTURE and trains it with our own Adam loop — **SPIN's model, our
+ARCHITECTURE and trains it with our own Adam loop: **SPIN's model, our
 optimizer**, on the same terms as the GRIN driver beside it.
 
 WHY IT IS HERE. SPIN is the one method in `research/cascade_reconstruction.md`
@@ -18,7 +18,7 @@ WHY IT IS HERE. SPIN is the one method in `research/cascade_reconstruction.md`
 against `.8206`) while running OUT OF MEMORY on Oregon2, Prost and Pol. That OOM
 pattern is the useful half: it is the clearest published statement of the scale
 ceiling on attention-based reconstruction, and our own graphs sit on both sides
-of it — `jazz` and `infectious` well below, `oregon2` and `rt_pol` at or above.
+of it: `jazz` and `infectious` well below, `oregon2` and `rt_pol` at or above.
 An OOM here is a REPORTABLE RESULT rather than a failed arm, and `run_baseline`
 records it as a skip with the reason attached.
 
@@ -28,7 +28,7 @@ Warning: SUPERVISED, exactly as `grin` is, and the same caveat applies to its ro
 `[batch, steps, nodes, channels]` and returns `(x_hat, intermediate_imputations)`.
 `u` is the exogenous/positional input: SPIN's own experiments pass time-of-day
 encodings there, and a cascade has no calendar, so this passes the normalized step
-index — which is the same information (where in the sequence this step sits) in
+index, which is the same information (where in the sequence this step sits) in
 the form the positional encoder expects.
 """
 
@@ -94,7 +94,7 @@ if __name__ == "__main__":
     except torch.cuda.OutOfMemoryError as error:
         raise SystemExit(
             f"[spin] OUT OF MEMORY on {data['num_nodes']} nodes x {data['steps']} "
-            f"steps. That is the published behaviour rather than a wiring bug — "
+            f"steps. That is the published behaviour rather than a wiring bug: "
             f"SPIN OOMs on Oregon2, Prost and Pol in its own comparison table "
             f"(research/cascade_reconstruction.md §5.1.2). Report it as the scale "
             f"ceiling it is, or lower GWM_IMPUTE_HIDDEN / GWM_IMPUTE_BATCH. "

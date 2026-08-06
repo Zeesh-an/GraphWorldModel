@@ -3,7 +3,7 @@ Pure classical-IM primitives over GraphInfo.
 
 These are the building blocks the named algorithms (algorithms.py) compose, and
 the surface the coding agent is told it may call. Spread estimation uses the real
-NDlib simulator (data/wm_simulator.py) — i.e. the honest classical cost; the
+NDlib simulator (data/wm_simulator.py): i.e. the honest classical cost; the
 outer-loop Environment (envs/) is what the world model accelerates.
 """
 
@@ -42,7 +42,7 @@ def build_simulator(
 
 
 def _nx_from_graph_info(graph: GraphInfo) -> tuple:
-    """(networkx graph, {(u, v): p}) — the pair both simulators are constructed from."""
+    """(networkx graph, {(u, v): p}), the pair both simulators are constructed from."""
     nx_graph = nx.DiGraph() if graph.directed else nx.Graph()
     nx_graph.add_nodes_from(range(graph.num_nodes))
     ic_prob_map = {}
@@ -174,13 +174,13 @@ def mc_simulate_blocking(
     Mean final NEGATIVE spread when `blockers` answers `negative_seeds`. LOWER is better.
 
     The blocking counterpart of `mc_simulate_spread`, and the honest classical cost of
-    scoring one blocker set — Budak's Greedy and TC-AIBM's Greedy-B both pay exactly
+    scoring one blocker set: Budak's Greedy and TC-AIBM's Greedy-B both pay exactly
     this per candidate per pick, which is why the library members built on it are
     blocked from generated scripts (they bypass the metered evaluator).
 
     `lever` decides what a "blocker" is: a node to counter-seed, a node to delete, or
     an `(u, v)` arc to cut or zero. All four run through the same simulator, which is
-    the point of §7 — no published work scores them under one metric.
+    the point of §7: no published work scores them under one metric.
     """
     from coding_agent.blocking import blocking_plan
 
@@ -351,7 +351,7 @@ def predict_marginals_mc(
 
     The vector-valued twin of `mc_simulate_spread`: the same call, returning the
     per-node marginal rather than its sum. That vector is what an INVERSE problem
-    needs — source localization compares a hypothesis's predicted marginal against
+    needs: source localization compares a hypothesis's predicted marginal against
     the observed one, and the sum throws away exactly the spatial information the
     comparison runs on (research/source_localization.md §2.4.3).
 
@@ -400,7 +400,7 @@ def mc_simulate_containment(
     The containment counterpart of `mc_simulate_spread`, and the honest classical
     cost of scoring one blocker set: LOWER is better. Runs under `blocked`
     semantics, so a deleted node is uncounted, cannot transmit and cannot be
-    infected — the `spent` reading would report each blocker as infected and
+    infected: the `spent` reading would report each blocker as infected and
     inflate every number by exactly +k
     (research/critical_node_detection.md §2.3).
     """

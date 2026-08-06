@@ -11,7 +11,7 @@ Layer formula:
 
 H^0 is the output of the input projection (shared across all layers).
 α (alpha) controls the weight of the initial residual connection.
-λ (lamda) controls the decay of β_l with depth — larger λ → larger β_l.
+λ (lamda) controls the decay of β_l with depth: larger λ → larger β_l.
 
 Interface matches GraphTransformerForwardModel:
     forward(seed_vec: (N, 1), adj: sparse COO (N, N)) -> (N, 1)
@@ -28,7 +28,7 @@ from world_model.model.model_utils import degree_encoding
 class GCNIILayer(nn.Module):
     """
     One GCNII layer with initial residual + identity mapping.
-    No per-layer LayerNorm and no outer residual — the (1 - α)·P·H + α·H^0 structure is the residual mechanism in GCNII.
+    No per-layer LayerNorm and no outer residual: the (1 - α)·P·H + α·H^0 structure is the residual mechanism in GCNII.
     """
 
     def __init__(
@@ -60,9 +60,9 @@ class GCNIILayer(nn.Module):
         adjacency: torch.Tensor,
     ) -> torch.Tensor:
         """
-        hidden: (N, hidden_dim) — current hidden state
-        initial_hidden: (N, hidden_dim) — initial projected features (shared across layers)
-        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
+        hidden: (N, hidden_dim), current hidden state
+        initial_hidden: (N, hidden_dim), initial projected features (shared across layers)
+        adjacency: sparse COO (N, N), normalized D^-1/2 (A+I) D^-1/2
         returns: (N, hidden_dim)
         """
         # Dropout on input hidden state (matches reference GCNII implementation)
@@ -142,7 +142,7 @@ class GCNIIForwardModel(nn.Module):
     def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
+        adjacency: sparse COO (N, N), normalized D^-1/2 (A+I) D^-1/2
         returns: (N, 1) predicted outcome probabilities in [0, 1]
         """
         device = seed_vec.device
@@ -204,7 +204,7 @@ class GCNIIEncoder(nn.Module):
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
         X: (N, in_channels) node feature matrix
-        graph: GraphInput — uses graph.adj_norm (sparse COO, normalized)
+        graph: GraphInput, uses graph.adj_norm (sparse COO, normalized)
         returns: (N, hidden_dim) node embeddings
         """
         initial_hidden = F.relu(self.input_proj(X))  # shape: (N, hidden_dim)

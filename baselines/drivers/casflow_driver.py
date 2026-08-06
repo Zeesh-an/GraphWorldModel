@@ -3,8 +3,8 @@ Drive CasFlow (TKDE'21) and CCGL (TKDE'22) on OUR cascades and dump per-cascade
 predictions.
 
 Both repos are by the same author, take the same five-field line format, and run
-the same three-stage pipeline — `gene_cas` (filter + split), `gene_emb` (graphwave
-+ sparse matrix factorization embeddings), then the model — so one driver covers
+the same three-stage pipeline: `gene_cas` (filter + split), `gene_emb` (graphwave
++ sparse matrix factorization embeddings), then the model, so one driver covers
 both and `GWM_CASFLOW_SRC` picks which clone's `src` directory to import from.
 
 **What this driver does NOT do is re-run the repo's own preprocessing.** `gene_cas.py`
@@ -12,7 +12,7 @@ applies CasFlow's corpus-specific publication filters and then splits 70/15/15 a
 RANDOM, and both halves are wrong for us: our cascades were already filtered by
 `data/wm_cascades.py` at the protocol we are reporting, and
 `research/cascade_prediction.md` §8.3 is the single most transferable finding in
-that file — the random-over-cascades split LEAKS, and reproducing it here would put
+that file: the random-over-cascades split LEAKS, and reproducing it here would put
 this arm on a different protocol from every other arm in the table. So the driver
 reimplements `gene_cas.py`'s `file_write` loop (thirty lines, and the trivially
 correct part) honoring OUR split, and calls the repo's own code for the two stages
@@ -137,7 +137,7 @@ def build_embeddings(work_dir: Path, observation: int) -> None:
     Run the repo's OWN `gene_emb` stage: graphwave + sparse matrix factorization.
 
     Called through its module rather than reimplemented, because this is where the
-    method's actual content is — the cascade-graph wavelet embeddings and the global
+    method's actual content is: the cascade-graph wavelet embeddings and the global
     structural embedding CasFlow's contribution is built on. `absl` flags are set
     programmatically so no CLI is involved.
     """
@@ -161,7 +161,7 @@ def build_model():
     CasFlow's architecture, exactly as `casflow.py` builds it.
 
     Rebuilt here rather than imported because `casflow.py` inlines the whole graph
-    inside `main(argv)` and returns nothing — there is no model object to get hold
+    inside `main(argv)` and returns nothing: there is no model object to get hold
     of, and no prediction to read. The layer stack below is a transcription of that
     function, which is the same treatment `ditto_driver.py` gives DITTO's own CLI.
     """
@@ -287,7 +287,7 @@ def main(work_dir: Path) -> None:
     # BOTH pools are predicted, not only test: the arm makes two passes (selection,
     # then held-out) and a repo invoked once has to cover both. Training on the
     # selection pool and predicting on all of it is the same thing every supervised
-    # baseline in this repo does — a label may reach `fit`, never an evaluation-row
+    # baseline in this repo does: a label may reach `fit`, never an evaluation-row
     # prediction, and the split flag is what enforces that.
     for split in ("train", "val", "test"):
         if not order[split]:

@@ -4,7 +4,7 @@ PGP Web of Trust Dataset Loader
 Source: http://konect.cc/networks/arenas-pgp/
     - 10,680 nodes, 24,316 undirected edges (PGP key signatures)
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 A standard dismantling benchmark: Collective Influence, Min-Sum and Wandelt all

@@ -31,7 +31,7 @@ Environment:
     GWM_COSASI_METHOD    jordan | netsleuth | lisn | rumor_centrality
 """
 
-# `cosasi` is installed in baselines/external/cosasi/.venv, NOT in ours — that
+# `cosasi` is installed in baselines/external/cosasi/.venv, NOT in ours: that
 # isolation is the whole point of the external-baseline design, and here it is
 # load-bearing rather than tidy: cosasi's own requirements pin numpy 1.21,
 # scikit-learn 1.1 and networkx 2.8, which cannot coexist with this project's
@@ -54,7 +54,7 @@ methods = ("jordan", "netsleuth", "lisn", "rumor_centrality")
 
 # Single-source estimators, kept and labelled as such. They rank all N nodes and
 # are exact on trees, but under a multi-source protocol at k = 10% of N they
-# score near zero BY CONSTRUCTION (research/source_localization.md §8.2) — a
+# score near zero BY CONSTRUCTION (research/source_localization.md §8.2): a
 # property of the protocol, not the estimator. Run them at --budgets 1.
 single_source_methods = ("rumor_centrality",)
 
@@ -104,13 +104,13 @@ def sources_from_result(result, budget, num_nodes):
 
       * `SingleSourceResult.data[<method>]` is `{node: score}` over all N nodes,
         so the set is the top-k of that ranking.
-      * `MultiSourceResult.data["scores"]` is `{(n1, n2, ...): score}` — it scores
+      * `MultiSourceResult.data["scores"]` is `{(n1, n2, ...): score}`, it scores
         whole candidate SETS, not nodes. The prediction is the argmax TUPLE, which
         is cosasi's own answer; deriving per-node scores from it and re-ranking
         would be our reinterpretation rather than its output.
 
     Reading a MultiSourceResult as if it were the first shape yields a constant
-    vector, whose top-k is `[0, 1, ..., k-1]` for every instance — which is
+    vector, whose top-k is `[0, 1, ..., k-1]` for every instance, which is
     exactly what three cosasi arms silently produced before this split existed.
     """
     payload = result.data

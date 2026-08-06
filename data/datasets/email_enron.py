@@ -4,7 +4,7 @@ Email-Enron Dataset Loader
 Source: https://snap.stanford.edu/data/email-Enron.html
     - 36,692 nodes, 183,831 undirected edges
     - Undirected (Enron email communication)
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 The proactive-rumour-control paper's mid-size graph (§6.2). Its counts match the

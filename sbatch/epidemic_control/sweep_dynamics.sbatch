@@ -9,8 +9,8 @@
 
 # The three compartmental models, each with its own dataset, checkpoint and run
 # directory. This is the axis research/epidemic_control.md §9.1 puts in order:
-# "(a) SIR only — it is the smallest departure. (b) The CompartmentTransitionHead.
-# (c) SIS second — it breaks 'ever-infected' entirely and needs the endemic-
+# "(a) SIR only: it is the smallest departure. (b) The CompartmentTransitionHead.
+# (c) SIS second: it breaks 'ever-infected' entirely and needs the endemic-
 # prevalence metric. (d) SEIR last, or never."
 #
 # Usage: sbatch sbatch/epidemic_control/sweep_dynamics.sbatch
@@ -23,7 +23,7 @@
 # summary.csv, and for SIR and SEIR it is near zero by construction. The report
 # prints that warning itself on an SIS run.
 #
-# SEIR's extra latent compartment adds no new mechanism — §9.1 says so outright —
+# SEIR's extra latent compartment adds no new mechanism: §9.1 says so outright,
 # so it is here for completeness rather than as a result to lead with.
 
 set -euo pipefail

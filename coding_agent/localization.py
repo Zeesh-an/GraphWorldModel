@@ -8,11 +8,11 @@ inference algorithm and the world model is a subroutine that algorithm calls
 (`research/source_localization.md` §2.3, §2.5). Three pieces, and each one is
 where a specific claim of that file lives:
 
-  * **`load_instances`** — the labelled `(G, y, x)` episodes, regrouped from
+  * **`load_instances`**: the labelled `(G, y, x)` episodes, regrouped from
     transitions that already exist (§2.1). No new simulator, no new action op, no
     regeneration run.
 
-  * **`bind_predict_marginals`** — the ONE new primitive (§2.4.3), and its four
+  * **`bind_predict_marginals`**: the ONE new primitive (§2.4.3), and its four
     bindings. `@native` gets a raiser, `@monte_carlo` / `@oracle` / `@world_model`
     each get their own environment's `Trajectory.final_marginals`. The generated
     program is byte-identical across those arms and only its oracle changes, which
@@ -20,7 +20,7 @@ where a specific claim of that file lives:
     through `environment.rollout` is also what puts them in `evaluator_calls` /
     `evaluator_seconds` / `real_env_episodes`, i.e. §8.5.3's cost block.
 
-  * **`evaluate_localizer`** — the outer loop's reward: mean F1 against the TRUE
+  * **`evaluate_localizer`**: the outer loop's reward: mean F1 against the TRUE
     source set, over held-out episodes. §2.3.3 is emphatic that re-simulation error
     is the wrong selection signal here, because diffusion is many-to-one and a
     program that reliably recovers the wrong member of an equivalence class scores
@@ -31,7 +31,7 @@ The reward is EXACT rather than estimated, which is unusual for this pipeline an
 worth stating: F1 against a known source set carries no evaluator noise, so a
 recover task's `reward` is already comparable across conditions and does not need
 the `--compare` referee to become so. The referee still runs, measuring the
-re-simulated error (§8.5.5) — the metric this literature should report and does
+re-simulated error (§8.5.5): the metric this literature should report and does
 not (§11).
 """
 
@@ -101,7 +101,7 @@ class SourceInstance:
     # leaks the evaluation labels into the model that is then scored on them.
     split: str = ""
     # The whole observed path, shape (T, N), one binary row per step. NOT given to
-    # a generated program — its contract is a single snapshot, which is the
+    # a generated program: its contract is a single snapshot, which is the
     # setting every comparable published number uses (§8.3). It is carried for the
     # external baselines that condition on intermediate observations rather than
     # on the endpoint alone, PDSL being the one wired today.
@@ -158,14 +158,14 @@ def unavailable_forward_oracle(_seeds) -> np.ndarray:
     Raising rather than being absent from the namespace, for the same reason
     `executor._blocked_algorithm` raises: an AttributeError traceback costs a whole
     refinement iteration, while a message that names the condition costs one repair
-    turn. The experimental condition is identical either way — the program cannot
+    turn. The experimental condition is identical either way: the program cannot
     call a forward model, so it has to be a pure structural heuristic (§2.4.3).
     """
     raise StrategyError(
         "self.predict_marginals is not available in this condition (@native): this "
         "arm has NO forward model, by design. It exists to measure whether a "
         "forward model in the search loop is worth anything at all. Write a purely "
-        "structural inference rule instead — label propagation over the observed "
+        "structural inference rule instead: label propagation over the observed "
         "state, centralities restricted to the infected subgraph, per-component "
         "centres, community-aware separation constraints."
     )
@@ -288,7 +288,7 @@ def implemented(strategy: object, name: str) -> object | None:
 
     `hasattr` is the wrong test here and the failure is silent. Generated code
     writes `class MyStrategy(Strategy)`, and `Strategy` is a `typing.Protocol`
-    whose method bodies are `...` — so subclassing it inherits a `localize` and a
+    whose method bodies are `...`, so subclassing it inherits a `localize` and a
     `source_scores` that return `None`. `hasattr` then always says yes, which
     turns an OPTIONAL method into a required one that fails with "returned None"
     from inside validation, and turns a missing REQUIRED method into the same
@@ -319,7 +319,7 @@ def evaluate_localizer(
     Returns the same `(Trajectory, plan_seconds)` pair `evaluate_strategy` does, so
     every method (one_shot, evolve, the checkpointing, the population feedback)
     consumes it unchanged. `reward` is the mean F1 against the true sources, which
-    maximizes — no sign work is needed anywhere, unlike the containment tasks
+    maximizes: no sign work is needed anywhere, unlike the containment tasks
     (§2.7 item 3).
     """
     start = time.perf_counter()
@@ -357,7 +357,7 @@ def evaluate_localizer(
             if scores.shape != (instance.num_nodes,):
                 raise StrategyError(
                     f"source_scores() returned shape {scores.shape}, expected "
-                    f"({instance.num_nodes},) — one score per node, higher meaning "
+                    f"({instance.num_nodes},): one score per node, higher meaning "
                     f"more likely to be a source."
                 )
 
@@ -429,7 +429,7 @@ def validate_sources(
     Deliberately NOT `executor.validate_actions`: that validates an ACTION bag
     against an op whitelist, and a recovered source set is an inference, not an
     intervention. The rules that do carry over are the ones about spending the
-    budget — a duplicate wastes a slot and an over-length set inflates recall for
+    budget: a duplicate wastes a slot and an over-length set inflates recall for
     free.
     """
     try:
@@ -457,7 +457,7 @@ def validate_sources(
         raise StrategyError(
             f"localize() returned {len(nodes)} sources, exceeding the budget "
             f"{budget}. Returning extra nodes would buy recall at no cost to "
-            f"precision, which is why it is rejected — return at most k."
+            f"precision, which is why it is rejected: return at most k."
         )
 
     return nodes
@@ -476,7 +476,7 @@ metric_keys = (
 
 
 def aggregate_metrics(per_instance: list[dict]) -> dict[str, float]:
-    """Instance-averaged PR / RE / F1 / AUC — SL-VAE's own aggregation (§8.4 trap 5)."""
+    """Instance-averaged PR / RE / F1 / AUC: SL-VAE's own aggregation (§8.4 trap 5)."""
     return {
         key: float(np.nanmean([entry[key] for entry in per_instance]))
         for key in metric_keys
@@ -497,7 +497,7 @@ def referee_resimulation_error(
     at all: §11 records that no surveyed paper reports a genuine re-simulated
     error, so it is self-contained and must never be presented as a cross-paper
     comparison. Reported beside the true-source error, because the number is
-    meaningless without knowing what the ORACLE set scores — on an ill-posed
+    meaningless without knowing what the ORACLE set scores: on an ill-posed
     problem a recovered set can reproduce `y` better than the truth did.
     """
     by_episode = {entry["episode_id"]: entry for entry in per_instance}
@@ -539,7 +539,7 @@ def summarize_localization(
 
     `methods.base.summarize`'s cascade diagnostics (residual gain, community reach,
     unreached nodes) all describe where a cascade SHOULD go next, which is the
-    wrong question here — nothing was seeded and nothing spread. This replaces them.
+    wrong question here: nothing was seeded and nothing spread. This replaces them.
     """
     cost = trajectory.cost
     means = cost.get("metrics", {})
@@ -552,7 +552,7 @@ def summarize_localization(
         f"auc={means.get('auc', float('nan')):.4f} "
         f"(from {cost.get('auc_source', 'rank_derived')})  "
         f"accuracy={means.get('accuracy', 0.0):.4f} "
-        f"(accuracy is near-useless alone here — sources are a tiny minority class)",
+        f"(accuracy is near-useless alone here: sources are a tiny minority class)",
         f"forward-model calls: {cost.get('forward_calls', 0)} total, "
         f"{cost.get('forward_calls_per_instance', 0)} per instance",
     ]
@@ -607,7 +607,7 @@ def summarize_localization(
         lines.append(
             f"degree bias: your false positives average degree "
             f"{np.mean(spurious_degrees):.1f} against {np.mean(source_degrees):.1f} "
-            f"for the true sources — a large gap means you are naming hubs the "
+            f"for the true sources: a large gap means you are naming hubs the "
             f"cascade travelled THROUGH rather than the nodes it started from"
         )
 

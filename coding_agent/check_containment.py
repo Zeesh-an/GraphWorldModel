@@ -3,13 +3,15 @@ Self-check for critical node detection: the outbreak, the removal budget, the
 minimize sense, and the structural metrics.
 
 Everything here is checked on graphs where the answer is known by hand, so a
-regression fails as an assertion rather than as a quietly inverted result table —
+regression fails as an assertion rather than as a quietly inverted result table,
 which is the specific failure mode this task invites, because a maximize-shaped
 harness scoring a minimize task produces perfectly plausible numbers that name the
 worst arm as the winner.
 
     python -m coding_agent.check_containment
 """
+
+import inspect
 
 import networkx as nx
 import numpy as np
@@ -30,7 +32,9 @@ from coding_agent.methods.base import (
     evaluate_strategy,
     validate_plan,
 )
+import coding_agent.run
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.immunization_algorithms import immunization_algorithms
 from coding_agent.types import ActionOp, GraphInfo, State, TaskSpec, best_by, improves
 from data.wm_simulator import blocked
 from pipeline.conditions import result_sense
@@ -181,8 +185,8 @@ def budget_counts_removals_not_edges() -> None:
 
     Charging the incident remove_edge ops would make k mean deg(v) different
     things per node, and a hub would cost twenty times a leaf. The planner emits
-    BARE remove_node — allowing it to emit edge ops too would hand it an
-    unbudgeted second intervention — and the expansion happens after validation.
+    BARE remove_node: allowing it to emit edge ops too would hand it an
+    unbudgeted second intervention, and the expansion happens after validation.
     """
     graph = _graph(path, 4, directed=False)
     task = _task(budget=1)
@@ -324,7 +328,7 @@ def scored_mode_emits_the_budgeted_op() -> None:
     The fixed ScoredStrategy harness must emit `remove_node` on a containment task.
 
     It hardcoded `add_node`, so every scored-mode containment arm was rejected by
-    `validate_actions` before it was ever scored — an entire strategy mode dead on
+    `validate_actions` before it was ever scored: an entire strategy mode dead on
     the task, invisible because the default arm set uses free mode.
     """
     graph = _graph(path, 4, directed=False)
@@ -357,7 +361,7 @@ def anchors_run_under_every_task_shape() -> None:
     containment.
 
     Routing the static anchors through `evaluate_strategy` made an adaptive task
-    call `act()` on a plan-shaped object — which broke the leaderboard on
+    call `act()` on a plan-shaped object, which broke the leaderboard on
     `adaptive_online_im` too, not just here.
     """
     graph = _graph(path, 4, directed=False)
@@ -436,6 +440,37 @@ def removals_expand_even_without_an_outbreak() -> None:
     assert build_outbreak(graph, TaskSpec()) is None
 
 
+def the_shared_names_resolve_to_the_dismantling_pool() -> None:
+    """
+    `netshield` and `acquaintance_immunization` live in TWO pools as different
+    functions, and the epidemic forms refuse to dose an index case while the
+    dismantling forms will happily delete one. Both take `**_`, so dispatching to
+    the wrong pool cannot crash: it silently scores a different node set. A
+    containment arm must get the dismantling implementation.
+    """
+    shared = set(dismantling_algorithms) & set(immunization_algorithms)
+    assert shared == {"netshield", "acquaintance_immunization"}, shared
+
+    for name in sorted(shared):
+        assert (
+            dismantling_algorithms[name] is not immunization_algorithms[name]
+        ), name
+
+    # The dispatch is gated on Task.epidemic, so the two tasks land in different
+    # branches of the same elif chain rather than on whichever comes first
+    from pipeline.tasks import get_task
+
+    assert not get_task("critical_node_detection").epidemic
+    assert get_task("epidemic_control").epidemic
+
+    source = inspect.getsource(coding_agent.run)
+    gate = "elif config.baseline in immunization_algorithms and get_task(config.task).epidemic:"
+    assert gate in source, (
+        "the immunization branch is no longer task-gated, so critical node "
+        "detection will silently run the epidemic netshield"
+    )
+
+
 def outbreak_wrap_lets_a_removal_beat_a_source_seed() -> None:
     """
     Order inside the bag: the outbreak seeds FIRST, the policy's removals after.
@@ -474,6 +509,7 @@ if __name__ == "__main__":
         anchors_run_under_every_task_shape,
         readers_resolve_the_sense_from_a_result,
         removals_expand_even_without_an_outbreak,
+        the_shared_names_resolve_to_the_dismantling_pool,
         outbreak_wrap_lets_a_removal_beat_a_source_seed,
     ]
 

@@ -75,7 +75,7 @@ def _stream(
 
     subprocess.run(capture_output=True) holds everything in memory until the
     process exits, so a baseline that trains for hours contributes nothing to
-    the job log until it is over — a hang and steady progress look identical.
+    the job log until it is over: a hang and steady progress look identical.
     Here each line is written to the log file, flushed, and echoed with the
     baseline's name so interleaved arms stay attributable.
 
@@ -151,7 +151,7 @@ def run_external_baseline(
     of observed diffusion states and returns one source set per observation,
     returned under `"sources"` instead of `"seeds"`. Passing it also selects the
     localization signatures of `export` and `parse_seeds`, which take the instance
-    list where the intervention ones take a budget — a split rather than a widened
+    list where the intervention ones take a budget: a split rather than a widened
     signature, so the seven already-wired IM adapters are untouched.
 
     `batches` is the round schedule for an adaptive task. It is written into
@@ -161,7 +161,7 @@ def run_external_baseline(
 
     `negative_seeds` is S_N for an influence-blocking task and crosses the boundary
     exactly the same way and for the same reason. It is NOT derivable from
-    (graph, budget) — every blocking repo has to be told which rumour it is
+    (graph, budget): every blocking repo has to be told which rumour it is
     answering, and two of the three would otherwise draw their own from a fixed
     seed and silently answer a different one than every other arm in the sweep.
     """
@@ -212,7 +212,7 @@ def run_external_baseline(
 
     # Everything below is third-party code and third-party file formats. ANY
     # failure here must surface as BaselineError, because that is the only
-    # exception the pipeline catches — anything else aborts the whole sweep and
+    # exception the pipeline catches: anything else aborts the whole sweep and
     # loses the arms that already succeeded.
     try:
         extras = (
@@ -289,7 +289,7 @@ def run_external_baseline(
         if len(seeds) != len(raw):
             raise BaselineError(
                 f"baseline {name!r} returned {len(raw) - len(seeds)} of "
-                f"{len(raw)} seeds outside [0, {graph.num_nodes}) — it was run "
+                f"{len(raw)} seeds outside [0, {graph.num_nodes}): it was run "
                 f"on a different graph than the one being scored (stale cached "
                 f"input?). Logs in {work_dir}."
             )
@@ -298,7 +298,7 @@ def run_external_baseline(
     except Exception as error:
         raise BaselineError(
             f"baseline {name!r} ran but its seed output could not be parsed "
-            f"({type(error).__name__}: {error}). Logs in {work_dir} — check "
+            f"({type(error).__name__}: {error}). Logs in {work_dir}, check "
             f"stdout.log and fix parse_seeds in baselines/registry.py."
         ) from error
 
@@ -318,13 +318,13 @@ def run_external_baseline(
             f"baseline {name!r} returned {spent} {unit}, exceeding budget {budget}"
         )
 
-    # Under-spending the budget is not an error — some methods legitimately
-    # stop early — but it is never visible in the spread column, where it just
+    # Under-spending the budget is not an error: some methods legitimately
+    # stop early, but it is never visible in the spread column, where it just
     # looks like a weak method. Say it out loud and record it.
     if spent < budget:
         print(
             f"[baseline:{name}] WARNING: returned {spent} {unit} for budget "
-            f"{budget} — it is being scored on {budget - spent} fewer {unit} "
+            f"{budget}: it is being scored on {budget - spent} fewer {unit} "
             f"than every other arm at this budget"
         )
 
@@ -394,7 +394,7 @@ def _collect_sources(
     except Exception as error:
         raise BaselineError(
             f"baseline {name!r} ran but its per-instance source output could not "
-            f"be parsed ({type(error).__name__}: {error}). Logs in {work_dir} — "
+            f"be parsed ({type(error).__name__}: {error}). Logs in {work_dir}, "
             f"check stdout.log and fix parse_seeds in baselines/registry.py."
         ) from error
 
@@ -410,7 +410,7 @@ def _collect_sources(
         if outside:
             raise BaselineError(
                 f"baseline {name!r} returned node ids {outside[:5]} outside "
-                f"[0, {graph.num_nodes}) for episode {instance.episode_id} — it "
+                f"[0, {graph.num_nodes}) for episode {instance.episode_id}: it "
                 f"was run on a different graph than the one being scored (stale "
                 f"cached input?). Logs in {work_dir}."
             )
@@ -430,7 +430,7 @@ def _collect_sources(
     if short:
         print(
             f"[baseline:{name}] WARNING: {short}/{len(instances)} instances got "
-            f"fewer sources than their k — those rows are scored on a shorter "
+            f"fewer sources than their k: those rows are scored on a shorter "
             f"prediction than every other arm, which reads as low recall"
         )
 
@@ -459,7 +459,7 @@ def _collect_trajectories(
 
     The decoding counterpart of `_collect_sources`, and it has more to check
     because a trajectory is a richer object than a set: ids inside the graph, times
-    inside the horizon, and — the one that matters — every named parent an actual
+    inside the horizon, and (the one that matters) every named parent an actual
     in-neighbour. A repo that returns a plausible-looking tree over edges the graph
     does not have would post a Path Precision of zero that reads as a weak method
     rather than as the export bug it is.
@@ -474,7 +474,7 @@ def _collect_trajectories(
     except Exception as error:
         raise BaselineError(
             f"baseline {name!r} ran but its per-instance trajectory output could "
-            f"not be parsed ({type(error).__name__}: {error}). Logs in {work_dir} — "
+            f"not be parsed ({type(error).__name__}: {error}). Logs in {work_dir}, "
             f"check stdout.log and fix parse_seeds in baselines/registry.py."
         ) from error
 
@@ -493,7 +493,7 @@ def _collect_trajectories(
             if not 0 <= node < graph.num_nodes:
                 raise BaselineError(
                     f"baseline {name!r} returned node id {node} outside "
-                    f"[0, {graph.num_nodes}) for episode {instance.episode_id} — it "
+                    f"[0, {graph.num_nodes}) for episode {instance.episode_id}: it "
                     f"was run on a different graph than the one being scored "
                     f"(stale cached input?). Logs in {work_dir}."
                 )
@@ -505,7 +505,7 @@ def _collect_trajectories(
                 continue
 
             if parent is None:
-                # A time with no tree — see `needs_tree` below
+                # A time with no tree: see `needs_tree` below
                 cleaned[node] = (time, None)
                 continue
 
@@ -549,7 +549,7 @@ def _collect_trajectories(
     if dropped:
         print(
             f"[baseline:{name}] WARNING: dropped {dropped} decoded entries that "
-            f"named a non-existent arc, a hidden node or an out-of-range timestep — "
+            f"named a non-existent arc, a hidden node or an out-of-range timestep: "
             f"those cost this arm recall it would otherwise have had"
         )
 
@@ -577,7 +577,7 @@ def _collect_forecasts(
     The forecasting counterpart of `_collect_sources`, and the simplest of the
     three: what comes back is a number per cascade rather than a set or a tree. Two
     checks matter and both would otherwise surface as a weak method rather than as
-    the export bug they are — a value below the OBSERVED popularity means the repo
+    the export bug they are: a value below the OBSERVED popularity means the repo
     predicted a cascade shrinking (impossible under progressive adoption, so it was
     handed the wrong prefix), and a non-finite one means its fit diverged.
 
@@ -591,7 +591,7 @@ def _collect_forecasts(
     except Exception as error:
         raise BaselineError(
             f"baseline {name!r} ran but its per-cascade popularity output could not "
-            f"be parsed ({type(error).__name__}: {error}). Logs in {work_dir} — "
+            f"be parsed ({type(error).__name__}: {error}). Logs in {work_dir}, "
             f"check stdout.log and fix parse_seeds in baselines/registry.py."
         ) from error
 
@@ -641,7 +641,7 @@ def _collect_forecasts(
             f"[baseline:{name}] WARNING: {impossible}/{len(instances)} predictions "
             f"were BELOW the already-observed popularity and were clamped up to it. "
             f"That usually means the repo returned an INCREMENT where a total was "
-            f"expected — check the driver's target convention "
+            f"expected: check the driver's target convention "
             f"(research/cascade_prediction.md §5.7 difference 3)."
         )
 
@@ -669,7 +669,7 @@ def predict_script(popularities: dict[str, float | None]) -> str:
 
     Keyed by CASCADE ID rather than by an observation fingerprint, unlike
     `localize_script` and `reconstruct_script`. That is possible here and not there
-    because `predict(graph, observation, horizon)` IS handed the id — a
+    because `predict(graph, observation, horizon)` IS handed the id: a
     `CascadeObservation` carries its own `cascade_id`, since a real cascade has a
     name in its corpus and a masked simulated one does not.
 
@@ -689,7 +689,7 @@ class ExternalPredictor(Strategy):
             raise KeyError(
                 "the external baseline returned no prediction for cascade "
                 + str(observation.cascade_id) + ". It was run on a different "
-                "instance pool than the one being scored — check that "
+                "instance pool than the one being scored: check that "
                 "--cp-instances, --cp-observation-steps and --seed match between "
                 "the export and the evaluation."
             )
@@ -705,7 +705,7 @@ def reconstruct_script(trajectories: dict[str, dict]) -> str:
     """
     Wrap one trajectory per observation as a canned Strategy for a decoding task.
 
-    Keyed by `observation.infected` — the nodes the decoder was actually SHOWN,
+    Keyed by `observation.infected`: the nodes the decoder was actually SHOWN,
     which is the report set under three settings and the terminal state under the
     fourth. That is the only identity available on both sides of the boundary: the
     canned script is handed an `Observation` and nothing else, so it cannot key on
@@ -731,7 +731,7 @@ class ExternalDecoder(Strategy):
             raise KeyError(
                 "the external baseline returned no decode for this cascade ("
                 + str(len(shown)) + " observed nodes). It was run on a "
-                "different instance pool than the one being scored — check that "
+                "different instance pool than the one being scored: check that "
                 "--cr-instances, --cr-setting, --cr-observation-rate and --seed "
                 "match between the export and the evaluation."
             )
@@ -791,7 +791,7 @@ class ExternalLocalizer(Strategy):
             raise KeyError(
                 "the external baseline returned no prediction for this "
                 "observation (" + str(len(infected)) + " infected nodes). It was "
-                "run on a different instance pool than the one being scored — "
+                "run on a different instance pool than the one being scored: "
                 "check that --sl-instances, --sl-observation and --seed match "
                 "between the export and the evaluation."
             )
@@ -807,7 +807,7 @@ def edge_script(seeds: list[int], budget_op: str = "remove_edge") -> str:
     The flat node list is re-paired here rather than in the parser, because
     `run_external_baseline`'s range check is what catches a repo that was handed a
     stale graph and it only understands node ids. `set_edge_weight` gets weight 0,
-    which is "blocking as p -> 0" — the r~ = 0 end of DiffIM's own relaxation and
+    which is "blocking as p -> 0": the r~ = 0 end of DiffIM's own relaxation and
     the same intervention as cutting the arc.
     """
     arcs = list(zip(seeds[::2], seeds[1::2], strict=False))
@@ -833,7 +833,7 @@ def seed_script(seeds: list[int], budget_op: str = "add_node") -> str:
 
     `budget_op` is what the TASK budgets. A dismantling repo returns a set to
     REMOVE, not to seed, and emitting it as `add_node` is rejected by
-    `validate_actions` — so condition 7 would fail on every containment task
+    `validate_actions`, so condition 7 would fail on every containment task
     while looking like a bad generated program rather than a wiring bug.
     """
     return f"""\

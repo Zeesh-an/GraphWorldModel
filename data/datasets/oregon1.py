@@ -4,10 +4,10 @@ Oregon-1 Dataset Loader (AS peering, 31 March 2001)
 Source: https://snap.stanford.edu/data/Oregon-1.html
     - 10,670 nodes, 22,002 undirected edges [verified, SNAP]
     - Undirected, unweighted, tab-separated with a `#` header
-    - No inherent node features — uses log(1 + degree)
+    - No inherent node features: uses log(1 + degree)
 
 GreedyWalk's Table 2 row, at 10,670 / 22,002 with a published **lambda_1 = 58.72**
-[verified, `research/epidemic_control.md` §5.2] — which makes it one of only four
+[verified, `research/epidemic_control.md` §5.2], which makes it one of only four
 graphs where our `wm_metrics.spectral_radius` can be checked against a number
 somebody else computed. §7 also has it in Gelling, DAVA and GreedyWalk, so it is
 the closest thing the spectral line has to a shared benchmark.

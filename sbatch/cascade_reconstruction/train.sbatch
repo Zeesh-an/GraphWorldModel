@@ -21,7 +21,7 @@
 # objective degenerate: the model believes every hidden node was infected, and
 # every reconstruction metric collapses to "predict everything". The
 # self-terminating ICTransmissionHead is what makes trajectory likelihood a
-# meaningful score at all — `count_bias` near zero is the number to check before
+# meaningful score at all: `count_bias` near zero is the number to check before
 # reading any decode as a result.
 #
 # The second thing to watch is the same one source localization watches, and for a

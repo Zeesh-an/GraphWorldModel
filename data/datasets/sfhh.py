@@ -6,7 +6,7 @@ Source: https://sociopatterns.org/datasets.html
     - Undirected, unweighted after aggregation
     - No labels: a conference has no class structure to record
 A two-day scientific conference (Génois & Barrat 2018), and the one trace here
-with NO community structure at all — attendees mix freely, so its degree
+with NO community structure at all: attendees mix freely, so its degree
 distribution is close to homogeneous. That makes it the natural control against the
 school traces: a method that only works by cutting between classes has nothing to
 cut here.

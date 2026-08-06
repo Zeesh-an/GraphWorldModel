@@ -7,7 +7,7 @@ Source: https://networkrepository.com/opsahl-powergrid.php
     - 4,941 nodes (generators, transformers, substations)
     - 6,594 edges (power lines)
     - Undirected, unweighted
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Original paper: Watts & Strogatz, Nature 393, 440-442 (1998)
@@ -31,18 +31,18 @@ def download_power_grid() -> Path:
     edges_path = data_dir / "opsahl-powergrid.edges"
 
     if edges_path.exists():
-        print(f"[✓] Power Grid already downloaded at {edges_path}")
+        print(f"[ok] Power Grid already downloaded at {edges_path}")
         return edges_path
 
     if not zip_path.exists():
-        print(f"[↓] Downloading Power Grid from {power_grid_url} ...")
+        print(f"[get] Downloading Power Grid from {power_grid_url} ...")
         urllib.request.urlretrieve(power_grid_url, zip_path)
-        print(f"[✓] Saved to {zip_path}")
+        print(f"[ok] Saved to {zip_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
         zip_file.extractall(data_dir)
-    print(f"[✓] Extracted to {data_dir}")
+    print(f"[ok] Extracted to {data_dir}")
 
     return edges_path
 
@@ -111,7 +111,7 @@ def load_power_grid(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, 
 
     n_edges_undirected = adjacency.nnz // 2
     print(
-        f"[✓] Power Grid loaded: {num_nodes} nodes, "
+        f"[ok] Power Grid loaded: {num_nodes} nodes, "
         f"{n_edges_undirected} undirected edges"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")

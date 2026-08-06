@@ -2,7 +2,7 @@
 The baseline taxonomy: which conditions exist, how an arm spec names one, and how
 to read a finished run back.
 
-Two orthogonal axes — who designs the algorithm, and what feedback the designer
+Two orthogonal axes, who designs the algorithm, and what feedback the designer
 gets while designing:
 
 | # | condition                 | designer          | inner-loop feedback        |
@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.tools.blocking_algorithms import all_blocking_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.immunization_algorithms import immunization_algorithms
 from coding_agent.tools.localization_algorithms import localization_algorithms
 from coding_agent.tools.prediction_algorithms import prediction_algorithms
 from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
@@ -53,13 +54,13 @@ valid_evaluators = (native, monte_carlo, oracle, world_model)
 # relaxed source vector per instance, which is SL-VAE's own procedure with our
 # likelihood plugged in. The seed paper reports no significant difference across
 # GAT / MONSTOR / DeepIS forward models, so that swap is a no-op it already
-# published — which makes this the CONTROL program search is measured against
+# published, which makes this the CONTROL program search is measured against
 # rather than a competing method.
 # `decode` is arm A of research/cascade_reconstruction.md §2.9, and the same kind
 # of object `gradient` is: a fixed numerical procedure with no LLM in it. It runs
 # DITTO's Metropolis-Hastings sampler over histories with our learned kernel in
 # place of DITTO's mean-field beta-hat, which §2.3 argues is the component swap the
-# tempting move would make — so it is the CONTROL decoder search is measured
+# tempting move would make, so it is the CONTROL decoder search is measured
 # against rather than a competing method.
 valid_methods = (
     "one_shot",
@@ -103,7 +104,7 @@ condition_names = {
 }
 
 # Conditions 1 and 2 have no refinement loop, so their evaluator only decides how
-# the single result is scored — ground truth is the honest choice
+# the single result is scored: ground truth is the honest choice
 selection_evaluator = monte_carlo
 
 # The classical pool run as condition 1: one representative per major IM family
@@ -121,19 +122,28 @@ default_baselines = (
 # decides how it is driven: a static seed set, a per-round policy (method
 # "adaptive"), a node-removal set, a two-cascade blocker, or a source-set inference.
 # Collisions would make that silent, so they are caught here rather than at the first
-# budget — `greedy_blocking` (a dismantler) and `greedy_prevention` (a blocker) are
+# budget: `greedy_blocking` (a dismantler) and `greedy_prevention` (a blocker) are
 # exactly the near-miss this guard exists for.
+# NetShield and acquaintance immunization are published in BOTH the dismantling
+# and the epidemic literature, so the same name naming two different functions is
+# intrinsic rather than a mistake. They are disambiguated by TASK in
+# `coding_agent.run` (the immunization branch is gated on `Task.epidemic`), not by
+# renaming, so they are listed here as known overlaps. Anything else colliding is
+# a genuine bug and still raises.
+_known_overlaps = {"netshield", "acquaintance_immunization"}
+
 _pools = {
     "adaptive": set(adaptive_algorithms),
     "blocking": set(all_blocking_algorithms),
     "dismantling": set(dismantling_algorithms),
+    "immunization": set(immunization_algorithms),
     "localization": set(localization_algorithms),
     "prediction": set(prediction_algorithms),
     "reconstruction": set(reconstruction_algorithms),
 }
 for _first, _members in _pools.items():
     for _second, _others in _pools.items():
-        _collisions = _members & _others if _first < _second else set()
+        _collisions = (_members & _others) - _known_overlaps if _first < _second else set()
         if _collisions:
             raise ValueError(
                 f"algorithm names collide across the {_first} and {_second} pools, "
@@ -142,12 +152,12 @@ for _first, _members in _pools.items():
             )
 
 # Conditions 2-6. The method is held fixed across 3-6 so the only thing that
-# varies down that ladder is the inner-loop evaluator — the clean ablation.
+# varies down that ladder is the inner-loop evaluator: the clean ablation.
 #
 # evolve, not one_shot: both refine a program against the same feedback, but
 # evolve edits the POPULATION BEST each generation while one_shot edits the
 # latest attempt, so one_shot compounds a regression instead of rejecting it.
-# Same LLM calls, same evaluator, strictly better search — swap back to
+# Same LLM calls, same evaluator, strictly better search: swap back to
 # one_shot_free@* with --arms if you want the ablation.
 default_arms = (
     "routing",
@@ -180,9 +190,9 @@ class Arm:
         True when an LLM actually synthesises code (conditions 3-6).
 
         `gradient` and `decode` are excluded even though they name an evaluator:
-        both are fixed numerical procedures with no model in the loop — Adam on a
+        both are fixed numerical procedures with no model in the loop: Adam on a
         relaxed source vector against a frozen world model, and Metropolis-Hastings
-        over histories against the same one — so giving either --outer-iters LLM
+        over histories against the same one, so giving either --outer-iters LLM
         turns would charge it for calls it never makes.
         """
         return (
@@ -321,8 +331,8 @@ def ground_truth_reward(result: dict) -> float:
     """
     The only number comparable ACROSS conditions.
 
-    Each condition's `reward` is measured by its own evaluator — a native arm's is
-    one noisy episode, ours is a world-model estimate — so they cannot be plotted
+    Each condition's `reward` is measured by its own evaluator: a native arm's is
+    one noisy episode, ours is a world-model estimate, so they cannot be plotted
     against each other. `mc_reward` is the shared ground-truth referee written by
     --compare; fall back to `reward` only when that replay was not run.
     """
@@ -385,7 +395,7 @@ def is_forecast(results: list[dict]) -> bool:
     The fourth family, and the one whose column runs the other way: every other
     reward in this pipeline is a node count or an F1 and reads better-when-higher
     (or, for containment, better-when-lower on a count). A forecast task's reward is
-    MSLE, which is lower-is-better AND is not a count of anything — so a reader that
+    MSLE, which is lower-is-better AND is not a count of anything, so a reader that
     printed "final infected" over it would be wrong twice.
     """
     return any(result.get("prediction") for result in results) or any(

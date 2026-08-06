@@ -46,7 +46,7 @@
 # logs/%x_%j.out, so two jobs on the same dataset can never overwrite each
 # other. The job id is printed on the first line of the .out, along with the
 # exact command to resume that run. Set RUN_JOBID=0 for a stable
-# results/<task>/<dataset>/<run>/ that every rerun appends to — which is what
+# results/<task>/<dataset>/<run>/ that every rerun appends to, which is what
 # you want when you are deliberately resuming or chaining.
 #
 # TASK selects the graph task and is the first results level. Only
@@ -111,7 +111,7 @@
 #
 # --- 5b. NATIVE AGENT ONLY --------------------------------------------------
 # Condition 3: real executions only, NATIVE_MC_RUNS episode(s) per candidate.
-# Keep it at 1 for the honestly model-free baseline — the whole point of this
+# Keep it at 1 for the honestly model-free baseline: the whole point of this
 # arm is that every number the agent sees costs a real episode. CPU-only.
 #
 #   DATASET=sbm ARMS=evolve_free@native BASELINES=none \
@@ -140,7 +140,7 @@
 #   BASELINES="celf_pp imm degree_discount external:opim external:ssa" \
 #       ./sbatch/pipeline.sbatch
 #
-# Library algorithms (condition 1) — any of:
+# Library algorithms (condition 1): any of:
 #   adaptive_greedy betweenness_seeds celf celf_local_search celf_pp
 #   closeness_seeds cofim collective_influence community_celf community_im
 #   community_ris degree_discount degree_ris_refine eigenvector_seeds
@@ -149,7 +149,7 @@
 #   ris_basic simulated_annealing skim sp1m ssa static_greedy tim
 #   vanilla_greedy voterank weighted_degree
 #
-# External repos (condition 7) — external:<name> for any of:
+# External repos (condition 7): external:<name> for any of:
 #   learned (GPU):  moeim touplegdd deepim gcomb iminfector glie lense him piano
 #   C++ (CPU):      opim ssa subsim imm tim oim
 #
@@ -172,7 +172,7 @@
 #   (b) keep a @world_model arm but reuse a checkpoint trained earlier:
 #   DATASET=ba SKIP_STAGES=train ./sbatch/pipeline.sbatch
 #   (b) still asks for a GPU, because the arm rolls f_theta out. It fails
-#   loudly if the run's world_model/ has no checkpoint — it reuses, it
+#   loudly if the run's world_model/ has no checkpoint: it reuses, it
 #   does not silently fall back to the oracle.
 #
 #
@@ -187,7 +187,7 @@
 #
 #   DATASET=ba START_STAGE=agent ./sbatch/pipeline.sbatch
 #
-# Data generation alone (CPU-only — this is what the old wm_generate_data_*
+# Data generation alone (CPU-only: this is what the old wm_generate_data_*
 # scripts did):
 #
 #   DATASET=nethept START_STAGE=data END_STAGE=data MEM=64G \
@@ -256,16 +256,16 @@
 #                   blocking these two are |S_N| and the ATTACKER MODEL, which
 #                   is that task's second experimental axis
 #   EPI_LEVER       epidemic control: which of the four interventions the
-#                   budget buys — vaccinate (immune, uncounted), quarantine
+#                   budget buys: vaccinate (immune, uncounted), quarantine
 #                   (isolated but counted), edge_cut, contact_reduce. Sets the
 #                   budgeted op and the permitted op together.
 #   EPI_BETA        per-contact transmission as a multiple of the arc's own
 #                   probability; EPI_GAMMA the rate of leaving I (recovery under
 #                   SIR/SEIR, return-to-susceptible under SIS). Both land in
-#                   metadata.json — §8.2 trap 2 records that a table which fixes
+#                   metadata.json: §8.2 trap 2 records that a table which fixes
 #                   them without stating them is comparable only to itself.
 #   BLOCKING_LEVER  influence blocking: which of the four published
-#                   interventions the budget buys — counter_seed (default),
+#                   interventions the budget buys: counter_seed (default),
 #                   node_block, edge_block, weight_block
 #   TIE_BREAK       influence blocking: which cascade wins a node both reach on
 #                   the same step. auto (default) = each dynamics' own founding
@@ -296,16 +296,16 @@
 #                   filtered to that source fraction
 #   SL_PRIOR        arm A only: none = SL-VAE (a), vae = the full method
 #   SL_STEPS        arm A only: Adam steps per instance
-#   SL_TRANSFER_FROM  run ANOTHER run's winning program here, unmodified — the
+#   SL_TRANSFER_FROM  run ANOTHER run's winning program here, unmodified: the
 #                   graph axis of the amortization claim
 #
 # CASCADE RECONSTRUCTION (--task cascade_reconstruction). Every one is inert for
 # every other task, exactly like the SL block above.
 #   CR_SETTING      which of the four observation regimes is masked:
 #                   partial_times (a subsample of the infected set WITH
-#                   activation times — the ordered-Steiner regime),
+#                   activation times: the ordered-Steiner regime),
 #                   partial_nodes (the same subsample, times withheld),
-#                   final_snapshot (the terminal state only — DITTO's DASH, the
+#                   final_snapshot (the terminal state only: DITTO's DASH, the
 #                   hardest published formulation), or hidden_nodes (nodes
 #                   DELETED from the graph, not merely unobserved). These are
 #                   four separate protocols and their rows are never pooled
@@ -375,7 +375,7 @@
 #
 #   WM_MODEL     gcn | sage | gt | gat | gcnii
 #   HEAD         linear | structured | structured_residual
-#                structured/structured_residual REQUIRE POS_WEIGHT=off —
+#                structured/structured_residual REQUIRE POS_WEIGHT=off,
 #                pos_weight inflates the per-edge q globally and collapses
 #                one-step accuracy.
 #   HIDDEN_DIM   64 for <1K nodes, 128 for 1K-5K, 256 for >10K
@@ -387,7 +387,7 @@
 #   POS_WEIGHT   auto | off
 #   NO_PLAN_DEMO 1 skips the multi-graph planning demo after training
 #
-# Backbone sweep, five jobs into five runs sharing one dataset — generate the
+# Backbone sweep, five jobs into five runs sharing one dataset: generate the
 # data once, then each job reuses it:
 #
 #   DATASET=ba START_STAGE=data END_STAGE=data ./sbatch/pipeline.sbatch
@@ -413,7 +413,7 @@
 #                    anything but 1 for it is a hard error
 #   SYN_NODES        nodes per synthetic graph
 #   ER_P BA_M WS_K WS_P SBM_BLOCKS SBM_P_IN SBM_P_OUT   family-specific
-#   GEN_MODELS       IC, LT, or both — one transition file per dynamics
+#   GEN_MODELS       IC, LT, or both: one transition file per dynamics
 #   GEN_ALGORITHMS   spine seed selectors: random degree pagerank betweenness
 #                    celf local_search. betweenness is exact Brandes, O(V*E)
 #                    in pure networkx, so it is dropped by default on the big
@@ -429,7 +429,7 @@
 #                    every BUDGET_PCTS value you intend to evaluate at.
 #   ROLLOUTS         episodes per (graph, dynamics, selector)
 #   INJECT_P         probability an intermediate step injects an action
-#   CF_PROB          probability a step spawns counterfactual forks — the
+#   CF_PROB          probability a step spawns counterfactual forks: the
 #                    signal that forces action-conditioning
 #   CF_BRANCHES      counterfactual branches per fork
 #   MC_MARGINALS     draws per step for the soft targets. Must be >= 1 or
@@ -453,7 +453,7 @@
 #
 # --- 17. RESUME AFTER A CRASH -----------------------------------------------
 # Results live in results/<task>/<dataset>/<run>_<jobid>/, so resuming means
-# naming the tree the dead job created — a bare resubmit would start a FRESH
+# naming the tree the dead job created: a bare resubmit would start a FRESH
 # one. The dead job's .out prints the line to use, verbatim:
 #
 #   [sbatch] resume this run with: RUN=default_918273 RUN_JOBID=0 .../pipeline.sbatch
@@ -578,7 +578,7 @@ CR_TREE_WEIGHT="${CR_TREE_WEIGHT:-}"
 
 # Cascade prediction. `CP_SPLIT` is the load-bearing one: research/
 # cascade_prediction.md §8.3 shows the field's own random-over-cascades split LEAKS
-# the future, and that fixing it moved a decade of published numbers — two 2021-24
+# the future, and that fixing it moved a decade of published numbers: two 2021-24
 # SOTA models fell below a plain MLP. `chronological` is the default and the leaky
 # protocol is available on purpose, because the GAP between them is the experiment.
 # CP_OBSERVATION / CP_HORIZON are in the CORPUS's own time unit (seconds for the
@@ -606,7 +606,7 @@ CP_FORECAST_SAMPLES="${CP_FORECAST_SAMPLES:-}"
 # 7's "recovered is not removed"). EPI_BETA / EPI_GAMMA cross all three stages and
 # land in metadata.json, because §8.2 trap 2 records that a table which fixes them
 # without stating them is comparable only to itself. Note GEN_MODELS and
-# DIFFUSION_MODEL must both be one of SIR / SIS / SEIR here — the pipeline defaults
+# DIFFUSION_MODEL must both be one of SIR / SIS / SEIR here: the pipeline defaults
 # them from the task registry, so leaving both unset is the SIR setting.
 EPI_LEVER="${EPI_LEVER:-}"
 CONTACT_REDUCTION="${CONTACT_REDUCTION:-}"
@@ -628,7 +628,7 @@ case "$DATASET" in
     class_hidden=64 ; class_mem=16G ; class_time=24:00:00
     ;;
   nethept|twitter|digg|youtube|weibo)
-    # Exact Brandes betweenness is O(V*E) in pure networkx — hours at this
+    # Exact Brandes betweenness is O(V*E) in pure networkx: hours at this
     # size, so these lean on random/degree/pagerank instead
     class_graphs=1 ; class_nodes=100 ; class_rollouts=50
     class_selectors="random degree pagerank"
@@ -885,7 +885,7 @@ fi
 [ "$HIDE_EDGE_WEIGHTS" = "1" ] && flags+=(--hide-edge-weights)
 
 # ---------------------------------------------------------------------------
-# SUBMIT — outside a job, queue ourselves with the allocation these flags need
+# SUBMIT: outside a job, queue ourselves with the allocation these flags need
 # ---------------------------------------------------------------------------
 # Slurm resolves #SBATCH directives at submission, so the GPU decision cannot
 # be made from inside the job. Asking the pipeline keeps the answer in one
@@ -930,7 +930,7 @@ if [ -z "${SLURM_JOB_ID:-}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# RUN — inside the job
+# RUN: inside the job
 # ---------------------------------------------------------------------------
 # Set by the submit path above. Left unset when this script was submitted
 # directly with `sbatch ... pipeline.sbatch`, in which case follow whatever

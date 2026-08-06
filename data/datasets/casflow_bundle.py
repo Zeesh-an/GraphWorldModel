@@ -1,5 +1,5 @@
 """
-CasFlow's preprocessed Weibo / Twitter / APS bundle — the de-facto benchmark.
+CasFlow's preprocessed Weibo / Twitter / APS bundle: the de-facto benchmark.
 
 `research/cascade_prediction.md` §8.5 is the finding this module implements: there
 is **no** unified public benchmark for cascade prediction, no OGB or TGB analogue,
@@ -16,7 +16,7 @@ published counts, and its own two observation windows.
 **No auto-download.** The archive sits behind Google Drive's virus-scan
 interstitial, which `urlretrieve` receives as an HTML page [verified, §6.3]. Rather
 than guess at a confirm-token URL that breaks whenever Drive changes it, this
-raises with the exact manual steps — the standard `data/datasets/weibo.py` already
+raises with the exact manual steps: the standard `data/datasets/weibo.py` already
 sets and the one §6.5 asks for.
 
 **The publisher's own preprocessing is reproduced, not approximated.** CasFlow's
@@ -223,7 +223,7 @@ def bundle_loaders(corpus: str) -> tuple:
 
         print(
             f"[OK] CasFlow {corpus} global graph: {num_nodes} nodes, "
-            f"{adjacency.nnz // 2} undirected edges — this is the union of the "
+            f"{adjacency.nnz // 2} undirected edges: this is the union of the "
             f"observed diffusion paths, which is what CasFlow's own "
             f"generate_global_graph builds"
         )

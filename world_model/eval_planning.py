@@ -3,7 +3,7 @@ Recompute multi-graph planning regret on already-trained checkpoints, WITHOUT
 retraining, and write the updated numbers back into each results JSON.
 
 Planning regret depends only on the trained weights and the graphs, not on the
-training run — so like the rollout-threshold sweep, recomputing it should reload
+training run, so like the rollout-threshold sweep, recomputing it should reload
 the checkpoint rather than retrain. Use this after changing how planning is
 measured (e.g. single-graph -> multi-graph averaging).
 

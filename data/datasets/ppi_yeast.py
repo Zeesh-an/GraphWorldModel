@@ -4,7 +4,7 @@ Yeast PPI Dataset Loader (dismantling GCC)
 Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
     - 2,224 nodes, 6,609 undirected edges
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 The most widely shared biological benchmark in this literature: CoreHD, BPD, GND,

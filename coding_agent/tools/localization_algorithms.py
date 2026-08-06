@@ -1,5 +1,5 @@
 """
-Named classical SOURCE LOCALIZATION baselines — the condition-1 floor for
+Named classical SOURCE LOCALIZATION baselines: the condition-1 floor for
 `--task source_localization`.
 
 Every algorithm has the signature
@@ -22,15 +22,15 @@ deliberately not top-k of one another, and that is the honest reading.
 Read `research/source_localization.md` §2.9 risk 1 before treating any of these
 as a weak floor. In ascending order of danger:
 
-  1. `random_sources`, the Comin-Costa infected-subgraph centralities — free wins.
-  2. **`lpsi` (LPSI, AAAI 2017)** — SIDSL's Table 1 puts this 2017 label-propagation
+  1. `random_sources`, the Comin-Costa infected-subgraph centralities: free wins.
+  2. **`lpsi` (LPSI, AAAI 2017)**: SIDSL's Table 1 puts this 2017 label-propagation
      method at F1 **0.544** on Digg, beating both SL-VAE (0.479) and DDMSL (0.517)
      [verified, §5.5]. It has no learning whatsoever and it sits INSIDE the coding
      agent's expressible space, so "the search rediscovers LPSI" is the realistic
      floor and anything that does not clear it has not cleared the bar.
-  3. **`netsleuth`** — the multi-source MDL reference, and the only classical member
+  3. **`netsleuth`**: the multi-source MDL reference, and the only classical member
      that beats LPSI on Power Grid in SL-VAE's Table 1 (F1 0.5428 vs 0.4737).
-  4. `rumor_centrality` / `jordan_center` — SINGLE-SOURCE estimators. They rank all
+  4. `rumor_centrality` / `jordan_center`: SINGLE-SOURCE estimators. They rank all
      N nodes and are exact on trees; evaluated as multi-source at k = 10% of N they
      score near zero by construction (§8.2), which is a property of the protocol
      rather than of the method. They are here because they are the founding
@@ -43,20 +43,20 @@ widely enough to name up front:
   * **`k` is given, never inferred.** The harness hands every member the source
     count (§2.4.1), which removes NETSLEUTH's MDL half outright.
   * **Full observation only.** Our episodes record a state snapshot, so the
-    sparse-observer methods (OJC here, Pinto–Thiran–Vetterli not implemented at
+    sparse-observer methods (OJC here, Pinto, Thiran, Vetterli not implemented at
     all) run outside the regime they were designed for.
   * **Bounded candidate pools** wherever a method costs one solve per candidate
     (`dmp_localize`, `dynamic_age`, `resim_greedy`). The bounds are module globals
     at the top of this file, not buried constants.
 
 Two methods from `research/source_localization.md` §3 are absent and neither is an
-oversight. **Pinto–Thiran–Vetterli (2012)** estimates from per-node ARRIVAL TIMES
+oversight. **Pinto, Thiran, Vetterli (2012)** estimates from per-node ARRIVAL TIMES
 at a sparse observer set; our transitions record states, not timestamps, so it has
 no input to consume without a generation change. **Belief propagation (Altarelli
 et al. 2014)** is a full posterior over initial conditions on a time-unrolled
 factor graph; `dmp_localize` is its tractable relative and is implemented instead.
 Every method in §4 is LEARNED and is registered as an external repo in
-`baselines/registry.py` rather than reimplemented here — except SL-VAE's inversion
+`baselines/registry.py` rather than reimplemented here: except SL-VAE's inversion
 procedure, which is `world_model/wm_sl.py` because it is the control arm A.
 
 Three conventions everything here obeys:
@@ -125,7 +125,7 @@ def _restricted(scores: np.ndarray, observation: np.ndarray) -> np.ndarray:
     Push every uninfected node below every infected one, without losing its order.
 
     A source that the observation says was never infected is impossible under a
-    progressive cascade, so this is a hard constraint rather than a preference —
+    progressive cascade, so this is a hard constraint rather than a preference,
     but the uninfected nodes still have to be RANKED for AUC, so they are shifted
     below the infected block instead of being zeroed into one tie.
     """
@@ -152,7 +152,7 @@ def _pad(chosen: list[int], scores: np.ndarray, budget: int) -> list[int]:
     """
     Top up a short source set from the highest-scoring nodes not already in it.
 
-    Every constrained method can run out before the budget does — LPSI finds fewer
+    Every constrained method can run out before the budget does: LPSI finds fewer
     local maxima than k, OJC's cover is smaller, the infected set itself may be
     smaller than k. A short set silently under-spends the budget and makes the
     arm's precision look better than the protocol allows.
@@ -223,7 +223,7 @@ def _normalized_adjacency(graph: GraphInfo) -> tuple[np.ndarray, np.ndarray, np.
     (sources, targets, values) of the symmetric renormalization D^-1/2 A D^-1/2.
 
     LPSI is defined on exactly this operator, and it is also what our encoders
-    consume — so a generated program that reimplements label propagation is
+    consume, so a generated program that reimplements label propagation is
     working over the same matrix the world model does.
     """
     neighbours = neighbour_sets(graph)
@@ -374,7 +374,7 @@ def netsleuth(
     description length. This harness is given `k` (§2.4.1: `budget` is the source
     count, and the whole arm set is compared at matched `k`), so only the
     seed-SELECTION half runs. Under the given-k convention that is the right
-    comparison and it is what SL-VAE's own table reports NETSLEUTH under — but it
+    comparison and it is what SL-VAE's own table reports NETSLEUTH under, but it
     is strictly less than the published method, and an inferred-k arm would need a
     `budget=None` path through `localize` that does not exist.
     """
@@ -531,7 +531,7 @@ def rumor_centrality(
 
     SINGLE-SOURCE. Evaluated as multi-source at k = 10% of N it scores near zero by
     construction (`research/source_localization.md` §8.2), which is a property of
-    the protocol, not of the estimator — run it at `--budgets 1` for its own number.
+    the protocol, not of the estimator: run it at `--budgets 1` for its own number.
     """
     scores = _restricted(rumor_centrality_scores(graph, observation), observation)
 
@@ -590,7 +590,7 @@ def ojc(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[i
     solves for an optimal cover and proves optimality on tree-like graphs; this is
     the standard greedy set-cover approximation, made sequential so it returns a
     ranked set of exactly `budget` sources. It is also run under FULL observation,
-    which is the regime our episodes record — OJC's own advantage is the sparse
+    which is the regime our episodes record: OJC's own advantage is the sparse
     -observer setting we do not generate, so this row understates it by design
     rather than by accident.
     """
@@ -611,7 +611,7 @@ def ojc(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[i
     chosen = []
     uncovered = set(infected)
 
-    # Greedy set cover over the candidate balls, tie-broken by Jordan centrality —
+    # Greedy set cover over the candidate balls, tie-broken by Jordan centrality,
     # the paper's "optimal cover, then centre of the cover", made sequential so it
     # produces a ranked set of exactly `budget` sources
     for _ in range(min(budget, len(candidates))):
@@ -787,7 +787,7 @@ def _dmp_forward(
 
     This is the DMP recursion in its independent-cascade form: a frontier
     probability per node, composed through the true per-edge transmission
-    probabilities. Exact on trees, an approximation with loops — which is exactly
+    probabilities. Exact on trees, an approximation with loops, which is exactly
     what Lokhov et al. rely on. NOT a call to the metered evaluator: it is
     analytic, consumes no simulator episodes, and is the classical method's own
     forward model rather than ours.
@@ -855,7 +855,7 @@ def dmp_localize(
 
     Sequential rather than top-k of `dmp_scores`, because a second source is only
     worth adding where the first one's predicted cascade FAILS to explain the
-    observation — scoring hypotheses independently would return `budget` copies of
+    observation: scoring hypotheses independently would return `budget` copies of
     the same region.
     """
     observation = np.clip(np.asarray(observation, dtype=np.float64), 0.0, 1.0)
@@ -996,7 +996,7 @@ def infected_degree_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> 
 
 
 def infected_degree(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[int]:
-    """Comin-Costa: degree within the infected subgraph — the cheap-heuristic floor."""
+    """Comin-Costa: degree within the infected subgraph, the cheap-heuristic floor."""
     return _top_k(_restricted(infected_degree_scores(graph, observation), observation), budget)
 
 
@@ -1045,7 +1045,7 @@ def random_sources_scores(
 def random_sources(
     graph: GraphInfo, observation: np.ndarray, budget: int, seed: int = 0, **_kw
 ) -> list[int]:
-    """Uniformly random nodes from the infected set — the floor every number is read against."""
+    """Uniformly random nodes from the infected set: the floor every number is read against."""
     return _top_k(
         _restricted(random_sources_scores(graph, observation, seed), observation), budget
     )
@@ -1113,7 +1113,7 @@ def resim_greedy(
 
 
 localization_algorithms = {
-    # label propagation — the bar (§2.9 risk 1)
+    # label propagation: the bar (§2.9 risk 1)
     "lpsi": lpsi,
     # MDL / spectral, multi-source
     "netsleuth": netsleuth,

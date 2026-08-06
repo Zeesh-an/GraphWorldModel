@@ -7,10 +7,10 @@ Source: https://snap.stanford.edu/data/ca-GrQc.html
     - 5,242 nodes (authors), 14,496 undirected edges (co-authorships)
     - Undirected: an edge means the two authors co-wrote at least one paper
     - The file's own header says "each unordered pair of nodes is saved once",
-      but it actually lists 28,980 lines — both directions — plus 12 self-loops,
+      but it actually lists 28,980 lines (both directions) plus 12 self-loops,
       so the deduplicated undirected count is 14,484
-    - Sparse original ids (max 26,196) — remapped to 0..N-1
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - Sparse original ids (max 26,196): remapped to 0..N-1
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 ToupleGDD reports this graph as "caGr" at 4.2k / 13.4k, which is its largest
@@ -41,18 +41,18 @@ def download_ca_grqc() -> Path:
     txt_path = data_dir / "ca-GrQc.txt"
 
     if txt_path.exists():
-        print(f"[✓] CA-GrQc already downloaded at {txt_path}")
+        print(f"[ok] CA-GrQc already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading CA-GrQc from {ca_grqc_url} ...")
+        print(f"[get] Downloading CA-GrQc from {ca_grqc_url} ...")
         urllib.request.urlretrieve(ca_grqc_url, gz_path)
-        print(f"[✓] Saved to {gz_path}")
+        print(f"[ok] Saved to {gz_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with gzip.open(gz_path, "rb") as gz_file:
         txt_path.write_bytes(gz_file.read())
-    print(f"[✓] Extracted to {txt_path}")
+    print(f"[ok] Extracted to {txt_path}")
 
     return txt_path
 
@@ -82,7 +82,7 @@ def load_ca_grqc(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int
     degrees = np.array(adjacency.sum(axis=1)).flatten()
     n_edges_undirected = adjacency.nnz // 2
     print(
-        f"[✓] CA-GrQc loaded: {num_nodes} nodes, "
+        f"[ok] CA-GrQc loaded: {num_nodes} nodes, "
         f"{n_edges_undirected} undirected edges (from {raw_edges.shape[0]} raw lines)"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")

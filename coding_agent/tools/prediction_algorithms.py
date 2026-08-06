@@ -1,5 +1,5 @@
 """
-Named classical CASCADE PREDICTION baselines — the condition-1 floor for
+Named classical CASCADE PREDICTION baselines: the condition-1 floor for
 `--task cascade_prediction`.
 
 Every predictor has the signature
@@ -17,28 +17,28 @@ footnote and declining is a first-class outcome rather than an error.
 
 That is the whole difference from the other four pools. `algorithms.py` returns a
 seed set, `dismantling_algorithms.py` nodes to delete, `localization_algorithms.py`
-a source set, `reconstruction_algorithms.py` a trajectory — and this one returns a
+a source set, `reconstruction_algorithms.py` a trajectory, and this one returns a
 single number, because the task emits no action at all (§2.1).
 
 Read §3 and §5 before treating any of these as a weak floor. In ascending order of
 danger:
 
-  1. `random_prediction`, `mean_size`, `persistence` — the three floors. Do not
+  1. `random_prediction`, `mean_size`, `persistence`: the three floors. Do not
      dismiss `mean_size`: MSLE is an error in LOG space, so predicting the training
      mean is far stronger than the same idea would be under squared error, and an
      arm that cannot clear it has learned nothing about the instance.
-  2. **`szabo_huberman`** — the row that actually has to be beaten. One feature, one
+  2. **`szabo_huberman`**: the row that actually has to be beaten. One feature, one
      line, from 2008, and every paper in §5 still prints it as "Feature-S&H"
      (§3.1). Its whole content is that `log P(t_p)` is near-linear in `log P(t_o)`.
-  3. **`feature_linear` / `feature_gbt`** — CTCP's own MLP and XGBoost rows over
+  3. **`feature_linear` / `feature_gbt`**: CTCP's own MLP and XGBoost rows over
      Cheng et al.'s five feature classes, and §3.1 records CasFlow's own ablation
      finding that feature models "in some cases even beat deep learning models".
      Cheng et al.'s central result is that the TEMPORAL features dominate.
-  4. **`seismic` / `hawkes` / `hawkes_hybrid`** — §3.2's generative line, and the
+  4. **`seismic` / `hawkes` / `hawkes_hybrid`**: §3.2's generative line, and the
      closest classical analogue to a world model: a stated transition mechanism plus
-     a fitted parameter, rolled forward. Their failure mode is ours too — SEISMIC
+     a fitted parameter, rolled forward. Their failure mode is ours too: SEISMIC
      diverges when the branching factor exceeds 1, which is the same runaway
-     `ens_count_bias` was built to catch — and the field's answer (a learned
+     `ens_count_bias` was built to catch, and the field's answer (a learned
      corrective layer on a generative core) is structurally our
      `structured_residual` head.
 
@@ -53,7 +53,7 @@ deviations are shared widely enough to name up front:
   * **No content features anywhere.** Cheng et al.'s five classes include content,
     and their own result is that content alone reaches 0.558 accuracy against 0.73
     for the best temporal feature [verified, §5.6]. Our corpora carry no text, so
-    the content class is absent and the temporal class — the one that dominates —
+    the content class is absent and the temporal class: the one that dominates,
     is not.
   * **Point-process fits are moment-matched, not MLE.** SEISMIC's and the Hawkes
     line's published implementations fit by maximum likelihood over the exact event
@@ -69,7 +69,7 @@ from coding_agent.types import GraphInfo
 
 # Szabo & Huberman's model is `log P(t_p) = alpha * log P(t_o) + beta`. With no
 # fitted pair to hand (a single-instance call, or an unfitted arm) these are the
-# defaults: alpha = 1 and beta = log(2), i.e. "it doubles" — which is exactly the
+# defaults: alpha = 1 and beta = log(2), i.e. "it doubles", which is exactly the
 # median outcome Cheng et al. built their balanced classification task around (§1.3).
 default_sh_slope = 1.0
 default_sh_intercept = math.log(2.0)
@@ -152,7 +152,7 @@ def cascade_features(graph: GraphInfo, observation) -> dict[str, float]:
         "log_observed": math.log(max(observed, minimum_popularity)),
         "observed_steps": float(observation.observed_steps),
         "remaining_steps": float(max(observation.horizon - observation.observed_steps, 0)),
-        # Temporal — the class that dominates
+        # Temporal: the class that dominates
         "rate": observed / max(observation.observed_steps, 1),
         "rate_first_half": first_half / max(half, 1),
         "rate_second_half": second_half / max(steps - half, 1),
@@ -221,7 +221,7 @@ def _fit_matrix(graph: GraphInfo, examples: list) -> tuple[np.ndarray, np.ndarra
 
 def persistence(graph: GraphInfo, observation, horizon: int, **_: object) -> float:
     """
-    `P(t_p) = P(t_o)` — the cascade is over.
+    `P(t_p) = P(t_o)`: the cascade is over.
 
     The floor every table needs and the one this literature never prints, because
     it is embarrassing how well it does: most cascades ARE over, so under a
@@ -241,6 +241,14 @@ def mean_size(
     in LOG space, so the geometric mean is its minimizer over a constant predictor
     and this is the best any instance-blind rule can do. An arm near it has
     discovered the corpus's size distribution and nothing else.
+
+    Instance-blind EXCEPT for the physical floor, and it has to be: a cascade that
+    already has more adopters than the corpus geometric mean would otherwise get a
+    prediction below its own observed count, which `prediction.validate` rejects
+    outright (adoption is progressive, so that answer is known-wrong rather than
+    merely bad). Without the clamp this baseline cannot run at all on any corpus
+    whose largest cascades exceed its typical one, which is every corpus here.
+    Every other member of this pool clamps the same way.
     """
     if not fit_examples:
         return float(observation.popularity)
@@ -250,7 +258,7 @@ def mean_size(
         for example in fit_examples
     ]
 
-    return float(math.exp(float(np.mean(logs))))
+    return max(float(observation.popularity), float(math.exp(float(np.mean(logs)))))
 
 
 def szabo_huberman(
@@ -306,7 +314,7 @@ def feature_linear(
     graph: GraphInfo, observation, horizon: int, fit_examples: list | None = None, **_: object
 ) -> float:
     """
-    Ridge regression on Cheng et al.'s feature classes — CTCP's "MLP" row's honest cousin.
+    Ridge regression on Cheng et al.'s feature classes: CTCP's "MLP" row's honest cousin.
 
     §3.1: feature-driven regression is "still competitive", and CasFlow's own
     ablation says it sometimes beats deep models. Linear rather than an MLP because
@@ -330,7 +338,7 @@ def feature_gbt(
     graph: GraphInfo, observation, horizon: int, fit_examples: list | None = None, **_: object
 ) -> float:
     """
-    Gradient-boosted trees on the same features — CTCP's XGBoost row.
+    Gradient-boosted trees on the same features: CTCP's XGBoost row.
 
     sklearn's `GradientBoostingRegressor` rather than xgboost, and stated rather than
     hidden: CTCP reports XGBoost specifically [verified, §5.2] and the two are not
@@ -360,7 +368,7 @@ def weng_communities(graph: GraphInfo, observation, horizon: int, **_: object) -
 
     §3.1: "community structure of the early adopter set predicts meme virality better
     than volume". Their own measure needs a community partition of the whole graph;
-    ours uses the cheapest structural proxy a `GraphInfo` supports — the fraction of
+    ours uses the cheapest structural proxy a `GraphInfo` supports: the fraction of
     the adopter set's neighbourhood that is NOT already adopting, which is high
     exactly when the cascade has escaped its first neighbourhood. Deviation stated
     because the published measure is infection-tree entropy over Infomap communities
@@ -384,7 +392,7 @@ def branching_factor(graph: GraphInfo, observation, horizon: int, **_: object) -
     The mechanism SEISMIC, our structured IC head and every branching-process model
     in §3.2 share, in its barest form: if each adopter produces `R` more and `R < 1`,
     the remaining total is `last_wave * R / (1 - R)`. **DECLINES when `R >= 1`**,
-    which is the supercritical case §3.2 says SEISMIC also refuses — the expected
+    which is the supercritical case §3.2 says SEISMIC also refuses: the expected
     size diverges, and emitting a number there would be a guess dressed as a model.
     """
     waves = _waves(observation)
@@ -493,7 +501,7 @@ def hawkes(graph: GraphInfo, observation, horizon: int, **_: object) -> float | 
 
     §5.4 is why this row matters more than SEISMIC's: on Tweet-1Mo at five minutes
     Hawkes reaches mean ARE 0.36 against SEISMIC's 2.61, and it fails on 302
-    cascades against SEISMIC's 507 — better on both the error AND on how many
+    cascades against SEISMIC's 507: better on both the error AND on how many
     cascades it can score at all, which is the pairing §8.4 says to always report
     together.
 
@@ -517,8 +525,8 @@ def hawkes_hybrid(
     """
     Mishra et al.'s hybrid: the generative estimate CORRECTED by a fitted layer.
 
-    Their best row by a wide margin — 0.17 / 0.15 / 0.11 mean ARE against the pure
-    Hawkes 0.27 / 0.22 / 0.17 [verified, §5.4 Table 3] — and §3.2 records why it
+    Their best row by a wide margin: 0.17 / 0.15 / 0.11 mean ARE against the pure
+    Hawkes 0.27 / 0.22 / 0.17 [verified, §5.4 Table 3], and §3.2 records why it
     matters to us specifically: "a learned corrective layer on top of a generative
     core is structurally identical to our `structured_residual` head". This is that
     architecture as a baseline, so 6-vs-this is a comparison of two corrections on
@@ -583,14 +591,14 @@ def rpp(graph: GraphInfo, observation, horizon: int, **_: object) -> float:
     """
     Reinforced Poisson (Shen et al., AAAI 2014): fitness x aging x rich-get-richer.
 
-    `lambda_t = c * f_gamma(t) * r_alpha(R_t)` — built for CITATION counts, which is
+    `lambda_t = c * f_gamma(t) * r_alpha(R_t)`: built for CITATION counts, which is
     why it is in the default pool specifically for APS. The rich-get-richer term is
     the observed count itself, the aging kernel decays the arrival rate, and the
     fitness `c` is the observed rate.
 
     Deviation: the published model fits a log-normal aging kernel by MLE over exact
     arrival times. Ours holds the kernel exponential at a fitted decay, which a wave
-    series identifies and a log-normal does not. Never declines — the model has no
+    series identifies and a log-normal does not. Never declines: the model has no
     divergence, which is the structural difference from §3.2's Hawkes line.
     """
     waves = _waves(observation)
@@ -614,8 +622,8 @@ def hip(graph: GraphInfo, observation, horizon: int, **_: object) -> float:
     """
     Hawkes Intensity Process (Rizoiu et al., WWW 2017), endogenous half only.
 
-    §3.2: HIP's contribution is an EXOGENOUS promotion term — search, shares,
-    off-platform arrivals — "the term IC has no place for", and §2.2 lists exogenous
+    §3.2: HIP's contribution is an EXOGENOUS promotion term, search, shares,
+    off-platform arrivals: "the term IC has no place for", and §2.2 lists exogenous
     arrivals as one of three specific mechanisms by which real cascades violate our
     structured head's composition rule. That makes it the most diagnostically
     interesting row in this pool.
@@ -623,7 +631,7 @@ def hip(graph: GraphInfo, observation, horizon: int, **_: object) -> float:
     **Deviation, and it is a large one:** none of our corpora publish a separate
     stimulus series, so the exogenous term is estimated from the cascade's own
     residual growth rather than measured. That is also why the `hip` external repo
-    is registered BLOCKED rather than wired — `pyhip.HIP.initial` takes a
+    is registered BLOCKED rather than wired: `pyhip.HIP.initial` takes a
     `daily_share` series we do not have. A row here is HIP's kernel without HIP's
     contribution, and it is in the pool as a power-law-memory baseline rather than as
     an exogenous one.
@@ -649,7 +657,7 @@ def hip(graph: GraphInfo, observation, horizon: int, **_: object) -> float:
 
 def neighborhood_size(graph: GraphInfo, observation, horizon: int, **_: object) -> float:
     """
-    `P(t_o)` plus the frontier's un-adopted out-neighbourhood — the one-step graph floor.
+    `P(t_o)` plus the frontier's un-adopted out-neighbourhood: the one-step graph floor.
 
     The cheapest prediction that uses the graph at all, and the control that says
     whether a structural signal is worth anything here: if it ties with
@@ -671,7 +679,7 @@ def reachability(graph: GraphInfo, observation, horizon: int, **_: object) -> fl
     """
     The structural CEILING: everything within `horizon - t_o` hops of the frontier.
 
-    Not a serious predictor — it is an upper bound, and on a well-connected corpus
+    Not a serious predictor: it is an upper bound, and on a well-connected corpus
     it predicts most of the graph. It is in the pool because that bound is the
     single most useful diagnostic when an arm massively over-predicts: an arm at the
     ceiling has learned "the cascade reaches whatever it can reach", which is the
@@ -705,7 +713,7 @@ def degree_scaled(graph: GraphInfo, observation, horizon: int, **_: object) -> f
     The structural analogue of Szabo & Huberman: a multiplier, but read off the
     graph rather than fitted from history. In the pool because §5.5 (CoupledGNN) is
     the only published protocol that withholds timestamps entirely and uses the
-    early adopter set plus the global graph alone — this is the crudest member of
+    early adopter set plus the global graph alone: this is the crudest member of
     that family and sets the bar its whole line has to clear.
     """
     features = cascade_features(graph, observation)
@@ -724,7 +732,7 @@ def random_prediction(
     seed: int = 0, **_: object
 ) -> float:
     """
-    A draw from the training size distribution — the floor, and it is not a throwaway.
+    A draw from the training size distribution: the floor, and it is not a throwaway.
 
     §1.4 is the reason: Salganik/Dodds/Watts and Watts (2007) argued cascade size is
     close to inherently unpredictable, and Cheng et al. (WWW'14) is the direct
@@ -774,7 +782,7 @@ def mc_forward(
 
 
 prediction_algorithms = {
-    # §3.1's feature line — `szabo_huberman` is the bar
+    # §3.1's feature line: `szabo_huberman` is the bar
     "szabo_huberman": szabo_huberman,
     "feature_linear": feature_linear,
     "feature_gbt": feature_gbt,

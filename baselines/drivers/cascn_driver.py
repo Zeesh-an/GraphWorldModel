@@ -4,7 +4,7 @@ Drive CasCN (ICDE'19) on OUR cascades and dump per-cascade predictions.
 CasCN is the first method in this literature to use both structure and time
 properly: a cascade as a SEQUENCE of sub-cascade graphs, a GCN over each snapshot
 and an LSTM across them. `research/cascade_prediction.md` §5.3 is why it is worth
-running rather than citing — under CasTemp's leak-free split it is the BEST of the
+running rather than citing: under CasTemp's leak-free split it is the BEST of the
 six re-run baselines on Twitter (MSLE 1.206) and second on APS, which is a larger
 reordering than any other row in that table. Under the leaky split it sits mid-pack
 (2.7931 on Weibo 0.5 h), so it is the clearest single case of §8.3's finding
@@ -20,20 +20,20 @@ the per-split file `casflow_driver.py` already knows how to write:
 `seq2graph` builds the per-timestep sub-cascade graphs, and
 `caslaplacian.calculate_scaled_laplacian_dir` builds the scaled directed Laplacian.
 All of that is the method, and none of it is ours. What the driver supplies is the
-split — OUR split, not the repo's, for the reason §8.3 gives.
+split: OUR split, not the repo's, for the reason §8.3 gives.
 
 **Two things my own earlier blocker got wrong, corrected here rather than quietly.**
 The repo's `num_nodes` is `tf.flags.DEFINE_integer("num_nodes", 100, "number of max
-nodes in cascade")` — a PER-CASCADE bound, not the global graph, and cascades past
+nodes in cascade")`: a PER-CASCADE bound, not the global graph, and cascades past
 100 participants are discarded by the preprocessing itself. So the dense
 `[batch, n_steps, num_nodes, num_nodes]` placeholder is 100x100 per step, which is
 trivial rather than cluster-scale. And the one file that fails to parse under
 Python 3 (`preprocessing/utils.py`) fails on a genuine INDENTATION BUG in the repo
-— a mismatched `else:` at line 121 — not on a py2 construct; the registry patches
+a mismatched `else:` at line 121, not on a py2 construct; the registry patches
 it.
 
 **It already dumps per-cascade predictions.** `run_graph_sequence.py` pickles
-`(predict_result, y_test, test_loss)`, so the readout needs no patch — only the
+`(predict_result, y_test, test_loss)`, so the readout needs no patch: only the
 mapping back to cascade ids, which the driver keeps from the file order it wrote.
 
 **The label is `log2(dP + 1)`** (`preprocess_graph_signal.py`:
@@ -129,7 +129,7 @@ def write_configs(directory: Path, observation: int, horizon: int, n_steps: int)
     """
     Rewrite the repo's two `config.py` files with this run's paths and windows.
 
-    They are files of literals and they ARE the repo's parameter surface — there is
+    They are files of literals and they ARE the repo's parameter surface: there is
     no CLI for the observation window. Mutating the imported modules instead would
     not survive `runpy`, which re-imports them; and `preprocess_graph_signal.py` has
     no `main()` at all (its body sits under `if __name__ == "__main__"`), so runpy

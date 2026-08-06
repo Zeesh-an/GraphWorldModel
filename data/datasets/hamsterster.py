@@ -4,7 +4,7 @@ Hamsterster Dataset Loader (dismantling GCC, "P-H")
 Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
     - 2,000 nodes, 16,098 undirected edges
     - Undirected, unweighted, 1-indexed
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 The single most-shared graph in this literature: GND, Min-Sum, NIRM ("P-H"),
@@ -12,7 +12,7 @@ GDM, MIND, BPHD ("Social") and Wandelt all report it.
 
 Warning: Name collision (research/critical_node_detection.md §6.4). KONECT's
 `petster-hamster` is 2,426 / 16,631 and networkrepository's `soc-hamsterster` is
-2,426 / 16,630 — both the RAW graph. The dismantling number is the 2,000-node
+2,426 / 16,630: both the RAW graph. The dismantling number is the 2,000-node
 giant component, which is what this file is.
 """
 

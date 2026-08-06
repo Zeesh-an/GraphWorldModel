@@ -13,7 +13,7 @@
 # Usage: sbatch sbatch/critical_node_detection/sweep_datasets.sbatch
 #        DATASETS="ppi_yeast crime" sbatch sbatch/critical_node_detection/sweep_datasets.sbatch
 #
-# The order is deliberate — it runs from the graph classes where a learned model
+# The order is deliberate: it runs from the graph classes where a learned model
 # should do well to the one where research/critical_node_detection.md §9.4
 # predicts it fails, so a bad power-grid number arrives as a confirmed prediction
 # rather than as the first result anyone sees:
@@ -23,7 +23,7 @@
 #                       actually search
 #   ppi_yeast           the most widely shared benchmark in the literature (§7)
 #   hamsterster         dense social, the graph class degree heuristics own
-#   intnet1             hub-dominated AS graph — hardest place to beat HDA
+#   intnet1             hub-dominated AS graph: hardest place to beat HDA
 #   usair97, openflights transport, moderate diameter
 #   road_eu, power_grid MESH graphs, diameter 46. §9.4's predicted loss.
 #

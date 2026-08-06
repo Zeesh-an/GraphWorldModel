@@ -217,7 +217,7 @@ def load_taoke(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
 # ten daily columns, so a leak-free chronological split into three contiguous bins
 # leaves each bin about a day wide and a 2-day prediction window crosses every
 # boundary. 1 h / 6 h is what survives that split with most of the corpus intact, and
-# it is OUR setting rather than CasTemp's — a Taoke number from this loader is
+# it is OUR setting rather than CasTemp's: a Taoke number from this loader is
 # comparable to itself and not to that paper's Table 4.
 observation_windows = (3600, 7200)
 prediction_horizon = 21600

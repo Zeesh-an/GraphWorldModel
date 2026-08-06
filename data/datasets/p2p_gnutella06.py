@@ -4,11 +4,11 @@ Gnutella P2P Dataset Loader (6 August 2002 snapshot)
 Source: https://snap.stanford.edu/data/p2p-Gnutella06.html
     - 8,717 nodes, 31,525 arcs [verified, GreedyWalk Table 2 and SNAP]
     - Directed, tab-separated with a `#` header
-    - No inherent node features — uses log(1 + total degree)
+    - No inherent node features: uses log(1 + total degree)
 
 GreedyWalk's Table 2 row exactly (8,717 / 31,525), loaded as the pair with
 `p2p_gnutella05` because that table reports both and the two are consecutive
-daily snapshots of one network — the closest thing the spectral line has to a
+daily snapshots of one network: the closest thing the spectral line has to a
 same-graph replicate.
 
 Warning: FOUR Gnutella snapshots now live in this repo under names that differ only

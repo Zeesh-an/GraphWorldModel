@@ -12,8 +12,8 @@
 # Usage: sbatch sbatch/source_localization/generate_data_jazz.sbatch
 #
 # Jazz is the single cleanest comparison target in this literature: FOUR papers
-# report it at 198 / 2,742 to the digit — IVGD Table 2, SL-VAE Table 5, GraphSL
-# Table 1, SIDSL Table 5 (research/source_localization.md §6.1) — and it is small
+# report it at 198 / 2,742 to the digit: IVGD Table 2, SL-VAE Table 5, GraphSL
+# Table 1, SIDSL Table 5 (research/source_localization.md §6.1), and it is small
 # enough that a full six-condition ladder finishes in hours.
 #
 # --task supplies the whole data shape from the registry, so no --gen-action-ops
@@ -24,7 +24,7 @@
 #
 # INJECT_P and the counterfactual forks are inert for the same reason (empty
 # action ops means sample_injection always returns NULL and counterfactual_actions
-# produces nothing), so they are left at their defaults rather than zeroed — the
+# produces nothing), so they are left at their defaults rather than zeroed: the
 # registry is the single place that decides.
 #
 # BUDGET_PCT_RANGE is the SOURCE fraction band, which is the one generation knob

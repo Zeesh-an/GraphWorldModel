@@ -24,7 +24,7 @@ from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory, improv
 
 
 # A script that fails to build or run teaches the next turn something, but it is
-# not an evaluation — charging it against --outer-iters silently turns a 5-round
+# not an evaluation: charging it against --outer-iters silently turns a 5-round
 # search into a 3-round one. Repairs get their own budget instead.
 default_max_repairs = 3
 
@@ -49,7 +49,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         self.checkpoint_path = checkpoint_path
         self.checkpoint_fingerprint = checkpoint_fingerprint
         # Canned arms (classical baselines, routing) never read a prompt, so the
-        # anchor rollout would be pure cost — real episodes under an MC evaluator
+        # anchor rollout would be pure cost: real episodes under an MC evaluator
         self.use_anchor = use_anchor
         # Per-iteration rewards, read back by run.py for the convergence plot
         self.history = []
@@ -161,7 +161,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 )
                 last_script = strategy.source_script
 
-                # The generated algorithm's own computation — with free-mode
+                # The generated algorithm's own computation, with free-mode
                 # composition scripts this internal planning dominates wall-clock
                 tqdm.write(f"[one_shot] iter {iteration}: executing plan_horizon()...")
 
@@ -183,7 +183,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 # Log the first line of any StrategyError
                 tqdm.write(
                     f"[one_shot] iter {iteration}: script failed "
-                    f"(repair {repairs}/{self.max_repairs}) — "
+                    f"(repair {repairs}/{self.max_repairs}): "
                     f"{last_error.splitlines()[0]}"
                 )
 
@@ -194,7 +194,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     break
 
                 # The thread already carries the task, so the next turn is only
-                # the failure — plus the script that failed, when we got that far,
+                # the failure, plus the script that failed, when we got that far,
                 # and the best working script when one exists to fall back to
                 pending = build_feedback_prompt(
                     0.0,
@@ -262,7 +262,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             report = None
 
             # Counterfactual credit ablates one ACTION at a time, and an inverse
-            # task emits no actions — there is nothing to ablate and nothing the
+            # task emits no actions: there is nothing to ablate and nothing the
             # rollout would answer
             if self.credit and not task.recovers:
                 # The bags that actually ran, not the plan object: identical for
@@ -275,7 +275,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 report = format_credit_report(base_reward, entries)
 
             # Next turn: this iteration's reward and diagnostics, and the BEST
-            # script so far as the edit target — editing the latest attempt
+            # script so far as the edit target: editing the latest attempt
             # instead makes a regression the base for every iteration after it
             pending = build_feedback_prompt(
                 trajectory.reward,

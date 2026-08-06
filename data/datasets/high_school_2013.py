@@ -7,7 +7,7 @@ Source: https://sociopatterns.org/datasets.html
     - 9 class labels (2BIO1-3, MP, MP*1-2, PC, PC*, PSI*)
 §6.6 ranks this THIRD: it is the only multi-layer instance within reach, because
 Mastrandrea et al. (2015) published three DIFFERENT relations on the same students
-— this proximity trace, a contact diary (120 nodes / 502 directed arcs) and a
+this proximity trace, a contact diary (120 nodes / 502 directed arcs) and a
 Facebook friendship graph (156 / 1,437 undirected) [all derived, §6.2]. Only the
 proximity layer is loaded: the other two are different relations rather than
 contact networks, and an epidemic does not travel along a Facebook edge.

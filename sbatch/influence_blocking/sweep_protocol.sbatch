@@ -17,13 +17,13 @@
 #
 #   tie_break   §8.4: the three rules differ ONLY in how a same-step arrival
 #               resolves, which is a one-line change in a simulator and a large
-#               change in the reported numbers — and most papers never say which
+#               change in the reported numbers, and most papers never say which
 #               they used. TC-AIBM's three-rule comparison is the exception, and
 #               it is published as bar charts with no numeric table (§11), so
 #               this sweep produces numbers that do not currently exist.
 #
 #   attacker    §8.3: every blocking result is conditioned on how S_N was chosen
-#               and the papers disagree — SandIMIN draws randomly from the top
+#               and the papers disagree: SandIMIN draws randomly from the top
 #               200, TC-AIBM reports Degree / IMM / PageRank, CLDAG sweeps
 #               largest-degree and random. Our spine selectors already cover it.
 #

@@ -4,11 +4,11 @@ American College Football Dataset Loader
 Source: https://public.websites.umich.edu/~mejn/netdata/football.zip
     - 115 nodes, 613 undirected edges [verified, KONECT]
     - Undirected, unweighted GML
-    - 12 conference labels — the ground-truth communities
+    - 12 conference labels: the ground-truth communities
 
 Girvan & Newman's (PNAS 2002) football graph: Division I-A teams, an edge per
 regular-season game, and conference membership as the ground-truth partition. In
-`research/epidemic_control.md` §6.3's catalogue and loaded here for one reason — at
+`research/epidemic_control.md` §6.3's catalogue and loaded here for one reason: at
 115 nodes with 12 known communities and near-regular degree (mean 10.7, max 12), it
 is the one graph in this repo where the DEGREE heuristic has almost nothing to
 grab. §9.4 predicts a heuristic-collapse result on power-law graphs; this is the
@@ -76,7 +76,7 @@ def load_football(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, in
 
     degrees = np.array(adjacency.sum(axis=1)).flatten()
     print(
-        f"[✓] American College Football loaded: {num_nodes} nodes, "
+        f"[ok] American College Football loaded: {num_nodes} nodes, "
         f"{adjacency.nnz // 2} undirected edges, "
         f"{len(set(conferences))} conference labels"
     )

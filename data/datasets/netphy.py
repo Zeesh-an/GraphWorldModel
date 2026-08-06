@@ -1,16 +1,16 @@
 """
 NetPHY Dataset Loader
 
-Downloads and loads the arXiv Physics-section collaboration network — NetHEPT's
+Downloads and loads the arXiv Physics-section collaboration network: NetHEPT's
 sibling, and the other half of the classical IM benchmark pair.
 
 Source: https://www.microsoft.com/en-us/research/people/weic/selected-projects/
     (Wei Chen's own release, `weic-graphdata.zip`, which ships hep.txt + phy.txt)
     - 37,154 nodes (authors), 174,161 undirected edges after deduplication
     - Undirected: an edge means the two authors co-wrote at least one paper
-    - The raw file lists 231,584 edge LINES — one per co-authored paper, so a
+    - The raw file lists 231,584 edge LINES: one per co-authored paper, so a
       frequently-collaborating pair appears many times. See the note below.
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Reconciling the three published edge counts for this graph:
@@ -55,22 +55,22 @@ def download_netphy() -> Path:
     edges_path = data_dir / "phy.txt"
 
     if edges_path.exists():
-        print(f"[✓] NetPHY already downloaded at {edges_path}")
+        print(f"[ok] NetPHY already downloaded at {edges_path}")
         return edges_path
 
     if not zip_path.exists():
-        print(f"[↓] Downloading NetPHY from {netphy_url} ...")
+        print(f"[get] Downloading NetPHY from {netphy_url} ...")
         request = urllib.request.Request(
             netphy_url, headers={"User-Agent": browser_agent}
         )
         with urllib.request.urlopen(request) as response:
             zip_path.write_bytes(response.read())
-        print(f"[✓] Saved to {zip_path}")
+        print(f"[ok] Saved to {zip_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with zipfile.ZipFile(zip_path, "r") as zip_file:
         zip_file.extractall(data_dir)
-    print(f"[✓] Extracted to {data_dir}")
+    print(f"[ok] Extracted to {data_dir}")
 
     return edges_path
 
@@ -109,9 +109,9 @@ def load_netphy(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]
     n_edges_undirected = adjacency.nnz // 2
     n_isolates = int((degrees == 0).sum())
     print(
-        f"[✓] NetPHY loaded: {num_nodes} nodes, "
+        f"[ok] NetPHY loaded: {num_nodes} nodes, "
         f"{n_edges_undirected} undirected edges "
-        f"(from {declared_lines} raw lines — multi-edges collapsed)"
+        f"(from {declared_lines} raw lines: multi-edges collapsed)"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")
     if n_isolates > 0:

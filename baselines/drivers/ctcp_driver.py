@@ -4,7 +4,7 @@ Drive CTCP (IJCAI'23) on OUR cascades and dump per-cascade predictions.
 CTCP is the continuous-time, cross-cascade method: one evolving user/cascade state
 updated event by event and shared across ALL cascades, rather than a per-cascade
 encoder. `research/cascade_prediction.md` §5.3 makes it the interesting arm to run
-beside CasFlow — under CasTemp's leak-free split it is one of the two methods whose
+beside CasFlow: under CasTemp's leak-free split it is one of the two methods whose
 train-vs-test loss curves stay flat while CasFlow's and CasDO's diverge, so it is
 the published method least likely to be exploiting the temporal shortcut §8.3
 describes.
@@ -23,7 +23,7 @@ renamed, so the export is a rename rather than a reconstruction.
 **The split crosses as TIME BOUNDARIES, not as flags.** `get_data` takes
 `train_time` / `val_time` / `test_time` and assigns a cascade by its publication
 time, which is exactly the chronological protocol `data/wm_cascades.py` already
-replayed under — so passing our own boundaries reproduces our split inside the
+replayed under, so passing our own boundaries reproduces our split inside the
 repo rather than fighting it. That is the one place this driver is luckier than
 `casflow_driver.py`, which had to reimplement a random split it could not use.
 
@@ -105,7 +105,7 @@ def write_event_table(work_dir: Path, data: dict) -> tuple[Path, dict, dict]:
         for nodes, when in paths:
             # The repo's `src` is who was forwarded FROM and `dst` who forwarded.
             # A single-element path is the root, whose own "forward" is from itself
-            # — which is how the repo's own preprocessing writes a cascade's first
+            #, which is how the repo's own preprocessing writes a cascade's first
             # event, so the convention is theirs rather than ours.
             source = nodes[-2] if len(nodes) > 1 else nodes[-1]
             rows.append((identifier, source, nodes[-1], cascade, int(when)))

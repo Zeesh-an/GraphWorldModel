@@ -22,7 +22,7 @@ from world_model.wm_model import WorldModel
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Oracle structured rollout (q = true edge prob) — validates the IC structural form"
+        description="Oracle structured rollout (q = true edge prob): validates the IC structural form"
     )
     parser.add_argument(
         "--data-dir",

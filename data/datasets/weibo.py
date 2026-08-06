@@ -6,7 +6,7 @@ Loads the Sina Weibo follower network (Influence Locality dataset).
 Source: https://www.aminer.cn/influencelocality
     - 1,787,443 users, ~216M directed follow edges
     - Directed: edge u -> v means v follows u (influence flows u -> v)
-    - No inherent node features — uses log(1 + total degree) as synthetic features
+    - No inherent node features: uses log(1 + total degree) as synthetic features
     - No node labels
 
 NO auto-download: AMiner gates the archive behind registration, so
@@ -30,7 +30,7 @@ def download_weibo() -> Path:
     network_path = data_dir / "weibo_network.txt"
 
     if network_path.exists():
-        print(f"[✓] Weibo network found at {network_path}")
+        print(f"[ok] Weibo network found at {network_path}")
         return network_path
 
     raise FileNotFoundError(
@@ -102,7 +102,7 @@ def load_weibo(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
     # Placeholder labels
     node_labels = np.zeros(num_nodes, dtype=np.int32)
 
-    print(f"[✓] Weibo loaded: {num_nodes} nodes, {adjacency.nnz} directed edges")
+    print(f"[ok] Weibo loaded: {num_nodes} nodes, {adjacency.nnz} directed edges")
     print(
         f"    Avg out-degree: {out_degrees.mean():.1f}, "
         f"max out-degree: {out_degrees.max():.0f}"

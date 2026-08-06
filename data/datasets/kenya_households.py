@@ -4,7 +4,7 @@ Kenyan Households (Kilifi) Contact Network Loader
 Source: https://sociopatterns.org/datasets.html
     - 75 nodes, 576 undirected edges, 32,643 contact records [derived]
     - Undirected, unweighted after aggregation
-    - 5 household labels (B, E, F, H, L) — a PHYSICAL block structure
+    - 5 household labels (B, E, F, H, L): a PHYSICAL block structure
 
 Kiti et al. (2016), five rural Kenyan households over three days. The one trace in
 this family whose community labels are households rather than institutional roles,
@@ -14,11 +14,11 @@ synthetically.
 Warning: THE PUBLISHED NODE COUNT OF 47 IS WRONG, and `research/epidemic_control.md`
 §6.2 says why: member ids restart at 1 in every household, so a global dedup on the
 member id alone collapses distinct people. A person is the PAIR `(household,
-member)`, which gives 75 — B=15, E=17, F=8, H=29, L=6, verified against the file.
+member)`, which gives 75: B=15, E=17, F=8, H=29, L=6, verified against the file.
 Netzschleuder's mirror reports the collapsed 47.
 
 Warning: not a `tij` trace at all. Its rows carry `duration / day / hour` rather
-than a timestamp, so there is no ordering to discard here — the aggregation warning
+than a timestamp, so there is no ordering to discard here: the aggregation warning
 in `sociopatterns.py` applies to the day/hour resolution instead.
 """
 

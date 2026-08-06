@@ -30,7 +30,7 @@ identity is EXACT, not an approximation, and it costs nothing extra. It does
 condition on the seed sets: a policy that re-plans against the realized union
 makes the later sets random, and the estimate then conditions on the realized
 path rather than integrating over it. The policy is handed the representative
-sample's union for exactly that reason — it is one realization, and it is
+sample's union for exactly that reason: it is one realization, and it is
 labelled as such rather than being passed off as the expectation.
 """
 

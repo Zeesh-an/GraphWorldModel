@@ -104,7 +104,7 @@ adaptive_anchor_algorithms = ("adapt_epic", "adapt_degree_discount", "static_spl
 # for: they return seed sets, and this planner spends its budget on removals.
 # `adaptive_degree` heads the list because it is the row that actually has to be
 # beaten (research/critical_node_detection.md §9.3 item 2). `greedy_blocking` is
-# deliberately absent for the same reason `adapt_greedy` is — it costs
+# deliberately absent for the same reason `adapt_greedy` is: it costs
 # k x candidates x mc_runs episodes and would dominate startup for a table that
 # exists to set a bar. Run it as its own --baselines arm when you want its number.
 dismantling_anchor_algorithms = (
@@ -120,7 +120,7 @@ dismantling_anchor_algorithms = (
 # (research/epidemic_control.md §9.4, §5.1: RLGN's own Table 2 has Degree tying
 # Eigenvector to within 0.1 on two of five graphs). `netshield` and `dava` are the
 # two published methods this task is positioned BETWEEN, and running both is the
-# only way §8.2 trap 1 is visible — the spectral method wins the eigendrop and the
+# only way §8.2 trap 1 is visible: the spectral method wins the eigendrop and the
 # data-aware one wins the attack rate. `acquaintance_immunization` is on the list
 # because §8.3 names it as the row that most embarrasses learned methods, and
 # `random_immunization` is not a throwaway floor: the GAP between it and degree is
@@ -166,7 +166,7 @@ no_immunization = "no_immunization"
 # label-propagation method with no learning beats both SL-VAE and DDMSL on Digg,
 # and it sits inside the agent's own expressible space. `resim_greedy` is
 # deliberately absent for the same reason `greedy_blocking` and `adapt_greedy`
-# are — it re-simulates every candidate on a private simulator and would dominate
+# are: it re-simulates every candidate on a private simulator and would dominate
 # startup for a table that exists to set a bar, not to be the result.
 localization_anchor_algorithms = (
     "lpsi",
@@ -182,12 +182,12 @@ localization_anchor_algorithms = (
 # (research/cascade_reconstruction.md §5.6): Xiao SDM'18's methods reach node
 # precision > 0.8 from an O(m + k log k) BFS variant, and it sits inside the
 # agent's own expressible space. `personalized_pagerank` is second for the
-# opposite reason — §8.2 trap 4 records that it BEATS tree sampling on `ca_grqc`
+# opposite reason: §8.2 trap 4 records that it BEATS tree sampling on `ca_grqc`
 # specifically, so an arm that does not clear it there has demonstrated nothing.
 # `observed_only` is Rozenshtein's `Reports` control and the concrete answer to
 # §2.11 risk 1: a trivial decoder has to score badly under the chosen reward.
 # `mcmc_decode` and `forward_backward` are deliberately absent for the same reason
-# `resim_greedy` and `adapt_greedy` are — they call the kernel thousands of times
+# `resim_greedy` and `adapt_greedy` are: they call the kernel thousands of times
 # per instance and would dominate startup for a table that exists to set a bar.
 reconstruction_anchor_algorithms = (
     "delayed_bfs",
@@ -204,13 +204,13 @@ reconstruction_anchor_algorithms = (
 # (research/cascade_prediction.md §3.1): one feature, one line, from 2008, and
 # every paper in §5 still prints it as "Feature-S&H". `seismic` and `hawkes` are the
 # generative pair, and they are here for their DECLINE behaviour as much as their
-# error — §5.4 shows Hawkes beating SEISMIC on both mean ARE and on how many
+# error: §5.4 shows Hawkes beating SEISMIC on both mean ARE and on how many
 # cascades it can score at all, which is the pairing §8.4 says to always report
 # together. `mean_size` and `persistence` are the two floors: under a LOG-space
 # error an instance-blind constant is far stronger than intuition suggests, and an
 # arm that only ties with them has learned the corpus's size distribution rather
 # than anything about the instance. `mc_forward` is deliberately absent for the same
-# reason `mcmc_decode` and `resim_greedy` are — it pays kernel calls per instance
+# reason `mcmc_decode` and `resim_greedy` are: it pays kernel calls per instance
 # and would dominate startup for a table that exists to set a bar.
 prediction_anchor_algorithms = (
     "szabo_huberman",
@@ -227,7 +227,7 @@ prediction_anchor_algorithms = (
 # (research/influence_blocking.md §5.4, §5.6), and `degree_blocking` is on it for the
 # opposite reason: CLDAG reports the degree heuristic fails outright here, so an arm
 # that only beats degree has demonstrated nothing. `greedy_prevention` and
-# `cmia_o` are deliberately absent — the first re-simulates the whole competitive
+# `cmia_o` are deliberately absent: the first re-simulates the whole competitive
 # cascade per candidate and would dominate startup, the second runs a Dijkstra per
 # candidate per pick. Run either as its own --baselines arm when you want its number.
 blocking_anchor_algorithms = {
@@ -253,7 +253,7 @@ max_listed_gains = 10
 
 
 def _communities(graph: GraphInfo) -> dict[int, int]:
-    """{node: community_id}, cached on the graph — summarize() runs every turn."""
+    """{node: community_id}, cached on the graph, summarize() runs every turn."""
     if graph._community_labels is None:
         graph._community_labels = primitives.detect_communities(graph)
 
@@ -381,7 +381,7 @@ def _gain_lines(gains: dict, graph: GraphInfo) -> list[str]:
     )
 
     if not listed:
-        return ["no unseeded node has meaningful residual gain — the seed set already covers the reachable graph"]
+        return ["no unseeded node has meaningful residual gain: the seed set already covers the reachable graph"]
 
     return [
         f"highest-value nodes you did NOT seed (estimated extra spread in nodes if "
@@ -462,7 +462,7 @@ def _containment_lines(
         )
         lines.append(
             f"nodes the cascade still reaches (P(infected)>={reached_threshold:.0%}): "
-            f"{len(infected)}/{graph.num_nodes} — top by degree: {listed}"
+            f"{len(infected)}/{graph.num_nodes}: top by degree: {listed}"
         )
 
     return lines
@@ -477,7 +477,7 @@ def _blocking_lines(
     `summarize`'s seed-centric diagnostics all describe where a cascade SHOULD go
     next, and `_containment_lines`' removal-distance framing assumes the only lever
     is deletion. Neither answers the question a blocker asks, which is whether its
-    counter-cascade got anywhere BEFORE the rumour did — the tie-break makes arriving
+    counter-cascade got anywhere BEFORE the rumour did: the tie-break makes arriving
     second worth exactly nothing.
     """
     lever = lever_of(task)
@@ -518,7 +518,7 @@ def _blocking_lines(
             f"reachability of your seeds from the rumour: {len(inside)}/{len(spent)} "
             f"sit within 3 hops of S_N ({sum(1 for node in spent if node in hop_one)} "
             f"of them adjacent to a source). A seed the rumour never reaches saves "
-            f"nobody, and one it reaches FIRST saves nobody either — prevented "
+            f"nobody, and one it reaches FIRST saves nobody either: prevented "
             f"influence counts only nodes that would otherwise have been infected."
         )
 
@@ -535,7 +535,7 @@ def _blocking_lines(
         )
         lines.append(
             f"nodes the RUMOUR still reaches (P>={reached_threshold:.0%}): "
-            f"{len(infected)}/{graph.num_nodes} — top by degree: {listed}"
+            f"{len(infected)}/{graph.num_nodes}: top by degree: {listed}"
         )
 
     return lines
@@ -544,8 +544,8 @@ def _blocking_lines(
 def summarize(
     trajectory: Trajectory, graph: GraphInfo | None = None, task: TaskSpec | None = None
 ) -> str:
-    # An inverse task rolled out no cascade, so every diagnostic below — frontier
-    # counts, residual gain, community reach — describes something that did not
+    # An inverse task rolled out no cascade, so every diagnostic below: frontier
+    # counts, residual gain, community reach: describes something that did not
     # happen. Its own summary answers the question that was actually asked: which
     # sources were recovered, which were missed, and what the misses have in common.
     # A DECODER's is different again: the split that matters there is the node half
@@ -591,7 +591,7 @@ def summarize(
     if frontier_counts and frontier_counts[-1] == 0:
         death_step = len(frontier_counts) - 1 - frontier_counts[::-1].index(0)
         lines.append(
-            f"cascade dead by t={death_step} — actions scheduled after that did nothing"
+            f"cascade dead by t={death_step}: actions scheduled after that did nothing"
         )
 
     if graph is None:
@@ -652,7 +652,7 @@ def summarize(
         )
         lines.append(
             f"unreached nodes (P(infected)<{unreached_threshold:.0%} across the "
-            f"ensemble): {len(unreached)}/{graph.num_nodes} — top by estimated gain: "
+            f"ensemble): {len(unreached)}/{graph.num_nodes}, top by estimated gain: "
             f"{listed}{overflow}"
         )
 
@@ -675,7 +675,7 @@ def paired_delta(
     Signed change against the incumbent, with the noise band that decides it.
 
     Both rollouts run at the same seed, so the realizations are shared and the
-    difference is far better resolved than either absolute number — but on a
+    difference is far better resolved than either absolute number, but on a
     hub-dominated graph the whole algorithmic spread can still sit inside this
     band, and the model needs to be told that rather than chase it.
 
@@ -691,13 +691,13 @@ def paired_delta(
 
     if abs(delta) <= band:
         verdict = (
-            "INSIDE THE NOISE — this change did nothing measurable, so do not "
+            "INSIDE THE NOISE: this change did nothing measurable, so do not "
             "read anything into its sign"
         )
     elif improves(trajectory.reward, incumbent.reward, sense):
-        verdict = "a real improvement — keep what caused it"
+        verdict = "a real improvement: keep what caused it"
     else:
-        verdict = "a real regression — undo what caused it"
+        verdict = "a real regression: undo what caused it"
 
     direction = "fewer is better" if sense == "minimize" else "more is better"
     # F1, the reconstruction score and every prediction error live on scales where a
@@ -777,7 +777,7 @@ def attach_context(
     budget)` are the contract every existing method, exemplar and checkpoint is
     written against. `outbreak` is empty for a seeding task, so a generated script
     may read it unconditionally; `budget_op` is what the SCORED harness emits,
-    which is `add_node` for seeding and `remove_node` for containment — hardcoding
+    which is `add_node` for seeding and `remove_node` for containment: hardcoding
     it made every scored-mode containment arm fail validation before it was ever
     scored.
 
@@ -828,8 +828,8 @@ def wrap_exogenous(
     """
     Layer everything the environment must see but the policy is not charged for.
 
-    Every path that builds an ActionFn goes through here — `evaluate_strategy`,
-    `per_step`, `windowed` — because a rollout that skips it faces no outbreak and
+    Every path that builds an ActionFn goes through here: `evaluate_strategy`,
+    `per_step`, `windowed`, because a rollout that skips it faces no outbreak and
     no edit stream, and would post a number that looks like a win against arms
     that did face both.
 
@@ -840,7 +840,7 @@ def wrap_exogenous(
 
     A COMPETITIVE task takes the blocking wrapper instead of the containment one, and
     the difference is not cosmetic: the containment wrapper seeds the outbreak as
-    `add_node` ops, and under two cascades `add_node` means the POSITIVE one — so
+    `add_node` ops, and under two cascades `add_node` means the POSITIVE one, so
     reusing it would have every arm start the rumour's own counter-cascade for it.
     The rumour is committed by the simulator's `reset` there (§2.1), and the wrapper's
     remaining jobs are the detection delay and the removal expansion.
@@ -973,8 +973,8 @@ class _BlockingAnchor:
     Wraps a library blocker as the plan_horizon()-shaped object evaluate_strategy wants.
 
     Separate from `_PlanAnchor` because the blocking library is the only one whose
-    members return two different SHAPES — node ids on three levers and `(u, v)` arcs
-    on the fourth — and `blocking_plan` is what reconciles them. `None` as the
+    members return two different SHAPES: node ids on three levers and `(u, v)` arcs
+    on the fourth, and `blocking_plan` is what reconciles them. `None` as the
     selector is the unopposed reference: an empty plan, so the rumour runs with
     nobody stopping it, which is the number every prevented-influence column divides
     by and the floor every arm has to beat.
@@ -1010,8 +1010,8 @@ class _ImmunizationAnchor:
     Wraps a library immunizer as the plan_horizon()-shaped object evaluate_strategy wants.
 
     The compartmental twin of `_BlockingAnchor`, and separate from `_PlanAnchor` for
-    the same reason: the immunization library's members return two SHAPES — node ids
-    on the two node levers and `(u, v)` arcs on the two edge ones — and
+    the same reason: the immunization library's members return two SHAPES, node ids
+    on the two node levers and `(u, v)` arcs on the two edge ones, and
     `immunization_plan` is what reconciles them. `None` as the selector is the
     UNPROTECTED reference: an empty plan, so the outbreak runs with nobody dosed,
     which is the number every prevented-infections column divides by.
@@ -1126,7 +1126,7 @@ def baseline_anchor(
     environment: object, task: TaskSpec, graph: GraphInfo
 ) -> tuple[str, Trajectory, str]:
     """
-    One rollout per classical baseline in the same env — the table to top.
+    One rollout per classical baseline in the same env: the table to top.
 
     Returns the leaderboard text, the BEST baseline's trajectory, and its name.
     The trajectory rides along because its per-node marginals are what
@@ -1135,7 +1135,7 @@ def baseline_anchor(
     if task.forecasts:
         # A forecasting task's floor is the classical POPULARITY-PREDICTOR library.
         # These go through `evaluate_strategy` like everything else, which routes
-        # them into the prediction path — same cascades, same observation window,
+        # them into the prediction path: same cascades, same observation window,
         # same metric as the arm they are setting a bar for.
         scored = []
 
@@ -1151,7 +1151,7 @@ def baseline_anchor(
             f"REFERENCE SCORES: classical popularity-prediction baselines run on "
             f"THESE cascades, at the same observation window and under the same "
             f"metric. The score is {task.prediction_metric.upper()}, and it is an "
-            f"ERROR — **LOWER IS BETTER**, unlike every other task in this repo. "
+            f"ERROR: **LOWER IS BETTER**, unlike every other task in this repo. "
             f"Beating the top row is the bar. Read the whole table, not just the "
             f"score: `szabo_huberman` is a 2008 one-parameter regression and it is "
             f"the row that matters; `mean_size` ignores the instance entirely, and "
@@ -1176,7 +1176,7 @@ def baseline_anchor(
     if task.decodes:
         # A decoding task's floor is the classical TRAJECTORY-DECODER library.
         # These go through `evaluate_strategy` like everything else, which routes
-        # them into the reconstruction path — same episodes, same mask, same
+        # them into the reconstruction path: same episodes, same mask, same
         # setting as the arm they are setting a bar for.
         scored = []
 
@@ -1197,7 +1197,7 @@ def baseline_anchor(
             f"score: `delayed_bfs` is the row that matters, and "
             f"`personalized_pagerank` is on this list because the published finding "
             f"is that it BEATS tree sampling on assortative graphs like ca_grqc. "
-            f"`observed_only` reports exactly what it was shown and infers nothing — "
+            f"`observed_only` reports exactly what it was shown and infers nothing: "
             f"if it is competitive, the reward is wrong, not the arm:",
         ]
         lines += [
@@ -1214,7 +1214,7 @@ def baseline_anchor(
     if task.recovers:
         # An inverse task's floor is the classical SOURCE-LOCALIZATION library.
         # These go through `evaluate_strategy` like everything else, which routes
-        # them into the localization path — same instances, same k, same
+        # them into the localization path: same instances, same k, same
         # observation mode as the arm they are setting a bar for.
         scored = []
 
@@ -1232,7 +1232,7 @@ def baseline_anchor(
             "REFERENCE SCORES: classical source-localization baselines run on THESE "
             "episodes, at the same k and the same observation. F1 against the true "
             "source set, HIGHER is better; beating the top row is the bar. LPSI is "
-            "the row that matters — it is a 2017 label-propagation method with no "
+            "the row that matters: it is a 2017 label-propagation method with no "
             "learning at all, and it beats both SL-VAE and DDMSL on real cascades:"
         ]
         lines += [
@@ -1247,7 +1247,7 @@ def baseline_anchor(
 
     if task.blocks:
         # An influence-blocking task's floor is the BLOCKING library, and the row
-        # that matters is `no_blocking` — sigma(S_N, empty), the rumour with nobody
+        # that matters is `no_blocking`: sigma(S_N, empty), the rumour with nobody
         # stopping it. Every other row is only interesting as a difference from it,
         # which is what "prevented influence" means (§8.1).
         lever = lever_of(task)
@@ -1273,7 +1273,7 @@ def baseline_anchor(
             f"final size, so LOWER IS BETTER; `prevented` is how much of the "
             f"unopposed cascade each one stopped, which is the quantity every paper "
             f"in this literature reports. `no_blocking` is the rumour with nobody "
-            f"stopping it — beating it by a lot is the bar, and the degree heuristic "
+            f"stopping it: beating it by a lot is the bar, and the degree heuristic "
             f"is on this list because the published finding is that it FAILS here:",
         ]
         lines += [
@@ -1288,7 +1288,7 @@ def baseline_anchor(
 
     if task.immunizes:
         # An epidemic-control task's floor is the IMMUNIZATION library, and the row
-        # that matters is `no_immunization` — the outbreak with nobody dosed. Every
+        # that matters is `no_immunization`: the outbreak with nobody dosed. Every
         # other row is only interesting as a difference from it, which is what
         # "prevented infections" means (§8.3).
         lever = task.epi_lever
@@ -1311,7 +1311,7 @@ def baseline_anchor(
             f"REFERENCE SCORES: classical epidemic-control baselines for the "
             f"{lever} lever, run on THIS graph against THIS outbreak, under THIS "
             f"evaluator, at the same budget and horizon. The column is the attack "
-            f"rate — how many nodes were EVER infected — so LOWER IS BETTER; "
+            f"rate (how many nodes were EVER infected) so LOWER IS BETTER; "
             f"`prevented` is how many infections each one stopped. "
             f"`no_immunization` is the outbreak with nobody dosed, and beating it "
             f"by a lot is the bar. Read `netshield` against `dava` specifically: "
@@ -1347,7 +1347,7 @@ def baseline_anchor(
     # A static selector is a static PLAN, so it is scored against a non-adaptive
     # view of the task even when the task has rounds: `evaluate_strategy` would
     # otherwise route it through `adaptive_action_fn` and call an `act()` it does
-    # not have. That is also the right reading — a one-shot algorithm dealt at t=0
+    # not have. That is also the right reading: a one-shot algorithm dealt at t=0
     # is exactly the control an adaptive arm is measured against.
     static_task = replace(task, rounds=None, per_round_budget=None)
 
@@ -1448,8 +1448,8 @@ def reference_diff(
     gained.sort(key=graph.degree, reverse=True)
 
     lines = [
-        f"REFERENCE DIFF (your cascade vs {reference_name}'s — the strongest "
-        f"baseline on this graph — same evaluator, per-node P(infected)). Listed "
+        f"REFERENCE DIFF (your cascade vs {reference_name}'s: the strongest "
+        f"baseline on this graph: same evaluator, per-node P(infected)). Listed "
         f"nodes are DECISIVE flips only (one side >= {reached_threshold:.0%}, the "
         f"other < {unreached_threshold:.0%}); the net line below sums every node, "
         f"so it is larger:"
@@ -1468,12 +1468,12 @@ def reference_diff(
 
     if missed:
         lines.append(
-            f"{their_reach} — top by degree: "
+            f"{their_reach}: top by degree: "
             f"{_diff_node_list(missed, mine, theirs, graph)}"
         )
     if gained:
         lines.append(
-            f"{your_reach} — top by degree: "
+            f"{your_reach}: top by degree: "
             f"{_diff_node_list(gained, mine, theirs, graph)}"
         )
     if not missed and not gained:

@@ -52,7 +52,7 @@ class GraphSAGELayer(nn.Module):
     ) -> torch.Tensor:
         """
         features: (N, hidden_dim)
-        edge_index: (2, E) long — [src, dst] with self-loops already removed
+        edge_index: (2, E) long, [src, dst] with self-loops already removed
         edge_weight: (E,) float edge weights, or None for unweighted mean
         returns: (N, hidden_dim)
         """
@@ -142,7 +142,7 @@ class GraphSAGEForwardModel(nn.Module):
     def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2 (self-loops added)
+        adjacency: sparse COO (N, N), normalized D^-1/2 (A+I) D^-1/2 (self-loops added)
         returns: (N, 1) predicted outcome probabilities in [0, 1]
         """
         device = seed_vec.device
@@ -209,7 +209,7 @@ class GraphSAGEEncoder(nn.Module):
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
         X: (N, in_channels) node feature matrix
-        graph: GraphInput — uses graph.edge_index (2, E) and graph.edge_weight (E,)
+        graph: GraphInput, uses graph.edge_index (2, E) and graph.edge_weight (E,)
         returns: (N, hidden_dim) node embeddings
         """
         # Strip self-loops so the neighbor mean excludes self (self enters via concat)

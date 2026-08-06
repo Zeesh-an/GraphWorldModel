@@ -6,8 +6,8 @@ Source: https://snap.stanford.edu/data/p2p-Gnutella31.html
       component **62,561 / 147,878**, UNDIRECTED, as CoreHD's "P2P" and FINDER's
       headline ND network both do
       (research/critical_node_detection.md §8.2 traps 7 and 9)
-    - Sparse original ids — remapped by `load_edge_list` via the adjacency
-    - No inherent node features — uses log(1 + degree) as synthetic features
+    - Sparse original ids: remapped by `load_edge_list` via the adjacency
+    - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
 Warning: SCALE WARNING. At 62.6K nodes this is well past what the NDlib rollout +

@@ -41,7 +41,7 @@ edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 # rephrasings of each other: the objective sign, what a unit of budget buys, and
 # whether the planner starts the cascade all differ, and a model told the wrong
 # one optimizes the wrong direction with a perfectly valid program. The inverse
-# family differs more than the other two do from each other — it emits no action
+# family differs more than the other two do from each other: it emits no action
 # at all.
 seeding_brief = """\
 You are designing an Influence Maximization algorithm as an executable Python script.
@@ -57,7 +57,7 @@ YOUR GOAL: MINIMIZE the number of infected nodes at the end of the cascade. LOWE
 IS BETTER, and every score you are shown reads that way.
 
 You do NOT start the cascade. An OUTBREAK is already seeded at fixed source nodes
-you did not choose and cannot change — they are listed in the task block below.
+you did not choose and cannot change: they are listed in the task block below.
 Your budget buys DELETIONS: each `remove_node` takes that node out of the graph
 along with all its edges, so it can never be infected, never transmit, and never
 counts toward the final total. You are cutting the routes the outbreak would
@@ -95,7 +95,7 @@ node taken by one cascade is closed to the other forever.
 
 WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
 - ARRIVING FIRST IS THE ENTIRE GAME. A node you reach after the rumour does is worth
-  nothing — it is already lost. Read the tie-break rule stated below: it decides who
+  nothing: it is already lost. Read the tie-break rule stated below: it decides who
   wins a node you both reach on the SAME step, and it is the difference between a
   seed being worth something and worth nothing.
 - Your score counts only nodes the rumour WOULD have infected. Protecting a node it
@@ -121,7 +121,7 @@ edges, so the rumour can never pass through it.
 WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
 - Your score counts only nodes the rumour WOULD have infected. Deleting a node it
   was never going to reach scores exactly zero.
-- The nodes that matter are the ones the rumour has to pass THROUGH — cut points on
+- The nodes that matter are the ones the rumour has to pass THROUGH: cut points on
   its routes out of the sources, not the highest-degree nodes in the graph.
 - The published trivial heuristic here is "rank the sources' out-neighbours by
   degree", and it beats two principled VLDB algorithms in a fifth of their own
@@ -157,8 +157,8 @@ are shown reads that way.
 The rumour was seeded first, at fixed source nodes you did not choose and cannot
 change (listed below), and it is ALREADY spreading at t=0. Your budget buys WEIGHT
 REDUCTIONS: `ActionOp("set_edge_weight", u, v, w)` sets the arc's transmission
-probability to `w`. You may only LOWER an arc — a weight above its current
-probability is REJECTED — and `w = 0.0` is the same thing as cutting it.
+probability to `w`. You may only LOWER an arc: a weight above its current
+probability is REJECTED, and `w = 0.0` is the same thing as cutting it.
 
 WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
 - Choosing `w = 0.0` on the right arcs is a strictly stronger move than any
@@ -176,7 +176,7 @@ localization_brief = """\
 You are designing a Source Localization algorithm as an executable Python script.
 
 YOUR GOAL: given a graph and an OBSERVED diffusion state, recover the SEED SET
-that produced it. You are not intervening in anything — you are inferring a hidden
+that produced it. You are not intervening in anything: you are inferring a hidden
 cause. You are scored on F1 against the true source set, averaged over many
 labelled cascades. HIGHER IS BETTER.
 
@@ -187,7 +187,7 @@ is P(node v was infected) at the end of the cascade, in [0, 1]. You return the
 WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
 - The problem is ILL-POSED. Diffusion is many-to-one: different seed sets produce
   the same final state, and a cascade that saturated retains almost no trace of
-  where it began. Perfect F1 is not achievable and chasing it is not the goal —
+  where it began. Perfect F1 is not achievable and chasing it is not the goal,
   beating the reference table is.
 - Sources are a TINY MINORITY of nodes, so accuracy is worthless as a signal.
   A rule that names nothing scores 90%+ accuracy and 0 F1.
@@ -208,7 +208,7 @@ reconstruction_brief = """\
 You are designing a Cascade Reconstruction algorithm as an executable Python script.
 
 YOUR GOAL: a diffusion already happened on this graph and you only saw part of it.
-Recover the WHOLE HISTORY — which nodes were infected, at which timestep each one
+Recover the WHOLE HISTORY, which nodes were infected, at which timestep each one
 activated, and WHO INFECTED WHOM. You are not intervening in anything; you are
 reconstructing the past. HIGHER IS BETTER.
 
@@ -220,14 +220,14 @@ YOUR SCORE IS DELIBERATELY WEIGHTED TOWARD THE HARD HALF:
 who-infected-whom EDGES. The exact LAMBDA is in the task block below and it is at
 least 0.5, on purpose: recovering WHICH nodes were infected is nearly free, and a
 decoder that stops there is the standard failure of this problem. Thirteen years
-of published work says the same thing twice — one paper reports 100% node
+of published work says the same thing twice: one paper reports 100% node
 precision alongside 78% edge precision, and the best modern method reaches 0.68
 path precision. **Spend your effort on the parents.**
 
 WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
 - The observation is a SUBSET. Nodes the cascade infected but nobody reported are
   yours to infer, and a report set that looks disconnected is usually one cascade
-  with the connecting nodes missing — filling them in is most of the recall.
+  with the connecting nodes missing: filling them in is most of the recall.
 - TIME IS THE STRUCTURE. If you were given activation times, they constrain the
   tree completely: an edge `u -> v` is only possible when `t(u) < t(v)`. If you
   were not, you have to infer an ordering before you can infer any parent.
@@ -250,12 +250,12 @@ You are designing a Cascade Popularity Prediction algorithm as an executable Pyt
 script.
 
 YOUR GOAL: a REAL cascade is spreading on this graph. You are shown its first `t_o`
-timesteps — who adopted and when — and you must predict how many nodes will have
+timesteps (who adopted and when) and you must predict how many nodes will have
 adopted by the horizon. You are not intervening in anything and you are not
 recovering the past; you are forecasting. **LOWER IS BETTER**: your score is a
 prediction ERROR, unlike every other task in this system.
 
-THE SCORE IS MSLE — MEAN SQUARED **LOG** ERROR:
+THE SCORE IS MSLE: MEAN SQUARED **LOG** ERROR:
 
     MSLE = mean( (log2(predicted) - log2(actual))^2 )
 
@@ -272,15 +272,15 @@ WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
 - THE DYNAMICS ARE NOT INDEPENDENT CASCADE. These are real logged adoptions, not a
   simulation. Adoption is not memoryless (a node's second exposure matters), a node
   is exposed repeatedly rather than once per neighbour, and some adopters arrive
-  from outside the graph entirely — search, front pages, off-platform sharing. Any
+  from outside the graph entirely: search, front pages, off-platform sharing. Any
   model that assumes one-shot independent transmission will be wrong in a
   systematic direction.
 - TEMPORAL FEATURES DOMINATE. The single most predictive quantity in this
-  literature is the adoption RATE IN THE SECOND HALF of the observation window —
+  literature is the adoption RATE IN THE SECOND HALF of the observation window,
   it beats every structural feature by a wide margin. A cascade still accelerating
   at `t_o` is a different object from one that has flattened, and the observed
   wave series tells you which.
-- THE CLASSICAL BAR IS ONE LINE. `log P(horizon) = alpha * log P(t_o) + beta` — a
+- THE CLASSICAL BAR IS ONE LINE. `log P(horizon) = alpha * log P(t_o) + beta`: a
   2008 result, one feature, and it is still printed as a baseline in every paper
   published since. Beat it or explain why you did not.
 - BRANCHING RATIO IS THE MECHANISM. If each adopter produces R more and R < 1, the
@@ -293,7 +293,7 @@ WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
 DECLINING IS ALLOWED AND IS NOT AN ERROR: return None when your model genuinely has
 no estimate (a divergent generative fit, an empty observation). Declines are COUNTED
 in a separate column, never scored as a wrong answer. But a predictor that declines
-EVERYTHING is rejected — it has not answered the question.
+EVERYTHING is rejected: it has not answered the question.
 """
 
 
@@ -302,7 +302,7 @@ def _prediction_rules(task: TaskSpec) -> str:
     if task.forward_model:
         oracle_block = """\
 
-THE FORWARD MODEL — `self.forecast_marginals(adopters, frontier, steps)`:
+THE FORWARD MODEL: `self.forecast_marginals(adopters, frontier, steps)`:
     Returns a numpy array of length num_nodes: P(node has adopted `steps`
     timesteps after the end of the observation window), given that `adopters` is
     everyone who has adopted so far and `frontier` is the wave that adopted most
@@ -325,7 +325,7 @@ THE FORWARD MODEL — `self.forecast_marginals(adopters, frontier, steps)`:
 
     IT IS ALSO NOT GROUND TRUTH. It is an Independent-Cascade-shaped model of a
     process that is not Independent Cascade. Treat its output as one input among
-    several — blending it with a feature estimate, or using it only to rank rather
+    several: blending it with a feature estimate, or using it only to rank rather
     than to size, is a legitimate and often better use of it than trusting it."""
     else:
         oracle_block = """\
@@ -338,7 +338,7 @@ history, the wave series and the graph structure alone."""
 
     return f"""\
 {prediction_brief}
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
+OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
 example usage, no test code.
@@ -347,20 +347,20 @@ IMPORTS: you MAY import any of {", ".join(allowed_imports)}. Use numpy for
 anything you would otherwise write as a Python loop over all nodes.
 Importing anything else is rejected.
 
-AVAILABLE NAMES (already in your script's namespace — do NOT import these):
+AVAILABLE NAMES (already in your script's namespace: do NOT import these):
 - `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node),
   .degree(node), .edge_index (2, E), .ic_probs (E,).
 - `prediction_algorithms` : the published predictors (API below).
 - `cascade_features(graph, observation)` : the standard feature dict (API below).
 - `primitives` : structural helpers (API below).
-- `ActionOp` and `State` exist but you will not need them — this task emits no
+- `ActionOp` and `State` exist but you will not need them: this task emits no
   actions at all.
 
 THE OBSERVATION OBJECT you are handed:
 - `observation.adopters` : `{{node: timestep it adopted}}` for everyone who adopted
   INSIDE the observation window. This is the whole observed history, not a count.
 - `observation.popularity` : `len(observation.adopters)`, i.e. P(t_o). Your
-  prediction is bounded below by this — adoption is progressive and nobody
+  prediction is bounded below by this: adoption is progressive and nobody
   un-adopts.
 - `observation.frontier` : the node ids that adopted in the LAST observed step.
 - `observation.wave(t)`  : the node ids that adopted at step `t`.
@@ -372,7 +372,7 @@ THE OBSERVATION OBJECT you are handed:
 
 - `self.fit_examples` : a list of LABELLED cascades from the selection split, each
   with `.observation` and `.actual` (its true final popularity). Use them to fit a
-  constant, a regression, or a calibration — that is exactly what the classical
+  constant, a regression, or a calibration: that is exactly what the classical
   baselines do and it is not cheating. These are never the cascades you are scored
   on.
 
@@ -396,7 +396,7 @@ def _reconstruction_rules(task: TaskSpec) -> str:
     if task.forward_model:
         oracle_block = """\
 
-THE TRANSITION KERNEL — `self.step_marginals(infected, frontier)`:
+THE TRANSITION KERNEL: `self.step_marginals(infected, frontier)`:
     Returns a numpy array of length num_nodes: P(node activates on the NEXT step)
     given that `infected` is the set active now and `frontier` is the wave that
     just activated. This is the one-step dynamics the cascade you are inverting
@@ -410,12 +410,12 @@ THE TRANSITION KERNEL — `self.step_marginals(infected, frontier)`:
 
     `transition_logprob(marginal, infected, next_frontier)` is already bound for
     you and derives from the same call, so summing it over the steps of a proposed
-    trajectory gives that trajectory's log-likelihood — a score you can compute
+    trajectory gives that trajectory's log-likelihood: a score you can compute
     WITHOUT any labels, and the natural objective for a local search.
 
     It is not free. Every call is one evaluation of the kernel and the calls are
     counted. Get a decode first with a cheap structural method, THEN spend calls
-    improving it — a search that calls the kernel inside a loop over all nodes
+    improving it: a search that calls the kernel inside a loop over all nodes
     will not finish. You are also free to never call it at all; if structure alone
     wins, that is a result."""
     else:
@@ -423,12 +423,12 @@ THE TRANSITION KERNEL — `self.step_marginals(infected, frontier)`:
 
 NO TRANSITION KERNEL IN THIS CONDITION. `self.step_marginals` raises if you call
 it. This arm exists to measure what pure structure and timing achieve, so your
-decoder must work from the graph, the reports and their times alone — Steiner
+decoder must work from the graph, the reports and their times alone: Steiner
 trees, BFS/shortest-path orderings, centralities on the observed subgraph."""
 
     return f"""\
 {reconstruction_brief}
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
+OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
 example usage, no test code.
@@ -437,23 +437,23 @@ IMPORTS: you MAY import any of {", ".join(allowed_imports)}. Use numpy for
 anything you would otherwise write as a Python loop over all nodes.
 Importing anything else is rejected.
 
-AVAILABLE NAMES (already in your script's namespace — do NOT import these):
+AVAILABLE NAMES (already in your script's namespace: do NOT import these):
 - `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node),
   .degree(node), .edge_index (2, E), .ic_probs (E,).
 - `reconstruction_algorithms` : the published decoders (API below).
 - `primitives` : structural helpers (API below).
-- `ActionOp` and `State` exist but you will not need them — this task emits no
+- `ActionOp` and `State` exist but you will not need them: this task emits no
   actions.
 
 THE OBSERVATION OBJECT you are handed:
 - `observation.reported` : `{{node: activation timestep or None}}`. A node in here
-  WAS infected — that is ground truth. `None` means "infected, time unknown".
+  WAS infected: that is ground truth. `None` means "infected, time unknown".
 - `observation.times`    : just the entries whose time is known, as `{{node: t}}`.
 - `observation.infected` : the observed infected node ids, sorted.
 - `observation.final_state` : an (N,) 0/1 array, or None. Under the
   final-snapshot setting this is ALL you get and `reported` is empty.
 - `observation.visible`  : an (N,) bool mask, or None. Under the hidden-node
-  setting a False entry is a node that is NOT IN THE GRAPH — naming one is
+  setting a False entry is a node that is NOT IN THE GRAPH: naming one is
   rejected.
 
 WHAT YOU IMPLEMENT:
@@ -479,7 +479,7 @@ def _localization_rules(task: TaskSpec) -> str:
     if task.forward_model:
         oracle_block = """\
 
-THE FORWARD ORACLE — `self.predict_marginals(seeds)`:
+THE FORWARD ORACLE: `self.predict_marginals(seeds)`:
     Returns a numpy array of length num_nodes: P(node infected at the end) if the
     cascade had STARTED from `seeds`. This is the simulator the observation came
     from, and it is the one thing a purely structural rule does not have.
@@ -493,7 +493,7 @@ THE FORWARD ORACLE — `self.predict_marginals(seeds)`:
     It is not free. Every call is a full rollout and the calls are counted, so a
     scan over all nodes inside a per-pick loop will not finish. Narrow to a short
     candidate list with a cheap structural rule FIRST, then spend calls ranking it.
-    You are also free to never call it at all — if structure alone wins, that is a
+    You are also free to never call it at all: if structure alone wins, that is a
     result."""
     else:
         oracle_block = """\
@@ -504,7 +504,7 @@ must be a structural inference rule over the graph and the observation alone."""
 
     return f"""\
 {localization_brief}
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
+OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
 example usage, no test code.
@@ -513,20 +513,20 @@ IMPORTS: you MAY import any of {", ".join(allowed_imports)}. Use numpy for
 anything you would otherwise write as a Python loop over all nodes.
 Importing anything else is rejected.
 
-AVAILABLE NAMES (already in your script's namespace — do NOT import these):
+AVAILABLE NAMES (already in your script's namespace: do NOT import these):
 - `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node),
   .degree(node), .edge_index (2, E), .ic_probs (E,).
 - `localization_algorithms` and `localization_scorers` : the published baselines
   and their per-node score vectors (API below).
 - `primitives` : structural helpers (API below).
-- `ActionOp` and `State` exist but you will not need them — this task emits no
+- `ActionOp` and `State` exist but you will not need them: this task emits no
   actions.
 
 WHAT YOU IMPLEMENT:
     def localize(self, graph, observation, budget) -> list[int]
         The node ids you believe started the cascade. AT MOST `budget` of them,
         no duplicates, every id in [0, num_nodes). Returning more than `budget` is
-        REJECTED — extra names would buy recall for free.
+        REJECTED: extra names would buy recall for free.
 
     def source_scores(self, graph, observation) -> np.ndarray     (OPTIONAL)
         One float per node, higher meaning more likely to be a source. Implement
@@ -539,13 +539,13 @@ WHAT YOU IMPLEMENT:
 
 blocking_budget_rules = {
     "counter_seed": """\
-- A blocker is ActionOp("add_node", node), which seeds YOUR cascade — never the
+- A blocker is ActionOp("add_node", node), which seeds YOUR cascade: never the
   rumour's. Emit at most `budget` add_node actions in total.
 - Seeding the same node twice is REJECTED: it spends two units of budget on one node.
 - Seeding a node the rumour already owns does nothing; it is already committed.""",
     "node_block": """\
 - A blocker is ActionOp("remove_node", node). Emit at most `budget` remove_node
-  actions in total. You do NOT need to emit the incident remove_edge ops — the
+  actions in total. You do NOT need to emit the incident remove_edge ops: the
   harness expands each removal into a full node deletion for you.
 - Removing the same node twice is REJECTED: it spends two units of budget on one node.
 - Emitting add_node is REJECTED under this lever. You are not seeding anything.""",
@@ -553,7 +553,7 @@ blocking_budget_rules = {
 - A blocker is ActionOp("remove_edge", u, v), one directed arc. Emit at most
   `budget` remove_edge actions in total.
 - Cutting the same arc twice is REJECTED. Cutting two different arcs out of the same
-  node is FINE — the budget is counted per arc, not per node.
+  node is FINE: the budget is counted per arc, not per node.
 - Emitting add_node or remove_node is REJECTED under this lever.""",
     "weight_block": """\
 - A blocker is ActionOp("set_edge_weight", u, v, w), which sets arc u -> v to
@@ -561,7 +561,7 @@ blocking_budget_rules = {
 - w must be between 0.0 and the arc's CURRENT probability. Raising an arc is
   REJECTED: you are blocking, not boosting.
 - Reweighting the same arc twice is REJECTED. Two different arcs out of one node is
-  FINE — the budget is per arc.
+  FINE: the budget is per arc.
 - Emitting add_node or remove_node is REJECTED under this lever.""",
 }
 
@@ -575,11 +575,11 @@ epidemic_briefs = {
     "vaccinate": """\
 You are designing a network VACCINATION algorithm as an executable Python script.
 
-YOUR GOAL: MINIMIZE the attack rate — the number of nodes EVER infected by the end.
+YOUR GOAL: MINIMIZE the attack rate, the number of nodes EVER infected by the end.
 LOWER IS BETTER, and every score you are shown reads that way.
 
 You do NOT start the outbreak. Index cases are already infectious at fixed nodes
-you did not choose and cannot change — they are listed in the task block below.
+you did not choose and cannot change: they are listed in the task block below.
 Your budget buys DOSES: each `remove_node` immunizes that node, taking it out of
 the graph along with all its edges, so it can never be infected, never transmit,
 and never counts toward the attack rate.
@@ -602,7 +602,7 @@ removal on a one-way cascade:
 WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
 - Two published families disagree, and the disagreement is the interesting part.
   The SPECTRAL family (NetShield) minimizes the adjacency's leading eigenvalue,
-  which is a model-independent bound on whether an epidemic can take off at all —
+  which is a model-independent bound on whether an epidemic can take off at all,
   but it does not know where this outbreak IS.
 - The DATA-AWARE family (DAVA) conditions on exactly that: it cuts the nodes that
   DOMINATE the paths out of the observed sources. On a small localized outbreak it
@@ -614,11 +614,11 @@ WHAT ACTUALLY WORKS HERE, AND WHAT DOES NOT:
     "quarantine": """\
 You are designing a network QUARANTINE algorithm as an executable Python script.
 
-YOUR GOAL: MINIMIZE the attack rate — the number of nodes EVER infected by the end.
+YOUR GOAL: MINIMIZE the attack rate, the number of nodes EVER infected by the end.
 LOWER IS BETTER, and every score you are shown reads that way.
 
 You do NOT start the outbreak. Index cases are already infectious at fixed nodes
-you did not choose — they are listed in the task block below. Your budget buys
+you did not choose: they are listed in the task block below. Your budget buys
 ISOLATION: each `remove_node` cuts every contact of that node while LEAVING THE
 NODE IN THE GRAPH. It is not immune. If the outbreak already reached it, it stays
 counted in the attack rate; it simply stops passing the infection on.
@@ -635,13 +635,13 @@ what it prevents before that happens.
     "edge_cut": """\
 You are designing a CONTACT-SEVERING algorithm as an executable Python script.
 
-YOUR GOAL: MINIMIZE the attack rate — the number of nodes EVER infected by the end.
+YOUR GOAL: MINIMIZE the attack rate, the number of nodes EVER infected by the end.
 LOWER IS BETTER.
 
 You do NOT start the outbreak. Index cases are already infectious at fixed nodes
 listed in the task block. Your budget buys ARC CUTS: each `remove_edge(u, v)`
 deletes one directed contact, so the infection can no longer travel that way.
-Nobody is immunized — every node stays in the graph and stays infectable through
+Nobody is immunized: every node stays in the graph and stays infectable through
 whatever routes remain.
 
 This is a strictly weaker instrument than vaccination at the same k (one dose
@@ -650,21 +650,21 @@ BRIDGES: a few arcs whose loss disconnects the outbreak from a large region. On 
 dense graph it will not, and reporting that honestly is a result.
 
 The published spectral rule scores an arc by u(i) * u(j), the product of the
-leading eigenvector's endpoint entries — that is NetMelt, and it does not know
+leading eigenvector's endpoint entries: that is NetMelt, and it does not know
 where the outbreak is. Cutting the boundary of the observed infected set does.
 """,
 }
 epidemic_briefs["contact_reduce"] = """\
 You are designing a CONTACT-REDUCTION algorithm as an executable Python script.
 
-YOUR GOAL: MINIMIZE the attack rate — the number of nodes EVER infected by the end.
+YOUR GOAL: MINIMIZE the attack rate, the number of nodes EVER infected by the end.
 LOWER IS BETTER.
 
 You do NOT start the outbreak. Index cases are already infectious at fixed nodes
 listed in the task block. Your budget buys REWEIGHTS: each
 `set_edge_weight(u, v, w)` lowers the per-contact transmission probability on that
-arc to `w`. This is the graded version of a cut — social distancing rather than
-a travel ban — and it is the only lever in this literature that is continuous.
+arc to `w`. This is the graded version of a cut: social distancing rather than
+a travel ban, and it is the only lever in this literature that is continuous.
 
 You may only LOWER an arc. Raising one is rejected.
 
@@ -675,7 +675,7 @@ does, so it pays off exactly where a few arcs carry the outbreak between regions
 epidemic_budget_rules = {
     "vaccinate": """\
 - A dose is ActionOp("remove_node", node). Emit at most `budget` remove_node
-  actions in total. You do NOT need to emit the incident remove_edge ops — the
+  actions in total. You do NOT need to emit the incident remove_edge ops: the
   harness expands each dose into a full node deletion for you.
 - Dosing the same node twice is REJECTED: it spends two units of budget on one node.
 - Dosing an INDEX CASE is REJECTED. Filter `self.outbreak` out of your candidates.
@@ -691,7 +691,7 @@ epidemic_budget_rules = {
 - A cut is ActionOp("remove_edge", u, v), one directed arc. Emit at most `budget`
   remove_edge actions in total.
 - Cutting the same arc twice is REJECTED. Cutting two different arcs out of the
-  same node is FINE — the budget is counted per arc, not per node.
+  same node is FINE: the budget is counted per arc, not per node.
 - Emitting add_node or remove_node is REJECTED under this lever.""",
     "contact_reduce": """\
 - A reduction is ActionOp("set_edge_weight", u, v, w), which sets arc u -> v to
@@ -699,7 +699,7 @@ epidemic_budget_rules = {
 - w must be between 0.0 and the arc's CURRENT probability. Raising an arc is
   REJECTED: you are reducing contact, not increasing it.
 - Reweighting the same arc twice is REJECTED. Two different arcs out of one node
-  is FINE — the budget is per arc.
+  is FINE: the budget is per arc.
 - Emitting add_node or remove_node is REJECTED under this lever.""",
 }
 
@@ -709,7 +709,7 @@ def _epidemic_rules(task: TaskSpec) -> tuple[str, str, str]:
     library_line = (
         "- `immunization_algorithms`, `dismantling_algorithms`, `algorithms` and\n"
         "  `primitives` modules (API below). `immunization_algorithms` members are\n"
-        "  the published baselines for THIS task and take `outbreak=` — they are\n"
+        "  the published baselines for THIS task and take `outbreak=`: they are\n"
         "  what you are being compared against."
     )
 
@@ -736,7 +736,7 @@ something real even when the final count barely moves.
 
 
 epidemic_exemplars = """\
-EXAMPLES — two strategies at the level you should START from, not finish at.
+EXAMPLES: two strategies at the level you should START from, not finish at.
 
 Example 1, dominator-style allocation (the DAVA idea, cut the nodes that all paths
 out of the outbreak must pass through, weighted by how much sits behind them):
@@ -746,7 +746,7 @@ class OutbreakDominators(Strategy):
         sources = set(self.outbreak)
 
         # How much of the graph each node still leads to, discounted by distance
-        # from the outbreak — a cheap stand-in for "expected nodes saved by cutting"
+        # from the outbreak: a cheap stand-in for "expected nodes saved by cutting"
         reach = {node: 0.0 for node in range(graph.num_nodes)}
         wave, seen, depth = set(sources), set(sources), 0.0
         while wave and depth < horizon:
@@ -824,7 +824,7 @@ def _blocking_rules(task: TaskSpec) -> tuple[str, str, str]:
     library_line = (
         "- `blocking_algorithms`, `algorithms`, `dismantling_algorithms` and\n"
         "  `primitives` modules (API below). `blocking_algorithms` members are the\n"
-        "  published baselines for THIS task and take `negative_seeds=` — they are\n"
+        "  published baselines for THIS task and take `negative_seeds=`: they are\n"
         "  what you are being compared against."
     )
 
@@ -854,7 +854,7 @@ def _common_rules(task: TaskSpec | None) -> str:
         brief = containment_brief
         budget_rules = """\
 - A blocker is ActionOp("remove_node", node). Emit at most `budget` remove_node
-  actions in total. You do NOT need to emit the incident remove_edge ops — the
+  actions in total. You do NOT need to emit the incident remove_edge ops: the
   harness expands each removal into a full node deletion for you.
 - Removing the same node twice is REJECTED: it spends two units of budget on one node.
 - Emitting add_node is REJECTED. You are not seeding this cascade."""
@@ -876,17 +876,17 @@ def _common_rules(task: TaskSpec | None) -> str:
 
     return f"""\
 {brief}
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
+OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
 example usage, no test code.
 
 IMPORTS: you MAY import any of {", ".join(allowed_imports)}. Use numpy for
-anything you would otherwise write as a Python loop over all nodes — vectorized
+anything you would otherwise write as a Python loop over all nodes: vectorized
 scoring is what lets you afford large sample sizes inside the time limit.
 Importing anything else is rejected.
 
-AVAILABLE NAMES (already in your script's namespace — do NOT import these):
+AVAILABLE NAMES (already in your script's namespace: do NOT import these):
 - `ActionOp(op, target, destination=None, weight=None)` : a graph action. Ops:
     add_node, remove_node, add_edge, remove_edge, set_edge_weight.
 - `State` : has .infected / .frontier (the RUMOUR under a two-cascade task) and
@@ -935,7 +935,7 @@ it already caused.
 # high_degree stub they replaced set the anchor far too low: the model would
 # submit a one-line variation of it and spend its iterations tuning a constant.
 one_shot_exemplars = """\
-EXAMPLES — two strategies at the level you should START from, not finish at.
+EXAMPLES: two strategies at the level you should START from, not finish at.
 
 Example 1, community-aware discount (spends budget across communities, then
 suppresses neighbours of picks so seeds do not overlap):
@@ -1014,7 +1014,7 @@ Beat both. Combining their ideas, or replacing them, are both fair game.
 # both of its programs emit add_node, which this task REJECTS, so the model would
 # spend its first iteration repairing a syntax-valid but disallowed plan.
 containment_exemplars = """\
-EXAMPLES — two strategies at the level you should START from, not finish at.
+EXAMPLES: two strategies at the level you should START from, not finish at.
 
 Example 1, outbreak-weighted cut scoring (rank by how much a node carries the
 cascade AWAY from the sources, rather than by raw degree):
@@ -1059,7 +1059,7 @@ class OutbreakCut(Strategy):
 ```
 
 Example 2, adaptive degree restricted to the outbreak's reachable set (the
-published HDA baseline, narrowed — nodes the cascade cannot reach are free to
+published HDA baseline, narrowed: nodes the cascade cannot reach are free to
 ignore, which spends the whole budget where it can matter):
 ```python
 class ReachableHDA(Strategy):
@@ -1100,7 +1100,7 @@ Beat both. Combining their ideas, or replacing them, are both fair game.
 # only move, so both would teach the wrong shape. `self.outbreak` is S_N here.
 blocking_exemplars = {
     "counter_seed": """\
-EXAMPLES — two strategies at the level you should START from, not finish at.
+EXAMPLES: two strategies at the level you should START from, not finish at.
 
 Example 1, race-to-the-node scoring (rank a candidate by how much of the graph it
 reaches BEFORE the rumour does, which is the only thing that scores):
@@ -1194,7 +1194,7 @@ is the tuple of RUMOUR source ids, and it is also printed in the task block.
 Beat both. Combining their ideas, or replacing them, are both fair game.
 """,
     "node_block": """\
-EXAMPLES — two strategies at the level you should START from, not finish at.
+EXAMPLES: two strategies at the level you should START from, not finish at.
 
 Example 1, cut-point scoring by sampled reachability (delete the nodes the rumour has
 no way around):
@@ -1257,7 +1257,7 @@ Beat both. Combining their ideas, or replacing them, are both fair game.
 """,
 }
 blocking_exemplars["edge_block"] = """\
-EXAMPLES — one strategy at the level you should START from, not finish at.
+EXAMPLES: one strategy at the level you should START from, not finish at.
 
 Cut the arcs that carry the most traffic out of the rumour (reach probability of the
 tail, times how much only hangs off the head):
@@ -1307,7 +1307,7 @@ USING THE HORIZON: put every action in element 0 and leave the rest of the plan
 empty. The rumour was seeded at t=0 and is already moving; every step you wait is a
 step of head start you hand it, and under either tie-break a cascade that arrives
 second saves nobody. If the task block below states a DETECTION DELAY, the harness
-drops anything you emit before that step — that is the experiment, not a bug, and it
+drops anything you emit before that step: that is the experiment, not a bug, and it
 is what makes the first-mover advantage measurable.
 """
 
@@ -1317,10 +1317,10 @@ is what makes the first-mover advantage measurable.
 # rejects actions outright, so showing them would spend the first iteration on a
 # repair turn for a contract the model was never asked to implement.
 localization_exemplars = """\
-EXAMPLES — two algorithms at the level you should START from, not finish at.
+EXAMPLES: two algorithms at the level you should START from, not finish at.
 
 Example 1, LPSI with a community separation constraint (pure structure, no
-forward model — this is roughly the classical bar):
+forward model: this is roughly the classical bar):
 ```python
 import numpy as np
 
@@ -1404,7 +1404,7 @@ class ResimulationGreedy(Strategy):
 
         return selected
 ```
-Beat both. Combining their ideas, or replacing them, are both fair game — and if
+Beat both. Combining their ideas, or replacing them, are both fair game, and if
 the forward oracle turns out not to help, say so with a program that does not use it.
 """
 
@@ -1414,10 +1414,10 @@ the forward oracle turns out not to help, say so with a program that does not us
 # scored on the who-infected-whom edges. Showing the wrong set would cost the
 # search its first iteration on a repair turn for a contract nobody asked for.
 reconstruction_exemplars = """\
-EXAMPLES — two decoders at the level you should START from, not finish at.
+EXAMPLES: two decoders at the level you should START from, not finish at.
 
 Example 1, an ordered Steiner tree by likelihood-weighted BFS (pure structure, no
-kernel — this is roughly the classical bar):
+kernel: this is roughly the classical bar):
 ```python
 import heapq
 import math
@@ -1543,11 +1543,11 @@ list first, then spend calls on it.
 
 # Only shown when the task actually allows edge ops. Under add_node-only IC the
 # cascade is progressive and monotone, so delaying a seed is weakly worse and
-# every schedule is dominated by "all seeds at t=0" — telling the model to
+# every schedule is dominated by "all seeds at t=0": telling the model to
 # schedule across time there just burns iterations on a flat direction.
 prediction_exemplars = """\
 
-TWO WORKED PREDICTORS (different shapes — write your own, do not return these):
+TWO WORKED PREDICTORS (different shapes: write your own, do not return these):
 
 ```python
 import math
@@ -1603,7 +1603,7 @@ class BlendedForecast(Strategy):
     \"\"\"Blend a branching-process extrapolation with the learned forward model, in
     LOG space because that is where the error is measured. The forward model is an
     IC-shaped view of a process that is not IC, so it is used as one opinion rather
-    than as the answer — and the blend weight is fitted on the labelled examples
+    than as the answer, and the blend weight is fitted on the labelled examples
     rather than guessed.\"\"\"
 
     def _waves(self, observation):
@@ -1680,7 +1680,7 @@ localization_timing_note = """\
 
 THERE IS NO HORIZON TO PLAN ACROSS. You emit no actions and nothing you return is
 scheduled. `horizon` appears in the task block only because it is how long the
-cascade you are inverting ran for — a longer cascade means a more saturated
+cascade you are inverting ran for: a longer cascade means a more saturated
 observation and therefore LESS information about where it started, which is worth
 knowing when you decide how much to trust the observed state.
 """
@@ -1720,7 +1720,7 @@ containment_timing_note = """\
 
 USING THE HORIZON: put every removal in element 0 and leave the rest of the plan
 empty. Under a progressive cascade a node blocked at t>0 may already be infected,
-and blocking it then only cuts its ONWARD reach — the infections it already caused
+and blocking it then only cuts its ONWARD reach: the infections it already caused
 stand. Pre-emptive removal is strictly stronger, so all of your effort belongs in
 WHICH nodes you cut, not when.
 """
@@ -1833,7 +1833,7 @@ Implement `predict(self, graph, observation, horizon) -> float | None`.
 
 You are called ONCE PER LOGGED CASCADE, with that cascade's own observed prefix.
 Your score is the mean squared LOG error across all of them, so a predictor that
-nails the biggest cascade and collapses on the small ones LOSES — every cascade
+nails the biggest cascade and collapses on the small ones LOSES: every cascade
 weighs the same regardless of size, which is the whole reason the metric is in log
 space. Write an ALGORITHM, not a fit to one cascade: hardcoded ids or per-cascade
 constants score nothing on any other episode.
@@ -1848,7 +1848,7 @@ Two things about this task that no other one in this system has:
    DIRECTION of your residual in the feedback before changing the model: a
    constant multiplicative bias is one line to fix and is usually most of the gap.
 
-Fit whatever you need on `self.fit_examples` — the labelled selection cascades.
+Fit whatever you need on `self.fit_examples`: the labelled selection cascades.
 Fitting there is what every classical baseline in this literature does and it is
 expected, not a loophole. Those cascades are never the ones you are scored on.
 
@@ -1955,15 +1955,15 @@ def build_outbreak_block(task: TaskSpec) -> str:
     )
     # §8.4 is emphatic that the tie-break is a reported hyperparameter rather than an
     # implementation detail, and it is the single fact that decides whether a
-    # same-step arrival is worth anything — so it goes in the task block, not a
+    # same-step arrival is worth anything, so it goes in the task block, not a
     # footnote
     rule = (
         {
-            "negative": "the RUMOUR wins — you must arrive STRICTLY EARLIER to save "
+            "negative": "the RUMOUR wins, you must arrive STRICTLY EARLIER to save "
             "a node (this is the competitive-LT convention)",
-            "positive": "YOU win — arriving at the same step as the rumour is enough "
+            "positive": "YOU win, arriving at the same step as the rumour is enough "
             "to save a node (this is Budak's convention)",
-            "fixed": "a fixed per-node priority decides, and you cannot see it — "
+            "fixed": "a fixed per-node priority decides, and you cannot see it, "
             "treat a same-step arrival as worth roughly half a node",
         }.get(task.tie_break, task.tie_break)
         if task.blocks
@@ -1985,14 +1985,14 @@ def build_outbreak_block(task: TaskSpec) -> str:
             else ""
         )
         + (
-            ", returning to SUSCEPTIBLE — it can be infected again, and there is no "
+            ", returning to SUSCEPTIBLE: it can be infected again, and there is no "
             "terminal state.\n"
             if task.diffusion_model == "SIS"
             else ", and is then RECOVERED: immune, non-transmitting, but still "
             "counted in the attack rate.\n"
         )
         + f"Mean infectious period is about {1.0 / max(task.epi_gamma, 1e-9):.1f} "
-        f"steps, so the outbreak burns out on its own — a dose is worth only what "
+        f"steps, so the outbreak burns out on its own: a dose is worth only what "
         f"it saves before then.\n"
         if task.immunizes
         else ""
@@ -2019,7 +2019,7 @@ setting_notes = {
     ),
     "partial_nodes": (
         "PARTIAL NODES, NO TIMES. Each infected node was reported independently "
-        "with probability {rate}, but every report's timestep is withheld — "
+        "with probability {rate}, but every report's timestep is withheld: "
         "`observation.reported[v]` is None and `observation.times` is empty. You "
         "have to infer the ORDER before you can infer any parent."
     ),
@@ -2032,7 +2032,7 @@ setting_notes = {
     ),
     "hidden_nodes": (
         "HIDDEN NODES. Reports arrive with times at rate {rate}, AND a fraction of "
-        "the graph's nodes are absent entirely — `observation.visible` is False "
+        "the graph's nodes are absent entirely: `observation.visible` is False "
         "for them. A hidden node is not merely unobserved: it is not in the graph, "
         "naming one is rejected, and the cascade appears to jump across the gap it "
         "leaves."
@@ -2049,7 +2049,7 @@ def build_mask_block(task: TaskSpec) -> str:
     `final_snapshot` is solving a different problem from one selected under
     `partial_times`, and a model told the wrong one writes for an input it will not
     get. The masking DIRECTION is stated explicitly for the reason §8.2 trap 1
-    gives — two papers in this literature use the symbol sigma for opposite
+    gives: two papers in this literature use the symbol sigma for opposite
     quantities, so "reported with probability q" is written out rather than named.
     """
     if not task.decodes:
@@ -2078,7 +2078,7 @@ def build_mask_block(task: TaskSpec) -> str:
         f"  actually infected: {min(infected)}-{max(infected)} nodes "
         f"({100.0 * np.mean(infected) / num_nodes:.1f}% of N on average)",
         f"  you are shown: {min(observed)}-{max(observed)} of them "
-        f"({rate} on average) — the rest are yours to infer",
+        f"({rate} on average): the rest are yours to infer",
         f"  true sources per cascade: {min(sources)}-{max(sources)}, all committed "
         f"at timestep 0",
         f"  cascades ran for up to "
@@ -2124,7 +2124,7 @@ def build_observation_block(task: TaskSpec) -> str:
         f"mean F1 across all of them):",
         f"  sources per episode: {min(counts)}-{max(counts)} nodes "
         f"({100.0 * np.mean(counts) / instances[0].num_nodes:.1f}% of N on average) "
-        f"— you are handed the exact count as `budget`",
+        f", you are handed the exact count as `budget`",
         f"  observed infected per episode: {min(infected)}-{max(infected)} nodes "
         f"({100.0 * np.mean(infected) / instances[0].num_nodes:.1f}% of N on average)",
     ]
@@ -2140,7 +2140,7 @@ def build_observation_block(task: TaskSpec) -> str:
             "  observation is a CONTINUOUS Monte-Carlo marginal: entries strictly "
             "between 0 and 1 are nodes the last wave reached only sometimes, so "
             "the fractional values carry real information about the cascade's "
-            "FRONTIER — a node at 0.3 was reached late, a node at 1.0 early"
+            "FRONTIER: a node at 0.3 was reached late, a node at 1.0 early"
         )
 
     lines.append(
@@ -2184,7 +2184,7 @@ def build_cascade_block(task: TaskSpec) -> str:
         f"  actual at the horizon: {actual.min():.0f}-{actual.max():.0f} adopters "
         f"(median {np.median(actual):.0f})",
         f"  growth ratio actual/observed: median {np.median(ratio):.2f}x, "
-        f"90th percentile {np.percentile(ratio, 90):.2f}x — "
+        f"90th percentile {np.percentile(ratio, 90):.2f}x, "
         + (
             "most of these cascades are essentially OVER by the observation window, "
             "so the hard part is spotting the few that are not"
@@ -2233,7 +2233,7 @@ def build_user_prompt(
     allow_mc_algorithms: bool = False,
 ) -> str:
     if strategy_mode == "scored":
-        # Library source is inspiration, not callable — ideas must be written
+        # Library source is inspiration, not callable: ideas must be written
         # out inside score()/schedule()/source_score(), where they can be mutated
         if task.forecasts:
             menu = build_prediction_menu()
@@ -2263,7 +2263,7 @@ def build_user_prompt(
             "PRIMITIVES API (available as `primitives`; spread-simulation "
             "functions are NOT available):\n"
             f"{build_primitives_reference(exclude=scored_blocked_primitives)}\n\n"
-            "ALGORITHM IDEAS (NOT callable — steal the ideas into your "
+            "ALGORITHM IDEAS (NOT callable: steal the ideas into your "
             f"{hook}):\n"
             f"{menu}"
         )
@@ -2313,7 +2313,7 @@ def build_user_prompt(
     elif task.immunizes:
         # An epidemic task's library is the IMMUNIZATION pool. The dismantlers rank
         # by connectivity damage and know nothing about where the outbreak is or
-        # that nodes recover, and the IM algorithms return seed sets — neither
+        # that nodes recover, and the IM algorithms return seed sets: neither
         # answers the question this task asks. The generic primitives ride along
         # because an immunizer still needs centralities.
         reference = (
@@ -2343,7 +2343,7 @@ def build_user_prompt(
         final_line = f"Write the Strategy now (method = {method})."
     else:
         blocked = () if allow_mc_algorithms else mc_blocked_algorithms
-        # Signatures alone do not teach the idiom — the model reproduces the
+        # Signatures alone do not teach the idiom: the model reproduces the
         # library's shape much more reliably once it has read a few of them
         # The adaptive policies are the published baselines for this task, so an
         # adaptive prompt that hides them asks the model to reinvent AdaptGreedy
@@ -2368,34 +2368,34 @@ def build_user_prompt(
         final_line = f"Write the Strategy now (method = {method})."
 
     if task.forecasts:
-        budget_unit = "UNUSED — a predictor spends no budget on anything"
+        budget_unit = "UNUSED: a predictor spends no budget on anything"
         objective_line = (
-            f"predict how large each REAL cascade grows — MINIMIZE "
+            f"predict how large each REAL cascade grows: MINIMIZE "
             f"{task.prediction_metric.upper()} against the logged popularity "
             f"(**LOWER IS BETTER**, unlike every other task here)"
         )
-        ops_line = "allowed_ops = none — this task emits no actions\n"
+        ops_line = "allowed_ops = none: this task emits no actions\n"
     elif task.decodes:
-        budget_unit = "UNUSED — a decoder spends no budget on anything"
+        budget_unit = "UNUSED: a decoder spends no budget on anything"
         objective_line = (
-            "recover the hidden trajectory that produced the observation — "
+            "recover the hidden trajectory that produced the observation: "
             f"MAXIMIZE {task.tree_weight:.2f} * PathPrecision + "
             f"{1.0 - task.tree_weight:.2f} * EventF1 (higher is better)"
         )
-        ops_line = "allowed_ops = none — this task emits no actions\n"
+        ops_line = "allowed_ops = none: this task emits no actions\n"
     elif task.recovers:
         budget_unit = "max sources to name per episode"
         objective_line = (
-            "recover the seed set that produced the observation — MAXIMIZE F1 "
+            "recover the seed set that produced the observation: MAXIMIZE F1 "
             "against the true sources (higher is better)"
         )
-        ops_line = "allowed_ops = none — this task emits no actions\n"
+        ops_line = "allowed_ops = none: this task emits no actions\n"
     else:
         budget_unit = _budget_unit(task)
         objective_line = (
             "MINIMIZE how far the RUMOUR spreads (lower is better)"
             if task.blocks
-            else "MINIMIZE the ATTACK RATE — how many nodes are EVER infected "
+            else "MINIMIZE the ATTACK RATE: how many nodes are EVER infected "
             "(lower is better)"
             if task.immunizes
             else "MINIMIZE the final infected count (lower is better)"
@@ -2407,7 +2407,7 @@ def build_user_prompt(
         )
 
     return f"""\
-TASK: {task.task} — {objective_line}
+TASK: {task.task}, {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
@@ -2425,8 +2425,8 @@ def _scored_localization_system(task: TaskSpec) -> str:
     """
     Scored mode for the inverse task (research/source_localization.md §2.4.2).
 
-    The same trick as the intervention half — a fixed harness the agent cannot
-    override, with one hook it can — and it is a better fit here than anywhere
+    The same trick as the intervention half: a fixed harness the agent cannot
+    override, with one hook it can, and it is a better fit here than anywhere
     else: LPSI, the Comin-Costa centralities and rumor centrality are ALL exactly
     node-scoring functions over the observed state, so the constrained search space
     is directly comparable to the classical methods rather than a subset of them.
@@ -2434,7 +2434,7 @@ def _scored_localization_system(task: TaskSpec) -> str:
     oracle_line = (
         "- `self.predict_marginals(seeds)` -> np.ndarray of P(infected at the end) "
         "if the\n  cascade had started from `seeds`. Every call is a full rollout "
-        "and calls are\n  counted, so use it sparingly inside score() — it runs "
+        "and calls are\n  counted, so use it sparingly inside score(): it runs "
         "once per candidate per pick."
         if task.forward_model
         else "- `self.predict_marginals` RAISES in this condition: this arm has no "
@@ -2442,7 +2442,7 @@ def _scored_localization_system(task: TaskSpec) -> str:
     )
 
     return f"""\
-You are designing the SCORING RULE of a Source Localization algorithm — not a
+You are designing the SCORING RULE of a Source Localization algorithm, not a
 whole program.
 
 Given a graph and an OBSERVED diffusion state, the task is to recover the SEED SET
@@ -2455,7 +2455,7 @@ until the budget is spent. You may override ONLY:
 - source_score(self, node, graph, observation, selected) -> float
     Called for every candidate node at every pick. `observation[v]` is
     P(node v was infected) at the end of the cascade, in [0, 1]. `selected` is the
-    tuple of sources already named — use it to penalize a candidate whose
+    tuple of sources already named: use it to penalize a candidate whose
     neighbourhood an earlier pick already explains, because sources rarely cluster.
     Higher score = named sooner. Return float("-inf") to rule a node out.
 - source_scores(self, graph, observation) -> np.ndarray            (optional)
@@ -2472,7 +2472,7 @@ RULES:
   .degree(node), .edge_index, .ic_probs.
 {oracle_line}
 
-REPLY SHAPE (adapt the logic — improve on it, do not return it unchanged):
+REPLY SHAPE (adapt the logic: improve on it, do not return it unchanged):
 ```python
 class MyLocalizer(ScoredStrategy):
     def source_score(self, node, graph, observation, selected):
@@ -2492,7 +2492,7 @@ def _scored_reconstruction_system(task: TaskSpec) -> str:
     Scored mode for the decoding task, and the tightest of the three fits.
 
     Every ordered-Steiner method in research/cascade_reconstruction.md §3 IS
-    exactly a shortest-path computation under an arc cost — `delayed-bfs`,
+    exactly a shortest-path computation under an arc cost: `delayed-bfs`,
     `closure`, `greedy`, WPCT and CulT differ in their constraints and their
     attachment order, not in the shape of the object they optimize. Fixing the
     harness and exposing only the cost therefore leaves a search space that
@@ -2500,7 +2500,7 @@ def _scored_reconstruction_system(task: TaskSpec) -> str:
     than can be said for the scored harness on either intervention task.
     """
     return f"""\
-You are designing the ARC-COST FUNCTION of a Cascade Reconstruction algorithm —
+You are designing the ARC-COST FUNCTION of a Cascade Reconstruction algorithm,
 not a whole program.
 
 A diffusion already happened on this graph and you only saw part of it. The task
@@ -2508,7 +2508,7 @@ is to recover the whole history: which nodes were infected, when each activated,
 and who infected whom. Your score is
 {task.tree_weight:.2f} * PathPrecision + {1.0 - task.tree_weight:.2f} * EventF1,
 averaged over many masked cascades. HIGHER IS BETTER, and the weighting is toward
-the who-infected-whom EDGES on purpose — recovering the node set is nearly free.
+the who-infected-whom EDGES on purpose: recovering the node set is nearly free.
 
 A fixed harness (ScoredStrategy.reconstruct) grows a tree out of the observed
 region, cheapest arc first under your cost, respecting every observed activation
@@ -2532,7 +2532,7 @@ RULES:
 - `GraphInfo` has .num_nodes, .out_neighbors(node), .in_neighbors(node),
   .degree(node), .edge_index, .ic_probs.
 
-REPLY SHAPE (adapt the logic — improve on it, do not return it unchanged):
+REPLY SHAPE (adapt the logic: improve on it, do not return it unchanged):
 ```python
 class MyDecoder(ScoredStrategy):
     def edge_cost(self, source, target, probability, graph, observation):
@@ -2555,14 +2555,14 @@ def _scored_prediction_system(task: TaskSpec | None) -> str:
 
     The tightest fit of the four scored harnesses, and for a published reason.
     Szabo & Huberman's founding result is that `log P(t_p)` is near-linear in
-    `log P(t_o)` — that the whole problem is a multiplier — so a search over
+    `log P(t_o)` (that the whole problem is a multiplier) so a search over
     multipliers is a search over exactly the space the feature line of this
     literature occupies rather than a subset of it.
     """
     metric = (task.prediction_metric if task is not None else "msle").upper()
 
     return f"""\
-You are designing the GROWTH RULE of a Cascade Popularity Prediction algorithm —
+You are designing the GROWTH RULE of a Cascade Popularity Prediction algorithm,
 not a whole program.
 
 A fixed harness (ScoredStrategy.predict) multiplies the OBSERVED popularity by
@@ -2572,7 +2572,7 @@ You may override ONLY this method:
 - growth_factor(self, features, graph, observation) -> float
     A multiplier on `observation.popularity`. 1.0 means "this cascade is over";
     3.0 means "it will triple". Your score is {metric}, an ERROR in LOG space, so
-    what you are really choosing is an ADDITIVE offset on `log(popularity)` — being
+    what you are really choosing is an ADDITIVE offset on `log(popularity)`: being
     off by a factor of 2 costs the same whether the cascade is 20 or 2000.
 
 `features` is `cascade_features(graph, observation)`, already computed:
@@ -2582,7 +2582,7 @@ You may override ONLY this method:
   mean_degree, max_degree, frontier_size, frontier_mean_degree,
   exposed, exposure_ratio, spread_breadth, graph_fraction
 
-The single most predictive one in this literature is `rate_second_half` — the
+The single most predictive one in this literature is `rate_second_half`: the
 adoption rate in the SECOND HALF of the observation window. It beats every
 structural feature by a wide margin. `acceleration` is its signed form. Start
 there, and use `remaining_steps` to scale: a multiplier that ignores how much
@@ -2599,7 +2599,7 @@ RULES:
 - `GraphInfo` has .num_nodes, .out_neighbors(node), .in_neighbors(node),
   .degree(node), .edge_index, .ic_probs.
 
-REPLY SHAPE (adapt the logic — improve on it, do not return it unchanged):
+REPLY SHAPE (adapt the logic: improve on it, do not return it unchanged):
 ```python
 class MyGrowth(ScoredStrategy):
     def growth_factor(self, features, graph, observation):
@@ -2661,7 +2661,7 @@ class MyScorer(ScoredStrategy):
     )
 
     return f"""\
-You are designing the SCORING RULE of {problem} — not a whole program.
+You are designing the SCORING RULE of {problem}, not a whole program.
 
 A fixed harness (ScoredStrategy.plan_horizon) greedily picks the highest-score node
 until the budget is spent, then calls schedule() to place the picked {picks} across
@@ -2685,7 +2685,7 @@ RULES:
   .num_nodes, .out_neighbors(node), .in_neighbors(node), .degree(node),
   .edge_index, .ic_probs.
 
-REPLY SHAPE (adapt the logic — improve on it, do not return it unchanged):
+REPLY SHAPE (adapt the logic: improve on it, do not return it unchanged):
 {example}
 """
 
@@ -2809,7 +2809,7 @@ evolve_operator_instructions = {
         "overall approach."
     ),
     "restructure": (
-        "REDESIGN the approach: keep the same contract but change the core idea — "
+        "REDESIGN the approach: keep the same contract but change the core idea, "
         "different structural signals, different selection logic. Do not just "
         "re-tune the parent."
     ),
@@ -2827,7 +2827,7 @@ def build_evolve_prompt(
     `last_result` is the previous generation's paired delta.
 
     The parent's own summary carries the delta it was created with, but a
-    candidate that did not become the parent never surfaces one — so without
+    candidate that did not become the parent never surfaces one, so without
     this the model's most recent edit gets no verdict at all.
     """
     inspiration_text = "".join(
@@ -2843,7 +2843,7 @@ def build_evolve_prompt(
     return f"""
 You are evolving a population of strategies. Produce a NEW candidate by modifying the PARENT.
 {last_text}
-PARENT — the best in the population, which is NOT necessarily your last attempt
+PARENT: the best in the population, which is NOT necessarily your last attempt
 (reward={parent["reward"]:.2f}):
 ```python
 {parent["script"]}
@@ -2851,7 +2851,7 @@ PARENT — the best in the population, which is NOT necessarily your last attemp
 Parent rollout diagnostics:
 {parent["summary"]}
 {inspiration_text}{error_text}
-OPERATION — {operator.upper()}: {evolve_operator_instructions[operator]}
+OPERATION: {operator.upper()}: {evolve_operator_instructions[operator]}
 Reply with one ```python block."""
 
 
@@ -2861,7 +2861,7 @@ You are an algorithm-selection router for Influence Maximization.
 You will be given a task, a graph description, and a menu of classical library
 algorithms. Pick the single most promising algorithm for this graph and task.
 
-Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
 no explanation."""
 
 containment_routing_system = """\
@@ -2870,7 +2870,7 @@ You will be given a task, a graph description, and a menu of classical network
 DISMANTLING algorithms. Each returns a set of nodes to DELETE from the graph. Pick
 the single one most likely to MINIMIZE the final infected count on this graph.
 
-Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
 no explanation."""
 
 
@@ -2881,7 +2881,7 @@ and a menu of classical source-localization algorithms. Each takes the observed
 diffusion state and returns the nodes it believes STARTED the cascade. Pick the
 single one most likely to MAXIMIZE F1 against the true sources on these instances.
 
-Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
 no explanation."""
 
 
@@ -2889,10 +2889,10 @@ blocking_routing_system = """\
 You are an algorithm-selection router for Influence Blocking.
 You will be given a task, a graph description, the rumour's own seed nodes, and a
 menu of classical influence-blocking algorithms. Each returns the intervention this
-task's lever buys — counter-seeds, node deletions, or arcs. Pick the single one most
+task's lever buys: counter-seeds, node deletions, or arcs. Pick the single one most
 likely to MINIMIZE how far the rumour spreads on this graph.
 
-Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
 no explanation."""
 
 
@@ -2900,11 +2900,11 @@ reconstruction_routing_system = """\
 You are an algorithm-selection router for Cascade Reconstruction.
 You will be given a task, a graph description, a summary of the masked cascades to
 recover, and a menu of classical trajectory decoders. Each takes the partial
-observation and returns the whole history — which nodes were infected, when, and
+observation and returns the whole history, which nodes were infected, when, and
 who infected whom. Pick the single one most likely to MAXIMIZE the tree-weighted
 score on these instances.
 
-Reply with EXACTLY ONE algorithm name from the menu — no code, no punctuation,
+Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
 no explanation."""
 
 
@@ -2927,7 +2927,7 @@ def build_routing_system(task: TaskSpec | None = None) -> str:
 
 def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
     if task.decodes:
-        budget_unit = "UNUSED — a decoder spends no budget"
+        budget_unit = "UNUSED: a decoder spends no budget"
         objective_line = (
             f"MAXIMIZE {task.tree_weight:.2f} * PathPrecision + "
             f"{1.0 - task.tree_weight:.2f} * EventF1 (higher is better)"
@@ -2942,7 +2942,7 @@ def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
         objective_line = (
             "MINIMIZE how far the RUMOUR spreads (lower is better)"
             if task.blocks
-            else "MINIMIZE the ATTACK RATE — how many nodes are EVER infected "
+            else "MINIMIZE the ATTACK RATE: how many nodes are EVER infected "
             "(lower is better)"
             if task.immunizes
             else "MINIMIZE the final infected count (lower is better)"
@@ -2959,7 +2959,7 @@ def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
             menu = build_algorithm_menu()
 
     return f"""\
-TASK: {task.task} — {objective_line}
+TASK: {task.task}, {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
@@ -2982,12 +2982,12 @@ def build_explanation_prompt(
     wrote rather than reconstructing them. `history` is passed anyway because a
     long run trims the middle of the thread while every reward survives here,
     and `script` because the winner is the max over iterations, not the last
-    turn — without the echo the model would narrate the wrong algorithm.
+    turn, without the echo the model would narrate the wrong algorithm.
     """
     iteration_lines = "\n".join(
         f"  iteration {record['iteration']}: "
         + (
-            f"FAILED — {record['error'].splitlines()[0]}"
+            f"FAILED: {record['error'].splitlines()[0]}"
             if record.get("error")
             else f"reward={record['reward']:.2f} (best so far {record['best']:.2f})"
         )
@@ -2996,9 +2996,9 @@ def build_explanation_prompt(
     )
 
     return f"""\
-The search is over. Write the final report in plain English — no code blocks.
+The search is over. Write the final report in plain English: no code blocks.
 
-THE WINNING SCRIPT (reward={reward:.2f}) — this is the one to describe, and it
+THE WINNING SCRIPT (reward={reward:.2f}), this is the one to describe, and it
 is NOT necessarily your last attempt:
 ```python
 {script}
@@ -3016,7 +3016,7 @@ order, and nothing before the first one:
 Two or three sentences: what the final algorithm is, and what it scored.
 
 ## Iteration log
-One `### Iteration N — reward X` subsection per iteration above. For each: what
+One `### Iteration N: reward X` subsection per iteration above. For each: what
 you were trying to fix, what you actually changed in the code, and whether it
 worked. Be specific about the change ("raised the redundancy penalty from 1.0 to
 2.5", not "tuned parameters"). If an iteration is no longer visible in this
@@ -3056,7 +3056,7 @@ def build_feedback_prompt(
     best-scoring code so far, shown only when the two differ.
 
     Both are also assistant turns in the conversation, so the echo is
-    deliberately redundant — but it is what makes "EDIT this one" unambiguous,
+    deliberately redundant, but it is what makes "EDIT this one" unambiguous,
     and it survives history trimming and any gateway that mangles multi-turn
     threads. The incumbent is what the next edit must be applied to: editing the
     latest attempt instead turns the loop into a random walk, because a
@@ -3074,19 +3074,19 @@ def build_feedback_prompt(
 
     if incumbent_script is not None:
         target_text = (
-            f"\nYOUR BEST SCRIPT SO FAR (reward {incumbent_reward:.2f}) — THIS is "
+            f"\nYOUR BEST SCRIPT SO FAR (reward {incumbent_reward:.2f}), THIS is "
             f"the one to edit, NOT the attempt above, which scored worse:\n"
             f"```python\n{incumbent_script}\n```\n"
         )
         instruction = (
             f"EDIT THE BEST SCRIPT ABOVE to improve {objective}. The attempt that "
-            f"just ran is shown so you can see what did not work — do not build on "
+            f"just ran is shown so you can see what did not work: do not build on "
             f"it. Change what the diagnostics say is weak and keep what is working."
         )
     else:
         target_text = ""
         instruction = (
-            f"That attempt is your best so far. EDIT it to improve {objective} — "
+            f"That attempt is your best so far. EDIT it to improve {objective}: "
             f"change what the diagnostics say is weak and keep what is working, "
             f"rather than starting a new design from scratch."
         )

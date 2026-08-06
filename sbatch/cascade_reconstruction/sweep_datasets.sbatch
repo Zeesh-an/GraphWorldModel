@@ -16,16 +16,16 @@
 # risk 5 name ONE graph specifically: on `ca_grqc` (assortativity 0.164) a plain
 # Personalized PageRank baseline BEATS principled tree sampling, and loses
 # elsewhere. That is the row where a weak result is most informative, so it runs
-# early rather than being buried — "if the search cannot beat PageRank there, the
+# early rather than being buried: "if the search cannot beat PageRank there, the
 # result is not real".
 #
 #   jazz          198 nodes. The fastest place to converge a number at all
 #   infectious    410 / 2,765. Xiao ICDM'18's smallest row, assortativity 0.0121
-#   email_univ    1,133 / 5,451. Xiao ICDM'18, assortativity -0.0007 — the
+#   email_univ    1,133 / 5,451. Xiao ICDM'18, assortativity -0.0007: the
 #                 assortativity-NEUTRAL control for ca_grqc
 #   uci_students  1,266 / 6,451. Xiao ICDM'18 + Rozenshtein KDD'16
 #   citeseer      DIPT's third graph. Warning: our count is the graph2gauss LCC and
-#                 NOT the 3,327 / 4,732 that circulates — see the loader
+#                 NOT the 3,327 / 4,732 that circulates: see the loader
 #   cora_ml       2,810 / 7,981. DIPT's headline row, and one where our graph is
 #                 known to match theirs byte for byte
 #   ca_grqc       5,242 / 14,484. THE PAGERANK ROW. Run it, read it, and if the
@@ -36,7 +36,7 @@
 #   oregon2       11,461 / 32,730. DITTO's own graph, and the ONLY place
 #                 external:ditto can be run against its own published row
 #   rt_pol        18,470 / 48,053. DITTO's Pol, where BOTH supervised imputers
-#                 OOM in its own table — the scale reference
+#                 OOM in its own table: the scale reference
 #
 # `--cr-setting final_snapshot` is what makes the DITTO comparison legitimate:
 # DITTO conditions on the terminal state and nothing else whatever the sweep runs,

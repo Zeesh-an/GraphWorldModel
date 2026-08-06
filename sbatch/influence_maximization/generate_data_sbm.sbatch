@@ -16,7 +16,7 @@ mkdir -p results logs
 # Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
 # logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
 # transitions. Set RUN_JOBID=0 for a stable
-# results/<task>/<dataset>/<run>/data — which is what
+# results/<task>/<dataset>/<run>/data, which is what
 # the train/agent scripts downstream expect to be told about.
 TASK="${TASK:-influence_maximization}"
 DATASET=sbm
@@ -27,7 +27,7 @@ OUT="results/$TASK/$DATASET/$RUN/data"
 
 # SBM-100 with 40 distinct graphs, 4 planted communities each (25 nodes per block,
 # p_in 0.15 / p_out 0.01). Same scale/recipe as the BA run so the only variable is
-# community structure — within-block degrees are near-uniform, so degree carries
+# community structure: within-block degrees are near-uniform, so degree carries
 # little seed signal and budget allocation across blocks becomes the real problem.
 
 # Node ops only, matching the BA recipe.

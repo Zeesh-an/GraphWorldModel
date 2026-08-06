@@ -18,13 +18,13 @@ Source: CasFlow's Drive bundle (manual; see `casflow_bundle.instructions`)
 
 Reported by: CasCN, VaCas, CasFlow, CCGL, MUCas, CTCP, CasDO, CasFT (§7). CasFT's
 own row at `t_o = 3 y` is **MSLE 1.2468 / MAPE 0.2282** against CasFlow's 1.4370 /
-0.2401 [verified, §5.1] — and §5.3 is the reason to read those two numbers with
+0.2401 [verified, §5.1], and §5.3 is the reason to read those two numbers with
 care, because under CasTemp's leak-free split the whole field moves from that
 1.19-2.11 band to 2.28-4.82.
 
 **Warning: two other things are called APS.** CTCP re-preprocessed to 48,575
 cascades and CasTemp to 90,768. **Warning: licensing is unchecked.** §11 flags it as
-an open gap — `journals.aps.org/datasets` requires a request form (403 to `curl`,
+an open gap: `journals.aps.org/datasets` requires a request form (403 to `curl`,
 re-verified 2026-08-05) and whether the redistributed CasFlow bundle is licensed for
 our use was never established. `data/datasets/aps.py` is the direct route for anyone
 who obtains the release themselves.

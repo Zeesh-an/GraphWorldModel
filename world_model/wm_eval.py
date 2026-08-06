@@ -66,14 +66,14 @@ def evaluate_one_step(
     model output changes under counterfactual actions at the same state), and the persistence baseline.
 
     Under `competitive` the headline suite is unchanged and still describes columns
-    0-1, which are the NEGATIVE cascade under both layouts — the quantity a blocking
+    0-1, which are the NEGATIVE cascade under both layouts: the quantity a blocking
     task is scored on. What changes is the action metric: an `add_node` there seeds
     the POSITIVE cascade, so "did the model flip the target to infected" has to read
     the positive channel or it measures the exact opposite of the intervention. The
     positive cascade's own suite is reported alongside under `pos_*`.
 
     Under `epidemic` the headline suite is again unchanged and describes columns 0-1,
-    which are the ATTACK SET and the INCIDENCE — the quantity a control task is
+    which are the ATTACK SET and the INCIDENCE: the quantity a control task is
     scored on. What changes is that `remove_node` is a DOSE rather than a spent
     spreader, so the removal metric reads the infectious channel and is reported as
     `dose_success`; and the three compartment columns get their own accuracy under
@@ -182,7 +182,7 @@ def evaluate_one_step(
             )
         )
         # Keyed on the rounded PROBABILITIES, not the thresholded prediction.
-        # Under a seeding task the two agree — seeding A flips A itself, a
+        # Under a seeding task the two agree: seeding A flips A itself, a
         # decisive 0 -> 1. Under containment they do not: blocking A rather than B
         # shifts its neighbours' infection probabilities without moving any of them
         # across 0.5, so the binary version reports "the model ignored the action"
@@ -645,7 +645,7 @@ def competitive_rollout_ensemble(
     the learned head can be used as a SIMULATOR rather than only a one-step
     predictor. Two things differ from the single-cascade version and both matter:
 
-      * The bias that counts is `ens_count_bias`, on the NEGATIVE cascade — the
+      * The bias that counts is `ens_count_bias`, on the NEGATIVE cascade: the
         quantity a blocker is scored on. A head that over-predicts the positive
         cascade under-reports the rumour and reports containment it never achieved,
         so `ens_pos_count_bias` is reported beside it rather than folded in.
@@ -796,7 +796,7 @@ def sample_competitive_step(
 
     Coupled rather than four independent draws, and for the same reason the
     single-cascade sampler couples its two channels: independent draws produce states
-    the simulator cannot reach — here a node in BOTH cascades — and those states
+    the simulator cannot reach (here a node in BOTH cascades) and those states
     systematically inflate a free-running rollout. One uniform per node decides
     whether it activates at all and, if so, which cascade takes it, in proportion to
     the two frontier marginals the head already resolved through the tie-break.
@@ -821,7 +821,7 @@ def sample_competitive_step(
     activates = draw < np.clip(total, 0.0, 1.0)
     # ONE uniform does both jobs: `draw < total` decides that the node activates, and
     # the same draw landing in [0, p_negative) rather than [p_negative, total)
-    # decides which cascade takes it — which splits it in exactly the right
+    # decides which cascade takes it, which splits it in exactly the right
     # proportion without a second random number or a second source of drift
     goes_negative = activates & (draw < p_negative)
 
@@ -837,7 +837,7 @@ def sample_competitive_step(
 
 
 def _store_graph(store_entry: dict) -> tuple:
-    """(nx graph, {(u, v): p}) from a stored graph — shared by all three rebuilders."""
+    """(nx graph, {(u, v): p}) from a stored graph, shared by all three rebuilders."""
     edge_index = store_entry["edge_index"]
     ic_probs = store_entry["ic_probs"]
     num_nodes = store_entry["num_nodes"]
@@ -898,7 +898,7 @@ def sample_epidemic_step(
 
     COUPLED, exactly as the two-cascade sampler is coupled and for a stronger
     version of the same reason: S, E, I and R are mutually EXCLUSIVE, so four
-    independent Bernoulli draws would put a node in two compartments at once —
+    independent Bernoulli draws would put a node in two compartments at once,
     a state the simulator cannot reach and one that inflates a free-running rollout
     in whichever direction the noise happens to point. One uniform per node is drawn
     against the cumulative (E, I, R, S) distribution the head already composed, so
@@ -906,7 +906,7 @@ def sample_epidemic_step(
 
     `S` is derived rather than predicted (`1 - E - I - R`) and the four are
     renormalized, because the head's exact composition is put through a
-    sigmoid/logit round trip and a clamp before it gets here — the sum is 1 up to
+    sigmoid/logit round trip and a clamp before it gets here: the sum is 1 up to
     floating point, not identically.
 
     `ever` is advanced from the SAMPLE, not from column 0: a node counts as newly
@@ -994,7 +994,7 @@ def epidemic_rollout_ensemble(
       * **`ens_prevalence_bias`**, on `|I(t)|`. `ens_count_bias` is on the attack
         set, which is monotone and therefore forgiving; the prevalence is the
         non-monotone quantity, and a head that cannot shrink `I` shows up here
-        first — as a positive bias that grows with `t` — while the attack-set bias
+        first (as a positive bias that grows with `t`) while the attack-set bias
         still looks fine. This is the saturation guard for the compartmental case.
       * **`ens_peak_model` / `ens_peak_true`**, the peak prevalence, which is what
         §2.6 lists as the shape metric this literature grades on and the attack rate
@@ -1269,14 +1269,14 @@ def blocking_regret(
     One-step blocker choice: does the model pick the counter-seed that saves the most?
 
     The competitive analogue of `planning_regret`, and it measures PREVENTED
-    influence rather than spread — `sigma(S_N, empty) - sigma(S_N, blocker)`, the
+    influence rather than spread: `sigma(S_N, empty) - sigma(S_N, blocker)`, the
     quantity every name in research/influence_blocking.md §8.1 refers to. Regret is
     against the best candidate in the same shortlist, so 0 means the model chose the
     node the simulator agrees was best.
 
     Both comparison baselines are here for a reason §5.4 states outright: `degree` is
     the heuristic that "cannot be used for influence blocking maximization at all",
-    and `proximity` — an out-neighbour of the rumour's own seeds — is the strong
+    and `proximity` (an out-neighbour of the rumour's own seeds) is the strong
     cheap one. Beating random is not evidence here; beating proximity is.
     """
     rng = np.random.default_rng(seed)
@@ -1418,7 +1418,7 @@ def immunization_regret(
     One-dose choice: does the model pick the node whose vaccination saves the most?
 
     The compartmental analogue of `blocking_regret`, measuring PREVENTED INFECTIONS
-    — `|R(inf)| unprotected - |R(inf)| with one dose` — which is what §8.3 says the
+: `|R(inf)| unprotected - |R(inf)| with one dose`, which is what §8.3 says the
     table should report rather than the eigendrop the spectral line optimizes.
     Regret is against the best candidate in the same shortlist, so 0 means the model
     chose the node the simulator agrees was best.
@@ -1430,15 +1430,14 @@ def immunization_regret(
     and `random` is the control their whole line exists to beat. Beating random is
     not evidence here; beating degree and acquaintance is.
 
-    Each candidate's dose is emitted as a full DELETION BAG — `remove_node` plus its
-    incident arcs — because the head's T_exo assumes a vaccinated node's edges are
+    Each candidate's dose is emitted as a full DELETION BAG: `remove_node` plus its
+    incident arcs, because the head's T_exo assumes a vaccinated node's edges are
     gone from `edge_index`, and a bare removal would leave a fresh susceptible its
     in-edges promptly re-infect.
     """
     rng = np.random.default_rng(seed)
     num_nodes = store_entry["num_nodes"]
     edge_index = store_entry["edge_index"]
-    ic_probs = store_entry["ic_probs"]
 
     degrees = np.zeros(num_nodes)
     np.add.at(degrees, edge_index[0], 1)
@@ -1678,7 +1677,7 @@ def planning_regret_multi(
 
     Single-graph planning regret ties across backbones because the per-graph
     argmax choice is coarse (most models pick the same candidate). Averaging over
-    several graphs — each with its own seed offset so the sampled states differ —
+    several graphs: each with its own seed offset so the sampled states differ,
     gives the metric real resolution, plus a cross-graph std as an error bar.
     """
     graph_ids = list(store)[:n_graphs]

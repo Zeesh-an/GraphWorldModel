@@ -1,5 +1,5 @@
 """
-Named classical CASCADE RECONSTRUCTION baselines — the condition-1 floor for
+Named classical CASCADE RECONSTRUCTION baselines: the condition-1 floor for
 `--task cascade_reconstruction`.
 
 Every decoder has the signature
@@ -14,7 +14,7 @@ parent assignment gives Path Precision, Jaccard and order accuracy.
 
 That is the whole difference from the other three pools. `algorithms.py` returns a
 seed set to maximize with, `dismantling_algorithms.py` nodes to delete,
-`localization_algorithms.py` a source SET — and this one returns a whole
+`localization_algorithms.py` a source SET, and this one returns a whole
 trajectory, which is why §2.5.1 calls source localization the projection of this
 task rather than a sibling of it (the subset with `parent = None` IS the recovered
 seed set).
@@ -22,19 +22,19 @@ seed set).
 Read §2.9 and §8.2 before treating any of these as a weak floor. In ascending
 order of danger:
 
-  1. `random_reconstruction`, `observed_only`, `one_hop` — Rozenshtein's own two
+  1. `random_reconstruction`, `observed_only`, `one_hop`: Rozenshtein's own two
      controls plus a floor. `observed_only` has node precision 1.0 BY CONSTRUCTION
      and exists to prove the reward is not gameable (§2.11 risk 1).
-  2. **`delayed_bfs` (Xiao SDM'18)** — the row that actually has to be beaten. All
+  2. **`delayed_bfs` (Xiao SDM'18)**: the row that actually has to be beaten. All
      four of that paper's methods reach node precision > 0.8 and usually near 1.0
      [figure], `delayed-bfs` is `O(m + k log k)`, and it sits INSIDE the coding
      agent's expressible space.
-  3. **`personalized_pagerank`** — §8.2 trap 4, and the most specific warning in
+  3. **`personalized_pagerank`**: §8.2 trap 4, and the most specific warning in
      that file: Xiao ICDM'18 found Personalized PageRank BEATS tree sampling on
      `grqc` (assortativity 0.164) and loses elsewhere [verified]. Our suite
      contains exactly that graph. If the search cannot clear PPR on `ca_grqc`, the
      result is not real.
-  4. `consistent_tree_wpct` — Zong ICDM'12, and the source of this task's central
+  4. `consistent_tree_wpct`: Zong ICDM'12, and the source of this task's central
      asymmetry: `prec_v = 100%` alongside `prec_e = 78-86%` [verified]. The node
      set is easy and the tree is hard, thirteen years before DIPT said it again.
 
@@ -58,7 +58,7 @@ name up front:
 Two conventions everything here obeys:
 
   * **The reported set is the anchor.** A node the observation reports as infected
-    is infected — no method here may drop one, because under a progressive cascade
+    is infected: no method here may drop one, because under a progressive cascade
     an observation is ground truth about that node. What differs is what each one
     infers ABOUT THE REST.
   * **A transmission travels along an arc that exists.** `finalize` only ever
@@ -116,7 +116,7 @@ def _probability_map(graph: GraphInfo) -> dict[tuple[int, int], float]:
 
 def _weighted_view(graph: GraphInfo) -> nx.DiGraph:
     """
-    The graph as `-log p` arc costs — the likelihood metric every Steiner-style
+    The graph as `-log p` arc costs: the likelihood metric every Steiner-style
     method in §3 is defined over.
 
     A most-likely path is a shortest path under `-log p`, so one weighted view
@@ -261,7 +261,7 @@ def finalize(
          most likely in-neighbour is added at `t - 1`, recursively. This is exactly
          what a Steiner method does when it inserts a hidden node to connect two
          reports, and it is why `observed_only` scores node precision below 1.0 on
-         a sparsely reported cascade — the reports alone do not explain themselves.
+         a sparsely reported cascade: the reports alone do not explain themselves.
       3. **Attach.** Each non-source node takes the in-neighbour with the highest
          `p(u -> v)` among those at an earlier time, preferring `t - 1` exactly.
          A node left with no candidate becomes a source at `t = 0`.
@@ -288,7 +288,7 @@ def finalize(
             if candidates:
                 continue
 
-            # Nothing explains this node — add its most likely in-neighbour one
+            # Nothing explains this node: add its most likely in-neighbour one
             # step earlier, which is the hidden node a Steiner method would insert
             options = [
                 neighbour
@@ -376,7 +376,7 @@ def observed_only(
     graph: GraphInfo, observation, horizon: int, **_kw
 ) -> dict[int, tuple[int, int | None]]:
     """
-    Report exactly what was observed and infer nothing — Rozenshtein's `Reports`.
+    Report exactly what was observed and infer nothing: Rozenshtein's `Reports`.
 
     Node PRECISION is 1.0 by construction (§8.1: `Reports` is "trivially precision
     1.0"), which is precisely why it belongs in the default pool: §2.11 risk 1
@@ -398,7 +398,7 @@ def one_hop(
     graph: GraphInfo, observation, horizon: int, **_kw
 ) -> dict[int, tuple[int, int | None]]:
     """
-    The reports plus their one-hop neighbourhood — Rozenshtein's `Baseline`.
+    The reports plus their one-hop neighbourhood: Rozenshtein's `Baseline`.
 
     The cheapest thing that trades precision for recall, and the second of the two
     controls CulT is measured against in KDD'16 §5.1.
@@ -421,7 +421,7 @@ def one_hop(
 def random_reconstruction(
     graph: GraphInfo, observation, horizon: int, seed: int = 0, **_kw
 ) -> dict[int, tuple[int, int | None]]:
-    """Random times over the reports and a random sample around them — the floor."""
+    """Random times over the reports and a random sample around them: the floor."""
     rng = np.random.default_rng(seed)
     members = set(reported_nodes(observation))
     extra = [
@@ -460,7 +460,7 @@ def delayed_bfs(
 
     THE row that has to be beaten. Terminals are attached in increasing observed
     time, each along the cheapest path from the tree built so far, and the path's
-    interior nodes are DELAYED to land between the two endpoints' times — which is
+    interior nodes are DELAYED to land between the two endpoints' times, which is
     what makes the result respect the observed order rather than merely span the
     reports. The paper's own scalable option, and the one whose linear cost makes
     it the realistic floor for a generated program.
@@ -589,8 +589,8 @@ def greedy_ordered(
     """
     Xiao SDM'18's `greedy`: attach whichever terminal is CLOSEST to the tree next.
 
-    Differs from `delayed_bfs` in the attachment order — nearest-first rather than
-    earliest-first — which the paper reports scales roughly linearly in |E| and
+    Differs from `delayed_bfs` in the attachment order: nearest-first rather than
+    earliest-first, which the paper reports scales roughly linearly in |E| and
     beats plain `steiner` on order accuracy under every model and graph [figure].
     """
     members = set(reported_nodes(observation))
@@ -734,14 +734,14 @@ def personalized_pagerank(
     graph: GraphInfo, observation, horizon: int, **_kw
 ) -> dict[int, tuple[int, int | None]]:
     """
-    Personalized PageRank from the reported nodes — the assortativity trap.
+    Personalized PageRank from the reported nodes: the assortativity trap.
 
     §8.2 trap 4 and §2.11 risk 5, and it is the most specific warning in that file:
     Xiao ICDM'18 found this BEATS tree sampling on `grqc` (assortativity 0.164) and
     loses elsewhere [verified], because an assortative graph makes the infected
     subgraph densely connected and a random walker exploits exactly that. Our suite
     contains that graph. **If a generated decoder cannot beat this row on
-    `ca_grqc`, the result is not real** — run it there specifically.
+    `ca_grqc`, the result is not real**: run it there specifically.
 
     The kept set is sized to the reported set scaled by the observation rate the
     reports imply, so it does not silently predict the whole graph.
@@ -839,8 +839,8 @@ def dhrec(
 
     Deviation: DHREC needs the diffusion PARAMETERS to price a ball and handles
     SEIR; we price by hop count under IC/LT and take `k` from the cover rather than
-    from a prize. DITTO's Tables 4-5 report DHREC at `F1 .50-.70` — 10 to 35% below
-    the supervised ideal — which is the bar this row is here to set [verified §5.1].
+    from a prize. DITTO's Tables 4-5 report DHREC at `F1 .50-.70`: 10 to 35% below
+    the supervised ideal, which is the bar this row is here to set [verified §5.1].
     """
     members = set(reported_nodes(observation))
     if not members:
@@ -912,7 +912,7 @@ def cri(
 
     DITTO's second MLE baseline. The observed set is partitioned into clusters, one
     reverse-infection centre is taken per cluster, and every node's time is its
-    distance from its own centre — which is the whole method for infection times.
+    distance from its own centre, which is the whole method for infection times.
 
     Deviation, and the paper's own: CRI estimates infection times but NOT recovery
     times. Under IC/LT there is no recovery compartment, so nothing is lost here;
@@ -971,7 +971,7 @@ def _consistent_tree(
     paths satisfy the temporal constraints.
 
     Zong's decision problems are NP-complete and hard to approximate, so the paper
-    gives approximation algorithms and heuristics; this is the heuristic — a
+    gives approximation algorithms and heuristics; this is the heuristic: a
     Dijkstra from the estimated roots over `-log p` in which a relaxation is
     REJECTED when it would put a node at a time inconsistent with what was
     observed. `path_consistent` is the difference between the two variants: WPCT
@@ -1039,7 +1039,7 @@ def consistent_tree_wpct(
     graph: GraphInfo, observation, horizon: int, **_kw
 ) -> dict[int, tuple[int, int | None]]:
     """
-    Zong ICDM'12 WPCT — the weighted PATH-consistent tree, and the paper's winner.
+    Zong ICDM'12 WPCT: the weighted PATH-consistent tree, and the paper's winner.
 
     The source of this task's central asymmetry: `prec_v = 100%` alongside
     `prec_e = 78-86%` on Enron and Twitter [verified, Table I]. Getting the node
@@ -1054,7 +1054,7 @@ def consistent_tree_wbct(
     graph: GraphInfo, observation, horizon: int, **_kw
 ) -> dict[int, tuple[int, int | None]]:
     """
-    Zong ICDM'12 WBCT — the weaker BOUNDED variant, and the control WPCT beats.
+    Zong ICDM'12 WBCT: the weaker BOUNDED variant, and the control WPCT beats.
 
     Zong's Table I: `prec_v` falls from 100% to 66-70% and `prec_e` from 78-86% to
     41-69%. Both are in the pool because reporting only the winner of a paper's own
@@ -1078,7 +1078,7 @@ def cult(
     **The honest ceiling for "what can you do without a kernel"** (§5.5): CulT is
     the only method in §3 that assumes no propagation model at all, which makes it
     the right thing for a learned kernel to beat. Its own paper publishes ZERO
-    tables — `grep -c "Table"` returns 0 — so its MCC 0.6-0.9 is [figure] and this
+    tables (`grep -c "Table"` returns 0) so its MCC 0.6-0.9 is [figure] and this
     row is a reimplementation of the method, not a reproduction of a number.
 
     Deviation: CulT operates on a temporal interaction STREAM and binary-searches
@@ -1143,7 +1143,7 @@ def jordan_backward(
     graph: GraphInfo, observation, horizon: int, **_kw
 ) -> dict[int, tuple[int, int | None]]:
     """
-    Greedy backward decode from the Jordan centres — the cheap first cut of §2.11.
+    Greedy backward decode from the Jordan centres: the cheap first cut of §2.11.
 
     Name the centre of each observed component as a source, then walk the cascade
     FORWARD from those sources through the observed set, taking at each step the
@@ -1204,7 +1204,7 @@ def mcmc_decode(
     **_kw,
 ) -> dict[int, tuple[int, int | None]]:
     """
-    Metropolis-Hastings over HISTORIES, scored under the transition kernel — DITTO, minus the learned proposal.
+    Metropolis-Hastings over HISTORIES, scored under the transition kernel: DITTO, minus the learned proposal.
 
     §2.4.3's third family. Start from `delayed_bfs`, then repeatedly perturb one
     node's activation time by +/-1 and accept the move with probability
@@ -1216,7 +1216,7 @@ def mcmc_decode(
     **Blocked from generated scripts by default**, exactly as `celf` and
     `resim_greedy` are, and for the same reason plus one more: it costs
     `proposals x horizon` kernel evaluations per instance, and a generated program
-    already HAS the metered kernel — writing the search around it itself is the
+    already HAS the metered kernel: writing the search around it itself is the
     only way that cost lands in this arm's `kernel_calls`.
     """
     from coding_agent.reconstruction import transition_logprob
@@ -1334,7 +1334,7 @@ def forward_backward(
             if node not in infected
         ]
         # A node the observation says activated here is in the wave whatever the
-        # filter thinks — that is the backward pass's conditioning
+        # filter thinks: that is the backward pass's conditioning
         wave += [
             int(node)
             for node, time in observation.times.items()
@@ -1355,14 +1355,14 @@ def forward_backward(
 
 
 reconstruction_algorithms = {
-    # ordered Steiner family (Xiao SDM'18) — `delayed_bfs` is the bar
+    # ordered Steiner family (Xiao SDM'18): `delayed_bfs` is the bar
     "delayed_bfs": delayed_bfs,
     "ordered_steiner_closure": ordered_steiner_closure,
     "greedy_ordered": greedy_ordered,
     "steiner_tree": steiner_tree,
     # probabilistic tree sampling (Xiao ICDM'18)
     "tree_sampling": tree_sampling,
-    # the assortativity trap (§8.2 trap 4) — run it on ca_grqc specifically
+    # the assortativity trap (§8.2 trap 4): run it on ca_grqc specifically
     "personalized_pagerank": personalized_pagerank,
     # consistent trees (Zong ICDM'12), both variants
     "consistent_tree_wpct": consistent_tree_wpct,

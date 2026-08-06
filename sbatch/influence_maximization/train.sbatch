@@ -15,7 +15,7 @@
 #            results/influence_maximization/sbm/default/data
 #
 # The checkpoint and results JSON land beside the data they were trained on, in
-# results/<task>/<dataset>/<run>/world_model/ — NOT in a per-job directory.
+# results/<task>/<dataset>/<run>/world_model/, NOT in a per-job directory.
 # That coupling is
 # deliberate: every downstream reader (eval_planning, eval_rollout_ensemble, the
 # agent stage) locates a checkpoint from its data dir, and the filenames already

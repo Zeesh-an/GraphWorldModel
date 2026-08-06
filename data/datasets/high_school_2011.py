@@ -9,7 +9,7 @@ The 2011 Thiers wave, the smallest of the three and the cheapest of the family
 after LH10. See `high_school_2012` for why all three are loaded.
 
 Warning: 1,709 EDGES, NOT 1,710. `research/epidemic_control.md` §6.2 derives 1,710
-by counting unique dyads including `(43, 43)` — the file carries one SELF-CONTACT,
+by counting unique dyads including `(43, 43)`: the file carries one SELF-CONTACT,
 which `edges_to_adjacency` drops with `setdiag(0)` like every other loader here.
 The two counts describe the same graph and this one is the one an epidemic can
 travel on; a self-loop transmits to nobody.

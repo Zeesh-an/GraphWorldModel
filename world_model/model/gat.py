@@ -81,7 +81,7 @@ class GATLayer(nn.Module):
     ) -> torch.Tensor:
         """
         features: (N, hidden_dim)
-        edge_index: (2, E) long — [src, dst]
+        edge_index: (2, E) long, [src, dst]
         edge_weight: (E,) float edge weights added as log-bias to attention scores, or None for unweighted
         returns: (N, hidden_dim)
         """
@@ -207,7 +207,7 @@ class GATForwardModel(nn.Module):
     def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
         """
         seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adjacency: sparse COO (N, N) — normalized D^-1/2 (A+I) D^-1/2
+        adjacency: sparse COO (N, N), normalized D^-1/2 (A+I) D^-1/2
         returns: (N, 1) predicted outcome probabilities in [0, 1]
         """
         device = seed_vec.device
@@ -268,7 +268,7 @@ class GATEncoder(nn.Module):
     def forward(self, X: torch.Tensor, graph) -> torch.Tensor:
         """
         X: (N, in_channels) node feature matrix
-        graph: GraphInput — uses graph.edge_index (2, E) and graph.edge_weight (E,)
+        graph: GraphInput, uses graph.edge_index (2, E) and graph.edge_weight (E,)
         returns: (N, hidden_dim) node embeddings
         """
         # Add self-loops so each node attends to itself (weight 1 -> neutral log-bias)

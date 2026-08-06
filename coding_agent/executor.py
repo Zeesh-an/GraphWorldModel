@@ -71,19 +71,19 @@ scored_blocked_primitives = (
 #
 #   time      measured on BA-1589 at k=79 (5% of N): all nine below exceed 60s
 #             per call, vanilla_greedy exceeds 120s. Everything still available
-#             runs in under 2.7s — imm 0.55s, betweenness_seeds 2.68s, the rest
+#             runs in under 2.7s: imm 0.55s, betweenness_seeds 2.68s, the rest
 #             under 0.6s. No library algorithm sits in between.
 #
 #   honesty   their episodes run on a private NDlib Simulator, so
 #             MonteCarloEnvironment.episodes_used never sees them. One one_shot
 #             iteration calling celf(mc_runs=20) simulated 7,462 episodes and
-#             reported real_env_episodes=2 — and that field is the
+#             reported real_env_episodes=2, and that field is the
 #             sample-efficiency axis the whole condition ladder is read on.
 #
 # genetic_algorithm and simulated_annealing are bounded (~17s, a fixed
 # population x generations budget rather than a full-N scan) but still call
 # mc_simulate_spread, so they leak episodes too and are blocked on that ground.
-# static_greedy calls no MC primitive at all — it is here because its per-pick
+# static_greedy calls no MC primitive at all: it is here because its per-pick
 # snapshot reachability scan is the same shape and the same cost.
 mc_blocked_algorithms = (
     "vanilla_greedy",
@@ -123,7 +123,7 @@ if _unknown_blocked:
 
 # Same rule on the source-localization side. `resim_greedy` falls back to a
 # PRIVATE NDlib estimator when it is not handed a forward oracle, so a generated
-# script calling it would bypass `real_env_episodes` exactly as `celf` does — and
+# script calling it would bypass `real_env_episodes` exactly as `celf` does, and
 # a generated script has `self.predict_marginals`, which is the metered binding,
 # so nothing is lost by blocking it.
 mc_blocked_localization = localization_algorithms.mc_localization_algorithms
@@ -168,7 +168,7 @@ if _unknown_blocked:
 
 # ...and on the cascade-reconstruction side. `mcmc_decode` and `forward_backward`
 # evaluate the transition kernel `proposals x horizon` times per instance, and a
-# generated program already HAS the metered kernel (`self.step_marginals`) — so
+# generated program already HAS the metered kernel (`self.step_marginals`), so
 # blocking them costs nothing and is the only way that cost lands in the arm's
 # own `kernel_calls`, which is the number research/cascade_reconstruction.md §11
 # says nobody has published.
@@ -187,7 +187,7 @@ if _unknown_blocked:
 # Kernel-heavy POPULARITY predictors, on the same terms as every other pool's:
 # `mc_forward` unrolls the forward model `steps * forecast_samples` times per
 # cascade, and a generated program already HAS the metered oracle
-# (`self.forecast_marginals`) — so blocking it costs nothing and is the only way
+# (`self.forecast_marginals`), so blocking it costs nothing and is the only way
 # that cost lands in the arm's own `kernel_calls`, which is the axis
 # research/cascade_prediction.md §2.4 says the whole comparison is read on.
 mc_blocked_prediction = prediction_algorithms.mc_prediction_algorithms
@@ -327,7 +327,7 @@ def _blocked_localizer(name: str, *_args, **_kwargs) -> None:
         f"localization_algorithms.{name} is not available: it re-simulates every "
         f"candidate on its own private simulator, which bypasses the metered "
         f"evaluator. Blocked: {', '.join(mc_blocked_localization)}. You already "
-        f"have the metered version — call `self.predict_marginals(seeds)` and "
+        f"have the metered version: call `self.predict_marginals(seeds)` and "
         f"write the search around it yourself, which is also the only way its "
         f"cost lands in this arm's forward-call count."
     )
@@ -338,7 +338,7 @@ def _blocked_decoder(name: str, *_args, **_kwargs) -> None:
         f"reconstruction_algorithms.{name} is not available: it evaluates the "
         f"transition kernel proposals x horizon times per instance, which "
         f"dominates wall clock. Blocked: {', '.join(mc_blocked_reconstruction)}. "
-        f"You already have the metered kernel — call "
+        f"You already have the metered kernel: call "
         f"`self.step_marginals(infected, frontier)` and write the search around it "
         f"yourself, which is also the only way its cost lands in this arm's "
         f"kernel-call count."
@@ -350,7 +350,7 @@ def _blocked_predictor(name: str, *_args, **_kwargs) -> None:
         f"prediction_algorithms.{name} is not available: it unrolls the forward "
         f"model steps x forecast_samples times per cascade, which dominates wall "
         f"clock. Blocked: {', '.join(mc_blocked_prediction)}. You already have the "
-        f"metered oracle — call `self.forecast_marginals(adopters, frontier, steps)` "
+        f"metered oracle: call `self.forecast_marginals(adopters, frontier, steps)` "
         f"or `self.expected_popularity(...)` and write the estimate around it "
         f"yourself, which is also the only way its cost lands in this arm's "
         f"kernel-call count."
@@ -449,7 +449,7 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         # Vaccination / quarantine / edge selectors for epidemic control, on the
         # same terms: present under every task, and the MC-heavy member blocked
         # unless --allow-mc-algorithms. `immunization_levers` rides along because a
-        # generated script that composes one has to know which op it may emit —
+        # generated script that composes one has to know which op it may emit,
         # `netmelt` returns arcs and `netshield` returns nodes.
         "immunization_algorithms": SimpleNamespace(
             **{
@@ -495,8 +495,8 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         ),
         # POPULARITY predictors for cascade prediction, on the same terms again.
         # `cascade_features` rides along because it is the shared feature extractor
-        # every §3.1 method here is defined over — Cheng et al.'s five classes, minus
-        # content — and the scored-mode harness takes its output directly, so hiding
+        # every §3.1 method here is defined over: Cheng et al.'s five classes, minus
+        # content, and the scored-mode harness takes its output directly, so hiding
         # it would ask the model to reinvent the one thing that paper actually found.
         "prediction_algorithms": SimpleNamespace(
             **{
@@ -516,11 +516,11 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         # package, which imports this module.
         "containment": importlib.import_module("coding_agent.containment"),
         # ...and the blocking helpers, on the same terms. `blocking_plan` is what
-        # turns a library selector's output — node ids from three levers, arcs from
-        # the fourth — into the one plan shape the executor validates.
+        # turns a library selector's output: node ids from three levers, arcs from
+        # the fourth: into the one plan shape the executor validates.
         "blocking": importlib.import_module("coding_agent.blocking"),
         # ...and the epidemic helpers. `immunization_plan` is what turns an
-        # immunizer's output — node ids from two levers, arcs from the other two —
+        # immunizer's output: node ids from two levers, arcs from the other two,
         # into the one plan shape the executor validates, and it also drops any
         # index case the algorithm happened to pick.
         "epidemic": importlib.import_module("coding_agent.epidemic"),
@@ -593,7 +593,7 @@ def build_strategy(
         ):
             raise StrategyError(
                 f"scored mode: {fixed} is the fixed harness and may not be "
-                f"overridden — override only score(), schedule(), source_score() "
+                f"overridden: override only score(), schedule(), source_score() "
                 f"or edge_cost()."
             )
     try:
@@ -614,14 +614,14 @@ def call_strategy(method: Callable, *args, allow_none: bool = False) -> object:
     A `None` return is caught here rather than downstream: `plan_horizon`, `act`,
     `localize`, `reconstruct` and the scored hooks all must return a value, and the
     commonest way to get None is a model that implemented the wrong method for the
-    task's own harness — `plan_horizon` when the method wanted `act`, or an `act`
+    task's own harness: `plan_horizon` when the method wanted `act`, or an `act`
     that falls off the end without returning. Left alone it surfaces as
     `TypeError: 'NoneType' object is not iterable` from inside validation, which
     is an opaque traceback instead of a turn the model can act on.
 
     `allow_none` is the one exception, and it exists for exactly one contract:
     `predict()` returns None to DECLINE scoring a cascade, which is a legitimate
-    answer rather than a failure (research/cascade_prediction.md §8.4 — a
+    answer rather than a failure (research/cascade_prediction.md §8.4: a
     generative model whose fit diverges on a supercritical cascade produces no
     estimate, and reporting the mean over scoreable cascades alone "silently
     favours the model that gives up more often"). Declines are COUNTED in
@@ -645,7 +645,7 @@ def call_strategy(method: Callable, *args, allow_none: bool = False) -> object:
     except _StrategyTimeout:
         raise StrategyError(
             f"strategy exceeded the {strategy_timeout_seconds:.0f}s wall-clock limit "
-            f"for one call. Something in it scales badly — a scan over all nodes "
+            f"for one call. Something in it scales badly: a scan over all nodes "
             f"inside a per-pick loop, or a sample size far larger than the graph "
             f"needs. Rewrite it to run in seconds: vectorize with numpy, precompute "
             f"scores once outside the selection loop, or shrink the sample count."
@@ -663,7 +663,7 @@ def budget_key(action) -> object:
 
     A node op is identified by its target; an EDGE op by the whole arc, because two
     arcs out of the same `u` are two different interventions. Keying edge ops on
-    `target` alone — which is what a node-shaped check does — would reject a legal
+    `target` alone (which is what a node-shaped check does) would reject a legal
     plan that cuts two of a hub's out-edges as a duplicate, and that is exactly the
     plan an edge-blocking lever is supposed to produce.
     """
@@ -688,14 +688,14 @@ def validate_actions(
     budget.
 
     `budget_op` is what one unit of budget buys: `add_node` for a seeding task,
-    `remove_node` for a containment one. Only that op is counted — a containment
+    `remove_node` for a containment one. Only that op is counted: a containment
     plan's `remove_edge` ops are the mechanics of a node deletion
     (`containment.delete_node_ops`), so charging them would make k mean deg(v)
     different things per node.
 
     `protected` is the outbreak's source set on a containment task. Deleting a
     source ENDS the outbreak instead of containing it, which collapses the problem
-    to "find the sources" — a different task (`source_localization`) with a
+    to "find the sources": a different task (`source_localization`) with a
     different objective, and one where a uniform random removal set beats every
     dismantler by luck. The published immunization protocol vaccinates first and
     then infects a NON-immunized node, so this rule is that protocol rather than a
@@ -703,7 +703,7 @@ def validate_actions(
 
     `edge_weight_caps` is `{(u, v): p}` on the weight-reduction lever of influence
     blocking. DiffIM's relaxation is `p~ = p * r~` with `r~ in [0, 1]`, so a blocker
-    may only LOWER an edge — raising one would be an unbudgeted boost to its own
+    may only LOWER an edge: raising one would be an unbudgeted boost to its own
     counter-cascade wearing a blocking action's name.
     """
     spent_units = 0
@@ -723,7 +723,7 @@ def validate_actions(
             # only the rule: those ops are free, and a plan that buys them is
             # spending an intervention the budget never charged for
             hint = (
-                " A node deletion is emitted as a BARE remove_node — the harness "
+                " A node deletion is emitted as a BARE remove_node: the harness "
                 "expands it into the incident remove_edge ops for you, and letting "
                 "you emit them would be an unbudgeted second intervention."
                 if action.op in ("add_edge", "remove_edge", "set_edge_weight")
@@ -745,7 +745,7 @@ def validate_actions(
                 f"node {action.target} is an OUTBREAK SOURCE and cannot be removed. "
                 f"Deleting a source ends the outbreak rather than containing it, "
                 f"which is not the problem you are being scored on. The sources are "
-                f"{sorted(guarded)} — filter them out of your candidates and spend "
+                f"{sorted(guarded)}: filter them out of your candidates and spend "
                 f"the budget on the routes out of them instead."
             )
 
@@ -777,8 +777,8 @@ def validate_actions(
             if weight > cap + 1e-9:
                 raise StrategyError(
                     f"set_edge_weight raises arc {arc} from {cap:.6f} to "
-                    f"{weight:.6f}. A blocker may only REDUCE an edge — the "
-                    f"published relaxation is p~(u,v) = p(u,v) * r with r in [0, 1] — "
+                    f"{weight:.6f}. A blocker may only REDUCE an edge, the "
+                    f"published relaxation is p~(u,v) = p(u,v) * r with r in [0, 1]: "
                     f"so a weight above the arc's own probability would be an "
                     f"unbudgeted boost rather than a block."
                 )

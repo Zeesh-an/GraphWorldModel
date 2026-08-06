@@ -28,7 +28,7 @@ def improves(candidate: float, incumbent: float, sense: str, epsilon: float = 0.
     Whether `candidate` beats `incumbent` under the task's objective sense.
 
     Every "is this better" in the outer loop routes through here, so flipping one
-    registry field flips the whole search rather than N scattered comparisons —
+    registry field flips the whole search rather than N scattered comparisons,
     and a place that forgets to ask is a place that silently maximizes.
     """
     if sense == minimize:
@@ -189,7 +189,7 @@ class TaskSpec:
     # and every call site that has a task already has it. Empty for every task
     # that does not invert.
     instances: tuple = ()
-    # Where each instance's k comes from — `episode` (its own source count, the
+    # Where each instance's k comes from: `episode` (its own source count, the
     # published given-k convention) or `sweep` (the pipeline's k, for §8.5.1's
     # source-fraction axis)
     source_budget_mode: str = "episode"
@@ -238,7 +238,7 @@ class TaskSpec:
     # Which of research/epidemic_control.md §2.5's four interventions the budget
     # buys. Carried as a FIELD rather than derived from `budget_op`, because
     # `vaccinate` and `quarantine` both spend `remove_node` and differ only in what
-    # the harness expands it into — the first deletes the node, the second isolates
+    # the harness expands it into: the first deletes the node, the second isolates
     # it and leaves it counted (§8.2 trap 7).
     epi_lever: str = "vaccinate"
     # Multiplier `set_edge_weight` writes under the `contact_reduce` lever. 0.0 is a
@@ -263,7 +263,7 @@ class TaskSpec:
     # `observes` is the narrowing one, and it narrows `forecasts` exactly as
     # `decodes` narrows `recovers`: the transitions were REPLAYED FROM A LOG, so the
     # dynamics that produced them are not IC, not LT and not known
-    # (research/cascade_prediction.md §2.2). The prompt has to say so — a system
+    # (research/cascade_prediction.md §2.2). The prompt has to say so: a system
     # message asserting IC dynamics over Weibo retweets would be a lie the model
     # would then optimize against.
     observational: bool = False
@@ -304,8 +304,8 @@ class TaskSpec:
         `not self.forecasts` is load-bearing rather than defensive: a forecast
         task's reward is a prediction ERROR, so its `sense` is `minimize` for a
         reason that has nothing to do with containment. Without the guard every
-        reader that asks `contains` — the prompt, the summary, the structural
-        metrics block, the plots — would describe a cascade-prediction arm as an
+        reader that asks `contains`: the prompt, the summary, the structural
+        metrics block, the plots: would describe a cascade-prediction arm as an
         outbreak it was trying to shrink.
         """
         return self.sense == minimize and not self.forecasts
@@ -331,7 +331,7 @@ class TaskSpec:
         Same relationship `blocks` has to `contains`, and the difference is what
         the DYNAMICS are rather than what the budget buys: a critical-node arm
         fights a monotone cascade, while this one fights a compartmental process in
-        which nodes RECOVER and — under SIS — become susceptible again. That
+        which nodes RECOVER and (under SIS) become susceptible again. That
         non-monotonicity is what needs a different simulator, a different feature
         layout and a head that composes a transition matrix rather than a
         probability (research/epidemic_control.md §2.4).
@@ -344,7 +344,7 @@ class TaskSpec:
         True when the program infers a hidden cause instead of choosing an action.
 
         The third problem family, and the one that changes the CONTRACT rather than
-        only the sign: no rollout, no action bag, no budget spent on the graph —
+        only the sign: no rollout, no action bag, no budget spent on the graph,
         `localize(graph, observation, budget)` returning the nodes that started the
         cascade, scored on F1 against the truth.
         """
@@ -385,7 +385,7 @@ class TaskSpec:
         Same relationship `decodes` has to `recovers`, and the difference is where
         the DATA came from rather than what is predicted: these transitions were
         replayed from a real log, so the process behind them is not IC, not LT and
-        not known. That is the one thing the prompt must not get wrong — §2.2 lists
+        not known. That is the one thing the prompt must not get wrong: §2.2 lists
         three specific mechanisms (Hawkes self-excitation, repeated exposure,
         exogenous arrivals) by which real adoption violates the composition rule our
         structured head hard-codes, and a model told it is predicting IC would tune
@@ -442,13 +442,13 @@ class Trajectory:
     # the rollout only breaks when the frontier AND the action bag are both
     # empty, which is a fixed point of monotone IC/LT.
     spread_curve: list[float] | None = None
-    # E|I(t)| after each timestep — the CURRENTLY-infectious count, not the
+    # E|I(t)| after each timestep: the CURRENTLY-infectious count, not the
     # cumulative one. Only a compartmental task fills it, and it is a separate
     # field rather than a reinterpretation of `spread_curve` because the two are
     # genuinely different curves there: the attack set is monotone and the
     # prevalence is not, and §2.6's peak, time-to-peak and AUC are all functions of
     # the second. Padding it by holding the last value would be WRONG for the same
-    # reason — a dead epidemic's prevalence is 0, not its last non-zero value — so
+    # reason (a dead epidemic's prevalence is 0, not its last non-zero value) so
     # it is padded with zeros instead.
     prevalence_curve: list[float] | None = None
 
@@ -482,8 +482,8 @@ class Strategy(Protocol):
     # partial `Observation` of a diffusion that already happened, return
     # `{node: (activation timestep, inferred parent)}` for every node believed
     # infected, with `parent = None` marking a source and uninfected nodes simply
-    # absent. The harness binds `self.step_marginals(infected, frontier)` — the
-    # transition kernel, evaluated at an ARBITRARY proposed state — before calling
+    # absent. The harness binds `self.step_marginals(infected, frontier)`: the
+    # transition kernel, evaluated at an ARBITRARY proposed state, before calling
     # this; under @native that attribute raises instead
     # (research/cascade_reconstruction.md §2.5).
     def reconstruct(
@@ -493,11 +493,11 @@ class Strategy(Protocol):
     # Cascade prediction. Neither an intervention nor an inversion: given the graph
     # and a `CascadeObservation` of a REAL cascade's first `t_o` steps, return the
     # popularity it will have reached by `t_p`. Return None (or a non-finite value)
-    # to DECLINE — a generative model that cannot score a supercritical cascade is
+    # to DECLINE: a generative model that cannot score a supercritical cascade is
     # counted in `n_failed` rather than charged a wild guess, which is the column
     # research/cascade_prediction.md §8.4 says almost nobody publishes. The harness
-    # binds `self.forecast_marginals(adopters, frontier, steps)` — the multi-step
-    # forward model — before calling this; under @native that attribute raises
+    # binds `self.forecast_marginals(adopters, frontier, steps)`: the multi-step
+    # forward model, before calling this; under @native that attribute raises
     # instead (§2.1).
     def predict(
         self, graph: GraphInfo, observation: object, horizon: int
@@ -516,7 +516,7 @@ class Strategy(Protocol):
 class ScoredStrategy:
     """
     Scored-mode contract: plan_horizon and localize are fixed harnesses the agent
-    cannot override — generated code may only override score(), schedule(), or
+    cannot override: generated code may only override score(), schedule(), or
     source_score(). This forces edits to the algorithm's internals instead of
     free-form programs or composition over the library.
 
@@ -607,7 +607,7 @@ class ScoredStrategy:
         """
         The whole score vector at the first pick, so scored mode gets a REAL AUC.
 
-        Free for the agent — it wrote `source_score`, and this only evaluates it
+        Free for the agent: it wrote `source_score`, and this only evaluates it
         once per node with an empty `selected`. Non-finite entries (the natural way
         a rule rules a node out) are pushed below the lowest finite score rather
         than left as -inf, so the ranking stays total.
@@ -658,7 +658,7 @@ class ScoredStrategy:
 
         Scored mode for cascade prediction, and the tightest fit of the four:
         Szabo & Huberman's founding result is that `log P(t_p)` is near-linear in
-        `log P(t_o)`, i.e. that the whole problem is a multiplier — so a search over
+        `log P(t_o)`, i.e. that the whole problem is a multiplier, so a search over
         multipliers is a search over exactly the space §3.1's feature line occupies,
         rather than a subset of it. `features` is `cascade_features(...)`: Cheng et
         al.'s five classes (root, structural, temporal, community, and the observed
@@ -700,7 +700,7 @@ class ScoredStrategy:
         every ordered-Steiner method in `research/cascade_reconstruction.md` §3 IS
         exactly a shortest-path computation under an arc cost, so the constrained
         search space is directly comparable to the classical methods rather than a
-        subset of them. The default is the likelihood metric they all use — a
+        subset of them. The default is the likelihood metric they all use: a
         most-likely path is a shortest path under `-log p`.
 
         `observation.reported` is the observed report set, so a rule may make an

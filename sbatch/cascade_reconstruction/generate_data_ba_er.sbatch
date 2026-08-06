@@ -7,7 +7,7 @@
 #SBATCH --mem=32G
 #SBATCH --time=24:00:00
 
-# DITTO's own two synthetic graphs, at DITTO's own parameters — the two rows of
+# DITTO's own two synthetic graphs, at DITTO's own parameters: the two rows of
 # research/cascade_reconstruction.md §5.1 that are reachable without a loader.
 #
 # Usage: sbatch sbatch/cascade_reconstruction/generate_data_ba_er.sbatch

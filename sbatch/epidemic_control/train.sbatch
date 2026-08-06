@@ -19,14 +19,14 @@
 # per-edge parameter at all, so under them this head cannot exist.
 #
 # The three rates are read back OFF the dataset's metadata.json rather than passed
-# here — `train_wm.resolve_epidemic` does it — because a head whose gamma disagrees
+# here (`train_wm.resolve_epidemic` does it) because a head whose gamma disagrees
 # with the simulator that made the targets is fit against a transition that never
 # happened, and nothing about the loss curve would say so.
 #
 # The number to read first is `ens_prevalence_bias` in the results JSON, not
 # `ens_count_bias`. The attack set is monotone and therefore forgiving; the
 # prevalence is the NON-monotone quantity, and a head that cannot shrink `I` shows
-# up there first — as a positive bias that grows with `t` — while the attack-set
+# up there first (as a positive bias that grows with `t`) while the attack-set
 # bias still looks fine.
 
 set -euo pipefail

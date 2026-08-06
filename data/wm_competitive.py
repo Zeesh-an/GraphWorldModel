@@ -13,7 +13,7 @@ only expressible tie-break is a single global "first rule wins".
 Three parameters decide what is being simulated, and all three are recorded in
 `data/metadata.json` because §5.1 shows each one moves the published numbers:
 
-  * **tie_break** — `negative` / `positive` / `fixed` dominance (§8.4). `auto`
+  * **tie_break**: `negative` / `positive` / `fixed` dominance (§8.4). `auto`
     resolves to each dynamics' own founding paper: PD under IC, because Budak's
     MCICM and COICM both hard-code "if the bad and the good information reach a node
     at the same step, the good information takes effect"; ND under LT, because He
@@ -21,12 +21,12 @@ Three parameters decide what is being simulated, and all three are recorded in
     for that rule. Most papers never state which they used, so it is a flag with a
     printed default rather than an artifact of node iteration order.
 
-  * **positive_prob** — `shared` (COICM: one probability per edge, independent of
+  * **positive_prob**: `shared` (COICM: one probability per edge, independent of
     information type) or a constant `c` (MCICM: the limiting campaign transmits at
     `c` on every edge; `c = 1.0` is Budak's high-effectiveness property, the case
     Theorem 4.2 proves submodular).
 
-  * **remove_semantics** — `blocked` throughout, as every containment task needs:
+  * **remove_semantics**: `blocked` throughout, as every containment task needs:
     a removed node is deleted, uncounted, and cannot transmit or be infected by
     either cascade.
 
@@ -79,7 +79,7 @@ def resolve_tie_break(tie_break: str, diffusion_model: str) -> str:
     Budak's MCICM/COICM resolve simultaneous arrival in favour of the GOOD campaign
     (WWW'11 §3.1); He et al.'s CLT resolves it in favour of the negative one (SDM'12).
     Running IC under ND or LT under PD is a legitimate experiment and is what the
-    explicit values are for — it is just not what either paper measured.
+    explicit values are for: it is just not what either paper measured.
     """
     if tie_break == auto_dominance:
         return negative_dominance if diffusion_model == "LT" else positive_dominance
@@ -125,7 +125,7 @@ class CompetitiveSimulator:
     PRE-STEP frontiers and only then committed.
 
     `add_node` always seeds the POSITIVE cascade. The negative seed set is an input
-    to the episode rather than an action (§2.1) — it is committed by `reset` — so the
+    to the episode rather than an action (§2.1) (it is committed by `reset`) so the
     three action channels keep the meaning they have in every other task and the
     blocker can only ever help itself.
     """
@@ -170,7 +170,7 @@ class CompetitiveSimulator:
         self.blocked = set()
         # Per-node priority for FIXED dominance and the two hidden CLT thresholds.
         # Drawn per episode and NEVER stored, exactly like the single-cascade LT
-        # threshold — which is where the head's partial-observability tax comes from.
+        # threshold, which is where the head's partial-observability tax comes from.
         self.priority = np.zeros(self.num_nodes, dtype=np.float64)
         self.neg_threshold = {}
         self.pos_threshold = {}
@@ -243,7 +243,7 @@ class CompetitiveSimulator:
         The five ops, with `add_node` seeding the POSITIVE cascade.
 
         A blocker may seed a node the rumour already owns and it simply does
-        nothing — the node is already committed, exactly as re-seeding an active node
+        nothing: the node is already committed, exactly as re-seeding an active node
         does nothing under single-cascade IC.
         """
         rebuild = False
@@ -341,7 +341,7 @@ class CompetitiveSimulator:
         Commit one step's arrivals under the configured tie-break.
 
         The three rules differ only for a node BOTH cascades reached, which is the
-        whole content of §8.4 — and the reason this is one function rather than
+        whole content of §8.4, and the reason this is one function rather than
         three scattered conditionals.
         """
         new_negative, new_positive = set(), set()
@@ -389,7 +389,7 @@ class CompetitiveSimulator:
         One-step marginals for both cascades: the four soft targets the head is fit on.
 
         Same shape as `Simulator.advance_marginal` with four count dicts instead of
-        two (§2.1). The action is applied ONCE — it is deterministic — and only the
+        two (§2.1). The action is applied ONCE (it is deterministic) and only the
         diffusion step is redrawn.
         """
         if num_mc < 1:
@@ -399,7 +399,7 @@ class CompetitiveSimulator:
         post_action = self.snapshot()
 
         # CLT is deterministic given its (hidden) thresholds, but they are redrawn
-        # per draw here so the target is the THRESHOLD marginal — which is the only
+        # per draw here so the target is the THRESHOLD marginal, which is the only
         # thing a state-only model can represent, and what the LT head is fit against
         draws = num_mc
         counts = [{}, {}, {}, {}]

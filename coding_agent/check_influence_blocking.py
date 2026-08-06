@@ -3,7 +3,7 @@ Self-check for influence blocking: the two cascades, the tie-break, the four lev
 prevented influence, and the competitive head.
 
 Everything here runs on graphs where the answer is known by hand, so a regression
-fails as an assertion rather than as a quietly wrong results table — which is the
+fails as an assertion rather than as a quietly wrong results table, which is the
 specific failure mode this task invites, because a two-cascade harness that silently
 drops one cascade produces perfectly plausible numbers in which every blocker looks
 useless and every arm ties at the unopposed spread.
@@ -72,7 +72,7 @@ from world_model.wm_model import WorldModel
 path = [(0, 1), (1, 2), (2, 3)]
 
 # A diamond: 0 -> 1 -> 3 and 0 -> 2 -> 3. Node 3 is reached by both branches, so
-# neither 1 nor 2 dominates it — the case a naive "count my descendants" scorer
+# neither 1 nor 2 dominates it: the case a naive "count my descendants" scorer
 # gets wrong and the dominator tree gets right.
 diamond = [(0, 1), (0, 2), (1, 3), (2, 3)]
 
@@ -614,7 +614,7 @@ def check_head_matches_simulator() -> None:
 
         assert abs(predicted - empirical) < 0.03, (
             f"under {rule} dominance the oracle head predicts {predicted:.4f} for "
-            f"node 3 but the simulator measures {empirical:.4f} over 4000 draws — the "
+            f"node 3 but the simulator measures {empirical:.4f} over 4000 draws, the "
             f"product form and the tie-break composition disagree"
         )
 

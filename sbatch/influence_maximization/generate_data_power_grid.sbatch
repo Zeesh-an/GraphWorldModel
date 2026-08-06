@@ -16,7 +16,7 @@ mkdir -p results logs
 # Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
 # logs/%x_%j.out, so two generation jobs can never half-overwrite each other's
 # transitions. Set RUN_JOBID=0 for a stable
-# results/<task>/<dataset>/<run>/data — which is what
+# results/<task>/<dataset>/<run>/data, which is what
 # the train/agent scripts downstream expect to be told about.
 TASK="${TASK:-influence_maximization}"
 DATASET=power_grid
@@ -26,9 +26,9 @@ RUN_JOBID="${RUN_JOBID:-1}"
 OUT="results/$TASK/$DATASET/$RUN/data"
 
 # US Western power grid (4,941 nodes, 6,594 edges, lattice-like: long paths,
-# slow cascades — the horizon actually binds here). Auto-downloads on first use.
+# slow cascades: the horizon actually binds here). Auto-downloads on first use.
 # ONE real graph: 100 rollouts x 2 models x 4 algos = 800 episodes.
-# betweenness on ~5K sparse nodes takes a few minutes, computed once — fine.
+# betweenness on ~5K sparse nodes takes a few minutes, computed once: fine.
 
 # k ~ U(1%, 20% of N) per episode -> 49..988 seeds here. One checkpoint covers
 # the whole budget sweep instead of only the k it was generated at.

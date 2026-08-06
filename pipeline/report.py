@@ -69,7 +69,7 @@ reported_config_keys = (
 
 
 def _format_number(value: object, digits: int = 2) -> str:
-    return f"{float(value):.{digits}f}" if isinstance(value, (int, float)) else "—"
+    return f"{float(value):.{digits}f}" if isinstance(value, (int, float)) else ", "
 
 
 def _graph_section(agent_results: list[dict], metadata: dict | None) -> list[str]:
@@ -95,9 +95,9 @@ def _graph_section(agent_results: list[dict], metadata: dict | None) -> list[str
 
         for entry in metadata.get("graphs", [])[:1]:
             lines.append(
-                f"- **generation budget band**: k {entry.get('budget_k_min')}–"
+                f"- **generation budget band**: k {entry.get('budget_k_min')}, "
                 f"{entry.get('budget_k_max')} "
-                f"({entry.get('budget_pct_min')}–{entry.get('budget_pct_max')}% of N)"
+                f"({entry.get('budget_pct_min')}, {entry.get('budget_pct_max')}% of N)"
             )
 
     return lines + [""]
@@ -110,11 +110,11 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
         return []
 
     isolates = {
-        1: "classical floor — fixed expert algorithms, no LLM anywhere",
+        1: "classical floor, fixed expert algorithms, no LLM anywhere",
         2: "is *choosing* from a pool enough, versus *generating* code?",
         3: "do the gains come merely from having a coding agent?",
         4: "does simulated lookahead by itself explain the gain?",
-        5: "ceiling of model-based guidance — a perfect internal model",
+        5: "ceiling of model-based guidance, a perfect internal model",
         6: "does the *learned* model recover the true dynamics?",
         7: "the original authors' code, seeds scored by our referee",
         8: "what program *search* buys over per-instance inversion of the same model",
@@ -136,9 +136,9 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
             }
         )
         lines.append(
-            f"| {condition} | {condition_names.get(condition, '—')} "
+            f"| {condition} | {condition_names.get(condition, ', ')} "
             f"| {', '.join(f'`{arm}`' for arm in arms)} "
-            f"| {isolates.get(condition, '—')} |"
+            f"| {isolates.get(condition, ', ')} |"
         )
 
     return lines + [""]
@@ -158,7 +158,7 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
         "**F1 is the headline.** SL-VAE calls it \"the most commonly used\" metric "
         "and IVGD \"the most important metric for performance evaluation\"; AUC is "
         "the tie-breaker, added because sources are a tiny positive class. "
-        "**Accuracy is near-useless alone** — IVGD's Table 3 has GCNSI at `ACC "
+        "**Accuracy is near-useless alone**: IVGD's Table 3 has GCNSI at `ACC "
         "0.8840` with `F1 0.0218`, so it is reported only beside F1 "
         "([`research/source_localization.md`](../../../../research/source_localization.md) "
         "§8.1).",
@@ -167,7 +167,7 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
         f"episodes, by re-running that arm's winning program unmodified. The "
         f"`selection F1` column is what it scored on the "
         f"`{first.get('select_split', '?')}` episodes the outer loop actually "
-        f"optimized against, and `gap` is the difference — a large negative gap "
+        f"optimized against, and `gap` is the difference: a large negative gap "
         f"means the program memorized specific cascades rather than learning an "
         f"algorithm, which is the failure §8.5.1 exists to catch.",
         "",
@@ -212,18 +212,18 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
             per_instance = f"{result['gradient_steps_per_instance']:g} (Adam steps)"
 
         lines.append(
-            f"| {result.get('condition', '—')} | {result.get('budget', '—')} "
+            f"| {result.get('condition', ', ')} | {result.get('budget', ', ')} "
             f"| `{result['arm']}` "
-            f"| `{result.get('evaluator', '—')}` "
+            f"| `{result.get('evaluator', ', ')}` "
             f"| {_format_number(metrics.get('f1'), 4)} "
             f"| {_format_number(metrics.get('precision'), 4)} "
             f"| {_format_number(metrics.get('recall'), 4)} "
             f"| {_format_number(metrics.get('auc'), 4)} "
             f"| {_format_number(metrics.get('accuracy'), 4)} "
             f"| {_format_number(selection.get('f1'), 4)} "
-            f"| {'—' if gap is None else f'{gap:+.4f}'} "
-            f"| `{result.get('auc_source', '—')}` "
-            f"| {per_instance if per_instance is not None else '—'} "
+            f"| {', ' if gap is None else f'{gap:+.4f}'} "
+            f"| `{result.get('auc_source', ', ')}` "
+            f"| {per_instance if per_instance is not None else ', '} "
             f"| {_format_number(result.get('evaluator_seconds'), 1)} "
             f"| {_format_number(result.get('elapsed_seconds'), 1)} |"
         )
@@ -255,7 +255,7 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
             lines.append(
                 f"| `{result['arm']}` | {_format_number(recovered, 5)} "
                 f"| {_format_number(truth, 5)} "
-                f"| {'—' if ratio is None else f'{ratio:.3f}'} |"
+                f"| {', ' if ratio is None else f'{ratio:.3f}'} |"
             )
 
     transferred = [result for result in ordered if result.get("transfer_from")]
@@ -266,7 +266,7 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
             "",
             "These rows ran a program selected on a DIFFERENT graph, unmodified. "
             "That is the graph axis of §8.5.1 and the headline of the amortization "
-            "claim — and it is a comparison no per-instance method can enter, "
+            "claim, and it is a comparison no per-instance method can enter, "
             "because SL-VAE, IVGD and DDMSL have no artifact to transfer.",
             "",
             "| arm | selected on | F1 here |",
@@ -286,8 +286,8 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
     Every error column per arm, on HELD-OUT cascades, with the protocol above it.
 
     The forecasting task's results table. Two things it must do that no other table
-    here does. First, it prints the PROTOCOL — corpus, window, horizon, split,
-    filters — because
+    here does. First, it prints the PROTOCOL: corpus, window, horizon, split,
+    filters, because
     [`research/cascade_prediction.md`](../../../../research/cascade_prediction.md)
     §5.7 lists five independent incompatibilities between published tables and four
     of them are protocol rather than method: three different corpora are called
@@ -324,7 +324,7 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
     )
 
     lines = [
-        f"> **`{metric}` is an ERROR and LOWER IS BETTER** — the only column in this "
+        f"> **`{metric}` is an ERROR and LOWER IS BETTER**: the only column in this "
         f"pipeline that runs that way for a reason unrelated to containment. It is "
         f"measured in LOG space, so being off by a factor of two costs the same on a "
         f"cascade of 20 and one of 2000, and RELATIVE accuracy is the whole game.",
@@ -382,7 +382,7 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
             "instance-BLIND prediction"
             + (f" (`{metric} {trivial:.4f}`)" if trivial is not None else "")
             + ", and predicting the already-observed count unchanged is right "
-            "whenever a cascade is finished — which most are"
+            "whenever a cascade is finished, which most are"
             + (f" (`{metric} {persistence:.4f}`)" if persistence is not None else "")
             + ". An arm that does not clear both has learned the corpus's size "
             "distribution rather than anything about the instance.",
@@ -422,7 +422,7 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
     if modelling:
         lines += [
             "",
-            "### Modelling error — what the FORWARD MODEL alone predicts",
+            "### Modelling error: what the FORWARD MODEL alone predicts",
             "",
             "The number §9.1 is actually about, and the one no other task in this "
             "repo can produce. Roll each arm's own forward model forward from the "
@@ -430,7 +430,7 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
             "popularity against what the log says happened. The gap between this "
             "column and the arm's own error is what the SEARCH bought; the LEVEL is "
             "how far an Independent-Cascade-shaped kernel is from a real adoption "
-            "process. §2.2 names three mechanisms by which it is wrong — adoption is "
+            "process. §2.2 names three mechanisms by which it is wrong: adoption is "
             "not memoryless, exposure is repeated rather than one-shot per "
             "neighbour, and exogenous arrivals have no infected in-neighbour at all.",
             "",
@@ -459,7 +459,7 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
         "method and `1.685` / `1.329` / `2.438` for CasFlow (§5.3). Our "
         "preprocessing differs from all of them (§6.4 lists seven artefacts sharing "
         "three names), so these are context markers for the order of magnitude and "
-        "nothing more. §9.9: do not chase the leaderboard — CasFlow is a "
+        "nothing more. §9.9: do not chase the leaderboard, CasFlow is a "
         "2M-parameter model tuned for this one task.",
         "",
     ]
@@ -476,7 +476,7 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
     `prec_e = 78-86%` and DIPT's best path precision thirteen years later is
     `0.680` against source-localization F1 of `0.518-0.839` on the same graphs
     ([`research/cascade_reconstruction.md`](../../../../research/cascade_reconstruction.md)
-    §5.2, §8.1) — the node set is easy and the tree is hard, and a table that led
+    §5.2, §8.1): the node set is easy and the tree is hard, and a table that led
     with `node F1` would look excellent and say nothing.
     """
     first = agent_results[0]
@@ -515,8 +515,8 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
 
     if trivial is not None:
         lines += [
-            f"**Reward sanity check (§2.11 risk 1): a trivial decoder — everyone "
-            f"reachable, parents by BFS — scores `{trivial:.4f}` under this reward.** "
+            f"**Reward sanity check (§2.11 risk 1): a trivial decoder, everyone "
+            f"reachable, parents by BFS: scores `{trivial:.4f}` under this reward.** "
             f"If that number were competitive with the arms below, the reward would "
             f"be wrong rather than the arms good.",
             "",
@@ -526,7 +526,7 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
         "Warning: **`path precision` is a PRECISION.** An arm that names three "
         "transmission edges and gets them right scores 1.0 on the half the reward "
         "is weighted toward, so read `path recall`, `jaccard` and `tree edges` "
-        "beside it — under-predicting is the second gaming corner and it is not one "
+        "beside it: under-predicting is the second gaming corner and it is not one "
         "this literature names, because no published method has a search that could "
         "find it.",
         "",
@@ -556,8 +556,8 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
             )
 
         lines.append(
-            f"| {result.get('condition', '—')} | `{result['arm']}` "
-            f"| `{result.get('evaluator', '—')}` "
+            f"| {result.get('condition', ', ')} | `{result['arm']}` "
+            f"| `{result.get('evaluator', ', ')}` "
             f"| {_format_number(score, 4)} "
             f"| {_format_number(metrics.get('path_precision'), 4)} "
             f"| {_format_number(metrics.get('path_recall'), 4)} "
@@ -569,9 +569,9 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
             f"| {_format_number(metrics.get('time_nrmse'), 4)} "
             f"| {_format_number(metrics.get('source_f1'), 4)} "
             f"| {_format_number(metrics.get('n_tree_edges'), 1)} "
-            f"| {_format_number(score - gap, 4) if gap is not None else '—'} "
-            f"| {'—' if gap is None else f'{gap:+.4f}'} "
-            f"| {per_instance if per_instance is not None else '—'} "
+            f"| {_format_number(score - gap, 4) if gap is not None else ', '} "
+            f"| {', ' if gap is None else f'{gap:+.4f}'} "
+            f"| {per_instance if per_instance is not None else ', '} "
             f"| {_format_number(result.get('evaluator_seconds'), 1)} |"
         )
 
@@ -580,7 +580,7 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
             "",
             "Warning: **this dataset carries no transmission edge**, so every tree "
             "column above is empty and the score collapsed onto Event F1. That is "
-            "the exact failure §2.6 describes — regenerate with "
+            "the exact failure §2.6 describes: regenerate with "
             "`--trace-parents` (the pipeline sets it automatically for "
             "`--task cascade_reconstruction`) before reading any of these numbers "
             "as a reconstruction result.",
@@ -592,7 +592,7 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
             "### Re-simulated error",
             "",
             "Re-run the ground-truth simulator from each decode's RECOVERED SOURCES "
-            "— the nodes it gave no parent — and compare against what the cascade "
+            ", the nodes it gave no parent, and compare against what the cascade "
             "actually did. The score above is already exact (it is measured against "
             "a history we stored), so this measures something else: whether the "
             "recovered ROOTS reproduce the observation. Reported beside the true "
@@ -613,7 +613,7 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
             lines.append(
                 f"| `{result['arm']}` | {_format_number(recovered, 5)} "
                 f"| {_format_number(truth, 5)} "
-                f"| {'—' if ratio is None else f'{ratio:.3f}'} |"
+                f"| {', ' if ratio is None else f'{ratio:.3f}'} |"
             )
 
     return lines + [""]
@@ -655,8 +655,8 @@ def _results_table(agent_results: list[dict]) -> list[str]:
             "compartmental epidemic-control task: an outbreak is already running "
             "from index cases no arm chose, the budget buys doses, and the column "
             "counts every node that was EVER infected. Unlike every other task "
-            "here the dynamics are NOT monotone — infectious nodes recover and stop "
-            "transmitting — so the outbreak burns out on its own and the "
+            "here the dynamics are NOT monotone: infectious nodes recover and stop "
+            "transmitting, so the outbreak burns out on its own and the "
             "prevented-infections table below reports what each arm saved before "
             "that happened, together with the curve's shape.",
             "",
@@ -673,7 +673,7 @@ def _results_table(agent_results: list[dict]) -> list[str]:
     if has_mc:
         lines += [
             "**Spread** is the ground-truth Monte Carlo replay of each arm's winning "
-            "strategy — the only number comparable across conditions, since each "
+            "strategy: the only number comparable across conditions, since each "
             "arm's own `reward` is measured by its own evaluator. **Estimate** is "
             "what that arm's evaluator believed, so estimate − spread is its "
             "fidelity error (zero by construction for a `monte_carlo` arm).",
@@ -716,9 +716,9 @@ def _results_table(agent_results: list[dict]) -> list[str]:
         spread = ground_truth_reward(result)
         nodes = result["graph"]["num_nodes"]
         row = (
-            f"| {result.get('condition', '—')} | {result['budget']} "
+            f"| {result.get('condition', ', ')} | {result['budget']} "
             f"| {_format_number(result['budget_pct'])} | `{result['arm']}` "
-            f"| `{result.get('evaluator', '—')}` | {_format_number(spread)} "
+            f"| `{result.get('evaluator', ', ')}` | {_format_number(spread)} "
             f"| {_format_number(100.0 * spread / nodes)} |"
         )
 
@@ -729,7 +729,7 @@ def _results_table(agent_results: list[dict]) -> list[str]:
             row += (
                 f" {estimate - spread:+.2f} |"
                 if result.get("mc_reward") is not None
-                else " — |"
+                else ": |"
             )
 
         row += f" {result.get('real_env_episodes', 0)} |"
@@ -797,7 +797,7 @@ def _adaptivity_section(agent_results: list[dict]) -> list[str]:
 
 def _blocking_section(agent_results: list[dict]) -> list[str]:
     """
-    Prevented influence per arm — the column every blocking paper actually reports.
+    Prevented influence per arm: the column every blocking paper actually reports.
 
     Empty for every task with one cascade. The results table above reports the
     rumour's REMAINING size, which is what the search minimizes; this reports the
@@ -833,7 +833,7 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
         "§8.2 records that percent-of-N budgets are used by **nobody** in this "
         "literature, while `k` in `{10..50}` is the shared convention of SandIMIN, "
         "both Xie papers and TC-AIBM. The informative ratio is `|S_P| / |S_N|`, which "
-        "is its own column below — CLDAG's Table 2 shows it takes 20-30x the rumour's "
+        "is its own column below: CLDAG's Table 2 shows it takes 20-30x the rumour's "
         "own seed count to cut it to a 10% residual.",
         "",
         "> **A heuristic winning here is the NORMAL outcome, not a failed run.** "
@@ -857,11 +857,11 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
         lines.append(
             f"| `{result['arm']}` "
             f"| {_format_number(ground_truth_reward(result))} "
-            f"| {'—' if prevented is None else f'{prevented:+.2f}'} "
-            f"| {'—' if percent is None else f'{percent:.1f}%'} "
+            f"| {', ' if prevented is None else f'{prevented:+.2f}'} "
+            f"| {', ' if percent is None else f'{percent:.1f}%'} "
             f"| {_format_number(result.get('prevented_pct_of_nodes'))} "
-            f"| {'—' if ratio is None else f'{ratio:.2f}'} "
-            f"| {result.get('n_spent', '—')} |"
+            f"| {', ' if ratio is None else f'{ratio:.2f}'} "
+            f"| {result.get('n_spent', ', ')} |"
         )
 
     lines += [
@@ -869,7 +869,7 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
         "`prevented` counts only nodes the rumour **would otherwise have infected** "
         "(Budak's \"saved\" set): a blocker that protects a node the cascade never "
         "reaches scores exactly zero, however central that node is. An arm whose "
-        "`spent` is below the budget ran out of candidates — the reachable region was "
+        "`spent` is below the budget ran out of candidates: the reachable region was "
         "smaller than `k`, which is common at the high end of the sweep and is the "
         "honest answer rather than a padded set.",
         "",
@@ -880,7 +880,7 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
 
 def _epidemic_section(agent_results: list[dict]) -> list[str]:
     """
-    Prevented infections and the outbreak's SHAPE — what an immunization table reports.
+    Prevented infections and the outbreak's SHAPE: what an immunization table reports.
 
     Empty for every non-compartmental task. Three groups, and the order is the
     argument this task makes (research/epidemic_control.md §8.3):
@@ -930,12 +930,12 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
         "[`research/epidemic_control.md`](../../../../research/epidemic_control.md) "
         "§8.2 trap 2: NetShield reports against a normalized virus strength swept on "
         "the x-axis, and most other papers fix one pair without justifying it. The "
-        "rates above are stated for exactly that reason — this table is comparable "
+        "rates above are stated for exactly that reason: this table is comparable "
         "to another run at the same rates and to nothing else.",
         "",
         "> **Read `eigendrop` as context, never as the score.** It is what the "
         "spectral line (NetShield, NetMelt, Gelling, GreedyWalk) actually optimizes, "
-        "and it needs no simulator at all — so it is the only column this table and "
+        "and it needs no simulator at all, so it is the only column this table and "
         "theirs share. It is also the column §8.2 trap 1 warns about: `lambda_1` says "
         "nothing about WHERE the infection currently is, which is DAVA's entire "
         "contribution and the reason a data-aware method can post the smallest "
@@ -955,13 +955,13 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
         lines.append(
             f"| `{result['arm']}` "
             f"| {_format_number(ground_truth_reward(result))} "
-            f"| {'—' if prevented is None else f'{prevented:+.2f}'} "
-            f"| {'—' if percent is None else f'{percent:.1f}%'} "
+            f"| {', ' if prevented is None else f'{prevented:+.2f}'} "
+            f"| {', ' if percent is None else f'{percent:.1f}%'} "
             f"| {_format_number(curve.get('peak_prevalence'))} "
-            f"| {curve.get('time_to_peak', '—')} "
+            f"| {curve.get('time_to_peak', ', ')} "
             f"| {_format_number(curve.get('auc_infectious'))} "
-            f"| {'—' if eigendrop is None else f'{eigendrop:.1f}%'} "
-            f"| {result.get('n_spent', '—')} |"
+            f"| {', ' if eigendrop is None else f'{eigendrop:.1f}%'} "
+            f"| {result.get('n_spent', ', ')} |"
         )
 
     lines += [
@@ -970,7 +970,7 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
         "a dose spent on a node the epidemic never gets to scores exactly zero, "
         "however central that node is. The infectious set also RECOVERS, so the "
         "outbreak burns out on its own and a dose is worth only what it saves before "
-        "then — which is why `t_peak` moving earlier is a real result even when the "
+        "then, which is why `t_peak` moving earlier is a real result even when the "
         "attack rate barely moves.",
         "",
     ]
@@ -992,7 +992,7 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
 
 def _structural_section(agent_results: list[dict]) -> list[str]:
     """
-    What each removal set did to the graph's CONNECTIVITY — context, not the score.
+    What each removal set did to the graph's CONNECTIVITY: context, not the score.
 
     Empty for every task that does not remove nodes. The framing matters as much
     as the numbers: `research/critical_node_detection.md` §2.1 argues that
@@ -1021,20 +1021,20 @@ def _structural_section(agent_results: list[dict]) -> list[str]:
         f"## Structural context at k={largest}",
         "",
         "Computed exactly by BFS on the residual graph, and **never a training "
-        "target** — a k-layer message-passing model cannot represent "
+        "target**: a k-layer message-passing model cannot represent "
         "giant-component membership on a graph of diameter > k, so the world model "
         "is fit on the diffusion transition and these describe the same removal "
         "sets afterwards "
         "([`research/critical_node_detection.md`](../../../../research/critical_node_detection.md) "
         "§2.1, §8.3). They are the units the published dismantling literature "
-        "reports in, so they are the bridge to it — and §5.8 shows a method can "
+        "reports in, so they are the bridge to it, and §5.8 shows a method can "
         "win the column above and lose every column here.",
         "",
         f"Intact graph: pairwise connectivity {intact['pairwise_conn_intact']:,.0f}, "
         f"largest component {intact['largest_cc_intact']:,.0f}, "
         f"{intact['n_components_intact']:.0f} component(s). "
         f"`rho` is the fraction of N removed to drive the giant component below "
-        f"{intact['gcc_threshold']:.0%} of N; `—` means the budget ran out first, "
+        f"{intact['gcc_threshold']:.0%} of N; `, ` means the budget ran out first, "
         f"which is the common case at these budgets and is the honest answer.",
         "",
         "| arm | spread | GCC after | GCC drop | pairwise conn drop | components | "
@@ -1054,14 +1054,14 @@ def _structural_section(agent_results: list[dict]) -> list[str]:
             f"| {structural['n_components']:.0f} "
             f"| {_format_number(structural['schneider_r'], 4)} "
             f"| {_format_number(structural['anc'], 4)} "
-            f"| {'—' if rho is None else f'{rho:.3f}'} "
+            f"| {', ' if rho is None else f'{rho:.3f}'} "
             f"| {structural['degree_rank_spearman']:+.3f} |"
         )
 
     lines += [
         "",
         "**`degree-rank rho`** is the Spearman correlation between an arm's removal "
-        "ORDER and the degree of the nodes it removed — the self-measurement "
+        "ORDER and the degree of the nodes it removed: the self-measurement "
         "§9.5 asks for. MIND found GDM's dismantling order correlates at **0.762** "
         "with a PCA of its own handcrafted input features. We feed `log1p(degree)` "
         "as feature channel 2, so an arm near that value has re-derived the degree "
@@ -1118,8 +1118,8 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
     lines = [
         title,
         "",
-        f"**`{winner['arm']}`** (condition {winner.get('condition', '—')} — "
-        f"{condition_names.get(winner.get('condition'), 'unknown')}) — {headline}, "
+        f"**`{winner['arm']}`** (condition {winner.get('condition', ', ')}: "
+        f"{condition_names.get(winner.get('condition'), 'unknown')}): {headline}, "
         f"model `{winner.get('model')}`",
         "",
         "```",
@@ -1128,7 +1128,7 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
         "",
     ]
 
-    # The agent's own account of how it got here — written before the program so
+    # The agent's own account of how it got here: written before the program so
     # the reader knows what they are looking at when they expand it
     explanation = winner.get("explanation")
     if explanation:
@@ -1217,7 +1217,7 @@ def write_report(
     metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else None
 
     lines = [
-        f"# {layout.label} — Graph World Model results",
+        f"# {layout.label}: Graph World Model results",
         "",
         f"Dataset `{config['dataset']}`, evaluator `{config['evaluator']}`, "
         f"dynamics `{config['diffusion_model']}`.",

@@ -103,7 +103,7 @@ summary_columns = (
     "rho_at_threshold",
     "degree_rank_spearman",
     # Influence blocking: the two-cascade columns. `blocking_prevented` is the
-    # headline this literature publishes in — every other task's tables report a
+    # headline this literature publishes in: every other task's tables report a
     # spread, and this one reports a DIFFERENCE from the unopposed cascade.
     "blocking",
     "blocking_lever",
@@ -121,7 +121,7 @@ summary_columns = (
     "blocking_n_spent",
     # Epidemic control: the compartmental columns. `epi_prevented` is the headline
     # this literature publishes in, and the three curve columns beside it are the
-    # SHAPE — §8.2 trap 4 records that a good policy flattens rather than
+    # SHAPE: §8.2 trap 4 records that a good policy flattens rather than
     # eliminates, so a terminal-state number alone can rank two policies backwards.
     # `epi_eigendrop` is the spectral line's own metric, carried as CONTEXT: §8.2
     # trap 1 is that a method can win it and lose the attack rate.
@@ -151,7 +151,7 @@ summary_columns = (
     # Source localization: the inverse task's own metric set. Empty for every arm
     # that intervenes, so one table still holds all four runnable tasks.
     # `sl_f1` is the held-out score and duplicates `spread_ground_truth` on
-    # purpose — the shared column keeps cross-task readers working, and the named
+    # purpose: the shared column keeps cross-task readers working, and the named
     # one keeps a spreadsheet from calling an F1 a spread.
     "localization",
     "sl_f1",
@@ -178,7 +178,7 @@ summary_columns = (
     # Cascade reconstruction: the decoding task's own metric set. Empty for every
     # other arm, so one table still holds all six runnable tasks. `cr_score` is the
     # held-out tree-weighted score and duplicates `spread_ground_truth` on purpose,
-    # for the same reason `sl_f1` does — the shared column keeps cross-task readers
+    # for the same reason `sl_f1` does: the shared column keeps cross-task readers
     # working and the named one keeps a spreadsheet from calling a score a spread.
     "reconstruction",
     "cr_score",
@@ -216,7 +216,7 @@ summary_columns = (
     # Cascade prediction: the forecasting task's own metric set. Empty for every
     # other arm, so one table still holds all seven runnable tasks. `cp_error`
     # duplicates `spread_ground_truth` for the same reason `cr_score` and `sl_f1`
-    # do — the shared column keeps cross-task readers working and the named one
+    # do: the shared column keeps cross-task readers working and the named one
     # keeps a spreadsheet from calling an ERROR a spread. Every cp_* error column
     # runs LOWER-is-better; every cp_* correlation column runs higher.
     "prediction",
@@ -302,7 +302,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
     structural = result.get("structural") or {}
     metrics = result.get("metrics") or {}
     selection_metrics = result.get("selection_metrics") or {}
-    # The spectral block is present only under a NODE lever — the edge levers spend
+    # The spectral block is present only under a NODE lever: the edge levers spend
     # arcs, and `immunization_metrics` has nothing to delete
     spectral = result.get("spectral") or {}
     # ...and the ground-truth curve only exists under --compare, so the arm's own
@@ -408,7 +408,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "degree_rank_spearman": structural.get("degree_rank_spearman"),
         # Influence blocking. The `mc_*` prevented columns are preferred over the
         # arm's own because prevented influence is a DIFFERENCE, and a difference of
-        # two evaluators' numbers is not a quantity — the shared referee measures
+        # two evaluators' numbers is not a quantity: the shared referee measures
         # both terms or neither.
         "blocking": result.get("blocking"),
         "blocking_lever": result.get("lever"),
@@ -431,7 +431,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "blocking_spent": result.get("spent") if result.get("blocking") else None,
         "blocking_n_spent": result.get("n_spent") if result.get("blocking") else None,
         # Epidemic control. The `mc_*` prevented columns are preferred over the
-        # arm's own for the same reason blocking's are — prevented infections is a
+        # arm's own for the same reason blocking's are: prevented infections is a
         # DIFFERENCE, and a difference of two evaluators' numbers is not a quantity.
         # The curve columns likewise prefer the referee's, so peak and time-to-peak
         # describe the ground-truth outbreak rather than the model's picture of it.

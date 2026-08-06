@@ -10,10 +10,10 @@ an autoregressive, discrete-time transition model of graph diffusion under inter
 
 The transition factorizes as `s_{t+1} = T_endo(T_exo(s_t, a_t))`:
 
-- **`T_exo`** — the deterministic, immediate effect of the action (seed a node, drop a node from the frontier, add/remove/reweight an edge).
-- **`T_endo`** — the (possibly stochastic) diffusion step that follows.
+- **`T_exo`**: the deterministic, immediate effect of the action (seed a node, drop a node from the frontier, add/remove/reweight an edge).
+- **`T_endo`**: the (possibly stochastic) diffusion step that follows.
 
-The model learns both. The headline use case is as a fast, differentiable **simulator**: roll it forward to predict cascades, or score one-step interventions for planning — without running the expensive classical simulator at inference time.
+The model learns both. The headline use case is as a fast, differentiable **simulator**: roll it forward to predict cascades, or score one-step interventions for planning, without running the expensive classical simulator at inference time.
 
 ---
 
@@ -39,7 +39,7 @@ Train: `train_wm.py`. Model + heads: `wm_model.py`. Data/feature plumbing: `wm_d
 
 ---
 
-## The model input `X` — shape `(N, 6)`
+## The model input `X`: shape `(N, 6)`
 
 Every transition is turned into a per-node feature matrix `X` with one row per node and **6 channels** (`wm_data.py::build_features`, `IN_CHANNELS = 6`). All channels describe the situation at time `t`, _before_ diffusion:
 
@@ -52,15 +52,15 @@ Every transition is turned into a per-node feature matrix `X` with one row per n
 | 4   | `CH_REMOVE`   | node is the target of a `remove_node` op this step                         | binary 0/1       | the action bag                    |
 | 5   | `CH_EDGE`     | node is an endpoint of an edge op (`add/remove/set_edge_weight`) this step | binary 0/1       | both `target` and `destination`   |
 
-Channels 0–1 are the **state** `s_t`. Channel 2 is **structure**. Channels 3–5 are the **action** `a_t` projected onto nodes — this is what makes the model _action-conditioned_. Edge ops additionally change the graph itself (next section), so channel 5 flags the touched nodes while the adjacency carries the actual structural change.
+Channels 0-1 are the **state** `s_t`. Channel 2 is **structure**. Channels 3-5 are the **action** `a_t` projected onto nodes: this is what makes the model _action-conditioned_. Edge ops additionally change the graph itself (next section), so channel 5 flags the touched nodes while the adjacency carries the actual structural change.
 
-### Targets — `y_inf`, `y_fr`, each shape `(N,)`
+### Targets: `y_inf`, `y_fr`, each shape `(N,)`
 
-The regression targets are the **soft Monte-Carlo marginals** from data generation: `y_inf[v] = P(v infected at t+1)` and `y_fr[v] = P(v in frontier at t+1)`. They are read from `next_marginal_infected` / `next_marginal_frontier` and scattered into dense `(N,)` vectors. `build_features` **requires** these soft targets and raises `KeyError` if a record lacks them (regenerate with `--mc-marginals >= 1`). Training on the marginal — not a single Bernoulli draw — is what lifted one-step `delta_f1` from ~0.52 to ~0.83 on IC.
+The regression targets are the **soft Monte-Carlo marginals** from data generation: `y_inf[v] = P(v infected at t+1)` and `y_fr[v] = P(v in frontier at t+1)`. They are read from `next_marginal_infected` / `next_marginal_frontier` and scattered into dense `(N,)` vectors. `build_features` **requires** these soft targets and raises `KeyError` if a record lacks them (regenerate with `--mc-marginals >= 1`). Training on the marginal (not a single Bernoulli draw) is what lifted one-step `delta_f1` from ~0.52 to ~0.83 on IC.
 
 ---
 
-## Graph structure into the model — `GraphInput`
+## Graph structure into the model: `GraphInput`
 
 `wm_data.py::build_graph_input` turns the per-transition edge list into a `GraphInput` with three views the backbones consume:
 
@@ -83,11 +83,11 @@ This guarantees the model is always shown the adjacency that actually produced t
 
 ### Batching
 
-`collate_transitions` stacks `B` transitions into one **disjoint block-diagonal** graph: node ids are offset per sample, `X`/`y` are concatenated, and a single `GraphInput` is built over the union. Because the blocks are disconnected, message passing never crosses sample boundaries — it is exactly equivalent to running each graph independently, but in one batched forward pass.
+`collate_transitions` stacks `B` transitions into one **disjoint block-diagonal** graph: node ids are offset per sample, `X`/`y` are concatenated, and a single `GraphInput` is built over the union. Because the blocks are disconnected, message passing never crosses sample boundaries, it is exactly equivalent to running each graph independently, but in one batched forward pass.
 
 ---
 
-## The backbones (encoders) — `X (N,6) → h (N, H)`
+## The backbones (encoders): `X (N,6) → h (N, H)`
 
 All five live in `world_model/model/` and share the encoder interface `forward(X, graph) → (N, hidden_dim)`. Each is a stack of pre-norm residual blocks ending in a `LayerNorm`. (Each file also contains a legacy `*ForwardModel` class from the old seed→outcome pipeline; the world model uses only the `*Encoder` classes.) The encoder is selected by `--model` via the `BACKBONES` registry in `wm_model.py`.
 
@@ -99,19 +99,19 @@ All five live in `world_model/model/` and share the encoder interface `forward(X
 | **Graph Transformer** (`graph_transformer.py`) | `gt`      | scaled dot-product attention `Q_v·K_u/√d_k` per edge, scatter-softmax, position-wise FFN, pre-norm residual blocks; `edge_weight` as `log`-bias; self-loops added.                                                | `edge_index`, `edge_weight` |
 | **GCNII** (`gcnii.py`)                         | `gcnii`   | initial-residual + identity mapping: `support = (1-α)·adj·h + α·h⁰`, `h = ReLU((1-β_l)·support + β_l·W·support)`, `β_l = log(λ/l + 1)`. Built to go deep without oversmoothing.                                   | `adj_norm`                  |
 
-Shared knobs: `--hidden-dim` (`H`), `--n-layers`, `--dropout`; attention models take `--n-heads` (and GT `--ffn-dim`); GCNII takes `--gcnii-alpha`, `--gcnii-lamda`. There is **no positional encoding** in the world-model encoders — positional/degree information enters through `CH_DEGREE` instead. Recommended sizes scale with graph size (hidden 64 → 128 → 256 from <1K to >10K nodes; GCNII goes deeper, 8 → 16 layers).
+Shared knobs: `--hidden-dim` (`H`), `--n-layers`, `--dropout`; attention models take `--n-heads` (and GT `--ffn-dim`); GCNII takes `--gcnii-alpha`, `--gcnii-lamda`. There is **no positional encoding** in the world-model encoders, positional/degree information enters through `CH_DEGREE` instead. Recommended sizes scale with graph size (hidden 64 → 128 → 256 from <1K to >10K nodes; GCNII goes deeper, 8 → 16 layers).
 
 ---
 
-## The output heads — `h (N,H) → logits (N,2)`
+## The output heads: `h (N,H) → logits (N,2)`
 
 `wm_model.py` defines three heads, selected by `--head` (and the dynamics). All return **logits** `(N, 2)` = `[next_infected_logit, next_frontier_logit]`, so training (`BCEWithLogits`) and eval (`sigmoid`) are head-agnostic.
 
 ### `linear` (free head)
 
-`nn.Linear(H, 2)` — each node embedding maps directly to two logits. Maximally flexible, but on a free-running rollout it learns "more active → more spread" with no structural cap and **saturates** to the whole graph on its own out-of-distribution states. Fine for one-step metrics; unfaithful as a simulator.
+`nn.Linear(H, 2)`: each node embedding maps directly to two logits. Maximally flexible, but on a free-running rollout it learns "more active → more spread" with no structural cap and **saturates** to the whole graph on its own out-of-distribution states. Fine for one-step metrics; unfaithful as a simulator.
 
-### `structured` IC — `ICTransmissionHead`
+### `structured` IC: `ICTransmissionHead`
 
 Predict the **mechanism**, not the state. The head:
 
@@ -120,9 +120,9 @@ Predict the **mechanism**, not the state. The head:
 3. gates by an active source `t_uv = q_uv · frontier_u` and derives the IC infection form `p_new(v) = 1 − ∏_{u→v} (1 − t_uv)` (via a stable log-sum-exp scatter);
 4. composes the next state monotonically: `y_inf = infected + (1 − infected)·p_new`, `y_fr = (1 − infected)·p_new`.
 
-Locality + the `frontier_u` gate make this **structurally unable to saturate**: a susceptible node with no active in-neighbor has `p_new = 0`, so the cascade self-terminates. This is the fix that took IC rollout `count_bias` from ~+49 (linear) to ~−0.6 while preserving one-step `delta_f1 ≈ 0.83`. **Train it with `--pos-weight off`** — `pos_weight` globally inflates `q` and collapses one-step accuracy; the structural form already prevents the all-zeros degenerate.
+Locality + the `frontier_u` gate make this **structurally unable to saturate**: a susceptible node with no active in-neighbor has `p_new = 0`, so the cascade self-terminates. This is the fix that took IC rollout `count_bias` from ~+49 (linear) to ~−0.6 while preserving one-step `delta_f1 ≈ 0.83`. **Train it with `--pos-weight off`**, `pos_weight` globally inflates `q` and collapses one-step accuracy; the structural form already prevents the all-zeros degenerate.
 
-### `structured` LT — `LTThresholdHead`
+### `structured` LT: `LTThresholdHead`
 
 LT thresholds are hidden and re-drawn per episode, so the head predicts the activation _probability_ as a learned monotone function of the active-neighbor fraction:
 
@@ -146,13 +146,13 @@ Two reasons it exists, and they are the same reason from two directions. It is t
 
 ### `structured_oracle` (validation only)
 
-`ICTransmissionHead(oracle=True)`: skips the MLP and sets `q = edge_weight` (the true IC transmission prob). No learning — it validates that the IC structural form itself is correct (expected `count_bias ≈ 0`) before trusting a learned head. IC-only (LT thresholds aren't stored). Exposed via `eval_structured_oracle.py`, not `train_wm.py`.
+`ICTransmissionHead(oracle=True)`: skips the MLP and sets `q = edge_weight` (the true IC transmission prob). No learning, it validates that the IC structural form itself is correct (expected `count_bias ≈ 0`) before trusting a learned head. IC-only (LT thresholds aren't stored). Exposed via `eval_structured_oracle.py`, not `train_wm.py`.
 
 `WorldModel.forward` runs `h = encoder(X, graph)`, then `head(h)` for `linear` or `head(h, X, graph)` for the structured heads.
 
 ---
 
-## Training — `train_wm.py`
+## Training: `train_wm.py`
 
 **Teacher-forced one-step.** Each batch is a set of true `(s_t, a_t)` inputs; the model predicts the next-state marginals and is scored against the MC targets:
 
@@ -167,7 +167,7 @@ loss   = BCEWithLogits(logits[:,0], y_inf)                # next-infected
 - **Model selection.** Validate every epoch with `evaluate_one_step`; checkpoint the best **val `delta_f1`**; early-stop after `--patience` epochs without improvement.
 - **Final report.** Reload the best checkpoint and write a results JSON with four blocks: `history` (per-epoch train loss + val `delta_f1`), `test` (one-step), `rollout` (stochastic ensemble), and (with `--plan-demo`) `planning` (multi-graph regret). Checkpoint saved to `wm_<model>_<diffusion>.pt`.
 
-**Output paths.** `--ckpt-dir` defaults to a sibling of the data directory — `results/<task>/<dataset>/<run>/data` puts the checkpoint and results JSON in `results/<task>/<dataset>/<run>/world_model/`. `--results` defaults to `<ckpt-dir>/<model>_<diffusion>.json`. Pass either explicitly to override.
+**Output paths.** `--ckpt-dir` defaults to a sibling of the data directory: `results/<task>/<dataset>/<run>/data` puts the checkpoint and results JSON in `results/<task>/<dataset>/<run>/world_model/`. `--results` defaults to `<ckpt-dir>/<model>_<diffusion>.json`. Pass either explicitly to override.
 
 Example:
 
@@ -180,30 +180,30 @@ python -m world_model.train_wm \
 # -> results/influence_maximization/ba/default/world_model/{wm_sage_IC.pt, sage_IC.json}
 ```
 
-`train_world_model(TrainConfig(...))` is the importable form — it is what `pipeline/run.py` calls for the train stage, and it returns the same results dict it writes to disk.
+`train_world_model(TrainConfig(...))` is the importable form: it is what `pipeline/run.py` calls for the train stage, and it returns the same results dict it writes to disk.
 
 ---
 
-## Evaluation — `wm_eval.py`
+## Evaluation: `wm_eval.py`
 
 Three families of metrics, all written into the results JSON. Full definitions and worked SAGE numbers are in [`checkpoints/RESULTS.md`](checkpoints/RESULTS.md).
 
-### 1. One-step (`evaluate_one_step`) — block `test`
+### 1. One-step (`evaluate_one_step`): block `test`
 
 Teacher-forced, threshold 0.5; soft targets are thresholded at 0.5 for the binary metrics, kept raw for Brier.
 
 | metric                              | meaning                                                                                                                              |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `infected_acc` / `frontier_acc`     | per-node accuracy (dominated by unchanged nodes — high is easy)                                                                      |
+| `infected_acc` / `frontier_acc`     | per-node accuracy (dominated by unchanged nodes: high is easy)                                                                      |
 | `new_infection_f1`                  | F1 on **newly infected** nodes (restricted to nodes susceptible at `t`)                                                              |
-| `delta_f1`                          | F1 on nodes whose state **changed** `t → t+1` — the early-stop / headline metric                                                     |
+| `delta_f1`                          | F1 on nodes whose state **changed** `t → t+1`: the early-stop / headline metric                                                     |
 | `add_seed_success`                  | fraction of `add_node` targets the model predicts as infected (should be 1.0)                                                        |
 | `remove_frontier_success`           | fraction of `remove_node` targets predicted as not-frontier. Under `--remove-semantics blocked` a structured head zeroes those nodes in `T_exo`, so this reads ~1.0 by construction and stops being informative |
 | `action_sensitivity`                | mean # of distinct outputs across counterfactual actions at the same state (>0 ⇒ the model reacts to the action, not just the state). Compared on **probabilities rounded to 1e-3**, not on the thresholded prediction: under a seeding task the two agree, because seeding A flips A itself, but under containment blocking A rather than B shifts its neighbours without moving any of them across 0.5. The binary version read exactly 0.0 on the first containment dataset with counterfactual pairs present |
-| `brier_infected` / `brier_frontier` | MSE of predicted prob vs the soft marginal — calibration, lower better                                                               |
+| `brier_infected` / `brier_frontier` | MSE of predicted prob vs the soft marginal: calibration, lower better                                                               |
 | `persistence`                       | the "predict next = current" baseline; its `delta_f1`/`new_infection_f1` are 0 by construction                                       |
 
-### 2. Free-running rollout (`rollout_ensemble`) — block `rollout`
+### 2. Free-running rollout (`rollout_ensemble`): block `rollout`
 
 Treats the model as a **stochastic simulator**: for each test episode it rolls `n_samples` trajectories, at each step **sampling** the next state from the predicted marginals (not thresholding) and re-applying the recorded action, then compares the model's marginal/count distribution to the true NDlib simulator's MC trajectory under the same actions.
 
@@ -216,7 +216,7 @@ Treats the model as a **stochastic simulator**: for each test episode it rolls `
 
 Most meaningful for **IC** (genuinely stochastic). For LT the true re-run draws fresh hidden thresholds, so the comparison is indicative rather than exact.
 
-### 3. Planning regret (`planning_regret_multi`) — block `planning`
+### 3. Planning regret (`planning_regret_multi`): block `planning`
 
 Uses the world model to _choose_ an intervention. At sampled states it scores candidate `add_node` actions by predicted one-step spread, picks the argmax, and measures **regret** = `oracle_spread − true_spread(chosen)` (true spread via MC on the real simulator). Averaged over `--plan-graphs` graphs (each with its own seed offset) for resolution + a cross-graph std.
 
@@ -231,18 +231,18 @@ A useful planner must beat `random` decisively and at least match `degree`.
 
 ### Standalone re-eval CLIs (no retraining)
 
-These rebuild a model from a results JSON's `config`, reload its `.pt` checkpoint, recompute one block, and write it back — for when only the metric changed, not the weights:
+These rebuild a model from a results JSON's `config`, reload its `.pt` checkpoint, recompute one block, and write it back, for when only the metric changed, not the weights:
 
 | script                      | recomputes                                                                 |
 | --------------------------- | -------------------------------------------------------------------------- |
 | `eval_planning.py`          | multi-graph planning regret                                                |
 | `eval_rollout_ensemble.py`  | stochastic ensemble rollout                                                |
-| `eval_structured_oracle.py` | the IC oracle rollout (q = true edge prob) — validates the structural form |
+| `eval_structured_oracle.py` | the IC oracle rollout (q = true edge prob): validates the structural form |
 | `wm_sl.py`                  | invert the model instead of scoring it: relaxed-source gradient descent, PR / RE / F1 / AUC per episode |
 
 ---
 
-## Inverting the model — `wm_sl.py`
+## Inverting the model: `wm_sl.py`
 
 Everything above scores FORWARD prediction. `wm_sl.py` asks the opposite question, and it is a genuinely different property: does the learned transition kernel support **inference about its own inputs**? Given an observed diffusion state `y`, freeze `f_θ`, relax the source set to `x̃ ∈ [0,1]^{|V|}`, and run Adam on
 
@@ -254,10 +254,10 @@ then take the top `k` entries. It is `source_localization`'s **arm A**, and it i
 
 Two things make it short, and both are properties of the structured heads rather than of this file:
 
-- **`ICTransmissionHead` is already continuous in its inputs.** It composes `p_new = 1 − Π(1 − q · frontier_u)` from the state channels, so feeding it a SOFT `(infected, frontier, add)` state is well defined with no relaxation of the head. `soft_rollout` is then a plain unroll of the same recursion `WorldModelEnvironment.rollout` runs, with the per-step Bernoulli replaced by the marginal — a mean-field approximation, named as one, and not exact wherever the head is locally nonlinear.
+- **`ICTransmissionHead` is already continuous in its inputs.** It composes `p_new = 1 − Π(1 − q · frontier_u)` from the state channels, so feeding it a SOFT `(infected, frontier, add)` state is well defined with no relaxation of the head. `soft_rollout` is then a plain unroll of the same recursion `WorldModelEnvironment.rollout` runs, with the per-step Bernoulli replaced by the marginal: a mean-field approximation, named as one, and not exact wherever the head is locally nonlinear.
 - **The action enters through one channel.** `CH_ADD` *is* the decision variable, so `torch.autograd` reaches it through the whole unroll without a line of custom backward code.
 
-**This is also a sharp new diagnostic for the forward model.** A rollout that saturates (`ens_count_bias ≫ 0`) has destroyed exactly the information an inverse problem needs, so source-localization F1 collapses where one-step `delta_f1` — dominated by unchanged nodes — stays comfortable. Given that saturation was this project's hardest bug, a metric that regresses loudly when it recurs is worth having.
+**This is also a sharp new diagnostic for the forward model.** A rollout that saturates (`ens_count_bias ≫ 0`) has destroyed exactly the information an inverse problem needs, so source-localization F1 collapses where one-step `delta_f1` (dominated by unchanged nodes) stays comfortable. Given that saturation was this project's hardest bug, a metric that regresses loudly when it recurs is worth having.
 
 Standalone, no coding agent and no pipeline:
 
@@ -299,7 +299,7 @@ python -m world_model.wm_sl \
 y_inf = infected + (1 - infected) * p_new
 ```
 
-which is monotone non-decreasing in `infected` **by construction**: `p_new >= 0`, so `y_inf >= infected` for every assignment of encoder weights and every value of `q(u -> v)`. There is no way to make that expression predict a node LEAVING the infected set, and `LTThresholdHead` has the identical shape. That monotonicity is load-bearing — `checkpoints/RESULTS.md` records it as what fixed rollout saturation, `count_bias` +49 -> +0.27 — and it is exactly what `I -> R` under SIR/SEIR and `I -> S` under SIS violate.
+which is monotone non-decreasing in `infected` **by construction**: `p_new >= 0`, so `y_inf >= infected` for every assignment of encoder weights and every value of `q(u -> v)`. There is no way to make that expression predict a node LEAVING the infected set, and `LTThresholdHead` has the identical shape. That monotonicity is load-bearing, `checkpoints/RESULTS.md` records it as what fixed rollout saturation, `count_bias` +49 -> +0.27, and it is exactly what `I -> R` under SIR/SEIR and `I -> S` under SIS violate.
 
 The replacement is a per-node row-stochastic **transition matrix**:
 
@@ -315,9 +315,9 @@ Only `p_inf(v) = 1 - prod(1 - q_uv * infectious_u)` needs the graph, and it is `
 
 **Self-termination survives**, which matters more here than anywhere else: `p_inf = 0` with no infectious in-neighbour, and `I` decays geometrically at `gamma`, so a free-running SIS rollout cannot saturate even though nothing else would stop it.
 
-Input is `(N, 9)` and output `(N, 5)`. **Columns 0-1 are the attack set and the incidence**, which is what lets the rollout sampler, the one-step suite, the plots and the summary keep slicing `probs[:, 0]` and `probs[:, 1]` with no branch — the same discipline the competitive layout follows. Columns 2-4 are the current compartments and are what `sample_epidemic_step` draws from, coupled: one uniform per node against the cumulative `(E, I, R, S)` distribution, because four independent Bernoulli draws would put a node in two exclusive compartments at once.
+Input is `(N, 9)` and output `(N, 5)`. **Columns 0-1 are the attack set and the incidence**, which is what lets the rollout sampler, the one-step suite, the plots and the summary keep slicing `probs[:, 0]` and `probs[:, 1]` with no branch, the same discipline the competitive layout follows. Columns 2-4 are the current compartments and are what `sample_epidemic_step` draws from, coupled: one uniform per node against the cumulative `(E, I, R, S)` distribution, because four independent Bernoulli draws would put a node in two exclusive compartments at once.
 
-`--head structured_oracle` pins the matrix to the simulator's own rates and is therefore **exact rather than merely well-shaped** — `check_epidemic_control` measures all five columns against 4,000 simulator draws under all three dynamics. `--head structured_residual` anchors `q` on the arc's own `beta_uv` and exists only because we wrote our own stepper. There is deliberately **no `linear` compartmental head**: nothing would then keep the compartments on the simplex or the rollout self-terminating.
+`--head structured_oracle` pins the matrix to the simulator's own rates and is therefore **exact rather than merely well-shaped**: `check_epidemic_control` measures all five columns against 4,000 simulator draws under all three dynamics. `--head structured_residual` anchors `q` on the arc's own `beta_uv` and exists only because we wrote our own stepper. There is deliberately **no `linear` compartmental head**: nothing would then keep the compartments on the simplex or the rollout self-terminating.
 
 The number to read first in the rollout block is `ens_prevalence_bias`, not `ens_count_bias`. The attack set is monotone and therefore forgiving; the prevalence is the non-monotone quantity, and a head that cannot shrink `I` shows up there first while the attack-set bias still looks fine.
 
@@ -325,12 +325,12 @@ The number to read first in the rollout block is `ens_prevalence_bias`, not `ens
 
 ## Forecasting on REAL cascades (`--task cascade_prediction`)
 
-The one task that trains this model on transitions **no simulator produced**, and the reason it is here is the reason `research/cascade_prediction.md` §9.1 gives: every other evaluation in this file measures a learned model against traces drawn from the same NDlib simulator that trained it, which is a closed loop that can only report LEARNING error. A replayed Weibo corpus breaks the loop, and `--compare` then reports the quantity that loop hides — the **modelling error** of the forward model itself, with no program involved.
+The one task that trains this model on transitions **no simulator produced**, and the reason it is here is the reason `research/cascade_prediction.md` §9.1 gives: every other evaluation in this file measures a learned model against traces drawn from the same NDlib simulator that trained it, which is a closed loop that can only report LEARNING error. A replayed Weibo corpus breaks the loop, and `--compare` then reports the quantity that loop hides, the **modelling error** of the forward model itself, with no program involved.
 
 Three things change for the model, none of them a flag:
 
-- **The targets are HARD.** `next_marginal_infected` is a realized 0/1 indicator rather than an MC average, because a real cascade happened once. §2.4 calls this the main technical risk of the whole exercise, and §11 records that how much it costs one-step `delta_f1` is unestablished by anything in that literature — nobody there ever had soft targets to lose. Train with `--pos-weight off` as usual for a structured head; the class imbalance is worse here, not better.
-- **`--hide-edge-weights` is not an ablation here, it IS the setting.** §9.5: our IC heads consume the true transmission probability `w` as an input feature and `structured_residual` literally anchors on `logit(w)` — so the "recovers unknown dynamics" claim currently rests on LT rather than IC. **Real cascades have no `w`.** What our loaders synthesize is a weighted-cascade prior over the observed propagation ties, not a measured probability, so `--head structured` with `--hide-edge-weights` is the honest configuration and `structured_residual` is the one to justify rather than assume.
+- **The targets are HARD.** `next_marginal_infected` is a realized 0/1 indicator rather than an MC average, because a real cascade happened once. §2.4 calls this the main technical risk of the whole exercise, and §11 records that how much it costs one-step `delta_f1` is unestablished by anything in that literature: nobody there ever had soft targets to lose. Train with `--pos-weight off` as usual for a structured head; the class imbalance is worse here, not better.
+- **`--hide-edge-weights` is not an ablation here, it IS the setting.** §9.5: our IC heads consume the true transmission probability `w` as an input feature and `structured_residual` literally anchors on `logit(w)`, so the "recovers unknown dynamics" claim currently rests on LT rather than IC. **Real cascades have no `w`.** What our loaders synthesize is a weighted-cascade prior over the observed propagation ties, not a measured probability, so `--head structured` with `--hide-edge-weights` is the honest configuration and `structured_residual` is the one to justify rather than assume.
 - **`ens_count_bias` is the diagnostic to read first.** §2.2 predicts the direction of failure: an IC-shaped kernel on a process with repeated exposure and exogenous arrivals over-predicts, which is exactly the saturation this metric was built to catch. `coding_agent/prediction.summarize_prediction` reports the same thing in the outer loop as the sign of the mean log residual, and flags a systematic multiplicative bias explicitly because it is one line to fix and is usually most of the gap.
 
 `wm_metrics.popularity_metrics` is the metric layer, and it computes every variant this literature prints rather than one: §8.1's "get MSLE right or nothing else matters" is about three independent choices (log base 2 vs natural, total `P(t_p)` vs increment `ΔP`, the `+0` / `+1` / `+2` smoothing), and §5.7 difference 4 records that the field's headline table prints two of them under one name. `--cp-metric` names which one the reward is; every other one still lands in the results JSON and the report.

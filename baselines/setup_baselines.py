@@ -3,7 +3,7 @@ Fetch and install the external baseline repos into baselines/external/.
 
 Each baseline gets its OWN virtualenv so its dependency pins (old torch, old
 networkx, python2-era code) never collide with ours. Nothing here is imported by
-the pipeline at runtime — the pipeline only ever shells out to these repos.
+the pipeline at runtime: the pipeline only ever shells out to these repos.
 
     python -m baselines.setup_baselines --list
     python -m baselines.setup_baselines --only moeim touplegdd
@@ -40,7 +40,7 @@ def _run(argv: list[str], cwd: Path | None = None, timeout: int = 600) -> None:
 
 
 class ManualFetch(RuntimeError):
-    """The authors publish a tarball, not a git repo — a human must fetch it."""
+    """The authors publish a tarball, not a git repo: a human must fetch it."""
 
 
 def clone(name: str) -> Path:
@@ -53,7 +53,7 @@ def clone(name: str) -> Path:
 
     if spec.fetch == "manual":
         raise ManualFetch(
-            f"{name} is not on git — download it from {spec.repo} and unpack it "
+            f"{name} is not on git: download it from {spec.repo} and unpack it "
             f"into {spec.root}, then re-run setup to build it."
         )
 
@@ -76,7 +76,7 @@ def patch(name: str) -> None:
         path = spec.root / relative
         if not path.exists():
             raise FileNotFoundError(
-                f"{name}: cannot patch {path} — the repo layout changed"
+                f"{name}: cannot patch {path}, the repo layout changed"
             )
 
         text = path.read_text()
@@ -124,7 +124,7 @@ def build(name: str) -> None:
 
     if not spec.directory.exists():
         raise FileNotFoundError(
-            f"{name}: build directory {spec.directory} does not exist — the "
+            f"{name}: build directory {spec.directory} does not exist, the "
             f"repo layout changed, check the spec's subdir"
         )
 
@@ -137,7 +137,7 @@ def _create_venv(name: str, venv: Path) -> None:
     Prefer `uv venv`.
 
     stdlib `python -m venv` needs ensurepip, which Debian/Ubuntu ship in a
-    separate python3-venv package that is usually absent on a cluster node —
+    separate python3-venv package that is usually absent on a cluster node,
     and asking for sudo on a shared machine is not a fix. uv bootstraps its own
     pip, so it works where the stdlib path cannot.
     """
@@ -169,7 +169,7 @@ def install(name: str) -> None:
     if not has_requirements and not spec.pip_packages:
         if spec.requirements is None:
             print(
-                f"[setup] {name}: no Python requirements ({spec.entry}) — build manually"
+                f"[setup] {name}: no Python requirements ({spec.entry}), build manually"
             )
         else:
             print(f"[setup] {name}: no {spec.requirements} in the repo, skipping install")
@@ -224,7 +224,7 @@ def setup(name: str) -> None:
     spec = external_baselines[name]
 
     if spec.status == "blocked":
-        print(f"[setup] {name}: BLOCKED — {spec.blocker}")
+        print(f"[setup] {name}: BLOCKED, {spec.blocker}")
         return
 
     try:
@@ -232,7 +232,7 @@ def setup(name: str) -> None:
     except ManualFetch as error:
         # Not a failure of the run: one baseline needing a human is expected,
         # and the rest of --all should still install
-        print(f"[setup] {name}: MANUAL — {error}")
+        print(f"[setup] {name}: MANUAL, {error}")
         return
 
     patch(name)
@@ -276,7 +276,7 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     # --all installs what can actually be RUN. A repo with no adapter would be
-    # cloned, fail its install on some abandoned pin, and still be undriveable —
+    # cloned, fail its install on some abandoned pin, and still be undriveable,
     # so it is skipped unless named explicitly with --only.
     if args.only:
         targets = args.only
@@ -291,14 +291,14 @@ if __name__ == "__main__":
             print("[setup]   (install one anyway with --only <name>)")
 
     # One repo's broken pins or missing toolchain must not stop the other ten
-    # from installing — the failures are reported together at the end
+    # from installing: the failures are reported together at the end
     failures = {}
     for name in targets:
         try:
             setup(name)
         except Exception as error:
             failures[name] = f"{type(error).__name__}: {error}"
-            print(f"[setup] {name}: FAILED — {failures[name]}")
+            print(f"[setup] {name}: FAILED, {failures[name]}")
 
     installed = [name for name in targets if external_baselines[name].installed()]
     print(f"\n[setup] {len(installed)}/{len(targets)} present: {' '.join(installed)}")

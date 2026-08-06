@@ -17,7 +17,7 @@ groups that matter most are the first and the last:
     `y_inf = infected + (1 - infected) * p_new`, which is monotone by construction
     and provably cannot represent recovery. The replacement is a per-node
     transition matrix, and `structured_oracle` pins it to the simulator's own
-    rates — so its five output columns must match the simulator's one-step
+    rates, so its five output columns must match the simulator's one-step
     marginals to sampling error. If that check fails, nothing else in this task
     means anything.
 
@@ -53,7 +53,7 @@ from coding_agent.tools.immunization_algorithms import (
     immunization_shape,
 )
 from coding_agent.tools.primitives import mc_simulate_epidemic
-from coding_agent.types import ActionOp, GraphInfo, State, TaskSpec
+from coding_agent.types import ActionOp, GraphInfo, TaskSpec
 from data.wm_epidemic import (
     EpidemicConfig,
     EpidemicSimulator,
@@ -88,7 +88,7 @@ marginal_tolerance = 0.05
 
 def check(name: str, condition: bool, detail: str = "") -> None:
     (passed if condition else failed).append(name)
-    print(f"{'ok ' if condition else 'FAIL'} {name}{'  — ' + detail if detail else ''}")
+    print(f"{'ok ' if condition else 'FAIL'} {name}{': ' + detail if detail else ''}")
 
 
 def build_graph(nodes: int = 140, seed: int = 3) -> GraphInfo:
@@ -352,7 +352,7 @@ def check_head_matches_simulator() -> None:
     `structured_oracle` pins the transition matrix to the simulator's own rates:
     `q = beta_scale * w`, `gamma_hat = gamma`, `alpha_hat = alpha`. Every one of its
     five output columns must then equal the simulator's own one-step marginal to
-    sampling error, under all three dynamics — which is what makes it a genuine
+    sampling error, under all three dynamics, which is what makes it a genuine
     ground-truth ceiling rather than a well-shaped approximation of one.
 
     Two failures this specifically catches, both of which happened while building
@@ -649,7 +649,7 @@ def check_spectral_disagreement() -> None:
     A method can post the LARGEST eigendrop and prevent the FEWEST infections,
     because `lambda_1` is a global property that says nothing about where the
     outbreak currently is. That gap is DAVA's entire contribution and the reason
-    §9.4 says to position this task against DAVA rather than NetShield — so if the
+    §9.4 says to position this task against DAVA rather than NetShield, so if the
     two columns ever agree perfectly, the surrogate was sufficient and the task had
     nothing to add.
     """
@@ -687,14 +687,14 @@ def check_spectral_disagreement() -> None:
         "dava_optimizes_something_other_than_the_eigenvalue",
         scored["dava"][0] < scored["netshield"][0],
         f"eigendrops: dava {scored['dava'][0]:.2f} vs netshield "
-        f"{scored['netshield'][0]:.2f} — dava spends its budget on the outbreak's "
+        f"{scored['netshield'][0]:.2f}, dava spends its budget on the outbreak's "
         f"dominators, not on the graph's hubs",
     )
     ordered = sorted(scored, key=lambda name: scored[name][1])
     print(
-        f"     attack rates on this instance: "
+        "     attack rates on this instance: "
         + ", ".join(f"{name} {scored[name][1]:.1f}" for name in ordered)
-        + "  (which one wins depends on the graph and on where the outbreak is — "
+        + "  (which one wins depends on the graph and on where the outbreak is: "
         "that dependence IS the finding)"
     )
 
@@ -823,7 +823,7 @@ def check_oracle_environment_rolls_out() -> None:
 
 if __name__ == "__main__":
     print("=" * 72)
-    print("EPIDEMIC CONTROL — contract self-check")
+    print("EPIDEMIC CONTROL: contract self-check")
     print("=" * 72)
 
     for section, runner in (

@@ -16,7 +16,7 @@
 # the field's standard 70/15/15 RANDOM-over-cascades split leaks the future.
 # Cascades overlap in wall-clock time, so a training cascade's PREDICTION window can
 # sit inside a test cascade's OBSERVATION window, and the model learns "there was a
-# burst around time T" — a global temporal shortcut unavailable at deployment. Under
+# burst around time T": a global temporal shortcut unavailable at deployment. Under
 # CasTemp's leak-free fix:
 #
 #   * CasFlow and CasDO fall BELOW a plain MLP on the diagnostic scenarios
@@ -31,7 +31,7 @@
 # 6 of this file also applies: our own transitions split by EPISODE rather than by
 # time, which is structurally the same choice CasTemp is criticising. It is harmless
 # on NDlib episodes (they share no clock) and stops being harmless the moment a real
-# log is replayed — which is why `chronological` is the default here.
+# log is replayed, which is why `chronological` is the default here.
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/

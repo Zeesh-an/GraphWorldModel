@@ -6,9 +6,9 @@ Downloads and loads the SNAP wiki-Vote administrator-election network.
 Source: https://snap.stanford.edu/data/wiki-Vote.html
     - 7,115 nodes (users), 103,689 directed edges (votes)
     - Directed: edge (a, b) means user a voted on b's adminship promotion
-    - Dense for its size (avg total degree 29) — the only dense directed graph
+    - Dense for its size (avg total degree 29): the only dense directed graph
       in our suite
-    - No inherent node features — uses log(1 + total degree) as synthetic features
+    - No inherent node features: uses log(1 + total degree) as synthetic features
     - No node labels
 
 ToupleGDD reports this graph as "Wiki-2"; its "Wiki-1" is a DIFFERENT 889-node
@@ -39,18 +39,18 @@ def download_wiki_vote() -> Path:
     txt_path = data_dir / "wiki-Vote.txt"
 
     if txt_path.exists():
-        print(f"[✓] Wiki-Vote already downloaded at {txt_path}")
+        print(f"[ok] Wiki-Vote already downloaded at {txt_path}")
         return txt_path
 
     if not gz_path.exists():
-        print(f"[↓] Downloading Wiki-Vote from {wiki_vote_url} ...")
+        print(f"[get] Downloading Wiki-Vote from {wiki_vote_url} ...")
         urllib.request.urlretrieve(wiki_vote_url, gz_path)
-        print(f"[✓] Saved to {gz_path}")
+        print(f"[ok] Saved to {gz_path}")
 
-    print("[↓] Extracting ...")
+    print("[get] Extracting ...")
     with gzip.open(gz_path, "rb") as gz_file:
         txt_path.write_bytes(gz_file.read())
-    print(f"[✓] Extracted to {txt_path}")
+    print(f"[ok] Extracted to {txt_path}")
 
     return txt_path
 
@@ -79,10 +79,10 @@ def load_wiki_vote(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, i
 
     in_degrees = np.array(adjacency.sum(axis=0)).flatten()
     out_degrees = np.array(adjacency.sum(axis=1)).flatten()
-    print(f"[✓] Wiki-Vote loaded: {num_nodes} nodes, {adjacency.nnz} directed edges")
-    print(f"    In-degree  — avg: {in_degrees.mean():.1f}, max: {in_degrees.max():.0f}")
+    print(f"[ok] Wiki-Vote loaded: {num_nodes} nodes, {adjacency.nnz} directed edges")
+    print(f"    In-degree: avg: {in_degrees.mean():.1f}, max: {in_degrees.max():.0f}")
     print(
-        f"    Out-degree — avg: {out_degrees.mean():.1f}, max: {out_degrees.max():.0f}"
+        f"    Out-degree: avg: {out_degrees.mean():.1f}, max: {out_degrees.max():.0f}"
     )
 
     return adjacency, node_feats, node_labels, num_nodes

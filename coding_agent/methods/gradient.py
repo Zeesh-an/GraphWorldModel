@@ -4,7 +4,7 @@ Arm A: per-instance gradient descent on a relaxed source vector, no LLM anywhere
 The control that program search is measured against
 (`research/source_localization.md` §2.6 arm A, §9.3 step 3). It implements the
 same `OuterLoopMethod` contract as `one_shot` and `evolve` so it lands in the same
-results table, the same summary row and the same figures — but it has no
+results table, the same summary row and the same figures, but it has no
 conversation, no population and no refinement: the "program" it returns is a fixed
 numerical procedure, and its only iteration is Adam inside `wm_sl.invert`.
 
@@ -76,14 +76,14 @@ class GradientLocalizer:
         # produced the set rather than re-solving with a different random path
         self._scores = None
         self.source_script = (
-            f"# Arm A — research/source_localization.md §2.6, §2.2\n"
+            f"# Arm A: research/source_localization.md §2.6, §2.2\n"
             f"# Freeze f_theta, relax x to x~ in [0,1]^N, run Adam on\n"
             f"#     ||y - f_theta(x~, G)||^2 + {cardinality_weight} * (sum(x~) - k)^2"
             + (f" - {prior_weight} * log p(x~)\n" if prior is not None else "\n")
             + f"# steps={steps}, lr={lr}, prior={prior_kind}, unroll={horizon}\n"
             f"# Then take the top-k entries of the converged x~.\n"
             f"# This is SL-VAE's procedure with our world model as its likelihood,\n"
-            f"# which the seed paper reports is a no-op swap — hence a CONTROL.\n"
+            f"# which the seed paper reports is a no-op swap: hence a CONTROL.\n"
         )
 
     def localize(self, graph: GraphInfo, observation, budget: int) -> list[int]:
@@ -170,7 +170,7 @@ class GradientInversion(OuterLoopMethod):
             raise ValueError(
                 "arm A needs a trained world model to invert: pass "
                 "--wm-results-json, or run the train stage. It is not defined "
-                "against a sampling evaluator — the loss is "
+                "against a sampling evaluator: the loss is "
                 "||y - f_theta(x~)||^2 and needs gradients through f_theta."
             )
 

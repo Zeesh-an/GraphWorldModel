@@ -15,7 +15,7 @@ results/<task>/<dataset>/<run>/
 
 `task` is a key of `pipeline.tasks.tasks`, so the results tree and
 `research/<task>.md` are always spelled the same way. `run` separates variants of
-the same (task, dataset) — backbones, ablations, seeds — and defaults to
+the same (task, dataset) (backbones, ablations, seeds) and defaults to
 `default`.
 """
 
@@ -52,17 +52,17 @@ class Layout:
 
     @property
     def label(self) -> str:
-        """`task/dataset/run` — what a log line or report title should say."""
+        """`task/dataset/run`: what a log line or report title should say."""
         return f"{self.task}/{self.dataset}/{self.run}"
 
     @property
     def task_dir(self) -> Path:
-        """All runs of this task, across datasets — what a cross-dataset table reads."""
+        """All runs of this task, across datasets: what a cross-dataset table reads."""
         return self.root.parent.parent
 
     @property
     def dataset_dir(self) -> Path:
-        """All runs of this (task, dataset) — what an ablation comparison reads."""
+        """All runs of this (task, dataset): what an ablation comparison reads."""
         return self.root.parent
 
     @property
@@ -118,7 +118,7 @@ class Layout:
 
         `<arm>.skipped.json` markers and `<arm>.ckpt.json` checkpoints live in
         the same directories and match the same glob, but neither carries the
-        result fields — so both are excluded here rather than at every reader.
+        result fields, so both are excluded here rather than at every reader.
         """
         excluded = (skip_marker_suffix, checkpoint_suffix)
 

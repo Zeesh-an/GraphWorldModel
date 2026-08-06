@@ -21,17 +21,17 @@
 #                the graph the 2026 GNN benchmark shows a 72.9% top-5 ceiling on
 #   dolphins     62 / 159, in IVGD, GraphSL and the GNN benchmark. THE graph this
 #                literature uses that no other task file needed
-#   jazz         198 / 2,742 — four papers agree to the digit. (key)
-#   netscience   1,589 / 2,742 — comparable to IVGD, GraphSL and SIDSL, and NOT
+#   jazz         198 / 2,742: four papers agree to the digit. (key)
+#   netscience   1,589 / 2,742: comparable to IVGD, GraphSL and SIDSL, and NOT
 #                to SL-VAE, whose 1,565 / 13,532 is a different graph that is
 #                undocumented and not publicly downloadable (§6.4.1). Say so in
 #                any table that carries this row.
-#   cora_ml      2,810 / 7,981 — three papers agree; our loader already applies
+#   cora_ml      2,810 / 7,981: three papers agree; our loader already applies
 #                graph2gauss standardize()
-#   power_grid   4,941 / 6,594 — four papers agree. The largest matched graph,
+#   power_grid   4,941 / 6,594: four papers agree. The largest matched graph,
 #                and a diameter-46 mesh, so it is also where a k-layer encoder's
 #                receptive field runs out
-#   deezer       47,538 / 222,887 — IVGD's SCALABILITY column and nothing else,
+#   deezer       47,538 / 222,887: IVGD's SCALABILITY column and nothing else,
 #                so there is no F1 row to compare against. It is here for the
 #                COST axis of §2.3.2, which needs a size the others cannot give.
 #
