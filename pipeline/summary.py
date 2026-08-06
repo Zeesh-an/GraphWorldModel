@@ -213,6 +213,69 @@ summary_columns = (
     "cr_mcmc_acceptance_rate",
     "cr_resim_error",
     "cr_resim_error_true_sources",
+    # Cascade prediction: the forecasting task's own metric set. Empty for every
+    # other arm, so one table still holds all seven runnable tasks. `cp_error`
+    # duplicates `spread_ground_truth` for the same reason `cr_score` and `sl_f1`
+    # do — the shared column keeps cross-task readers working and the named one
+    # keeps a spreadsheet from calling an ERROR a spread. Every cp_* error column
+    # runs LOWER-is-better; every cp_* correlation column runs higher.
+    "prediction",
+    "cp_error",
+    "cp_metric",
+    "cp_msle",
+    "cp_male",
+    "cp_msle_offset",
+    "cp_msle_natural",
+    "cp_msle_increment",
+    "cp_mape",
+    "cp_mape_casft",
+    "cp_mrse",
+    "cp_mrse_median",
+    "cp_wroperc",
+    "cp_ape_median",
+    "cp_ape_p75",
+    "cp_ape_p95",
+    "cp_pcc",
+    "cp_r2",
+    "cp_coverage",
+    "cp_doubling_accuracy",
+    # The column §8.4 says almost nobody publishes: a mean over SCOREABLE cascades
+    # silently favours whoever gives up more often
+    "cp_n_scored",
+    "cp_n_failed",
+    "cp_decline_rate",
+    "cp_mean_predicted",
+    "cp_mean_actual",
+    "cp_error_selection",
+    "cp_generalization_gap",
+    # The two floors a reader needs to interpret any of the above
+    "cp_trivial_error",
+    "cp_persistence_error",
+    # The protocol. Four of §5.7's five incompatibilities live here, and a number
+    # without them is comparable to nothing.
+    "cp_corpus",
+    "cp_time_unit",
+    "cp_target",
+    "cp_split_protocol",
+    "cp_observation_window",
+    "cp_prediction_horizon",
+    "cp_observation_seconds",
+    "cp_horizon_seconds",
+    "cp_min_observed_filter",
+    "cp_truncate_filter",
+    "cp_hard_targets",
+    "cp_select_split",
+    "cp_eval_split",
+    "cp_select_instances",
+    "cp_eval_instances",
+    "cp_forecast_calls",
+    "cp_kernel_calls",
+    "cp_kernel_calls_per_instance",
+    # MODELLING error: what the arm's own forward model predicts with no program in
+    # the loop, which is the falsification number §9.1 is about
+    "cp_model_msle",
+    "cp_model_male",
+    "cp_model_pcc",
 )
 
 
@@ -505,6 +568,82 @@ def _row(result: dict, sense: str = "maximize") -> dict:
             if result.get("reconstruction")
             else None
         ),
+        # Cascade prediction. Empty for every other arm. `cp_error` is the reward
+        # and it MINIMIZES; `cp_n_failed` is the decline count, which travels beside
+        # every error because a mean over scoreable cascades alone favours the model
+        # that gives up more often (research/cascade_prediction.md §8.4).
+        "prediction": result.get("prediction"),
+        "cp_error": spread if result.get("prediction") else None,
+        "cp_metric": result.get("prediction_metric"),
+        "cp_msle": metrics.get("msle"),
+        "cp_male": metrics.get("male"),
+        "cp_msle_offset": metrics.get("msle_offset"),
+        "cp_msle_natural": metrics.get("msle_natural"),
+        "cp_msle_increment": metrics.get("msle_increment"),
+        "cp_mape": metrics.get("mape"),
+        "cp_mape_casft": metrics.get("mape_casft"),
+        "cp_mrse": metrics.get("mrse"),
+        "cp_mrse_median": metrics.get("mrse_median"),
+        "cp_wroperc": metrics.get("wroperc"),
+        "cp_ape_median": metrics.get("ape_median"),
+        "cp_ape_p75": metrics.get("ape_p75"),
+        "cp_ape_p95": metrics.get("ape_p95"),
+        "cp_pcc": metrics.get("pcc"),
+        "cp_r2": metrics.get("r2"),
+        "cp_coverage": metrics.get("coverage"),
+        "cp_doubling_accuracy": metrics.get("doubling_accuracy"),
+        "cp_n_scored": metrics.get("n_scored"),
+        "cp_n_failed": metrics.get("n_failed"),
+        "cp_decline_rate": metrics.get("decline_rate"),
+        "cp_mean_predicted": metrics.get("mean_predicted"),
+        "cp_mean_actual": metrics.get("mean_actual"),
+        "cp_error_selection": (
+            selection_metrics.get(result.get("prediction_metric", "msle"))
+            if result.get("prediction")
+            else None
+        ),
+        "cp_generalization_gap": (
+            result.get("generalization_gap") if result.get("prediction") else None
+        ),
+        "cp_trivial_error": result.get("trivial_predictor_error"),
+        "cp_persistence_error": result.get("persistence_error"),
+        "cp_corpus": result.get("corpus"),
+        "cp_time_unit": result.get("corpus_time_unit"),
+        "cp_target": result.get("prediction_target"),
+        "cp_split_protocol": result.get("split_protocol"),
+        "cp_observation_window": result.get("observation_window"),
+        "cp_prediction_horizon": result.get("prediction_horizon"),
+        "cp_observation_seconds": result.get("observation_seconds"),
+        "cp_horizon_seconds": result.get("horizon_seconds"),
+        "cp_min_observed_filter": result.get("min_observed_filter"),
+        "cp_truncate_filter": result.get("truncate_filter"),
+        "cp_hard_targets": result.get("hard_targets"),
+        "cp_select_split": (
+            result.get("select_split") if result.get("prediction") else None
+        ),
+        "cp_eval_split": (
+            result.get("eval_split") if result.get("prediction") else None
+        ),
+        "cp_select_instances": (
+            result.get("n_select_instances") if result.get("prediction") else None
+        ),
+        "cp_eval_instances": (
+            result.get("n_eval_instances") if result.get("prediction") else None
+        ),
+        "cp_forecast_calls": (
+            result.get("forecast_calls") if result.get("prediction") else None
+        ),
+        "cp_kernel_calls": (
+            result.get("kernel_calls") if result.get("prediction") else None
+        ),
+        "cp_kernel_calls_per_instance": (
+            result.get("kernel_calls_per_instance")
+            if result.get("prediction")
+            else None
+        ),
+        "cp_model_msle": result.get("model_msle"),
+        "cp_model_male": result.get("model_male"),
+        "cp_model_pcc": result.get("model_pcc"),
     }
 
 

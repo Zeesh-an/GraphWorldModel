@@ -237,9 +237,7 @@ class EvolveSearch(OuterLoopMethod):
                     best[1],
                     "the population best",
                     task.sense,
-                    unit=(
-                        "score" if task.decodes else "F1" if task.recovers else "nodes"
-                    ),
+                    unit=task.reward_unit,
                 )
                 if best is not None
                 else None

@@ -147,6 +147,55 @@ real_directed = {
     # degree, so it is the control that shows what happens when the heavy tail the
     # degree heuristic feeds on is gone.
     "football": False,
+    # The REAL CASCADE CORPORA (research/cascade_prediction.md §6.2), and the only
+    # datasets here that carry diffusion TRACES rather than topology alone. Every one
+    # is loaded undirected: the graph we build is the union of the observed
+    # propagation paths (CasFlow's own `generate_global_graph`), and an observed
+    # retweet is evidence of a tie rather than of a one-way channel. `digg_cascades`
+    # is the exception in construction but not in directedness — it has a real
+    # published friendship graph and uses it, symmetrized.
+    #
+    # Warning: THREE of these collide by name with graphs we already load, and §6.1
+    # and §6.4 record all three rather than renaming theirs. `digg_cascades` is the
+    # ISI/Lerman Digg 2009 corpus (279,632 nodes WITH 3,553 vote cascades) while
+    # `digg` is the Syracuse friendship graph (116,893, no cascades) — different
+    # graph, and ours has no traces. `weibo_cascades` is the AMiner retweet TRACES
+    # while `weibo` is the AMiner follower GRAPH — same download, different artefact.
+    # And `casflow_weibo` is Weibo-A, the DeepHawkes preprocessing that carries the
+    # published numbers, which `weibo_cascades` (raw, unfiltered) is not.
+    "casflow_weibo": False,
+    "casflow_twitter": False,
+    "casflow_aps": False,
+    "weibo_cascades": False,
+    "aps": False,
+    "digg_cascades": False,
+    "memetracker": False,
+    "taoke": False,
+}
+
+# Which datasets carry CASCADES as well as a graph. `--task cascade_prediction`
+# refuses anything outside this set up front, because the failure otherwise lands
+# three stages later as an empty transitions file. Each loader module exposes
+# `load_<name>_cascades(path) -> list[Cascade]` alongside the usual pair, and
+# `data/datasets/cascade_common.py` documents the contract.
+cascade_corpora = (
+    "casflow_weibo",
+    "casflow_twitter",
+    "casflow_aps",
+    "weibo_cascades",
+    "aps",
+    "digg_cascades",
+    "memetracker",
+    "taoke",
+)
+
+# The corpus's own time unit per second, so an observation window quoted in the
+# literature's units reaches the replay unchanged. APS publishes citation lags in
+# DAYS and every social corpus in SECONDS, which is the one place a window of
+# "1095" means three years rather than eighteen minutes.
+corpus_time_unit = {
+    "casflow_aps": "day",
+    "aps": "day",
 }
 
 
@@ -409,3 +458,45 @@ def make_real_bundle(
         prob_model=prob_model,
         uniform_p=uniform_p,
     )
+
+
+def load_cascade_corpus(
+    dataset: str, prob_model: str = "weighted", uniform_p: float = 0.1
+) -> tuple[GraphBundle, list]:
+    """
+    A cascade corpus's graph AND its observed diffusion traces, from one parse.
+
+    The second half of the loader contract that only these datasets implement
+    (`data/datasets/cascade_common.py`). Both halves come from one call so a node id
+    means the same thing in each: the graph is built FROM the traces for every
+    corpus but Digg, which publishes a real friendship network and uses it.
+
+    Raises on a dataset with no cascades rather than returning an empty list —
+    `--task cascade_prediction` on a topology-only graph would otherwise generate
+    zero episodes and fail three stages later with nothing to point at.
+    """
+    if dataset not in cascade_corpora:
+        raise ValueError(
+            f"dataset {dataset!r} carries no cascades, so it cannot be replayed for "
+            f"--task cascade_prediction. Real cascade corpora: "
+            f"{sorted(cascade_corpora)}. research/cascade_prediction.md §6.1 records "
+            f"that NONE of the graphs we load for the other tasks carry a trace — "
+            f"that is the whole reason this task needed new loaders."
+        )
+
+    module = importlib.import_module(f"data.datasets.{dataset}")
+    raw_path = getattr(module, f"download_{dataset}")()
+
+    adjacency, node_feats, node_labels, _ = getattr(module, f"load_{dataset}")(raw_path)
+    cascades = getattr(module, f"load_{dataset}_cascades")(raw_path)
+
+    bundle = make_real_bundle_from_arrays(
+        dataset,
+        adjacency,
+        node_feats,
+        node_labels,
+        prob_model=prob_model,
+        uniform_p=uniform_p,
+    )
+
+    return bundle, cascades

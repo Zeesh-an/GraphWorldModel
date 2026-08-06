@@ -9,6 +9,7 @@ from pipeline.conditions import (
     adaptivity_gaps,
     condition_names,
     ground_truth_reward,
+    is_forecast,
     is_ground_truth,
     is_reconstruct,
     is_recover,
@@ -280,6 +281,192 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
     return lines + [""]
 
 
+def _prediction_table(agent_results: list[dict]) -> list[str]:
+    """
+    Every error column per arm, on HELD-OUT cascades, with the protocol above it.
+
+    The forecasting task's results table. Two things it must do that no other table
+    here does. First, it prints the PROTOCOL — corpus, window, horizon, split,
+    filters — because
+    [`research/cascade_prediction.md`](../../../../research/cascade_prediction.md)
+    §5.7 lists five independent incompatibilities between published tables and four
+    of them are protocol rather than method: three different corpora are called
+    "Twitter", a `< 10` versus `< 50` participant filter moves MSLE by more than the
+    gap between any two consecutive published rows, and the random-over-cascades
+    split LEAKS. A number without its protocol is comparable to nothing.
+
+    Second, it prints the DECLINE COUNT beside every error. §8.4: generative models
+    refuse to score supercritical cascades, papers report the mean over scoreable
+    cascades only, and that "silently favours the model that gives up more often".
+    Mishra et al. publish their failure counts and almost nobody else does.
+    """
+    scored = [result for result in agent_results if result.get("prediction")]
+    if not scored:
+        return []
+
+    first = scored[0]
+    metric = str(first.get("prediction_metric", "msle")).upper()
+    trivial = next(
+        (
+            result["trivial_predictor_error"]
+            for result in scored
+            if result.get("trivial_predictor_error") is not None
+        ),
+        None,
+    )
+    persistence = next(
+        (
+            result["persistence_error"]
+            for result in scored
+            if result.get("persistence_error") is not None
+        ),
+        None,
+    )
+
+    lines = [
+        f"> **`{metric}` is an ERROR and LOWER IS BETTER** — the only column in this "
+        f"pipeline that runs that way for a reason unrelated to containment. It is "
+        f"measured in LOG space, so being off by a factor of two costs the same on a "
+        f"cascade of 20 and one of 2000, and RELATIVE accuracy is the whole game.",
+        "",
+        "**These cascades are REAL, not simulated.** That is the point of the task "
+        "and the one thing that makes it different from every other result in this "
+        "repo: every other task evaluates a learned model against traces drawn from "
+        "the same NDlib simulator that trained it, a closed loop that can only "
+        "measure LEARNING error. Here the dynamics that produced the data are "
+        "whatever they are, and our structured head's Independent-Cascade "
+        "composition rule is either an adequate approximation of them or it is not "
+        "(§9.1). Expect to lose to a method built for this task; the value is "
+        "diagnostic.",
+        "",
+        "### Protocol",
+        "",
+        "| setting | value |",
+        "| --- | --- |",
+        f"| corpus | `{first.get('corpus')}` |",
+        f"| observation window `t_o` | "
+        f"`{first.get('observation_seconds')}` {first.get('corpus_time_unit')}(s) "
+        f"= {first.get('observation_window')} replayed step(s) |",
+        f"| prediction horizon `t_p` | "
+        f"`{first.get('horizon_seconds')}` {first.get('corpus_time_unit')}(s) "
+        f"= {first.get('prediction_horizon')} replayed step(s) |",
+        f"| split protocol | `{first.get('split_protocol')}` |",
+        f"| target quantity | `{first.get('prediction_target')}` |",
+        f"| participant filter | drop `< {first.get('min_observed_filter')}` "
+        f"observed, keep first `{first.get('truncate_filter')}` |",
+        "| targets | "
+        + ("HARD 0/1 (a real cascade happened once)" if first.get("hard_targets") else "soft")
+        + " |",
+        f"| cascades | {first.get('n_select_instances')} selection / "
+        f"{first.get('n_eval_instances')} held out |",
+        "",
+    ]
+
+    if first.get("split_protocol") == "random":
+        lines += [
+            "> **Warning: this run used the RANDOM split over cascades.** §8.3: "
+            "cascades overlap in wall-clock time, so a training cascade's prediction "
+            "window can sit inside a test cascade's observation window, and the model "
+            "learns a global temporal shortcut unavailable at deployment. Under the "
+            "leak-free chronological fix, two 2021-24 SOTA methods fell BELOW a plain "
+            "MLP and the field's APS band moved from 1.19-2.11 to 2.28-4.82. These "
+            "numbers are comparable to the published tables and NOT to a leak-free "
+            "run.",
+            "",
+        ]
+
+    if trivial is not None or persistence is not None:
+        lines += [
+            "**Two floors, and both are stronger than they sound.** Under a "
+            "log-space error the geometric mean of the training sizes is the best "
+            "instance-BLIND prediction"
+            + (f" (`{metric} {trivial:.4f}`)" if trivial is not None else "")
+            + ", and predicting the already-observed count unchanged is right "
+            "whenever a cascade is finished — which most are"
+            + (f" (`{metric} {persistence:.4f}`)" if persistence is not None else "")
+            + ". An arm that does not clear both has learned the corpus's size "
+            "distribution rather than anything about the instance.",
+            "",
+        ]
+
+    lines += [
+        f"| arm | condition | {metric} | MALE | MAPE | PCC | COV-10% | median APE | "
+        f"declined | selection | gap | kernel calls |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+
+    for result in rank_by(scored, ground_truth_reward, minimize):
+        metrics = result.get("metrics") or {}
+        selection = result.get("selection_metrics") or {}
+        gap = result.get("generalization_gap")
+        total = (metrics.get("n_scored") or 0) + (metrics.get("n_failed") or 0)
+
+        lines.append(
+            f"| `{result.get('arm')}` "
+            f"| {result.get('condition')} "
+            f"| **{_format_number(ground_truth_reward(result), 4)}** "
+            f"| {_format_number(metrics.get('male'), 4)} "
+            f"| {_format_number(metrics.get('mape'), 4)} "
+            f"| {_format_number(metrics.get('pcc'), 4)} "
+            f"| {_format_number(metrics.get('coverage'), 3)} "
+            f"| {_format_number(metrics.get('ape_median'), 3)} "
+            f"| {metrics.get('n_failed', 0):.0f}/{total:.0f} "
+            f"| {_format_number(selection.get(result.get('prediction_metric', 'msle')), 4)} "
+            f"| {_format_number(gap, 4) if gap is not None else '-'} "
+            f"| {result.get('kernel_calls') or 0} |"
+        )
+
+    modelling = [
+        result for result in scored if result.get("model_msle") is not None
+    ]
+    if modelling:
+        lines += [
+            "",
+            "### Modelling error — what the FORWARD MODEL alone predicts",
+            "",
+            "The number §9.1 is actually about, and the one no other task in this "
+            "repo can produce. Roll each arm's own forward model forward from the "
+            "observed prefix with no program in the loop, and compare its expected "
+            "popularity against what the log says happened. The gap between this "
+            "column and the arm's own error is what the SEARCH bought; the LEVEL is "
+            "how far an Independent-Cascade-shaped kernel is from a real adoption "
+            "process. §2.2 names three mechanisms by which it is wrong — adoption is "
+            "not memoryless, exposure is repeated rather than one-shot per "
+            "neighbour, and exogenous arrivals have no infected in-neighbour at all.",
+            "",
+            "| arm | model MSLE | model MALE | model PCC | program error | "
+            "search gain |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        for result in rank_by(modelling, lambda entry: entry["model_msle"], minimize):
+            program = ground_truth_reward(result)
+            lines.append(
+                f"| `{result.get('arm')}` "
+                f"| {_format_number(result.get('model_msle'), 4)} "
+                f"| {_format_number(result.get('model_male'), 4)} "
+                f"| {_format_number(result.get('model_pcc'), 4)} "
+                f"| {_format_number(program, 4)} "
+                f"| {_format_number(result['model_msle'] - program, 4)} |"
+            )
+
+    lines += [
+        "",
+        "**Published context, explicitly NOT a like-for-like comparison.** CasFT "
+        "reports MSLE `2.1728` on Weibo at `t_o = 0.5 h`, `3.8546` on Twitter at "
+        "1 d and `1.2468` on APS at 3 y, against CasFlow's `2.3370` / `4.7799` / "
+        "`1.4370` (§5.1, all under the random split). Under CasTemp's leak-free "
+        "split the same field compresses to `1.475` / `1.171` / `1.926` for its own "
+        "method and `1.685` / `1.329` / `2.438` for CasFlow (§5.3). Our "
+        "preprocessing differs from all of them (§6.4 lists seven artefacts sharing "
+        "three names), so these are context markers for the order of magnitude and "
+        "nothing more. §9.9: do not chase the leaderboard — CasFlow is a "
+        "2M-parameter model tuned for this one task.",
+        "",
+    ]
+
+    return lines
+
+
 def _reconstruction_table(agent_results: list[dict]) -> list[str]:
     """
     The tree half and the node half side by side, on HELD-OUT cascades.
@@ -440,6 +627,9 @@ def _results_table(agent_results: list[dict]) -> list[str]:
     sense = result_sense(agent_results)
     recover = is_recover(agent_results)
     lines = ["## Results", ""]
+
+    if is_forecast(agent_results):
+        return lines + _prediction_table(agent_results)
 
     if is_reconstruct(agent_results):
         return lines + _reconstruction_table(agent_results)

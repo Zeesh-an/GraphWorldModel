@@ -12,10 +12,12 @@ from pipeline.conditions import (
     adaptivity_gaps,
     condition_names,
     ground_truth_reward,
+    is_forecast,
     is_ground_truth,
     is_reconstruct,
     is_recover,
     result_sense,
+    reward_name,
 )
 from pipeline.tasks import minimize
 
@@ -82,6 +84,17 @@ def _reward_label(results: list[dict], normalize: bool = False) -> str:
     # A decoder's reward is a tree-weighted score in [0, 1] and an inverse task's
     # is an F1 in the same range; neither is a node count and neither needs a
     # referee, since both are measured against something we stored
+    # A forecast task's reward is an ERROR: not a count, and the one column in
+    # this pipeline where lower is better for a reason that has nothing to do with
+    # containment
+    if is_forecast(results):
+        for result in results:
+            metric = result.get("prediction_metric")
+            if metric:
+                return f"{metric.upper()} — LOWER IS BETTER (held-out cascades)"
+
+        return "MSLE — LOWER IS BETTER (held-out cascades)"
+
     if is_reconstruct(results):
         return (
             "tree-weighted reconstruction score — higher is better "
@@ -1074,11 +1087,11 @@ def plot_localization_metrics(
     precision carry F1, which is the signature of a thresholded relaxation
     over-predicting (research/source_localization.md §5.2).
     """
-    scored = [
-        result
-        for result in results
-        if result.get("metrics") and not result.get("reconstruction")
-    ]
+    # `result.get("metrics")` is NOT a discriminator any more: localization,
+    # reconstruction and prediction all write one, so this filters on the family's
+    # own flag. Without it a cascade-prediction sweep draws PR/RE/F1/AUC bars over
+    # a table that has none of those columns.
+    scored = [result for result in results if result.get("localization")]
     if not scored:
         return None
 
@@ -1172,11 +1185,14 @@ def plot_localization_cost(
     million rollouts before the MC multiplier, which is why nobody has run a
     program search over an inverse problem. This plots the axis that shows it.
     """
+    # The family's own flag rather than "has metrics": three families write a
+    # `metrics` block now, so the old test drew an F1-against-seconds figure over a
+    # cascade-prediction table that has no F1 in it. `plot_prediction_cost` is the
+    # forecast counterpart.
     scored = [
         result
         for result in results
-        if result.get("metrics")
-        and not result.get("reconstruction")
+        if result.get("localization")
         and result.get("evaluator_seconds") is not None
     ]
     if len(scored) < 2:
@@ -1221,7 +1237,7 @@ def plot_generalization_gap(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    Selection F1 against held-out F1 — did the program learn an algorithm or memorize?
+    Selection score against held-out score — did the program learn an algorithm or memorize?
 
     §8.5.1's episode axis, plotted. A point on the diagonal transferred perfectly;
     a point far below it scored well on the episodes the outer loop optimized
@@ -1231,27 +1247,51 @@ def plot_generalization_gap(
     paired = [
         result
         for result in results
-        if result.get("metrics") and result.get("selection_metrics")
+        if result.get("metrics")
+        and result.get("selection_metrics")
+        and result.get("generalization_gap") is not None
     ]
     if len(paired) < 2:
         return None
+
+    # The axis noun and its DIRECTION come from the family: a recover task plots an
+    # F1 that maximizes and a forecast task an error that minimizes, so a fixed "F1,
+    # higher is better" label would read a cascade-prediction figure backwards.
+    metric = reward_name(paired)
+    direction = "LOWER" if is_forecast(paired) else "higher"
 
     figure, axes = plt.subplots(figsize=(5.8, 5.4))
     axes.plot([0, 1], [0, 1], color="#888888", linestyle="--", linewidth=1.0,
               label="perfect transfer")
 
-    # A decoder is selected on the tree-weighted score and a localizer on F1;
-    # both live in [0, 1] and both are stored the same way, so one figure serves
-    # them once it reads the right key
+    # Three families store their selection score under three keys, and only two of
+    # them live in [0, 1]: a decoder's tree-weighted score and a localizer's F1 do,
+    # and a forecast task's error is unbounded above. One figure serves all three
+    # once it reads the right key AND stops assuming the range.
     decodes = is_reconstruct(paired)
-    key = "reward" if decodes else "f1"
+    forecasts = is_forecast(paired)
+
+    if forecasts:
+        key = paired[0].get("prediction_metric", "msle")
+    elif decodes:
+        key = "reward"
+    else:
+        key = "f1"
+
+    points = []
 
     for arm in _sorted_arms(paired):
         run = _by_arm(paired, arm)[0]
         selection = float(run["selection_metrics"].get(key) or 0.0)
         heldout = float(
-            (run.get("mc_reward") if decodes else run["metrics"].get(key)) or 0.0
+            (
+                run.get("mc_reward")
+                if decodes or forecasts
+                else run["metrics"].get(key)
+            )
+            or 0.0
         )
+        points.append((selection, heldout))
         axes.scatter(
             selection,
             heldout,
@@ -1266,12 +1306,21 @@ def plot_generalization_gap(
             textcoords="offset points",
         )
 
-    unit = "score" if decodes else "F1"
-    noun = "cascades" if decodes else "episodes"
+    unit = metric
+    noun = "cascades" if decodes or forecasts else "episodes"
+    limit = (
+        max(max(pair) for pair in points) * 1.1
+        if forecasts and points
+        else 1.02
+    )
+    # Redrawn at the real range: the diagonal was placed at [0, 1] before any point
+    # was known, which is right for an F1 and wrong for an error
+    axes.lines[0].set_data([0, limit], [0, limit])
+
     axes.set_xlabel(f"{unit} on the {noun} the search optimized against")
-    axes.set_ylabel(f"{unit} on held-out {noun}")
-    axes.set_xlim(0, 1.02)
-    axes.set_ylim(0, 1.02)
+    axes.set_ylabel(f"{unit} on held-out {noun} ({direction} is better)")
+    axes.set_xlim(0, limit)
+    axes.set_ylim(0, limit)
     axes.set_title(f"{title_prefix}: generalization across {noun}")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=7, loc="lower right")
@@ -1459,6 +1508,253 @@ def plot_tree_vs_node(
     return _save(figure, out_path)
 
 
+prediction_metric_keys = ("msle", "male", "mape", "wroperc")
+
+
+def plot_prediction_metrics(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Every error column per arm, with the two floors drawn across them.
+
+    None for every sweep that does not forecast. Four bars per arm rather than one,
+    because research/cascade_prediction.md §5.7 difference 4 records that these are
+    not variants of one number: MSLE and MALE disagree on how much a single huge
+    cascade counts, MAPE is a relative error IN LOG SPACE (named MAPE, is not MAPE),
+    and WroPerc is the only one measured on raw counts at all.
+
+    The two horizontal lines are the point of the figure. Under a LOG-space error an
+    instance-blind constant is far stronger than intuition suggests, and "predict
+    what you already see" is right whenever a cascade is finished — which most are.
+    An arm that does not clear both has not used the instance, and no arrangement of
+    the bars alone would show that.
+    """
+    scored = [
+        result for result in results if result.get("prediction") and result.get("metrics")
+    ]
+    if not scored:
+        return None
+
+    arms = _sorted_arms(scored)
+    figure, axes = plt.subplots(figsize=(max(7.5, 1.0 * len(arms)), 4.8))
+
+    positions = np.arange(len(arms))
+    width = 0.8 / len(prediction_metric_keys)
+    hatches = ("", "///", "...", "xxx")
+
+    for index, key in enumerate(prediction_metric_keys):
+        values = [
+            float(_by_arm(scored, arm)[0]["metrics"].get(key) or 0.0) for arm in arms
+        ]
+        axes.bar(
+            positions + index * width - 0.4 + width / 2,
+            values,
+            width=width,
+            color=[
+                condition_colors.get(_condition_of(scored, arm), "#4C72B0")
+                for arm in arms
+            ],
+            edgecolor="white",
+            linewidth=0.6,
+            hatch=hatches[index % len(hatches)],
+        )
+
+    legend_handles = [
+        plt.Rectangle(
+            (0, 0), 1, 1, facecolor="white", edgecolor="#444444",
+            hatch=hatches[index % len(hatches)],
+        )
+        for index in range(len(prediction_metric_keys))
+    ]
+
+    for key, colour, label in (
+        ("trivial_predictor_error", "#B03030", "constant (geometric mean)"),
+        ("persistence_error", "#3070B0", "persistence (predict what you see)"),
+    ):
+        floor = next(
+            (result[key] for result in scored if result.get(key) is not None), None
+        )
+        if floor is None or not np.isfinite(floor):
+            continue
+
+        axes.axhline(floor, color=colour, linestyle="--", linewidth=1.0)
+        axes.text(
+            len(arms) - 0.5,
+            floor,
+            f"{label} ({floor:.3f})",
+            fontsize=6,
+            color=colour,
+            ha="right",
+            va="bottom",
+        )
+
+    axes.set_xticks(positions)
+    axes.set_xticklabels(arms, rotation=30, ha="right", fontsize=7)
+    axes.set_ylabel("prediction error on held-out cascades — LOWER IS BETTER")
+    axes.set_title(
+        f"{title_prefix}: popularity prediction error, and the floors to clear",
+        fontsize=10,
+    )
+    axes.grid(alpha=0.3, axis="y")
+    axes.legend(
+        legend_handles,
+        [key.upper() for key in prediction_metric_keys],
+        fontsize=7,
+        ncol=4,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.42),
+        title="hatch = metric; colour = condition; dashed = floor",
+        title_fontsize=7,
+    )
+
+    return _save(figure, out_path)
+
+
+def plot_popularity_scatter(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Predicted against actual popularity, log-log, one panel per arm.
+
+    THE figure this literature publishes, and the one that separates two failures a
+    single MSLE cannot: a model that misses every viral cascade and one that invents
+    virality everywhere post the same error. On log-log axes the first sits below
+    the diagonal at the right edge and the second above it at the left, and the
+    shape is visible at a glance where the number is not.
+
+    The diagonal is perfect prediction; the dotted band is a factor of two either
+    way, which is roughly where a good published method lives on these corpora.
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("prediction") and result.get("per_instance")
+    ]
+    if not scored:
+        return None
+
+    arms = _sorted_arms(scored)[:6]
+    columns = min(len(arms), 3)
+    rows = (len(arms) + columns - 1) // columns
+    figure, axes_grid = plt.subplots(
+        rows, columns, figsize=(3.4 * columns, 3.2 * rows), squeeze=False
+    )
+
+    for index, arm in enumerate(arms):
+        axes = axes_grid[index // columns][index % columns]
+        entries = [
+            entry
+            for entry in _by_arm(scored, arm)[0]["per_instance"]
+            if not entry.get("declined") and entry.get("predicted")
+        ]
+        if not entries:
+            axes.set_axis_off()
+            continue
+
+        actual = np.array([max(entry["actual"], 1) for entry in entries], dtype=float)
+        predicted = np.array(
+            [max(entry["predicted"], 1) for entry in entries], dtype=float
+        )
+
+        axes.scatter(
+            actual,
+            predicted,
+            s=14,
+            alpha=0.55,
+            color=condition_colors.get(_condition_of(scored, arm), "#4C72B0"),
+            edgecolor="none",
+        )
+
+        limit = max(float(actual.max()), float(predicted.max())) * 1.2
+        line = np.array([1.0, limit])
+        axes.plot(line, line, color="#444444", linewidth=0.9)
+        axes.plot(line, line * 2, color="#888888", linestyle=":", linewidth=0.7)
+        axes.plot(line, line / 2, color="#888888", linestyle=":", linewidth=0.7)
+
+        axes.set_xscale("log")
+        axes.set_yscale("log")
+        axes.set_xlim(1, limit)
+        axes.set_ylim(1, limit)
+        axes.set_xlabel("actual popularity", fontsize=8)
+        axes.set_ylabel("predicted", fontsize=8)
+        axes.set_title(arm, fontsize=8)
+        axes.tick_params(labelsize=7)
+        axes.grid(alpha=0.25, which="both")
+
+    for index in range(len(arms), rows * columns):
+        axes_grid[index // columns][index % columns].set_axis_off()
+
+    figure.suptitle(
+        f"{title_prefix}: predicted vs actual popularity (diagonal = perfect, "
+        f"dotted = 2x either way)",
+        fontsize=10,
+    )
+
+    return _save(figure, out_path)
+
+
+def plot_prediction_cost(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    Error against evaluator seconds — the cost claim, as one figure.
+
+    The axis research/cascade_prediction.md §2.4 says the whole comparison is read
+    on. An @monte_carlo arm pays `mc_runs` real episodes per kernel evaluation and a
+    @world_model arm pays one batched matmul, at `steps * forecast_samples`
+    evaluations per cascade; the interesting outcome is not which corner wins but
+    whether the cheap corner is empty.
+
+    Arms with NO forward model (@native, and every classical baseline) sit at
+    essentially zero seconds by construction, and that is the point rather than an
+    artifact: §3.1 records that feature-driven regression sometimes beats deep
+    models outright here, so a native arm in the bottom-left is a real result.
+    """
+    scored = [
+        result
+        for result in results
+        if result.get("prediction") and result.get("evaluator_seconds") is not None
+    ]
+    if len(scored) < 2:
+        return None
+
+    figure, axes = plt.subplots(figsize=figure_size)
+
+    for index, arm in enumerate(_sorted_arms(scored)):
+        result = _by_arm(scored, arm)[0]
+        seconds = max(float(result.get("evaluator_seconds") or 0.0), 1e-3)
+
+        axes.scatter(
+            seconds,
+            ground_truth_reward(result),
+            s=110,
+            marker=_arm_style(index)["marker"],
+            color=condition_colors.get(_condition_of(scored, arm), "#4C72B0"),
+            edgecolor="white",
+            linewidth=0.8,
+            zorder=3,
+        )
+        axes.annotate(
+            arm,
+            (seconds, ground_truth_reward(result)),
+            textcoords="offset points",
+            xytext=(6, 4),
+            fontsize=7,
+        )
+
+    axes.set_xscale("log")
+    axes.set_xlabel("evaluator seconds (log) — what the search spent inside its model")
+    axes.set_ylabel(_reward_label(scored))
+    axes.set_title(
+        f"{title_prefix}: prediction error against forward-model cost "
+        f"(bottom-left wins)",
+        fontsize=10,
+    )
+    axes.grid(alpha=0.3, which="both")
+
+    return _save(figure, out_path)
+
+
 def build_plots(
     agent_results: list[dict],
     wm_results: dict | None,
@@ -1473,7 +1769,7 @@ def build_plots(
     # skipped outright rather than relabelled.
     spread_figures = (
         []
-        if is_recover(agent_results)
+        if is_recover(agent_results) or is_forecast(agent_results)
         else [
             plot_budget_vs_spread(
                 agent_results, plots_dir / "budget_vs_spread.png", title_prefix
@@ -1555,6 +1851,17 @@ def build_plots(
         ),
         plot_tree_vs_node(
             agent_results, plots_dir / "tree_vs_node.png", title_prefix
+        ),
+        # All three return None on a sweep that forecasts nothing, same as every
+        # pair above
+        plot_prediction_metrics(
+            agent_results, plots_dir / "prediction_metrics.png", title_prefix
+        ),
+        plot_popularity_scatter(
+            agent_results, plots_dir / "popularity_scatter.png", title_prefix
+        ),
+        plot_prediction_cost(
+            agent_results, plots_dir / "prediction_cost.png", title_prefix
         ),
     ]
 

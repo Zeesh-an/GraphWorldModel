@@ -32,6 +32,7 @@ from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
 from coding_agent.tools.blocking_algorithms import all_blocking_algorithms
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
 from coding_agent.tools.localization_algorithms import localization_algorithms
+from coding_agent.tools.prediction_algorithms import prediction_algorithms
 from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
 from coding_agent.types import improves
 from pipeline.tasks import get_task, maximize, minimize, tasks
@@ -127,6 +128,7 @@ _pools = {
     "blocking": set(all_blocking_algorithms),
     "dismantling": set(dismantling_algorithms),
     "localization": set(localization_algorithms),
+    "prediction": set(prediction_algorithms),
     "reconstruction": set(reconstruction_algorithms),
 }
 for _first, _members in _pools.items():
@@ -256,7 +258,9 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
         #
         # A published LOCALIZATION algorithm (LPSI, NETSLEUTH, OJC, ...) needs no
         # method of its own: on a recover task the harness always calls localize(),
-        # so one_shot with a single canned pass is the whole arm.
+        # so one_shot with a single canned pass is the whole arm. Same for a
+        # published PREDICTOR (S&H, SEISMIC, Hawkes, ...) on a forecast task, where
+        # the harness always calls predict().
         return Arm(
             spec=spec,
             name=f"baseline_{algorithm}{suffix}",
@@ -343,8 +347,11 @@ def result_sense(results: list[dict]) -> str:
             return objective
 
         name = result.get("task")
-        if name in tasks and get_task(name).objective in (maximize, minimize):
-            return get_task(name).objective
+        # `.sense` rather than `.objective`: a recover task reports an F1 that
+        # maximizes and a forecast task an error that minimizes, so reading the
+        # objective literally would rank two of the four families backwards
+        if name in tasks and get_task(name).sense in (maximize, minimize):
+            return get_task(name).sense
 
     return maximize
 
@@ -371,6 +378,23 @@ def is_reconstruct(results: list[dict]) -> bool:
     )
 
 
+def is_forecast(results: list[dict]) -> bool:
+    """
+    True when these results score a PREDICTION ERROR rather than a cascade.
+
+    The fourth family, and the one whose column runs the other way: every other
+    reward in this pipeline is a node count or an F1 and reads better-when-higher
+    (or, for containment, better-when-lower on a count). A forecast task's reward is
+    MSLE, which is lower-is-better AND is not a count of anything — so a reader that
+    printed "final infected" over it would be wrong twice.
+    """
+    return any(result.get("prediction") for result in results) or any(
+        result.get("task") in tasks and get_task(result["task"]).forecasts
+        for result in results
+        if result.get("task")
+    )
+
+
 def is_recover(results: list[dict]) -> bool:
     """
     True when these results score an INVERSE prediction rather than a cascade.
@@ -388,6 +412,16 @@ def is_recover(results: list[dict]) -> bool:
 
 def reward_name(results: list[dict]) -> str:
     """What the shared comparable column actually measures, for a table header."""
+    if is_forecast(results):
+        # Whichever error the run configured; every one of them minimizes, and the
+        # per-arm JSON records which so a mixed read cannot mislabel the column
+        for result in results:
+            metric = result.get("prediction_metric")
+            if metric:
+                return str(metric).upper()
+
+        return "MSLE"
+
     if is_reconstruct(results):
         return "score"
 

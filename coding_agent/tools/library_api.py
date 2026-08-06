@@ -13,6 +13,7 @@ from coding_agent.tools import (
     dismantling_algorithms,
     immunization_algorithms,
     localization_algorithms,
+    prediction_algorithms,
     primitives,
     reconstruction_algorithms,
 )
@@ -27,6 +28,7 @@ localization_names = list(localization_algorithms.localization_algorithms.keys()
 reconstruction_names = list(
     reconstruction_algorithms.reconstruction_algorithms.keys()
 )
+prediction_names = list(prediction_algorithms.prediction_algorithms.keys())
 blocking_names = list(blocking_algorithms.all_blocking_algorithms.keys())
 
 # Which library members a given lever can actually spend its budget on. Showing an
@@ -376,6 +378,63 @@ def build_reconstruction_reference(exclude: tuple = ()) -> str:
         "in it —\nand `personalized_pagerank` is on the list because the published "
         "finding is\nthat a plain random walker BEATS tree sampling on assortative "
         "graphs:\n" + "\n".join(lines) + blocked_note
+    )
+
+
+def build_prediction_menu() -> str:
+    """Return one `- name: summary` line per predictor (routing prompt)."""
+    lines = []
+    for name in prediction_names:
+        doc_lines = (
+            prediction_algorithms.prediction_algorithms[name].__doc__ or ""
+        ).strip().splitlines()
+        lines.append(f"- {name}: {doc_lines[0] if doc_lines else ''}")
+
+    return "\n".join(lines)
+
+
+def build_prediction_reference(exclude: tuple = ()) -> str:
+    """The POPULARITY-predictor surface, shown only to a forecasting task's prompt."""
+    lines = [
+        _signature_line(prediction_algorithms.prediction_algorithms[name])
+        for name in prediction_names
+        if name not in exclude
+    ]
+
+    blocked_note = (
+        "\n  NOT AVAILABLE (calling one raises): "
+        + ", ".join(name for name in prediction_names if name in exclude)
+        + " — it unrolls the forward model steps x samples times per\n"
+        "  cascade. You already have the metered oracle:\n"
+        "  `self.forecast_marginals(adopters, frontier, steps)`."
+        if any(name in exclude for name in prediction_names)
+        else ""
+    )
+
+    return (
+        "POPULARITY PREDICTORS  (from coding_agent.tools.prediction_algorithms,\n"
+        "imported as `prediction_algorithms`). Each returns the popularity at the\n"
+        "horizon, or None to DECLINE — declining is legitimate for a generative fit\n"
+        "that diverges and is COUNTED rather than penalized as an error. These are\n"
+        "the published baselines you are being compared against: call one, beat one,\n"
+        "or take its idea and improve on it. `szabo_huberman` is the one that\n"
+        "actually has to be beaten — it is a 2008 one-parameter log-linear\n"
+        "regression that every paper in this literature still prints — and\n"
+        "`mean_size` is on the list because the error is measured in LOG space,\n"
+        "where ignoring the instance entirely is far stronger than it sounds:\n"
+        + "\n".join(lines)
+        + blocked_note
+        + "\n\n`cascade_features(graph, observation)` is available directly (not\n"
+        "under a module) and returns Cheng et al.'s feature classes as a dict:\n"
+        "  observed, log_observed, observed_steps, remaining_steps,\n"
+        "  rate, rate_first_half, rate_second_half, acceleration, time_to_half,\n"
+        "  last_wave, peak_wave, root_degree, log_root_degree,\n"
+        "  mean_degree, max_degree, frontier_size, frontier_mean_degree,\n"
+        "  exposed, exposure_ratio, spread_breadth, graph_fraction\n"
+        "That paper's central finding is that the TEMPORAL features dominate: its\n"
+        "single best feature is the reshare rate in the SECOND HALF of the\n"
+        "observation window (0.73 accuracy), against 0.65 for the best structural\n"
+        "one. Start there."
     )
 
 

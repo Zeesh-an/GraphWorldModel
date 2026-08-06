@@ -33,6 +33,13 @@ from coding_agent.localization import (
     evaluate_localizer,
     summarize_localization,
 )
+from coding_agent.prediction import (
+    PredictAnchor,
+    bind_forecast_marginals,
+    evaluate_predictor,
+    expected_popularity,
+    summarize_prediction,
+)
 from coding_agent.reconstruction import (
     ReconstructAnchor,
     bind_step_marginals,
@@ -51,6 +58,7 @@ from coding_agent.tools.localization_algorithms import (
     localization_algorithms,
     localization_scorers,
 )
+from coding_agent.tools.prediction_algorithms import prediction_algorithms
 from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
 from coding_agent.types import (
     ActionOp,
@@ -189,6 +197,29 @@ reconstruction_anchor_algorithms = (
     "dhrec",
     "observed_only",
     "random_reconstruction",
+)
+
+# The leaderboard for a CASCADE PREDICTION task. `szabo_huberman` heads it because
+# it is the row that actually has to be beaten
+# (research/cascade_prediction.md §3.1): one feature, one line, from 2008, and
+# every paper in §5 still prints it as "Feature-S&H". `seismic` and `hawkes` are the
+# generative pair, and they are here for their DECLINE behaviour as much as their
+# error — §5.4 shows Hawkes beating SEISMIC on both mean ARE and on how many
+# cascades it can score at all, which is the pairing §8.4 says to always report
+# together. `mean_size` and `persistence` are the two floors: under a LOG-space
+# error an instance-blind constant is far stronger than intuition suggests, and an
+# arm that only ties with them has learned the corpus's size distribution rather
+# than anything about the instance. `mc_forward` is deliberately absent for the same
+# reason `mcmc_decode` and `resim_greedy` are — it pays kernel calls per instance
+# and would dominate startup for a table that exists to set a bar.
+prediction_anchor_algorithms = (
+    "szabo_huberman",
+    "feature_linear",
+    "seismic",
+    "hawkes",
+    "branching_factor",
+    "persistence",
+    "mean_size",
 )
 
 # The leaderboard for an INFLUENCE BLOCKING task, per lever. `proximity` heads the
@@ -519,6 +550,13 @@ def summarize(
     # sources were recovered, which were missed, and what the misses have in common.
     # A DECODER's is different again: the split that matters there is the node half
     # against the tree half, which is the failure the reward is weighted to prevent.
+    # A FORECAST task rolled out no cascade either, and its diagnostic is different
+    # again: the split that matters is over- against under-prediction, because MSLE
+    # is symmetric in log space and a model that misses every viral cascade posts
+    # the same number as one that invents virality everywhere.
+    if task is not None and task.forecasts and graph is not None:
+        return summarize_prediction(trajectory, graph, task)
+
     if task is not None and task.decodes and graph is not None:
         return summarize_reconstruction(trajectory, graph, task)
 
@@ -662,9 +700,10 @@ def paired_delta(
         verdict = "a real regression — undo what caused it"
 
     direction = "fewer is better" if sense == "minimize" else "more is better"
-    # F1 and the reconstruction score both live in [0, 1] and a 0.02 move is large
-    # there, so a fixed 2-decimal format would print every real change as +0.00
-    digits = 4 if unit in ("F1", "score") else 2
+    # F1, the reconstruction score and every prediction error live on scales where a
+    # 0.02 move is large, so a fixed 2-decimal format would print every real change
+    # as +0.00. Only a NODE COUNT wants two.
+    digits = 2 if unit == "nodes" else 4
 
     return (
         f"CHANGE vs {incumbent_label} ({incumbent.reward:.{digits}f}): "
@@ -763,6 +802,22 @@ def attach_context(
         # behind both and the cost accounting stays honest.
         strategy.step_marginals = bind_step_marginals(environment, task)
         strategy.transition_logprob = transition_logprob
+        # ...and the MULTI-STEP forward model, the one new primitive of cascade
+        # prediction (research/cascade_prediction.md §2.1). Same four bindings and
+        # the same reason, with one difference worth stating: on every other task
+        # conditions 3-6 vary what the search can SIMULATE while the action space
+        # stays the same, and here the action space is empty, so this binding is the
+        # ONLY thing that varies down that ladder. `expected_popularity` derives from
+        # it rather than being a second oracle, so one kernel budget covers both.
+        forecast = bind_forecast_marginals(environment, task, seed=task.seed)
+        strategy.forecast_marginals = forecast
+        strategy.expected_popularity = (
+            (lambda adopters, frontier, steps: expected_popularity(
+                forecast, adopters, frontier, steps
+            ))
+            if task.forward_model
+            else forecast
+        )
 
     return strategy
 
@@ -834,6 +889,30 @@ def evaluate_strategy(
     """
     start = time.perf_counter()
     attach_context(strategy, task, environment)
+
+    # A FORECAST task never rolls out either, and gives up one thing the two inverse
+    # tasks keep: there is no action to validate, because `a_t` is NULL at every
+    # step. It calls predict() once per logged cascade and scores the popularities
+    # against what the log says happened.
+    if task.forecasts:
+        if not task.instances:
+            raise StrategyError(
+                "no logged cascades were loaded for this forecasting task; the data "
+                "stage must have replayed a real corpus for this (dataset, dynamics, "
+                "split). research/cascade_prediction.md §2.2: running this on "
+                "simulated transitions closes exactly the loop it exists to break."
+            )
+
+        # `task.instances` IS the selection pool during search, so a fitted library
+        # predictor (S&H's two constants, the ridge, the Hawkes correction) fits on
+        # exactly the cascades the search is scored on and never on the held-out
+        # ones. `run_experiment` passes the selection pool explicitly when it
+        # re-runs the winner on the evaluation split, which is the only path where
+        # the two differ.
+        return evaluate_predictor(
+            strategy, environment, task, graph, list(task.instances),
+            fit_examples=list(task.instances),
+        )
 
     if task.decodes:
         if not task.instances:
@@ -1053,6 +1132,47 @@ def baseline_anchor(
     The trajectory rides along because its per-node marginals are what
     reference_diff() compares against, which costs no further rollouts.
     """
+    if task.forecasts:
+        # A forecasting task's floor is the classical POPULARITY-PREDICTOR library.
+        # These go through `evaluate_strategy` like everything else, which routes
+        # them into the prediction path — same cascades, same observation window,
+        # same metric as the arm they are setting a bar for.
+        scored = []
+
+        for name in prediction_anchor_algorithms:
+            predictor = PredictAnchor(name, prediction_algorithms[name], task)
+            trajectory, _ = evaluate_strategy(predictor, environment, task, graph)
+            scored.append((name, trajectory))
+
+        scored = rank_by(scored, lambda entry: entry[1].reward, task.sense)
+        best_name, best_trajectory = scored[0]
+
+        lines = [
+            f"REFERENCE SCORES: classical popularity-prediction baselines run on "
+            f"THESE cascades, at the same observation window and under the same "
+            f"metric. The score is {task.prediction_metric.upper()}, and it is an "
+            f"ERROR — **LOWER IS BETTER**, unlike every other task in this repo. "
+            f"Beating the top row is the bar. Read the whole table, not just the "
+            f"score: `szabo_huberman` is a 2008 one-parameter regression and it is "
+            f"the row that matters; `mean_size` ignores the instance entirely, and "
+            f"if it is competitive then this corpus's sizes are more predictable "
+            f"than its cascades are; `seismic` and `hawkes` DECLINE on supercritical "
+            f"cascades, which is why their `declined` column is not zero and why a "
+            f"low error there is not automatically a better method:",
+        ]
+        lines += [
+            f"  {name:<20} {task.prediction_metric.upper()} "
+            f"{trajectory.reward:8.4f} "
+            f"(MALE {trajectory.cost['metrics']['male']:.4f}  "
+            f"MAPE {trajectory.cost['metrics']['mape']:.4f}  "
+            f"PCC {trajectory.cost['metrics']['pcc']:.4f}  "
+            f"declined {trajectory.cost['metrics']['n_failed']:.0f}/"
+            f"{trajectory.cost['n_instances']})"
+            for name, trajectory in scored
+        ]
+
+        return "\n".join(lines), best_trajectory, best_name
+
     if task.decodes:
         # A decoding task's floor is the classical TRAJECTORY-DECODER library.
         # These go through `evaluate_strategy` like everything else, which routes

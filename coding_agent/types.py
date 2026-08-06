@@ -11,7 +11,7 @@ from typing import Callable, Iterable, Protocol
 import numpy as np
 
 from data.wm_simulator import ActionOp, State, spent, valid_action_ops
-from pipeline.tasks import maximize, minimize, recover
+from pipeline.tasks import forecast, maximize, minimize, recover
 
 # ActionFn is the interface between strategies and environments (every environment's rollout() consumes one of these; every method produces one):
 # ActionFn is a function mapping (current state, timestep) -> action bag for that timestep
@@ -253,6 +253,39 @@ class TaskSpec:
     epi_beta: float = 1.0
     epi_gamma: float = 0.3
     epi_alpha: float = 0.5
+    # Cascade prediction: the program PREDICTS a scalar the process produces rather
+    # than steering or inverting it, so it writes `predict()`, is scored on a
+    # prediction error against a REAL logged cascade, and emits no action ever. Set
+    # from the task registry's `objective == forecast`, and read by every path that
+    # has to pick the predictor contract, the forecast-instance pool or the
+    # popularity metrics.
+    #
+    # `observes` is the narrowing one, and it narrows `forecasts` exactly as
+    # `decodes` narrows `recovers`: the transitions were REPLAYED FROM A LOG, so the
+    # dynamics that produced them are not IC, not LT and not known
+    # (research/cascade_prediction.md §2.2). The prompt has to say so — a system
+    # message asserting IC dynamics over Weibo retweets would be a lie the model
+    # would then optimize against.
+    observational: bool = False
+    # Which quantity `predict()` is scored on. `increment` is CasFlow's own code
+    # (`label = P(t_p) - P(t_o)`), `total` is CasFT's Eq. 26. §5.7 difference 3
+    # records that the two share a symbol and are not the same quantity, so the
+    # choice is reported rather than assumed.
+    prediction_target: str = "increment"
+    # Which error the reward IS. Every one of these MINIMIZES, which is why
+    # `Task.sense` maps `forecast` onto `minimize` rather than reading the objective
+    # literally.
+    prediction_metric: str = "msle"
+    # Steps of history a predictor may see, and steps it must predict over. Both in
+    # the replayed corpus's own timesteps rather than seconds, so they are readable
+    # beside `horizon` (§8.2 pairs two observation windows per corpus deliberately:
+    # a single-window result is not publishable in this literature).
+    observation_window: int = 5
+    # Unrolls averaged inside one `forecast_marginals` call. The cost knob of §2.4:
+    # each unroll pays `steps` metered kernel evaluations, so an @monte_carlo arm
+    # pays `steps * samples * mc_runs` real episodes per call and a @world_model arm
+    # pays `steps * samples` matmuls.
+    forecast_samples: int = 8
     # Drives the edit stream's schedule. Carried on the task rather than read
     # from the environment so the same seed produces the same graph history for
     # every arm, which is what makes a cross-arm comparison under a stream mean
@@ -265,8 +298,17 @@ class TaskSpec:
 
     @property
     def contains(self) -> bool:
-        """True when the planner is fighting a cascade it did not start."""
-        return self.sense == minimize
+        """
+        True when the planner is fighting a cascade it did not start.
+
+        `not self.forecasts` is load-bearing rather than defensive: a forecast
+        task's reward is a prediction ERROR, so its `sense` is `minimize` for a
+        reason that has nothing to do with containment. Without the guard every
+        reader that asks `contains` — the prompt, the summary, the structural
+        metrics block, the plots — would describe a cascade-prediction arm as an
+        outbreak it was trying to shrink.
+        """
+        return self.sense == minimize and not self.forecasts
 
     @property
     def blocks(self) -> bool:
@@ -321,6 +363,56 @@ class TaskSpec:
         otherwise produce. Same relationship `blocks` has to `contains`.
         """
         return self.reconstructs
+
+    @property
+    def forecasts(self) -> bool:
+        """
+        True when the program PREDICTS a scalar instead of choosing or inverting.
+
+        The fourth problem family. It changes the contract as much as `recovers`
+        does and gives up more: `predict(graph, observation, horizon) -> float`,
+        scored on a prediction error, with `a_t` NULL at every step so no action is
+        ever emitted and no budget is ever spent
+        (research/cascade_prediction.md §2.1).
+        """
+        return self.objective_kind == forecast
+
+    @property
+    def observes(self) -> bool:
+        """
+        True for cascade prediction specifically, not for the forecast family.
+
+        Same relationship `decodes` has to `recovers`, and the difference is where
+        the DATA came from rather than what is predicted: these transitions were
+        replayed from a real log, so the process behind them is not IC, not LT and
+        not known. That is the one thing the prompt must not get wrong — §2.2 lists
+        three specific mechanisms (Hawkes self-excitation, repeated exposure,
+        exogenous arrivals) by which real adoption violates the composition rule our
+        structured head hard-codes, and a model told it is predicting IC would tune
+        against the wrong process.
+        """
+        return self.observational
+
+    @property
+    def reward_unit(self) -> str:
+        """
+        The noun a reward DELTA is quoted in, for the refinement feedback.
+
+        A property rather than a conditional at each call site because there are now
+        four families and the chain was already three deep in two files: a task that
+        forgets a branch here reports a `+0.00 nodes` change on an MSLE, which reads
+        as "nothing happened" for exactly the moves that mattered most.
+        """
+        if self.forecasts:
+            return self.prediction_metric.upper()
+
+        if self.decodes:
+            return "score"
+
+        if self.recovers:
+            return "F1"
+
+        return "nodes"
 
     @property
     def streaming(self) -> bool:
@@ -398,6 +490,19 @@ class Strategy(Protocol):
         self, graph: GraphInfo, observation: object, horizon: int
     ) -> dict[int, tuple[int, int | None]]: ...
 
+    # Cascade prediction. Neither an intervention nor an inversion: given the graph
+    # and a `CascadeObservation` of a REAL cascade's first `t_o` steps, return the
+    # popularity it will have reached by `t_p`. Return None (or a non-finite value)
+    # to DECLINE — a generative model that cannot score a supercritical cascade is
+    # counted in `n_failed` rather than charged a wild guess, which is the column
+    # research/cascade_prediction.md §8.4 says almost nobody publishes. The harness
+    # binds `self.forecast_marginals(adopters, frontier, steps)` — the multi-step
+    # forward model — before calling this; under @native that attribute raises
+    # instead (§2.1).
+    def predict(
+        self, graph: GraphInfo, observation: object, horizon: int
+    ) -> float | None: ...
+
     # Optional companion to localize(). F1 scores the SET, AUC scores the RANKING,
     # so a program that exposes a per-node score vector gets a true AUC; one that
     # does not gets an AUC derived from the ORDER of the list localize() returned,
@@ -429,6 +534,7 @@ class ScoredStrategy:
     outbreak: tuple = ()
     predict_marginals: Callable | None = None
     step_marginals: Callable | None = None
+    forecast_marginals: Callable | None = None
 
     def score(self, node: int, selected: tuple, graph: GraphInfo) -> float:
         return float(graph.degree(node))
@@ -543,6 +649,45 @@ class ScoredStrategy:
             selected.append(best_node)
 
         return selected
+
+    def growth_factor(
+        self, features: dict, graph: GraphInfo, observation: object
+    ) -> float:
+        """
+        Multiplier on the OBSERVED popularity. 1.0 = the cascade is already over.
+
+        Scored mode for cascade prediction, and the tightest fit of the four:
+        Szabo & Huberman's founding result is that `log P(t_p)` is near-linear in
+        `log P(t_o)`, i.e. that the whole problem is a multiplier — so a search over
+        multipliers is a search over exactly the space §3.1's feature line occupies,
+        rather than a subset of it. `features` is `cascade_features(...)`: Cheng et
+        al.'s five classes (root, structural, temporal, community, and the observed
+        counts) computed once per instance, so a rule can key off the reshare rate
+        in the second half of the window, which is the single best feature that
+        paper found.
+
+        The default is the doubling constant Cheng et al. built their whole
+        classification framing around: predict that a cascade reaches twice what it
+        has, which is the median outcome their balanced task is defined by.
+        """
+        return 2.0
+
+    def predict(
+        self, graph: GraphInfo, observation: object, horizon: int
+    ) -> float | None:
+        """
+        Fixed `P(t_o) * growth_factor` harness; not overridable in scored mode.
+
+        Clamped at the observed popularity from below because a progressive cascade
+        cannot shrink: an observation is ground truth about the nodes it reports, so
+        a multiplier below 1 predicts adopters un-adopting.
+        """
+        from coding_agent.tools.prediction_algorithms import cascade_features
+
+        observed = float(getattr(observation, "popularity", 0.0))
+        factor = float(self.growth_factor(cascade_features(graph, observation), graph, observation))
+
+        return max(observed, observed * factor)
 
     def edge_cost(
         self, source: int, target: int, probability: float, graph: GraphInfo,

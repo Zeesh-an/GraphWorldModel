@@ -90,7 +90,22 @@ All five appear in DeepIM's published tables, which are transcribed in [`../rese
 | `source_localization` | 12 (six `graphsl_*` arms, plus `graphsl`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`, `cosasi`) | 6 |
 | `influence_blocking` | 4 (`sandimin`, `imin_joc`, `diffim`, `stratlearner`) | 3 |
 | `cascade_reconstruction` | 13 (three `ditto*` arms, plus `grin`, `spin`, `deep_demixing`, `reconstructing_cascade`, `cascade_tree_samples`, `cult`, `active_cascade_reconstruction`, `brits`, `dipt`, `netrate`) | 6 |
+| `cascade_prediction` | 20 (`casflow`, `ccgl`, `ctcp`, `castemp`, `deephawkes`, `deepcas`, `cascn`, `mucas`, `coupledgnn`, `seismic`, `featuredriven_hawkes`, `hip`, `topolstm`, `deepinf`, `forest`, `ms_hgat`, `casseqgcn`, `ccasgnn`, `casft`, `casdo`) | 5 |
 | `epidemic_control` | 25 (six `netimm_*` arms, five shared `*_epi` dismantlers, plus `rlgn`, `idrleca`, `durleca`, `epilearn`, `covasim`, `pandemic_simulator`, `epimodel`, `greedywalk`, `netmelt`, `fractional_immunization`, `preciado`, `colagnn`, `stan`, `epignn`) | 11 |
+
+**Fifteen of cascade prediction's twenty are blocked, and that is the literature rather than us.** This line of work peaked in 2017-19 and its reference implementations were never ported: `deephawkes`, `deepcas` and `topolstm` are **Python 2** (py2 `print` statements, so the modules do not parse at all), `mucas` needs **eleven input arrays** its `get_batch` unpacks (position encodings, Chebyshev K-orders, a sampled support, and an outbreak-classification label we have no analogue for), `seismic` is an **R package** and `featuredriven_hawkes` is **R plus a notebook** with no Python entry point. Three more — `deepinf`, `forest`, `ms_hgat` — have fine modern code and answer a **different question**: they rank the next adopter or classify "will `v` adopt", so there is no popularity to read back. And the two most recent architectures, `casft` (AAAI-25, the source of the only recent result table that survives `pdftotext`) and `casdo` (TKDE'24), have **no public code at all**. Every reason above was read from the repo at HEAD rather than assumed, because a reader who sees "DeepHawkes, code available" in §4.1 will reasonably ask why it is not a baseline.
+
+The five that DO run share one export — CasFlow's canonical five-field line format, which §8.5 identifies as this literature's de-facto benchmark artefact since no OGB/TGB analogue exists:
+
+```bash
+python -m baselines.setup_baselines --only casflow
+python -m pipeline.run --dataset casflow_weibo --task cascade_prediction \
+    --baselines szabo_huberman external:casflow external:ctcp --compare
+```
+
+**`coupledgnn` is the one worth reading the notes on.** §4.1 calls it the closest published method to our own formulation — two coupled GNNs, one propagating activation state and one propagating influence — so a difference in that row is a statement about the architecture rather than about a feature pipeline. Its TF1 API is shimmed to `compat.v1` by three registry patches (mechanical, no behavioural content), but **two of its inputs are ours rather than the authors'**: `load_data` needs a 6-d per-node feature vector and a 32-d `.emb_32` embedding and the repo ships a derivation for neither, so the driver computes six standard graph statistics (matching the shipped example's `[degree, 5 normalized floats]` shape) and a spectral embedding in place of the DeepWalk one its own comment names. Neither is the method's contribution, and the row says so.
+
+`ctcp` is the easiest of the five and the most interesting to run beside `casflow`: its input is a plain `(id, src, dst, cas, time)` event table, its split crosses as TIME BOUNDARIES rather than as flags (so our chronological protocol is reproduced inside the repo rather than fought), and §5.3 shows it is one of only two published methods whose train-vs-test loss curves stay flat under a leak-free split while CasFlow's diverge.
 
 **Six wired arms, one install, for epidemic control — and it is the highest-value clone in this file.** `research/epidemic_control.md` §11 lists **NetShield, DAVA and DAVA-fast** among the methods with "no public release", and all three are in [`allogn/Network-Immunization`](https://github.com/allogn/Network-Immunization), along with NetShape (Khalil KDD'14), Degree and Random. Without it, every spectral and every data-aware number in our table is our own reimplementation and nobody else's:
 

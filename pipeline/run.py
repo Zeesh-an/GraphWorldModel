@@ -63,6 +63,7 @@ from baselines.run_baseline import (
     BaselineError,
     edge_script,
     localize_script,
+    predict_script,
     reconstruct_script,
     round_seed_script,
     run_external_baseline,
@@ -96,6 +97,7 @@ from coding_agent.tools.localization_algorithms import localization_algorithm_na
 from coding_agent.tools.reconstruction_algorithms import (
     reconstruction_algorithm_names,
 )
+from coding_agent.tools.prediction_algorithms import prediction_algorithm_names
 from coding_agent.tools.library_api import algorithm_names
 from coding_agent.blocking import counter_seed, resolve_lever, valid_levers
 from coding_agent.containment import outbreak_selectors, select_outbreak
@@ -111,6 +113,10 @@ from coding_agent.localization import (
     valid_budget_modes,
     valid_observations,
 )
+from coding_agent.prediction import (
+    default_forecast_samples,
+    load_forecasts,
+)
 from coding_agent.reconstruction import (
     default_hidden_rate,
     default_observation_rate,
@@ -120,7 +126,16 @@ from coding_agent.reconstruction import (
 )
 from coding_agent.rounds import round_batches
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
-from data.wm_graphs import kronecker_seeds
+from data.wm_cascades import (
+    chronological_split,
+    corpus_defaults,
+    resolve_step,
+    increment_target,
+    valid_graphs,
+    valid_splits,
+    valid_targets,
+)
+from data.wm_graphs import cascade_corpora, kronecker_seeds
 from data.wm_epidemic import default_burn_in
 from data.wm_simulator import (
     epidemic_dynamics,
@@ -146,6 +161,10 @@ from pipeline.report import write_report
 from pipeline.summary import write_environment, write_summary
 from world_model.train_wm import TrainConfig, train_world_model
 from world_model.wm_data import load_graph_store
+from world_model.wm_metrics import (
+    default_prediction_metric,
+    valid_prediction_metrics,
+)
 from world_model.wm_model import backbones
 
 stages = ("data", "train", "agent", "plots", "report")
@@ -294,6 +313,28 @@ class PipelineConfig:
     cr_tree_weight: float = 0.6
     cr_mcmc_proposals: int = 400
     cr_mcmc_burn_in: float = 0.3
+    # Cascade prediction; every field is inert unless the task forecasts, so one
+    # sweep configuration serves all seven runnable tasks. The two that decide
+    # whether a number means anything are `cp_observation` (§8.2 pairs TWO windows
+    # per corpus and a single-window result is not publishable in this literature)
+    # and `cp_split` (§8.3: the field's own random-over-cascades split LEAKS, and
+    # fixing it moved a decade of published numbers).
+    cp_observation: int = 0
+    cp_horizon: int = 0
+    cp_step: int = 0
+    cp_min_size: int = 10
+    cp_truncate: int = 100
+    cp_split: str = chronological_split
+    cp_target: str = increment_target
+    cp_graph: str = "native"
+    cp_max_cascades: int = 0
+    cp_max_nodes: int = 0
+    cp_select_split: str = "train"
+    cp_eval_split: str = "test"
+    cp_instances: int = 40
+    cp_observation_steps: int = 0
+    cp_metric: str = default_prediction_metric
+    cp_forecast_samples: int = default_forecast_samples
     allow_mc_algorithms: bool = False
     strategy_timeout: float = executor.strategy_timeout_seconds
     # USD per 1M tokens for the cost line; None -> tokens counted, cost null
@@ -541,6 +582,64 @@ def needs_gpu(config: PipelineConfig) -> tuple[bool, str]:
     return False, f"no torch on a device in stages {selected}"
 
 
+def resolve_cascade_protocol(config: PipelineConfig) -> None:
+    """
+    Fill `--cp-observation` / `--cp-horizon` / `--cp-step` / `--gen-horizon` for a
+    replayed corpus, and refuse a dataset that carries no cascades.
+
+    Defaults come from the CORPUS's own published windows rather than from a flag,
+    for the reason research/cascade_prediction.md §8.2 gives: the standard settings
+    are per corpus (Weibo 0.5 h / 1 h to 24 h; Twitter 1 d / 2 d to 32 d; APS 3 y /
+    5 y to 20 y), and a run that silently used one corpus's window on another would
+    produce a number comparable to nothing. `--gen-horizon` is derived last, because
+    it is the STEP COUNT the replay needs and getting it wrong truncates the very
+    quantity being predicted.
+    """
+    task = get_task(config.task)
+
+    if not task.observational:
+        return
+
+    if config.dataset not in cascade_corpora:
+        raise ValueError(
+            f"--task {config.task} replays REAL logged cascades, and dataset "
+            f"{config.dataset!r} carries none. Corpora: {sorted(cascade_corpora)}. "
+            f"research/cascade_prediction.md §6.1 records that not one graph we load "
+            f"for the other tasks carries a trace — that is the whole reason this "
+            f"task needed new loaders, and §2.2 is why replaying a SIMULATOR here "
+            f"would close exactly the loop the task exists to break."
+        )
+
+    observation, horizon = corpus_defaults(config.dataset)
+    config.cp_observation = config.cp_observation or observation
+    config.cp_horizon = config.cp_horizon or horizon
+    config.cp_step = resolve_step(config.cp_observation, config.cp_step)
+
+    needed = config.cp_horizon // config.cp_step
+    if config.gen_horizon < needed:
+        print(
+            f"[pipeline] --gen-horizon {config.gen_horizon} is shorter than the "
+            f"{needed} timesteps this protocol needs "
+            f"({config.cp_horizon} / {config.cp_step}); raising it, or the replay "
+            f"would stop before the quantity being predicted exists"
+        )
+        config.gen_horizon = needed
+
+    # A replayed corpus holds ONE dynamics: the transitions are identical whatever
+    # kernel label they carry (the log is the log), so writing both IC and LT would
+    # double the file for no second experiment. The label decides which HEAD is fit
+    # to them, which is the actual axis (§2.2).
+    if len(config.gen_models) > 1:
+        config.gen_models = (config.diffusion_model,)
+
+    print(
+        f"[pipeline] cascade protocol: t_o={config.cp_observation}, "
+        f"t_p={config.cp_horizon}, step={config.cp_step} "
+        f"-> {config.cp_observation // config.cp_step} observed of {needed} "
+        f"timesteps, split={config.cp_split}"
+    )
+
+
 def stage_data(config: PipelineConfig, layout: Layout) -> dict:
     if layout.data_metadata().exists() and not config.force:
         metadata = json.loads(layout.data_metadata().read_text())
@@ -627,6 +726,22 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         ),
         outbreak_selectors=tuple(config.outbreak_selectors),
         immunizer_selectors=tuple(config.immunizer_selectors),
+        # REPLAY rather than simulate, from the registry rather than a flag — for
+        # the same reason `competitive` and `trace_parents` are. A cascade-prediction
+        # dataset generated by forgetting this would be an NDlib rollout wearing the
+        # name of a real corpus, which is the one thing §2.2 says invalidates every
+        # number the task produces.
+        cascade_corpus=get_task(config.task).observational,
+        cp_observation=config.cp_observation,
+        cp_horizon=config.cp_horizon,
+        cp_step=config.cp_step,
+        cp_min_size=config.cp_min_size,
+        cp_truncate=config.cp_truncate,
+        cp_split=config.cp_split,
+        cp_target=config.cp_target,
+        cp_graph=config.cp_graph,
+        cp_max_cascades=config.cp_max_cascades,
+        cp_max_nodes=config.cp_max_nodes,
     )
 
     return run_generation(generation_config)
@@ -728,6 +843,11 @@ def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
     round at a time. Using the flat script for those would deal every batch at
     t=0 and put an adaptive method on the non-adaptive side of the gap table.
     """
+    # A PREDICTOR's repo returns one NUMBER per cascade, so its canned script is a
+    # predict() keyed by cascade id
+    if "popularities" in external_seeds:
+        return predict_script(external_seeds["popularities"])
+
     # A DECODER's repo returns one whole TRAJECTORY per observation, so its canned
     # script is a reconstruct() keyed by the observed report set
     if "trajectories" in external_seeds:
@@ -839,6 +959,35 @@ def _external_cascades(config: PipelineConfig, layout: Layout) -> list:
     )
 
 
+def _external_forecasts(config: PipelineConfig, layout: Layout) -> list:
+    """
+    Both cascade pools an external PREDICTOR has to forecast for.
+
+    Same shape and same reason as `_external_instances` and `_external_cascades`:
+    the arm makes two passes and a repo invoked once has to cover both.
+    `load_forecasts` is a pure function of the config, so this reproduces exactly
+    what `run_experiment` loads, and the canned script keys by cascade id, so a
+    disagreement surfaces as a loud KeyError rather than a silently wrong row.
+
+    The selection pool crosses first, which is what `registry.training_rows` reads:
+    every repo here is a SUPERVISED regressor that fits on labelled cascades before
+    predicting, so the split flag is what keeps a label out of an evaluation-row
+    prediction.
+    """
+    common = dict(
+        graph_id=config.graph_id,
+        observed_steps=config.cp_observation_steps,
+        limit=config.cp_instances,
+        seed=config.seed,
+    )
+
+    return load_forecasts(
+        str(layout.data_dir), config.diffusion_model, config.cp_select_split, **common
+    ) + load_forecasts(
+        str(layout.data_dir), config.diffusion_model, config.cp_eval_split, **common
+    )
+
+
 def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
     wm_results = (
         Path(config.wm_results_json)
@@ -863,6 +1012,11 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
     if (
         not config.compare
         and not get_task(config.task).recovers
+        # ...and a FORECAST task, for the same reason and with the same wrinkle: its
+        # error is measured against a popularity read off a log, so it carries no
+        # evaluator noise. --compare still buys the modelling-error column, which is
+        # the number §9.1 is actually about; it just is not load-bearing for the table.
+        and not get_task(config.task).forecasts
         and len({arm.evaluator for arm in arms}) > 1
     ):
         print(
@@ -926,7 +1080,9 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 # both instance pools at once rather than a budget. A DECODER's
                 # pools carry whole masked histories rather than endpoints, which
                 # is the only difference.
-                if get_task(config.task).reconstructs:
+                if get_task(config.task).forecasts:
+                    external_instances = _external_forecasts(config, layout)
+                elif get_task(config.task).reconstructs:
                     external_instances = _external_cascades(config, layout)
                 elif get_task(config.task).recovers:
                     external_instances = _external_instances(config, layout, resolved)
@@ -1028,6 +1184,14 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 cr_tree_weight=config.cr_tree_weight,
                 cr_mcmc_proposals=config.cr_mcmc_proposals,
                 cr_mcmc_burn_in=config.cr_mcmc_burn_in,
+                # ...and inert unless the task forecasts
+                cp_select_split=config.cp_select_split,
+                cp_eval_split=config.cp_eval_split,
+                cp_instances=config.cp_instances,
+                cp_observation_steps=config.cp_observation_steps,
+                cp_metric=config.cp_metric,
+                cp_target=config.cp_target,
+                cp_forecast_samples=config.cp_forecast_samples,
                 native_arm=arm.evaluator == native,
                 budget=budget or 5,
                 budget_pct=budget_pct,
@@ -1102,6 +1266,11 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                         if external_seeds.get("trajectories")
                         else None
                     ),
+                    "popularities": (
+                        len(external_seeds["popularities"])
+                        if external_seeds.get("popularities")
+                        else None
+                    ),
                     "instances_short": external_seeds.get("instances_short"),
                     # Time the external repo itself spent selecting; our scoring
                     # time is in elapsed_seconds as for every other arm
@@ -1128,7 +1297,10 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             )
             score = ground_truth_reward(result)
             score_text = (
-                f"held-out score {score:.4f}"
+                f"held-out {result.get('prediction_metric', 'error').upper()} "
+                f"{score:.4f} (lower is better)"
+                if result.get("prediction")
+                else f"held-out score {score:.4f}"
                 if result.get("reconstruction")
                 else f"held-out F1 {score:.4f}"
                 if result.get("localization")
@@ -1265,6 +1437,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
         config.remove_semantics = get_task(config.task).remove_semantics
 
     resolve_dynamics(config)
+    resolve_cascade_protocol(config)
 
     layout = Layout(
         config.task, config.dataset, config.run, root=config.results_root
@@ -1925,13 +2098,15 @@ if __name__ == "__main__":
             + list(immunization_algorithm_names)
             + list(localization_algorithm_names)
             + list(reconstruction_algorithm_names)
+            + list(prediction_algorithm_names)
             + [f"external:{name}" for name in external_baselines]
             + ["all", "all-classical", "all-external"]
         ),
         metavar="NAME",
         help="baselines to run: a static IM algorithm, a per-round adaptive "
         "policy, an influence blocker, a network dismantler, an epidemic "
-        "immunizer, a source localizer, a trajectory decoder "
+        "immunizer, a source localizer, a trajectory decoder, a popularity "
+        "predictor "
         "(all condition 1), 'external:<name>' for a published repo (condition 7), or "
         "the aliases 'all' / 'all-classical' / 'all-external'. 'all' includes only "
         "external baselines already installed. Unset = the task registry's own pool "
@@ -2137,6 +2312,154 @@ if __name__ == "__main__":
         "score and converges on decoders that never attempt it. 0 acknowledges a "
         "node-only protocol explicitly and is the only value that runs on data "
         "without a transmission edge (default: 0.6).",
+    )
+    # Cascade prediction. The whole point of this task is that the data is REAL, so
+    # the flags that shape it are protocol rather than tuning: research/
+    # cascade_prediction.md 5.7 lists five independent incompatibilities between
+    # published tables and four of them are set here.
+    parser.add_argument(
+        "--cp-observation",
+        type=int,
+        default=0,
+        help="cascade prediction: observation window t_o, in the CORPUS's own time "
+        "unit (seconds for the social corpora, DAYS for APS). 0 takes the corpus's "
+        "own first published window — Weibo 1800 (0.5 h), Twitter 86400 (1 d), APS "
+        "1095 (3 y). 8.2 pairs TWO windows per corpus deliberately, and a "
+        "single-window result is not publishable in this literature, so sweep it "
+        "(default: 0).",
+    )
+    parser.add_argument(
+        "--cp-horizon",
+        type=int,
+        default=0,
+        help="cascade prediction: prediction horizon t_p, same units. 0 takes the "
+        "corpus's own — Weibo 86400 (24 h), Twitter 2764800 (32 d), APS 7305 (20 y) "
+        "(default: 0).",
+    )
+    parser.add_argument(
+        "--cp-step",
+        type=int,
+        default=0,
+        help="cascade prediction: corpus time units per replayed timestep. 0 derives "
+        "it from the OBSERVATION window so the prefix always has ~4 bins, which is "
+        "the minimum that supports the feature this literature says dominates (the "
+        "adoption rate in the SECOND HALF of the window) (default: 0).",
+    )
+    parser.add_argument(
+        "--cp-min-size",
+        type=int,
+        default=10,
+        help="cascade prediction: drop cascades with fewer than this many "
+        "participants INSIDE the observation window. CasFlow and CasFT use 10, "
+        "CoupledGNN 5, SEISMIC and Mishra 50. 8.4: dropping small cascades removes "
+        "the hardest and most numerous cases and inflates every metric, so this is "
+        "recorded in metadata.json and reported (default: 10).",
+    )
+    parser.add_argument(
+        "--cp-truncate",
+        type=int,
+        default=100,
+        help="cascade prediction: keep only the first this-many participants of any "
+        "cascade. CasFlow uses 100; a method that exploits long tails cannot show it "
+        "under this rule, which is why it is reported. 0 disables (default: 100).",
+    )
+    parser.add_argument(
+        "--cp-split",
+        type=str,
+        default=chronological_split,
+        choices=list(valid_splits),
+        help="cascade prediction: how the corpus is cut into train/val/test. "
+        "`chronological` is CasTemp's leak-free protocol — contiguous bins of equal "
+        "publication-time duration, dropping any cascade whose prediction window "
+        "crosses a boundary. `random` is the field's own 70/15/15 over cascades, and "
+        "8.3 shows it LEAKS: two 2021-24 SOTA models fell below a plain MLP once it "
+        f"was fixed. Run both; the gap is the experiment (default: {chronological_split}).",
+    )
+    parser.add_argument(
+        "--cp-target",
+        type=str,
+        default=increment_target,
+        choices=list(valid_targets),
+        help="cascade prediction: which quantity the table is about. `increment` is "
+        "CasFlow's own label (P(t_p) - P(t_o)); `total` is CasFT's Eq. 26. 5.7 "
+        f"difference 3: they share a symbol and are not the same quantity "
+        f"(default: {increment_target}).",
+    )
+    parser.add_argument(
+        "--cp-graph",
+        type=str,
+        default="native",
+        choices=list(valid_graphs),
+        help="cascade prediction: which graph the transitions run over. `native` is "
+        "the corpus loader's own choice — the real published FRIENDSHIP network for "
+        "digg_cascades, the union of observed propagation ties for everything else, "
+        "which is all those corpora have. `paths` forces the union everywhere; on "
+        "Digg that is a real second experiment (the vote log records no parent, so "
+        "the union is a union of STARS) and elsewhere it is a no-op the log says so "
+        "(default: native).",
+    )
+    parser.add_argument(
+        "--cp-max-cascades",
+        type=int,
+        default=0,
+        help="cascade prediction: cap on replayed cascades, subsampled in --seed. "
+        "0 = all of them (default: 0).",
+    )
+    parser.add_argument(
+        "--cp-max-nodes",
+        type=int,
+        default=0,
+        help="cascade prediction: keep only the busiest this-many participants. "
+        "CoupledGNN's own move (1.78M users down to 23,681), and what makes a "
+        "6.7M-node corpus runnable. 0 = all of them (default: 0).",
+    )
+    parser.add_argument(
+        "--cp-select-split",
+        type=str,
+        default="train",
+        help="cascade prediction: cascades the outer loop optimizes on "
+        "(default: train).",
+    )
+    parser.add_argument(
+        "--cp-eval-split",
+        type=str,
+        default="test",
+        help="cascade prediction: HELD-OUT cascades the winner is re-run on "
+        "unmodified, and the number every table reports (default: test).",
+    )
+    parser.add_argument(
+        "--cp-instances",
+        type=int,
+        default=40,
+        help="cascade prediction: cascades one reward evaluation sweeps over, per "
+        "split (default: 40).",
+    )
+    parser.add_argument(
+        "--cp-observation-steps",
+        type=int,
+        default=0,
+        help="cascade prediction: replayed timesteps the predictor sees. 0 reads it "
+        "off the dataset's own `observed` block (default: 0).",
+    )
+    parser.add_argument(
+        "--cp-metric",
+        type=str,
+        default=default_prediction_metric,
+        choices=list(valid_prediction_metrics),
+        help="cascade prediction: which error the reward IS. All of them MINIMIZE. "
+        "`msle` is CasFlow's own code (log2, clamped at 1, no offset); "
+        "`msle_offset` is CasFT's stated log2(P+1); `msle_natural` is CTCP's loss. "
+        "5.7 difference 4 records that those variants are printed under one name in "
+        f"one published table (default: {default_prediction_metric}).",
+    )
+    parser.add_argument(
+        "--cp-forecast-samples",
+        type=int,
+        default=default_forecast_samples,
+        help="cascade prediction: unrolls averaged inside one forecast_marginals "
+        "call. An @monte_carlo arm pays steps x samples x mc_runs real episodes per "
+        f"call and a @world_model arm pays steps x samples matmuls "
+        f"(default: {default_forecast_samples}).",
     )
     parser.add_argument(
         "--cr-mcmc-proposals",
@@ -2401,6 +2724,22 @@ if __name__ == "__main__":
         cr_tree_weight=args.cr_tree_weight,
         cr_mcmc_proposals=args.cr_mcmc_proposals,
         cr_mcmc_burn_in=args.cr_mcmc_burn_in,
+        cp_observation=args.cp_observation,
+        cp_horizon=args.cp_horizon,
+        cp_step=args.cp_step,
+        cp_min_size=args.cp_min_size,
+        cp_truncate=args.cp_truncate,
+        cp_split=args.cp_split,
+        cp_target=args.cp_target,
+        cp_graph=args.cp_graph,
+        cp_max_cascades=args.cp_max_cascades,
+        cp_max_nodes=args.cp_max_nodes,
+        cp_select_split=args.cp_select_split,
+        cp_eval_split=args.cp_eval_split,
+        cp_instances=args.cp_instances,
+        cp_observation_steps=args.cp_observation_steps,
+        cp_metric=args.cp_metric,
+        cp_forecast_samples=args.cp_forecast_samples,
         allow_mc_algorithms=args.allow_mc_algorithms,
         strategy_timeout=args.strategy_timeout,
         llm_price_in=args.llm_price_in,

@@ -464,6 +464,236 @@ def reconstruction_reward(metrics: dict[str, float], tree_weight: float) -> floa
     )
 
 
+# Cascade / popularity prediction -------------------------------------------
+#
+# research/cascade_prediction.md §8.1 opens with "Get MSLE right or nothing else
+# matters", and it means three independent choices that all hide inside one name:
+# the log BASE (2 in CasFlow and CasFT, natural in CTCP's loss — a constant factor
+# of (ln 2)^2 ~ 0.48 between them), the QUANTITY (total `P(t_p)` versus the
+# increment `dP`), and the SMOOTHING offset (CasFlow's code clamps to >= 1 and adds
+# nothing; CasFT's stated definition adds 1). §5.7 difference 4 records that §5.1
+# prints two of those variants in ONE table. So every variant this repo can report
+# is computed and named, and the reward names which one it used.
+
+# CasFlow's own `casflow.py`, verbatim:
+#     predictions = [1 if p < 1 else p for p in predictions]
+#     msle  = mean((log2(pred) - log2(label))^2)
+#     mape  = mean(|log2(pred + 1) - log2(label + 1)| / log2(label + 2))
+# Note the asymmetry in MAPE — +1 inside the absolute value, +2 in the denominator.
+# §8.1 quotes CasFT's caption as `|log2(P+2) - log2(P_hat+2)| / log2(P+2)`, which is
+# a THIRD form. Both are computed; `mape` is the code's and `mape_casft` the
+# caption's, and a table has to say which.
+popularity_floor = 1.0
+
+# WroPerc's epsilon: CoupledGNN counts a cascade "wrong" when its relative error on
+# the RAW count exceeds this [verified, §8.1]. The practitioner's metric, and the
+# only one here that is not in log space.
+wroperc_epsilon = 0.5
+
+# COV-k's k, as a fraction of the scored set. CasFlow reports Coverage at
+# `k = floor(N/10)` — "did we find the viral ones" [verified, §8.1].
+coverage_fraction = 0.1
+
+
+def _safe_log2(values: np.ndarray) -> np.ndarray:
+    return np.log2(np.maximum(values, popularity_floor))
+
+
+def popularity_metrics(
+    predicted: np.ndarray,
+    actual: np.ndarray,
+    observed: np.ndarray,
+    declined: int = 0,
+) -> dict[str, float]:
+    """
+    Every metric §8.1 tabulates, over one arm's scored cascades.
+
+    `predicted` and `actual` are TOTAL popularities at `t_p`; `observed` is
+    `P(t_o)`, so the increment variants are derivable here rather than needing a
+    second pass. `declined` is how many cascades the predictor refused to score at
+    all, and it is a first-class column for the reason §8.4 gives: generative models
+    decline on supercritical cascades (SEISMIC failed on 1,022 of ~20K News cascades
+    at 5 minutes), papers report the mean over SCOREABLE cascades only, and that
+    "silently favours the model that gives up more often". Mishra et al. publish the
+    failure counts; almost nobody else does, so we always do.
+
+    Direction, because §8.4 warns the table mixes them: MSLE / MALE / MAPE / MRSE /
+    WroPerc are LOWER-is-better; PCC / R2 / COV-k are HIGHER-is-better.
+    """
+    predicted = np.asarray(predicted, dtype=np.float64)
+    actual = np.asarray(actual, dtype=np.float64)
+    observed = np.asarray(observed, dtype=np.float64)
+
+    scored = int(predicted.size)
+    if not scored:
+        return {
+            "msle": float("nan"),
+            "n_scored": 0,
+            "n_failed": int(declined),
+            "decline_rate": 1.0 if declined else 0.0,
+        }
+
+    log_predicted = _safe_log2(predicted)
+    log_actual = _safe_log2(actual)
+    error = log_predicted - log_actual
+
+    # The increment, floored at 0: a progressive cascade cannot shrink, so a
+    # prediction below what was already observed is a prediction of negative growth
+    predicted_increment = np.maximum(predicted - observed, 0.0)
+    actual_increment = np.maximum(actual - observed, 0.0)
+    increment_error = _safe_log2(predicted_increment + 1.0) - _safe_log2(
+        actual_increment + 1.0
+    )
+
+    # Genuinely relative, on RAW counts — CoupledGNN's units, and the only ones here
+    # that are not log-space
+    relative = (predicted - actual) / np.maximum(actual, 1.0)
+
+    absolute_relative = np.abs(relative)
+    variance = float(np.var(log_actual))
+
+    metrics = {
+        # CasFlow's own code: clamp to >= 1, log base 2, no offset
+        "msle": float(np.mean(error**2)),
+        "male": float(np.mean(np.abs(error))),
+        # CasFT's stated definition: log2(P + 1)
+        "msle_offset": float(
+            np.mean((np.log2(predicted + 1.0) - np.log2(actual + 1.0)) ** 2)
+        ),
+        # CTCP's loss, natural log — a factor of (ln 2)^2 from `msle`, and §8.1's
+        # warning that the two are printed under one name
+        "msle_natural": float(np.mean((np.log(np.maximum(predicted, popularity_floor))
+                                       - np.log(np.maximum(actual, popularity_floor))) ** 2)),
+        # CasFlow's code form, then §8.1's caption form
+        "mape": float(
+            np.mean(
+                np.abs(np.log2(predicted + 1.0) - np.log2(actual + 1.0))
+                / np.log2(actual + 2.0)
+            )
+        ),
+        "mape_casft": float(
+            np.mean(
+                np.abs(np.log2(actual + 2.0) - np.log2(predicted + 2.0))
+                / np.log2(actual + 2.0)
+            )
+        ),
+        # The increment, which is what CasFlow's own label IS (§5.7 difference 3)
+        "msle_increment": float(np.mean(increment_error**2)),
+        "male_increment": float(np.mean(np.abs(increment_error))),
+        # CoupledGNN's three, on raw counts
+        "mrse": float(np.mean(relative**2)),
+        "mrse_median": float(np.median(relative**2)),
+        "wroperc": float(np.mean(absolute_relative >= wroperc_epsilon)),
+        # SEISMIC reports APE as QUANTILES because the mean is outlier-dominated
+        # [verified, §5.4]; its own 10-minute row is 71% / 44% / 25%
+        "ape_median": float(np.median(absolute_relative)),
+        "ape_p75": float(np.percentile(absolute_relative, 75)),
+        "ape_p95": float(np.percentile(absolute_relative, 95)),
+        # Higher is better from here down
+        "pcc": (
+            float(np.corrcoef(log_predicted, log_actual)[0, 1])
+            if scored > 1 and np.std(log_predicted) > 0 and np.std(log_actual) > 0
+            else float("nan")
+        ),
+        "r2": (
+            float(1.0 - np.mean(error**2) / variance) if variance > 0 else float("nan")
+        ),
+        "n_scored": scored,
+        "n_failed": int(declined),
+        # The column §8.4 asks for and almost nobody publishes: a mean over
+        # scoreable cascades favours whoever gives up more often, so the give-up
+        # rate travels beside the mean rather than in a footnote
+        "decline_rate": float(declined / max(scored + declined, 1)),
+        "mean_predicted": float(np.mean(predicted)),
+        "mean_actual": float(np.mean(actual)),
+    }
+
+    metrics["coverage"] = coverage_at_k(predicted, actual)
+
+    return metrics
+
+
+def coverage_at_k(predicted: np.ndarray, actual: np.ndarray) -> float:
+    """
+    `|top-k predicted ∩ top-k true| / k` at `k = floor(N/10)` — CasFlow's COV-k.
+
+    "Did we find the viral ones", and the one metric here that asks a question MSLE
+    cannot: a model can be well calibrated on the bulk and rank the tail wrong,
+    which is the outcome §1.4's whole motivating debate (Salganik/Watts vs Cheng et
+    al.) is about.
+    """
+    count = int(len(actual) * coverage_fraction)
+
+    if count < 1:
+        return float("nan")
+
+    top_predicted = set(np.argsort(-np.asarray(predicted, dtype=np.float64))[:count])
+    top_actual = set(np.argsort(-np.asarray(actual, dtype=np.float64))[:count])
+
+    return float(len(top_predicted & top_actual) / count)
+
+
+# Which error the outer loop's reward IS. Every one of them MINIMIZES, which is why
+# `pipeline.tasks.objective_sense` maps `forecast` onto `minimize` rather than
+# reading the objective literally.
+valid_prediction_metrics = (
+    "msle",
+    "male",
+    "msle_offset",
+    "msle_natural",
+    "msle_increment",
+    "male_increment",
+    "mape",
+    "mrse",
+    "wroperc",
+)
+default_prediction_metric = "msle"
+
+
+def prediction_reward(metrics: dict[str, float], metric: str) -> float:
+    """
+    The scalar the outer loop minimizes, from the metric block.
+
+    A predictor that declined every cascade produces no metric at all, and returning
+    NaN there would make it compare false against everything and quietly win the
+    `improves` test on some paths. Infinity is the honest reading: it predicted
+    nothing, so it is worse than any prediction.
+    """
+    if metric not in valid_prediction_metrics:
+        raise ValueError(
+            f"unknown prediction metric {metric!r}; choose one of "
+            f"{valid_prediction_metrics}"
+        )
+
+    value = metrics.get(metric, float("nan"))
+
+    return float("inf") if not np.isfinite(value) else float(value)
+
+
+def doubling_accuracy(
+    predicted: np.ndarray, actual: np.ndarray, observed: np.ndarray
+) -> float:
+    """
+    Cheng et al.'s balanced framing: did the cascade at least DOUBLE, and did we say so?
+
+    §1.3 and §5.6: the WWW'14 paper reframed size prediction as "given `k` observed
+    reshares, will it reach `2k`" precisely because that holds the base rate at 50%
+    and makes accuracy interpretable — their own numbers are 0.795 accuracy / 0.877
+    AUC at `k = 5`. Reported rather than optimized, because our reward is MSLE and a
+    balanced-accuracy reward would select for a different program entirely.
+    """
+    predicted = np.asarray(predicted, dtype=np.float64)
+    actual = np.asarray(actual, dtype=np.float64)
+    observed = np.asarray(observed, dtype=np.float64)
+
+    if not predicted.size:
+        return float("nan")
+
+    threshold = 2.0 * observed
+
+    return float(np.mean((predicted >= threshold) == (actual >= threshold)))
+
+
 # Fraction of N the giant component must fall below for the graph to count as
 # dismantled. 0.01 is the Min-Sum / CoreHD / GND convention; the set size is
 # steeply sensitive to it near the percolation transition, so it is stated with

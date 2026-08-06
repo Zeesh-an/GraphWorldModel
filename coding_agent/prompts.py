@@ -10,6 +10,7 @@ from coding_agent.executor import (
     mc_blocked_dismantling,
     mc_blocked_immunization,
     mc_blocked_localization,
+    mc_blocked_prediction,
     mc_blocked_reconstruction,
     scored_blocked_primitives,
 )
@@ -27,6 +28,8 @@ from coding_agent.tools.library_api import (
     build_dismantling_reference,
     build_localization_menu,
     build_localization_reference,
+    build_prediction_menu,
+    build_prediction_reference,
     build_primitives_reference,
     build_reconstruction_menu,
     build_reconstruction_reference,
@@ -239,6 +242,152 @@ WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
 - Do not predict the whole graph. Recall is cheap and precision is not; a decoder
   that names every reachable node scores near zero on the tree half because almost
   none of its edges are real.
+"""
+
+
+prediction_brief = """\
+You are designing a Cascade Popularity Prediction algorithm as an executable Python
+script.
+
+YOUR GOAL: a REAL cascade is spreading on this graph. You are shown its first `t_o`
+timesteps — who adopted and when — and you must predict how many nodes will have
+adopted by the horizon. You are not intervening in anything and you are not
+recovering the past; you are forecasting. **LOWER IS BETTER**: your score is a
+prediction ERROR, unlike every other task in this system.
+
+THE SCORE IS MSLE — MEAN SQUARED **LOG** ERROR:
+
+    MSLE = mean( (log2(predicted) - log2(actual))^2 )
+
+Read that twice, because it changes what a good prediction is:
+- Being off by 10 on a cascade of 20 costs the same as being off by 1000 on a
+  cascade of 2000. RELATIVE accuracy is everything; absolute accuracy is nothing.
+- It is SYMMETRIC in log space, so over-predicting by 2x and under-predicting by 2x
+  cost exactly the same. A systematic multiplicative bias is therefore the cheapest
+  possible thing to fix and the first thing to check.
+- Predicting a CONSTANT is much stronger than it sounds. The geometric mean of the
+  training sizes is the best instance-blind prediction, and it is a real bar.
+
+WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
+- THE DYNAMICS ARE NOT INDEPENDENT CASCADE. These are real logged adoptions, not a
+  simulation. Adoption is not memoryless (a node's second exposure matters), a node
+  is exposed repeatedly rather than once per neighbour, and some adopters arrive
+  from outside the graph entirely — search, front pages, off-platform sharing. Any
+  model that assumes one-shot independent transmission will be wrong in a
+  systematic direction.
+- TEMPORAL FEATURES DOMINATE. The single most predictive quantity in this
+  literature is the adoption RATE IN THE SECOND HALF of the observation window —
+  it beats every structural feature by a wide margin. A cascade still accelerating
+  at `t_o` is a different object from one that has flattened, and the observed
+  wave series tells you which.
+- THE CLASSICAL BAR IS ONE LINE. `log P(horizon) = alpha * log P(t_o) + beta` — a
+  2008 result, one feature, and it is still printed as a baseline in every paper
+  published since. Beat it or explain why you did not.
+- BRANCHING RATIO IS THE MECHANISM. If each adopter produces R more and R < 1, the
+  remaining total is a geometric sum. If R >= 1 the expected size DIVERGES and the
+  honest answer is to decline (see below) or to fall back on a feature estimate.
+- DO NOT PREDICT THE REACHABLE SET. Most cascades die far short of what the graph
+  would allow. An estimate near "everything within k hops" is the classic
+  saturation failure and it scores terribly in log space.
+
+DECLINING IS ALLOWED AND IS NOT AN ERROR: return None when your model genuinely has
+no estimate (a divergent generative fit, an empty observation). Declines are COUNTED
+in a separate column, never scored as a wrong answer. But a predictor that declines
+EVERYTHING is rejected — it has not answered the question.
+"""
+
+
+def _prediction_rules(task: TaskSpec) -> str:
+    """The forecasting preamble: no actions, one method, and the forward model."""
+    if task.forward_model:
+        oracle_block = """\
+
+THE FORWARD MODEL — `self.forecast_marginals(adopters, frontier, steps)`:
+    Returns a numpy array of length num_nodes: P(node has adopted `steps`
+    timesteps after the end of the observation window), given that `adopters` is
+    everyone who has adopted so far and `frontier` is the wave that adopted most
+    recently. `self.expected_popularity(adopters, frontier, steps)` is the same
+    call summed into a single number, which is usually all you want.
+
+    Pass `observation.frontier` as the frontier and not the whole adopter set:
+    someone who adopted five steps ago has already had their chance to spread, and
+    seeding them again would over-predict badly.
+
+    This is the ONLY thing that differs between the experimental conditions here.
+    The action space of this task is empty, so what is being measured is whether a
+    forward model in the prediction loop is worth anything at all against a
+    feature-driven estimate. The published evidence is genuinely mixed.
+
+    It is not free. One call unrolls the kernel `steps` times across several
+    sampled realizations, and the calls are counted. Get an estimate from features
+    first, THEN spend calls refining it. A loop that calls it per node will not
+    finish.
+
+    IT IS ALSO NOT GROUND TRUTH. It is an Independent-Cascade-shaped model of a
+    process that is not Independent Cascade. Treat its output as one input among
+    several — blending it with a feature estimate, or using it only to rank rather
+    than to size, is a legitimate and often better use of it than trusting it."""
+    else:
+        oracle_block = """\
+
+NO FORWARD MODEL IN THIS CONDITION. `self.forecast_marginals` raises if you call
+it. This arm exists to measure what pure features and point-process fits achieve,
+and the literature suggests that may be a great deal: feature-driven regression is
+reported to beat deep models on some corpora. Work from the observed adoption
+history, the wave series and the graph structure alone."""
+
+    return f"""\
+{prediction_brief}
+OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else —
+no prose before or after. The block contains import lines (if you need any) and
+then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
+example usage, no test code.
+
+IMPORTS: you MAY import any of {", ".join(allowed_imports)}. Use numpy for
+anything you would otherwise write as a Python loop over all nodes.
+Importing anything else is rejected.
+
+AVAILABLE NAMES (already in your script's namespace — do NOT import these):
+- `GraphInfo` : .num_nodes, .out_neighbors(node), .in_neighbors(node),
+  .degree(node), .edge_index (2, E), .ic_probs (E,).
+- `prediction_algorithms` : the published predictors (API below).
+- `cascade_features(graph, observation)` : the standard feature dict (API below).
+- `primitives` : structural helpers (API below).
+- `ActionOp` and `State` exist but you will not need them — this task emits no
+  actions at all.
+
+THE OBSERVATION OBJECT you are handed:
+- `observation.adopters` : `{{node: timestep it adopted}}` for everyone who adopted
+  INSIDE the observation window. This is the whole observed history, not a count.
+- `observation.popularity` : `len(observation.adopters)`, i.e. P(t_o). Your
+  prediction is bounded below by this — adoption is progressive and nobody
+  un-adopts.
+- `observation.frontier` : the node ids that adopted in the LAST observed step.
+- `observation.wave(t)`  : the node ids that adopted at step `t`.
+- `observation.root`     : who started it.
+- `observation.observed_steps` : how many steps you were shown.
+- `observation.horizon`  : the step your prediction is for. `horizon -
+  observed_steps` is how much future there is.
+- `observation.num_nodes` : |V|; your prediction cannot exceed it.
+
+- `self.fit_examples` : a list of LABELLED cascades from the selection split, each
+  with `.observation` and `.actual` (its true final popularity). Use them to fit a
+  constant, a regression, or a calibration — that is exactly what the classical
+  baselines do and it is not cheating. These are never the cascades you are scored
+  on.
+
+WHAT YOU IMPLEMENT:
+    def predict(self, graph, observation, horizon) -> float | None
+        The popularity the cascade will have reached by `horizon`, as a TOTAL
+        count of distinct adopters (not an increment). Return None to DECLINE.
+
+        RULES, all enforced:
+        - the value must be >= `observation.popularity`. A cascade cannot shrink.
+        - the value must be <= `observation.num_nodes`. It counts distinct nodes.
+        - None or a non-finite value means DECLINE, which is counted separately
+          and never scored as an error.
+        - declining EVERY cascade is rejected.
+{oracle_block}
 """
 
 
@@ -684,6 +833,9 @@ def _blocking_rules(task: TaskSpec) -> tuple[str, str, str]:
 
 def _common_rules(task: TaskSpec | None) -> str:
     """The preamble, with the problem family and the budgeted op filled in."""
+    if task is not None and task.forecasts:
+        return _prediction_rules(task)
+
     if task is not None and task.decodes:
         return _reconstruction_rules(task)
 
@@ -1393,6 +1545,117 @@ list first, then spend calls on it.
 # cascade is progressive and monotone, so delaying a seed is weakly worse and
 # every schedule is dominated by "all seeds at t=0" — telling the model to
 # schedule across time there just burns iterations on a flat direction.
+prediction_exemplars = """\
+
+TWO WORKED PREDICTORS (different shapes — write your own, do not return these):
+
+```python
+import math
+
+class TemporalGrowth(Strategy):
+    \"\"\"Fit Szabo-Huberman on the labelled examples, then correct it with the
+    single feature this literature says dominates: the adoption rate in the SECOND
+    HALF of the observation window. A cascade still accelerating at t_o behaves
+    differently from one that has flattened, and one number captures that.\"\"\"
+
+    def _fitted(self):
+        # Cached across calls: the fit is over the selection split and does not
+        # depend on which cascade is being predicted
+        if getattr(self, \"_coefficients\", None) is None:
+            examples = list(getattr(self, \"fit_examples\", []))
+            if len(examples) < 4:
+                self._coefficients = (1.0, math.log(2.0))
+            else:
+                observed = [
+                    math.log(max(e.observation.popularity, 1.0)) for e in examples
+                ]
+                actual = [math.log(max(e.actual, 1.0)) for e in examples]
+                slope, intercept = numpy.polyfit(observed, actual, 1)
+                self._coefficients = (float(slope), float(intercept))
+
+        return self._coefficients
+
+    def predict(self, graph, observation, horizon):
+        if observation.popularity <= 0:
+            return None
+
+        slope, intercept = self._fitted()
+        base = math.exp(
+            slope * math.log(observation.popularity) + intercept
+        )
+
+        features = cascade_features(graph, observation)
+        # Positive acceleration means the cascade is still growing; negative means
+        # it has already turned over. Bounded so one odd cascade cannot blow up.
+        rate_ratio = features[\"rate_second_half\"] / max(features[\"rate\"], 1e-6)
+        adjustment = min(max(rate_ratio, 0.4), 2.5)
+
+        estimate = base * adjustment
+        return min(
+            max(estimate, float(observation.popularity)), float(observation.num_nodes)
+        )
+```
+
+```python
+import numpy
+
+class BlendedForecast(Strategy):
+    \"\"\"Blend a branching-process extrapolation with the learned forward model, in
+    LOG space because that is where the error is measured. The forward model is an
+    IC-shaped view of a process that is not IC, so it is used as one opinion rather
+    than as the answer — and the blend weight is fitted on the labelled examples
+    rather than guessed.\"\"\"
+
+    def _waves(self, observation):
+        counts = numpy.zeros(observation.observed_steps + 1)
+        for _, step in observation.adopters.items():
+            counts[min(step, len(counts) - 1)] += 1
+        return counts
+
+    def _branching(self, observation, horizon):
+        counts = self._waves(observation)
+        ratios = [
+            counts[i] / counts[i - 1] for i in range(1, len(counts)) if counts[i - 1] > 0
+        ]
+        if not ratios:
+            return float(observation.popularity)
+
+        reproduction = float(numpy.mean(ratios[-3:]))
+        if reproduction >= 1.0:
+            # Supercritical: the geometric sum diverges, so this branch has no
+            # estimate. The blend below falls back on the model alone.
+            return None
+
+        remaining = max(horizon - observation.observed_steps, 0)
+        tail = counts[-1] * reproduction * (1 - reproduction ** remaining)
+        return float(observation.popularity) + tail / (1 - reproduction)
+
+    def predict(self, graph, observation, horizon):
+        steps = max(horizon - observation.observed_steps, 0)
+        if steps <= 0:
+            return float(observation.popularity)
+
+        classical = self._branching(observation, horizon)
+
+        # ONE call, on the frontier rather than the whole adopter set: an adopter
+        # from five steps ago has already had its chance to transmit
+        model = self.expected_popularity(
+            list(observation.adopters), list(observation.frontier), steps
+        )
+
+        if classical is None:
+            estimate = model
+        else:
+            # Geometric mean = arithmetic mean in log space, which is the space the
+            # score is measured in
+            estimate = math.sqrt(max(classical, 1.0) * max(model, 1.0))
+
+        return min(
+            max(estimate, float(observation.popularity)), float(observation.num_nodes)
+        )
+```
+"""
+
 temporal_scheduling_note = """\
 
 USING THE HORIZON: this task allows edge operations, so the timing of actions
@@ -1433,6 +1696,20 @@ half of what you are scored on: `EventF1` counts a `(node, t)` pair only when `t
 is exactly right, and the reported infection-time NRMSE reads them too. A longer
 horizon means a more saturated cascade and therefore a harder inversion, because
 a cascade that ran to convergence retains almost no trace of the order it went in.
+"""
+
+# The forecasting counterpart, and the third variant of "there is no horizon to
+# plan across": here `horizon` is the QUESTION rather than a budget or an answer
+# length. It is the timestep the prediction is for, and the gap between it and the
+# observation window is the whole difficulty of the instance.
+prediction_timing_note = """\
+
+THE HORIZON IS THE QUESTION, NOT A BUDGET. You schedule nothing and emit nothing.
+`horizon` is the timestep your prediction is FOR, and `horizon -
+observation.observed_steps` is how much future you have to account for. A wider gap
+is a strictly harder instance: the classical result in this literature is that
+accuracy rises with how much you have SEEN and falls with how far ahead you must
+look, so both numbers belong in whatever you fit.
 """
 
 # The containment counterpart of seed_timing_note, and its mirror image: the
@@ -1548,6 +1825,33 @@ class MyStrategy(Strategy):
         scored.sort(reverse=True)
         return [ActionOp("add_node", node) for _, node in scored[:batch]]
 ```
+""",
+    "predict": """\
+
+METHOD: POPULARITY FORECASTING.
+Implement `predict(self, graph, observation, horizon) -> float | None`.
+
+You are called ONCE PER LOGGED CASCADE, with that cascade's own observed prefix.
+Your score is the mean squared LOG error across all of them, so a predictor that
+nails the biggest cascade and collapses on the small ones LOSES — every cascade
+weighs the same regardless of size, which is the whole reason the metric is in log
+space. Write an ALGORITHM, not a fit to one cascade: hardcoded ids or per-cascade
+constants score nothing on any other episode.
+
+Two things about this task that no other one in this system has:
+
+1. THE ERROR RUNS DOWNWARD. Lower is better. A change that makes the number go up
+   is a regression, whatever it looked like in the code.
+2. THE PROCESS IS REAL. These adoptions were logged, not simulated. No transition
+   rule you can write is the true one, and the forward model (where you have one)
+   is an approximation whose bias is systematic rather than random. Check the
+   DIRECTION of your residual in the feedback before changing the model: a
+   constant multiplicative bias is one line to fix and is usually most of the gap.
+
+Fit whatever you need on `self.fit_examples` — the labelled selection cascades.
+Fitting there is what every classical baseline in this literature does and it is
+expected, not a loophole. Those cascades are never the ones you are scored on.
+
 """,
     "reconstruct": """\
 
@@ -1849,6 +2153,57 @@ def build_observation_block(task: TaskSpec) -> str:
     return "\n".join(lines)
 
 
+def build_cascade_block(task: TaskSpec) -> str:
+    """
+    What the logged cascades actually look like, and the two floors to clear.
+
+    Spelled out because the SIZE DISTRIBUTION is the whole difficulty here: MSLE is
+    an error in log space, so the geometric mean of the training sizes is the best
+    instance-blind prediction, and a model told nothing about the distribution will
+    spend its first iterations rediscovering it. Printing both floors up front turns
+    that into a starting point instead of a wasted turn.
+    """
+    if not task.forecasts:
+        return ""
+
+    instances = list(task.instances)
+    if not instances:
+        return ""
+
+    observed = np.array([entry.observation.popularity for entry in instances], dtype=float)
+    actual = np.array([entry.actual for entry in instances], dtype=float)
+    ratio = actual / np.maximum(observed, 1.0)
+    geometric = float(np.exp(np.mean(np.log(np.maximum(actual, 1.0)))))
+
+    lines = [
+        "",
+        f"THE CASCADES YOU ARE SCORED ON ({len(instances)} REAL logged cascades, "
+        f"mean {task.prediction_metric.upper()} across all of them):",
+        f"  observed by t_o: {observed.min():.0f}-{observed.max():.0f} adopters "
+        f"(median {np.median(observed):.0f})",
+        f"  actual at the horizon: {actual.min():.0f}-{actual.max():.0f} adopters "
+        f"(median {np.median(actual):.0f})",
+        f"  growth ratio actual/observed: median {np.median(ratio):.2f}x, "
+        f"90th percentile {np.percentile(ratio, 90):.2f}x — "
+        + (
+            "most of these cascades are essentially OVER by the observation window, "
+            "so the hard part is spotting the few that are not"
+            if float(np.median(ratio)) < 1.5
+            else "these cascades still have most of their growth ahead of them"
+        ),
+        f"  TWO FLOORS TO CLEAR: predicting the constant {geometric:.1f} (the "
+        f"geometric mean, which is the best instance-BLIND answer under a log-space "
+        f"error), and predicting `observation.popularity` unchanged (which is right "
+        f"whenever a cascade is finished). Both are computed for you in the results; "
+        f"an algorithm that ties with either has not used the instance.",
+        f"  you see {instances[0].observation.observed_steps} of "
+        f"{instances[0].observation.horizon} timesteps.",
+        "",
+    ]
+
+    return "\n".join(lines)
+
+
 def _budget_unit(task: TaskSpec) -> str:
     """What one unit of budget buys, in words, for the task block."""
     if task.immunizes:
@@ -1880,7 +2235,9 @@ def build_user_prompt(
     if strategy_mode == "scored":
         # Library source is inspiration, not callable — ideas must be written
         # out inside score()/schedule()/source_score(), where they can be mutated
-        if task.decodes:
+        if task.forecasts:
+            menu = build_prediction_menu()
+        elif task.decodes:
             menu = build_reconstruction_menu()
         elif task.recovers:
             menu = build_localization_menu()
@@ -1894,7 +2251,9 @@ def build_user_prompt(
             menu = build_algorithm_menu()
 
         hook = (
-            "edge_cost()"
+            "growth_factor()"
+            if task.forecasts
+            else "edge_cost()"
             if task.decodes
             else "source_score()"
             if task.recovers
@@ -1909,6 +2268,20 @@ def build_user_prompt(
             f"{menu}"
         )
         final_line = "Write the ScoredStrategy subclass now."
+    elif task.forecasts:
+        # A forecasting task's library is the POPULARITY-predictor pool. Every other
+        # pool returns a NODE SET of some kind; this one returns a number, so showing
+        # any of the others invites a program that answers a different question
+        # entirely.
+        reference = (
+            build_prediction_reference(
+                exclude=() if allow_mc_algorithms else mc_blocked_prediction
+            )
+            + "\n\nPRIMITIVES  (from coding_agent.tools.primitives, imported as "
+            "`primitives`)\n"
+            + build_primitives_reference(exclude=scored_blocked_primitives)
+        )
+        final_line = f"Write the Strategy now (method = {method})."
     elif task.decodes:
         # A decoding task's library is the TRAJECTORY-decoder pool. A seed set, a
         # removal set and a source set are all node lists; a trajectory is not, so
@@ -1994,7 +2367,15 @@ def build_user_prompt(
         )
         final_line = f"Write the Strategy now (method = {method})."
 
-    if task.decodes:
+    if task.forecasts:
+        budget_unit = "UNUSED — a predictor spends no budget on anything"
+        objective_line = (
+            f"predict how large each REAL cascade grows — MINIMIZE "
+            f"{task.prediction_metric.upper()} against the logged popularity "
+            f"(**LOWER IS BETTER**, unlike every other task here)"
+        )
+        ops_line = "allowed_ops = none — this task emits no actions\n"
+    elif task.decodes:
         budget_unit = "UNUSED — a decoder spends no budget on anything"
         objective_line = (
             "recover the hidden trajectory that produced the observation — "
@@ -2030,7 +2411,7 @@ TASK: {task.task} — {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
-{ops_line}{build_outbreak_block(task)}{build_round_block(task)}{build_observation_block(task)}{build_mask_block(task)}
+{ops_line}{build_outbreak_block(task)}{build_round_block(task)}{build_observation_block(task)}{build_mask_block(task)}{build_cascade_block(task)}
 {build_graph_profile(graph)}
 
 {reference}
@@ -2168,7 +2549,72 @@ class MyDecoder(ScoredStrategy):
 """
 
 
+def _scored_prediction_system(task: TaskSpec | None) -> str:
+    """
+    Scored mode for cascade prediction: the agent writes a GROWTH MULTIPLIER.
+
+    The tightest fit of the four scored harnesses, and for a published reason.
+    Szabo & Huberman's founding result is that `log P(t_p)` is near-linear in
+    `log P(t_o)` — that the whole problem is a multiplier — so a search over
+    multipliers is a search over exactly the space the feature line of this
+    literature occupies rather than a subset of it.
+    """
+    metric = (task.prediction_metric if task is not None else "msle").upper()
+
+    return f"""\
+You are designing the GROWTH RULE of a Cascade Popularity Prediction algorithm —
+not a whole program.
+
+A fixed harness (ScoredStrategy.predict) multiplies the OBSERVED popularity by
+whatever your rule returns and clamps the result from below at the observed count.
+You may override ONLY this method:
+
+- growth_factor(self, features, graph, observation) -> float
+    A multiplier on `observation.popularity`. 1.0 means "this cascade is over";
+    3.0 means "it will triple". Your score is {metric}, an ERROR in LOG space, so
+    what you are really choosing is an ADDITIVE offset on `log(popularity)` — being
+    off by a factor of 2 costs the same whether the cascade is 20 or 2000.
+
+`features` is `cascade_features(graph, observation)`, already computed:
+  observed, log_observed, observed_steps, remaining_steps,
+  rate, rate_first_half, rate_second_half, acceleration, time_to_half,
+  last_wave, peak_wave, root_degree, log_root_degree,
+  mean_degree, max_degree, frontier_size, frontier_mean_degree,
+  exposed, exposure_ratio, spread_breadth, graph_fraction
+
+The single most predictive one in this literature is `rate_second_half` — the
+adoption rate in the SECOND HALF of the observation window. It beats every
+structural feature by a wide margin. `acceleration` is its signed form. Start
+there, and use `remaining_steps` to scale: a multiplier that ignores how much
+future is left will be right for one horizon and wrong for every other.
+
+`self.fit_examples` is the labelled selection split (each with `.observation` and
+`.actual`), so you may fit a constant or a small regression rather than guessing.
+
+RULES:
+- Overriding predict() is REJECTED by the executor.
+- `prediction_algorithms.*` does NOT exist here. Write your own rule.
+- Reply with exactly ONE fenced ```python block containing ONE class subclassing
+  ScoredStrategy. No imports, no module-level code, no prose.
+- `GraphInfo` has .num_nodes, .out_neighbors(node), .in_neighbors(node),
+  .degree(node), .edge_index, .ic_probs.
+
+REPLY SHAPE (adapt the logic — improve on it, do not return it unchanged):
+```python
+class MyGrowth(ScoredStrategy):
+    def growth_factor(self, features, graph, observation):
+        # Still accelerating -> more growth left; flattened -> nearly none
+        momentum = features["rate_second_half"] / max(features["rate"], 1e-6)
+        remaining = features["remaining_steps"]
+        return 1.0 + min(momentum, 3.0) * remaining / max(remaining + 2.0, 1.0)
+```
+"""
+
+
 def _scored_system(task: TaskSpec | None) -> str:
+    if task is not None and task.forecasts:
+        return _scored_prediction_system(task)
+
     if task is not None and task.decodes:
         return _scored_reconstruction_system(task)
 
@@ -2255,12 +2701,15 @@ def build_system_prompt(
     contains = task is not None and task.contains
     recovers = task is not None and task.recovers
     decodes = task is not None and task.decodes
+    forecasts = task is not None and task.forecasts
 
     blocks = task is not None and task.blocks
     immunizes = task is not None and task.immunizes
 
     if task is not None:
-        if decodes:
+        if forecasts:
+            horizon_note = prediction_timing_note
+        elif decodes:
             horizon_note = reconstruction_timing_note
         elif recovers:
             horizon_note = localization_timing_note
@@ -2281,7 +2730,11 @@ def build_system_prompt(
 
     # Only worth stating when the strategy may actually emit the op, which an
     # inverse task never does
-    if recovers or "remove_node" not in (task.allowed_ops if task is not None else ()):
+    if (
+        recovers
+        or forecasts
+        or "remove_node" not in (task.allowed_ops if task is not None else ())
+    ):
         remove_note = ""
 
     if strategy_mode == "scored":
@@ -2297,7 +2750,9 @@ def build_system_prompt(
     # population search over programs, and what those programs implement is
     # plan_horizon on an intervention task and localize on an inverse one. `method`
     # only picks which body describes the outer loop.
-    if decodes:
+    if forecasts:
+        resolved = "predict"
+    elif decodes:
         resolved = "reconstruct"
     elif recovers:
         resolved = "localize"
@@ -2311,7 +2766,9 @@ def build_system_prompt(
     # which a containment task REJECTS and an inverse task has no use for at all,
     # so showing the wrong set would cost the search its first iteration on a
     # repair turn for a contract nobody asked for
-    if resolved == "reconstruct":
+    if resolved == "predict":
+        base += prediction_exemplars
+    elif resolved == "reconstruct":
         base += reconstruction_exemplars
     elif resolved == "localize":
         base += localization_exemplars
@@ -2334,7 +2791,7 @@ def build_system_prompt(
         else:
             base += one_shot_exemplars
 
-    if resolved in ("localize", "reconstruct") or method in (
+    if resolved in ("localize", "reconstruct", "predict") or method in (
         "one_shot",
         "evolve",
         "adaptive",

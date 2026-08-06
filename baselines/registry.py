@@ -2043,6 +2043,162 @@ def _reconstruction_parse(work_dir: Path, stdout: str, instances: list) -> dict:
     return payload["trajectories"]
 
 
+# Cascade prediction ---------------------------------------------------------
+#
+# The inverse export turned around: a predictor is handed the observed PREFIX of a
+# real cascade and hands back one NUMBER per cascade. Everything here is a
+# SUPERVISED regressor — that is what the whole §4.1 line is — so the split flag is
+# the load-bearing field, exactly as it is for the three imputers on the
+# reconstruction side: a label may reach a repo's `fit`, never its evaluation-row
+# prediction.
+#
+# The exported shape is CasFlow's own canonical five-field line format
+# (`research/cascade_prediction.md` §6.3), because §8.5's finding is that there is
+# no benchmark for this task and that format IS the de-facto standard artefact —
+# every repo in §4.1 either reads it or reads something one rename away from it.
+
+
+def _prediction_export(
+    graph, work_dir: Path, instances: list, diffusion_model: str, driver: str
+) -> dict:
+    """
+    Our logged cascades as the canonical line format, one row per cascade.
+
+    `paths` is the field every repo here consumes, in CasFlow's own shape: a list of
+    `(node chain, elapsed)` pairs where the chain's last id is the adopter and the
+    one before it is who they took it from. Only the OBSERVED prefix crosses — a
+    predictor that could see past `t_o` would be reading the answer.
+
+    `labels` is the INCREMENT (`P(t_p) - P(t_o)`), which is CasFlow's own label and
+    what every repo here regresses; the drivers convert back to a total on the way
+    out. `splits` carries our protocol so a repo cannot re-split at random, which is
+    §8.3's whole warning.
+
+    Two invariants are ASSERTED rather than trusted, the same pair
+    `_reconstruction_export` asserts for its supervised drivers: no evaluation row
+    carries a label, and no row's `paths` extends past the observation window.
+    """
+    import numpy as np
+
+    os.makedirs(work_dir, exist_ok=True)
+    num_nodes = graph.num_nodes
+    view = _undirected_view(graph)
+
+    np.savez(
+        work_dir / "graph.npz",
+        edges=np.array(list(view.edges()), dtype=np.int64).reshape(-1, 2),
+        num_nodes=np.array(num_nodes),
+    )
+
+    cascade_ids, paths, labels, splits, publish_times, observed = [], [], [], [], [], []
+
+    for instance in instances:
+        observation = instance.observation
+        window = observation.observed_steps
+
+        # `(chain, elapsed)`, sorted by elapsed then id so the file order is
+        # deterministic. The chain is `[root, adopter]` for everything but the root
+        # itself, because our replay stores the parent per event and a corpus that
+        # logs no parent already attributes to the root.
+        rows = sorted(
+            (
+                ([int(node)] if node == observation.root else [int(observation.root), int(node)]),
+                int(step),
+            )
+            for node, step in observation.adopters.items()
+        )
+
+        if any(step > window for _, step in rows):
+            raise ValueError(
+                "a cascade's exported prefix extends past its observation window; "
+                "that would hand the repo part of the answer"
+            )
+
+        cascade_ids.append(str(instance.cascade_id))
+        paths.append(json.dumps(rows))
+        splits.append(str(instance.split))
+        publish_times.append(int(observation.publish_time))
+        observed.append(int(observation.popularity))
+        labels.append(int(instance.increment))
+
+    is_train = training_rows(instances)
+
+    if np.array(labels)[~is_train].size and np.any(np.array(labels)[~is_train] < 0):
+        raise ValueError("an evaluation row carries a negative increment label")
+
+    np.savez(
+        work_dir / "instances.npz",
+        cascade_ids=np.array(cascade_ids),
+        paths=np.array(paths),
+        labels=np.array(labels, dtype=np.int64),
+        splits=np.array(splits),
+        publish_times=np.array(publish_times, dtype=np.int64),
+        observed=np.array(observed, dtype=np.int64),
+        is_train=is_train,
+        observation=np.array(
+            instances[0].observation.observed_steps if instances else 0
+        ),
+        horizon=np.array(instances[0].observation.horizon if instances else 0),
+    )
+
+    shutil.copy(baselines_root / "drivers" / driver, work_dir / driver)
+
+    return {"driver": str(work_dir / driver)}
+
+
+def _prediction_command(
+    work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
+) -> list[str]:
+    return ["python", extras["driver"], str(work_dir)]
+
+
+def _prediction_parse(work_dir: Path, stdout: str, instances: list) -> dict:
+    """`{cascade_id: predicted total popularity}` from the driver's own artifact."""
+    payload = json.loads((Path(work_dir) / "predictions.json").read_text())
+
+    return payload["popularities"]
+
+
+def _casflow_entry(
+    name: str,
+    title: str,
+    venue: str,
+    repo: str,
+    paper: str,
+    entry: str,
+    source_subdir: str,
+    patches: list | None,
+    notes: str,
+) -> ExternalBaseline:
+    """
+    CasFlow or CCGL: same author, same line format, same three-stage pipeline.
+
+    One driver covers both and `GWM_CASFLOW_SRC` picks the clone's source directory,
+    which is the repo root for CasFlow and `src/` for CCGL. Both pin an exact
+    TensorFlow that no longer resolves on a current Python; the pin is patched away
+    rather than honoured, because the code uses plain Keras 2 APIs that every TF 2.x
+    provides and installing a 2021 wheel is not possible on most current platforms.
+    """
+    return ExternalBaseline(
+        name=name,
+        kind=learned,
+        title=title,
+        venue=venue,
+        repo=repo,
+        paper=paper,
+        entry=entry,
+        task="cascade_prediction",
+        status="needs_setup",
+        requirements="requirements.txt",
+        patches=patches,
+        export=partial(_prediction_export, driver="casflow_driver.py"),
+        command=_prediction_command,
+        parse_seeds=_prediction_parse,
+        extra_env={"GWM_CASFLOW_SRC": source_subdir},
+        notes=notes,
+    )
+
+
 # Influence blocking ---------------------------------------------------------
 #
 # S_N is not derivable from (graph, budget), so it crosses the process boundary the
@@ -5229,6 +5385,684 @@ external_baselines: dict[str, ExternalBaseline] = {
             "`preciado_allocation` discretizes the GP's own first-order structure "
             "to a top-k and is LABELLED a discretization rather than the method. "
             "Its published results are [figure]-only."
+        ),
+    ),
+    # Cascade prediction ------------------------------------------------------
+    #
+    # research/cascade_prediction.md 8.5's finding is that this literature has NO
+    # benchmark — no OGB or TGB analogue, no leaderboard to enter, no split to
+    # inherit — so every entry here is scored on OUR protocol against OUR replayed
+    # corpus, and the published numbers in each `notes` are context markers rather
+    # than comparisons. 9.9 is emphatic: do not chase the leaderboard, CasFlow is a
+    # 2M-parameter model tuned for this one task and we will not beat it.
+    #
+    # Warning: FOUR of the eight most-cited methods here are PYTHON 2 and two more
+    # are TensorFlow 1. That is not neglect on our part — this line of work peaked
+    # in 2017-19 and its reference implementations were never ported. Each is
+    # registered with the exact evidence, because a reader who sees "DeepHawkes,
+    # code available" in 4.1 will reasonably ask why it is not a baseline.
+    "casflow": _casflow_entry(
+        "casflow",
+        "CasFlow: hierarchical structures and propagation uncertainty for cascade prediction",
+        "TKDE 2021",
+        "https://github.com/Xovee/casflow",
+        "https://doi.org/10.1109/TKDE.2021.3126475",
+        "casflow.py",
+        ".",
+        # The pin is `tensorflow==2.9.3`, which has no wheel for current Python or
+        # for arm64 macOS at all. The code uses plain Keras 2 APIs that every TF 2.x
+        # provides, so unpinning is a smaller lie than not running it.
+        [("requirements.txt", "tensorflow==2.9.3", "tensorflow")],
+        "(key) THE reference SOTA of 2021-23 and the baseline every later paper "
+        "reports. Its own dataset bundle is the de-facto benchmark artefact of this "
+        "literature (8.5), which is why `data/datasets/casflow_bundle.py` parses "
+        "exactly its line format. Warning: its headline result table (TKDE'21 Table "
+        "3) is a RASTER IMAGE — 0 records that `pdftotext -layout` returns the "
+        "caption and nothing else, so every CasFlow number in 5 is a RE-RUN by a "
+        "later paper and those three disagree with each other. CasFT's re-run puts "
+        "it at MSLE 2.3370 on Weibo 0.5h, 4.7799 on Twitter 1d, 1.4370 on APS 3y "
+        "[verified, 5.1]; under CasTemp's leak-free split the same method reads "
+        "1.685 / 1.329 / 2.438 [verified, 5.3], and 5.3's diagnosis is that "
+        "CasFlow 'exhibit[s] low training losses but significantly higher test "
+        "losses' because its architecture 'learned dataset-specific shortcuts "
+        "enabled by temporal leakage'. Run it under BOTH --cp-split values; the gap "
+        "is the experiment.",
+    ),
+    "ccgl": _casflow_entry(
+        "ccgl",
+        "CCGL: contrastive cascade graph learning",
+        "TKDE 2022",
+        "https://github.com/Xovee/ccgl",
+        "https://arxiv.org/abs/2107.12576",
+        "src/base_model.py",
+        "src",
+        # Same TF pin problem, plus one genuine py2 leftover: `graphwave/utils/
+        # function_utils.py` carries `print "error: argument is negative"`, which
+        # does not parse under Python 3 at all. Verified by reading the file at HEAD.
+        [
+            ("requirements.txt", "tensorflow-gpu==2.3", "tensorflow"),
+            ("requirements.txt", "networkx==2.4", "networkx"),
+            ("requirements.txt", "scikit-learn==0.21.1", "scikit-learn"),
+            ("requirements.txt", "scipy==1.4.1", "scipy"),
+            (
+                "src/utils/graphwave/utils/function_utils.py",
+                'print "error: argument is negative"',
+                'print("error: argument is negative")',
+            ),
+        ],
+        "The self-supervised entry: contrastive pretraining on augmented cascade "
+        "graphs, then fine-tuning. Same author and same pipeline as `casflow`, so "
+        "one driver covers both — what differs is the pretraining stage, which is "
+        "the transfer-learning question this literature otherwise never asks. It "
+        "reports on the same Weibo-A / Twitter-A / APS-A triple (7), so its row is "
+        "directly comparable to `casflow`'s under our protocol.",
+    ),
+    "ctcp": ExternalBaseline(
+        name="ctcp",
+        kind=learned,
+        title="CTCP: continuous-time graph learning for cascade popularity prediction",
+        venue="IJCAI 2023",
+        repo="https://github.com/lxd99/CTCP",
+        paper="https://arxiv.org/abs/2306.03756",
+        entry="main.py",
+        task="cascade_prediction",
+        status="needs_setup",
+        # The repo ships no requirements file; its README pins python 3.7 / torch
+        # 1.9.1 / dgl 0.8.2, none of which resolve on a current interpreter. Listed
+        # unpinned for the same reason DITTO's and cosasi's are.
+        requirements=None,
+        pip_packages=("torch", "dgl", "scikit-learn", "numpy", "pandas", "tqdm"),
+        export=partial(_prediction_export, driver="ctcp_driver.py"),
+        command=_prediction_command,
+        parse_seeds=_prediction_parse,
+        notes=(
+            "(key) The most interesting arm to run BESIDE CasFlow rather than "
+            "instead of it. 5.3: under CasTemp's leak-free split CTCP is one of only "
+            "two methods whose train-vs-test loss curves stay flat while CasFlow's "
+            "and CasDO's diverge [verified, Fig 2] — so it is the published method "
+            "least likely to be exploiting the temporal shortcut 8.3 describes, and "
+            "the one whose ranking should move LEAST between our two --cp-split "
+            "settings. It is also the easiest to wire: its input is a plain (id, "
+            "src, dst, cas, time) event table and its split crosses as TIME "
+            "BOUNDARIES rather than as flags, so our chronological protocol is "
+            "reproduced inside the repo rather than fought. Its own Table 2 reports "
+            "MSLE 4.6916 / 2.5929 / 1.6289 on its OWN re-preprocessing of "
+            "Twitter/Weibo/APS (19,718 / 39,076 / 48,575 cascades — 6.4's versions "
+            "C, B and B), which is 3-10x smaller than CasFlow's and NOT comparable "
+            "to it."
+        ),
+    ),
+    "castemp": ExternalBaseline(
+        name="castemp",
+        kind=learned,
+        title="CasTemp / Beyond Leakage: temporal random walks with an inter-cascade competition graph",
+        venue="preprint (arXiv 2510.25348)",
+        repo="https://github.com/Lucas-PJ/CasTemp-ALGO",
+        paper="https://arxiv.org/abs/2510.25348",
+        entry="main.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "ITS INPUT IS ITS OWN PREPROCESSED ARTEFACT, NOT A CASCADE FILE. "
+            "Verified by reading `process_dataset.py` and `dataset_process/"
+            "data_loader.py` at HEAD: `main.py` reads six files from "
+            "`./processed_data/{dataset}/` — `{d}_node_feat.npy`, "
+            "`{d}_item_feat_emb.npy`, `{d}_item_forward_counts.csv`, "
+            "`{d}_item_price_delta.csv` and per-split `{d}_*_forward_relations.csv` "
+            "— of which the two `.npy` files are LEARNED EMBEDDINGS produced by a "
+            "pipeline the repo does not ship for an arbitrary corpus, and "
+            "`item_price_delta` is a Taoke-specific auxiliary signal with no "
+            "analogue in Weibo, Twitter or APS. Writing plausible embeddings "
+            "ourselves would make the row a measurement of OUR feature choice "
+            "rather than of their method. TO UNBLOCK: reimplement "
+            "`process_dataset.py`'s embedding stage from its own code, which is "
+            "tractable but is a reimplementation rather than an adapter."
+        ),
+        notes=(
+            "(key) The paper 5.3 and 8.3 both lean on, and the source of the single "
+            "most transferable finding in that file: the field's standard 70/15/15 "
+            "random-over-cascades split LEAKS, and under its 1:1:1 chronological fix "
+            "CasFlow and CasDO fall BELOW a plain MLP while the whole field's APS "
+            "band moves from 1.19-2.11 to 2.28-4.82 [verified, Table 4]. **We "
+            "implement its protocol rather than its model** — `--cp-split "
+            "chronological` IS its fix, and it is our default from the first commit "
+            "for exactly that reason, so the finding is inherited even though the "
+            "code is not. Its `Taoke.zip` IS wired, as `data/datasets/taoke.py`. "
+            "Warning: 11 records that this is an arXiv preprint carrying an ACM "
+            "template with placeholder conference metadata, not yet independently "
+            "replicated, and that its leakage claim deserves a second source before "
+            "being treated as settled."
+        ),
+    ),
+    "deephawkes": ExternalBaseline(
+        name="deephawkes",
+        kind=learned,
+        title="DeepHawkes: bridging prediction and understanding of information cascades",
+        venue="CIKM 2017",
+        repo="https://github.com/CaoQi92/DeepHawkes",
+        paper="https://dl.acm.org/doi/10.1145/3132847.3132973",
+        entry="deep_learning/run_sparse.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "PYTHON 2 AND TENSORFLOW 1, both verified by reading the repo at HEAD. "
+            "`deep_learning/config.py` uses py2 print STATEMENTS throughout "
+            "(`print \"observation time\",observation`), so the module does not parse "
+            "under Python 3 at all; `deep_learning/model_sparse.py` is built on "
+            "`tf.placeholder`, which TF 2 removed. Python 2.7 is EOL and has no "
+            "wheels for TF on any current platform, so a per-baseline venv cannot be "
+            "created for it — the constraint is the interpreter, not an adapter. TO "
+            "UNBLOCK: a full py2->py3 port plus a `tf.compat.v1` rewrite, which is "
+            "a reimplementation."
+        ),
+        notes=(
+            "(key) The most-reproduced baseline in this literature and the "
+            "interpretability-vs-accuracy bridge: it injects the three Hawkes "
+            "ingredients (user influence, self-excitation, time decay) into a GRU "
+            "over diffusion PATHS. Its release is also the origin of Weibo-A, the "
+            "corpus 6.4 lists first and the one carrying almost every published "
+            "number — so its data reaches us through "
+            "`data/datasets/casflow_weibo.py` even though its code does not. "
+            "CasFT's re-run puts it at MSLE 2.8741 on Weibo 0.5h against CasFlow's "
+            "2.3370 [verified, 5.1]. Our `hawkes` and `hawkes_hybrid` implement the "
+            "same generative ingredients without the GRU."
+        ),
+    ),
+    "deepcas": ExternalBaseline(
+        name="deepcas",
+        kind=learned,
+        title="DeepCas: an end-to-end predictor of information cascades",
+        venue="WWW 2017",
+        repo="https://github.com/chengli-um/DeepCas",
+        paper="https://arxiv.org/abs/1611.05373",
+        entry="tensorflow/run.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "PYTHON 2 AND TENSORFLOW 1, verified at HEAD: `tensorflow/run.py` ends "
+            "in py2 print STATEMENTS (`print \"Test Loss:\", best_test_loss`) and "
+            "`tensorflow/model.py` is placeholder-based TF 1. The repo's second "
+            "implementation is TORCH7 LUA (`torch/main/params.lua`), which needs an "
+            "interpreter that has been unmaintained since 2017. Same interpreter-"
+            "level blocker as `deephawkes`."
+        ),
+        notes=(
+            "(key) The founding deep model of this literature — random walks over "
+            "the cascade graph, bi-GRU with attention, regressing log dP — and the "
+            "paper that killed hand-crafted features as the default. CasFT's re-run "
+            "puts it at MSLE 4.6460 on Weibo 0.5h [verified, 5.1], which is WORSE "
+            "than DeepHawkes and only slightly better than the feature baseline: "
+            "3.1's point that feature models remain competitive is visible in that "
+            "column."
+        ),
+    ),
+    "cascn": ExternalBaseline(
+        name="cascn",
+        kind=learned,
+        title="CasCN: recurrent cascades convolutional networks",
+        venue="ICDE 2019",
+        repo="https://github.com/ChenNed/CasCN",
+        paper="https://par.nsf.gov/servlets/purl/10122600",
+        entry="model/run_graph_sequence.py",
+        task="cascade_prediction",
+        status="needs_setup",
+        requirements=None,
+        pip_packages=("tensorflow", "networkx", "scipy", "numpy", "six"),
+        # Two patches, and NEITHER is the one an earlier reading of this repo
+        # assumed. (1) `preprocessing/utils.py` does not parse under Python 3
+        # because of a genuine INDENTATION BUG at line 118-122 — an `if` whose body
+        # is over-indented and whose `else` is then mismatched — not because of any
+        # py2 construct; every other file in the repo parses cleanly. (2) The TF1
+        # API is shimmed to `compat.v1` exactly as `coupledgnn`'s is.
+        patches=[
+            (
+                "preprocessing/utils.py",
+                "            if len(observation_path)>100:\n"
+                "                    discard_cascade_id[cascadeID] = 1\n"
+                "                    continue\n"
+                "                else:\n"
+                "                    discard_cascade_id[cascadeID]=0\n",
+                "            if len(observation_path)>100:\n"
+                "                discard_cascade_id[cascadeID] = 1\n"
+                "                continue\n"
+                "            else:\n"
+                "                discard_cascade_id[cascadeID]=0\n",
+            ),
+            (
+                "model/model_sparse_graph_signal.py",
+                "import tensorflow as tf",
+                "import tensorflow.compat.v1 as tf\ntf.disable_v2_behavior()",
+            ),
+            (
+                "model/run_graph_sequence.py",
+                "import tensorflow as tf",
+                "import tensorflow.compat.v1 as tf\ntf.disable_v2_behavior()",
+            ),
+        ],
+        export=partial(_prediction_export, driver="cascn_driver.py"),
+        command=_prediction_command,
+        parse_seeds=_prediction_parse,
+        notes=(
+            "The first method in this literature to use both structure and time "
+            "properly: a cascade as a SEQUENCE of sub-cascade graphs, a GCN per "
+            "snapshot and an LSTM across them. **The row worth running rather than "
+            "citing**, because 5.3 shows it is where the leak-free split changes a "
+            "RANKING rather than a level: under the field's own leaky protocol it "
+            "sits mid-pack (MSLE 2.7931 on Weibo 0.5h, behind CasFlow's 2.3370), and "
+            "under CasTemp's fix it is the BEST of the six re-run baselines on "
+            "Twitter (1.206) and second on APS [verified, 5.3 Table 4]. Run it under "
+            "both --cp-split values. Its own preprocessing is reused rather than "
+            "reimplemented — it reads exactly the per-split line format "
+            "`casflow_driver.py` writes, and `caslaplacian."
+            "calculate_scaled_laplacian_dir` is the method's actual input. Warning: "
+            "its preprocessing DISCARDS any cascade with more than 100 observed "
+            "participants, so --cp-truncate above 100 silently shrinks this arm's "
+            "pool relative to every other one; the driver truncates to match and the "
+            "row's cascade count says so. Its `num_nodes` flag is a PER-CASCADE "
+            "bound of 100, not the global graph — the dense "
+            "`[batch, steps, num_nodes, num_nodes]` placeholder is 100x100 per step."
+        ),
+    ),
+    "mucas": ExternalBaseline(
+        name="mucas",
+        kind=learned,
+        title="MUCas: multi-scale graph capsule networks with influence attention",
+        venue="IJCAI 2022",
+        repo="https://github.com/ChenNed/MUCas",
+        paper="https://doi.org/10.24963/ijcai.2022/300",
+        entry="model/mucas.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "ELEVEN INPUT ARRAYS, not two. Its TF1 API is the same `compat.v1` shim "
+            "`cascn` and `coupledgnn` now use, and its sources parse cleanly under "
+            "Python 3, so neither is the blocker — `model/run_model.py`'s "
+            "`get_batch(id_list, x, support, adj, pos, y, y_c, time_interval, k, "
+            "rnn_index, max_order, order_level, ...)` is. Beyond the cascade "
+            "snapshots it needs sinusoidal POSITION encodings, per-cascade Chebyshev "
+            "K-ORDER tensors, a randomized-edge-sampled support, and a second "
+            "OUTBREAK-CLASSIFICATION label `y_c` that our contract has no analogue "
+            "for. Its `utils/gen_model_input.py` builds all of them and IS shipped "
+            "(unlike CasTemp's embedding stage), so this is wireable by the same "
+            "route `cascn` took — write the per-split line files, run the repo's own "
+            "`gen_model_input`, then its model. It is a driver's worth of work "
+            "rather than a structural blocker, and it is the next one to do."
+        ),
+        notes=(
+            "The graph-capsule entry, with directional / dynamic / position-aware "
+            "cascade encoding. Reports on the Weibo-A / Twitter-A / APS-A triple "
+            "(7) so it would be directly comparable to `casflow` if it ran; it "
+            "appears in this file only through other papers' comparison tables."
+        ),
+    ),
+    "coupledgnn": ExternalBaseline(
+        name="coupledgnn",
+        kind=learned,
+        title="CoupledGNN: popularity prediction with coupled graph neural networks",
+        venue="WSDM 2020",
+        repo="https://github.com/CaoQi92/CoupledGNN",
+        paper="https://arxiv.org/abs/1906.09032",
+        entry="train.py",
+        task="cascade_prediction",
+        status="needs_setup",
+        # No requirements file; the README pins Python 2.7.5 and TF 1.14. Its
+        # sources DO parse under Python 3 (the prints are function-style and
+        # `utils.load_data` already branches on `sys.version_info`), so the
+        # interpreter is not the blocker and only the TF1 API is — which the
+        # patches below shim rather than port.
+        requirements=None,
+        pip_packages=("tensorflow", "networkx", "scipy", "numpy"),
+        # `tf.placeholder`, `tf.flags` and `tf.set_random_seed` were all removed in
+        # TF 2. `compat.v1` still ships every one of them, so the edit is mechanical
+        # and has no behavioural content — the alternative was a Python 3.7 venv
+        # with `tensorflow==1.15`, which has no wheel on current platforms.
+        patches=[
+            (
+                "models.py",
+                "import tensorflow as tf",
+                "import tensorflow.compat.v1 as tf\ntf.disable_v2_behavior()",
+            ),
+            (
+                "layers.py",
+                "import tensorflow as tf",
+                "import tensorflow.compat.v1 as tf\ntf.disable_v2_behavior()",
+            ),
+            (
+                "train.py",
+                "import tensorflow as tf",
+                "import tensorflow.compat.v1 as tf\ntf.disable_v2_behavior()",
+            ),
+        ],
+        export=partial(_prediction_export, driver="coupledgnn_driver.py"),
+        command=_prediction_command,
+        parse_seeds=_prediction_parse,
+        notes=(
+            "(key) **The closest published method to our own formulation**, which is "
+            "why it is wired despite being the hardest of the three. Two COUPLED "
+            "GNNs — one propagating node ACTIVATION STATE, one propagating "
+            "INFLUENCE, iterated over K layers to imitate the cascading effect on "
+            "the global graph — is structurally what our structured head does with "
+            "`infected` and `frontier`, so a difference in this row is a statement "
+            "about the architecture rather than about a feature pipeline. It is also "
+            "the only entry here whose protocol withholds TIMESTAMPS entirely "
+            "(research/cascade_prediction.md 5.5): it sees the early adopter SET "
+            "plus the global graph and nothing else, which is the protocol our own "
+            "`neighborhood_size` and `degree_scaled` rows sit under, and its "
+            "published numbers are MRSE / mRSE / MAPE / WroPerc rather than MSLE for "
+            "that reason. **Warning: two of its inputs are OURS, not the authors'.** "
+            "`load_data` needs a 6-dimensional per-node feature vector and a 32-d "
+            "`.emb_32` embedding, and the repo ships a derivation for neither; the "
+            "driver computes six standard graph statistics (matching the shape of "
+            "the shipped example, which is `[degree, 5 normalized floats]`) and a "
+            "spectral embedding in place of the DeepWalk one its own comment names. "
+            "Neither is the method's contribution, but a reader comparing this row "
+            "against its Table 1 has to know. That table is on its own Weibo-D "
+            "subset (23,681 users / 3,228 cascades, sampled down from 1.78M — the "
+            "move `--cp-max-nodes` reproduces) and is not comparable to a row "
+            "produced here in any case."
+        ),
+        extra_env={},
+    ),
+    "seismic": ExternalBaseline(
+        name="seismic",
+        kind=classical,
+        title="SEISMIC: self-exciting point process with time-varying infectiousness",
+        venue="KDD 2015",
+        repo="https://cran.r-project.org/package=seismic",
+        paper="https://arxiv.org/abs/1506.02594",
+        entry="R package `seismic`",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "IT IS AN R PACKAGE. The reference implementation is on CRAN and there "
+            "is no Python release; `baselines/setup_baselines.py` creates per-"
+            "baseline venvs with `python -m venv`, which cannot install an R "
+            "library, and adding an R toolchain for one baseline would be the first "
+            "of its kind here. Our own `seismic` in "
+            "`coding_agent/tools/prediction_algorithms.py` implements the same "
+            "closed-form estimator and the same supercritical DECLINE, with the one "
+            "stated deviation that the infectiousness is estimated from binned "
+            "waves rather than exact event times."
+        ),
+        notes=(
+            "(key) The generative baseline every paper in 5 prints, and the one "
+            "whose FAILURE MODE matters most to us: it produces no prediction at "
+            "all for supercritical cascades (507 of ~30K Tweet-1Mo at five minutes, "
+            "1,022 of ~20K News) because the branching factor exceeds 1 and the "
+            "expected size diverges [verified, 5.4]. 3.2 records that this is the "
+            "same runaway our `ens_count_bias` metric was built to catch and the "
+            "same reason our structured head gates on `frontier_u`. Its own "
+            "breakout coverage is 78 of the top-100 most-reshared tweets identified "
+            "within ten minutes [verified]."
+        ),
+    ),
+    "featuredriven_hawkes": ExternalBaseline(
+        name="featuredriven_hawkes",
+        kind=classical,
+        title="Feature-driven and point-process approaches for popularity prediction",
+        venue="CIKM 2016",
+        repo="https://github.com/s-mishra/featuredriven-hawkes",
+        paper="https://arxiv.org/abs/1608.04862",
+        entry="code/rscripts/marked_hawkes.R",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "R, plus a Jupyter notebook. Verified by listing the repo at HEAD: the "
+            "only executable code is `code/rscripts/marked_hawkes.R` and "
+            "`simulation.R`, with `code/marked_hawkes_point_process.ipynb` as a "
+            "tutorial around them — there is no Python entry point at all. Same "
+            "R-toolchain blocker as `seismic`. Our `hawkes` and `hawkes_hybrid` "
+            "implement its two rows, with the stated deviation that the fit is "
+            "moment-matched on binned waves rather than MLE on exact times."
+        ),
+        notes=(
+            "(key) Its Table 2 is the ONLY place in this literature where a "
+            "generative model's failure COUNT is published beside its error, which "
+            "is why 8.4 singles it out: Hawkes reaches ARE 0.36 against SEISMIC's "
+            "2.61 on Tweet-1Mo at five minutes AND fails on 302 cascades against "
+            "SEISMIC's 507 — better on both axes [verified, 5.4]. Its hybrid row "
+            "(0.17 / 0.15 / 0.11 against pure Hawkes 0.27 / 0.22 / 0.17) is "
+            "structurally OUR `structured_residual` head: a learned corrective layer "
+            "on a generative core (3.2)."
+        ),
+    ),
+    "hip": ExternalBaseline(
+        name="hip",
+        kind=classical,
+        title="HIP: Hawkes Intensity Process with exogenous promotion",
+        venue="WWW 2017",
+        repo="https://github.com/andrei-rizoiu/hip-popularity",
+        paper="https://arxiv.org/abs/1602.06033",
+        entry="pyhip.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "IT TAKES AN EXOGENOUS STIMULUS SERIES OUR CASCADES DO NOT CARRY. "
+            "Verified by reading `pyhip.py` and `pyhip_example.py` at HEAD: "
+            "`HIP.initial(daily_share, daily_view, num_train, num_test, "
+            "num_initialization)` needs TWO aligned series — an external promotion "
+            "signal and the response it drives — and that is the whole contribution "
+            "of the method. None of Weibo, Twitter, APS, Digg, MemeTracker or Taoke "
+            "publishes a separate stimulus series, so a run here would have to "
+            "fabricate one and would be measuring our fabrication. (`pyhip_example.py` "
+            "is separately py2 — `import cPickle` — but that is the smaller "
+            "problem.) TO UNBLOCK: a corpus with a paired exogenous signal; HIP's "
+            "own is YouTube share counts against view counts."
+        ),
+        notes=(
+            "The one method in 3.2 that models EXOGENOUS arrivals — search, front "
+            "pages, off-platform sharing — which 2.2 names as one of three specific "
+            "mechanisms by which real cascades violate our structured head's "
+            "composition rule (a node adopts with no infected in-neighbour at all). "
+            "That makes it the most diagnostically interesting row in the pool and "
+            "the one we can least honestly run. Our `hip` implements its power-law "
+            "memory kernel WITHOUT the exogenous term and says so."
+        ),
+    ),
+    "topolstm": ExternalBaseline(
+        name="topolstm",
+        kind=learned,
+        title="Topo-LSTM: topological recurrent network for diffusion prediction",
+        venue="ICDM 2017",
+        repo="https://github.com/vwz/topolstm",
+        paper="https://arxiv.org/abs/1711.10162",
+        entry="code/main.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "PYTHON 2. Verified at HEAD: `code/data_utils.py` uses py2 print "
+            "STATEMENTS (`print 'pickle exists.'`), so the module does not parse "
+            "under Python 3. It is also MICROSCOPIC rather than macroscopic — it "
+            "ranks the NEXT ADOPTER and is scored with Hits@k / MAP@k (1.2), not a "
+            "popularity — so even ported it would answer a different question than "
+            "`predict()` asks and would need its own contract and its own metric "
+            "layer."
+        ),
+        notes=(
+            "The source of 6.2's Digg / Twitter-URL / Memes rows, and therefore of "
+            "the counts `data/datasets/digg_cascades.py` and "
+            "`data/datasets/memetracker.py` are measured against. Its Table II is "
+            "where Digg 2009's 279,632 / 2,617,993 / 3,553 comes from [verified]. "
+            "Its structural idea — an LSTM whose gates are wired to the cascade's "
+            "dynamic DAG rather than to a linear sequence — seeded CasCN."
+        ),
+    ),
+    "deepinf": ExternalBaseline(
+        name="deepinf",
+        kind=learned,
+        title="DeepInf: social influence prediction with deep learning",
+        venue="KDD 2018",
+        repo="https://github.com/xptree/DeepInf",
+        paper="https://arxiv.org/abs/1807.05560",
+        entry="src/deepinf.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "IT ANSWERS A DIFFERENT QUESTION. Verified by reading `src/` at HEAD: it "
+            "is a BINARY classifier over (user, cascade) pairs — 'will `v` adopt', "
+            "scored with AUC and F1 (1.2) — built on each user's r-hop ego network "
+            "plus its active-neighbour states. There is no popularity to read back, "
+            "so nothing our `predict()` contract or `popularity_metrics` can score. "
+            "This is a category difference, not a missing adapter. Its code is "
+            "PyTorch and Python 3 and would run fine; the output type is the blocker."
+        ),
+        notes=(
+            "(key) Registered rather than omitted because it is the purest "
+            "NODE-LEVEL analogue of our own head anywhere in this folder: given a "
+            "node's neighbourhood and which neighbours are active, predict whether "
+            "it activates. That is exactly `p_new(v)`, and a one-step accuracy "
+            "comparison against our structured head on real cascades would be a "
+            "genuinely interesting experiment that neither this task's contract nor "
+            "its metric layer currently supports. Worth its own microscopic task "
+            "entry rather than a forced fit into this one (1.2)."
+        ),
+    ),
+    "forest": ExternalBaseline(
+        name="forest",
+        kind=learned,
+        title="FOREST: multi-scale reinforced diffusion prediction",
+        venue="IJCAI 2019",
+        repo="https://github.com/albertyang33/FOREST",
+        paper="https://www.ijcai.org/proceedings/2019/560",
+        entry="train.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "MICROSCOPIC, same category difference as `topolstm` and `deepinf`: it "
+            "decodes the NEXT ADOPTER sequentially and is scored with Hits@k / "
+            "MAP@k. Its macroscopic size reward is an RL SIGNAL inside training, not "
+            "an output — verified by reading `train.py` and `model.py` at HEAD — so "
+            "there is still no per-cascade popularity to read back. The code is "
+            "PyTorch and Python 3; the output type is the blocker."
+        ),
+        notes=(
+            "The one microscopic method that also optimizes a macroscopic objective, "
+            "which makes it the natural first entry if a next-adopter task is ever "
+            "added. Reports on 6.2's Digg / Twitter-URL / Memes triple (7), all "
+            "three of which we now load."
+        ),
+    ),
+    "ms_hgat": ExternalBaseline(
+        name="ms_hgat",
+        kind=learned,
+        title="MS-HGAT: memory-enhanced sequential hypergraph attention",
+        venue="AAAI 2022",
+        repo="https://github.com/slingling/MS-HGAT",
+        paper="https://ojs.aaai.org/index.php/AAAI/article/view/20334",
+        entry="run.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "MICROSCOPIC, same as `topolstm` and `forest`. Additionally, CTCP's own "
+            "Table 2 records it as OOM on Weibo and APS at that paper's scale "
+            "[verified, 5.2] — so even with a contract it would not complete on two "
+            "of the three standard corpora."
+        ),
+        notes=(
+            "The hypergraph entry: user-cascade interaction as a hyperedge, with a "
+            "memory of past cascades. Present in 5.2's table as the only row with "
+            "OOM cells, which is itself the useful datum — it is the scale ceiling "
+            "of the microscopic line."
+        ),
+    ),
+    "casseqgcn": ExternalBaseline(
+        name="casseqgcn",
+        kind=learned,
+        title="CasSeqGCN: combining network structure and temporal sequence",
+        venue="ESWA 2021",
+        repo="https://github.com/MrYansong/CasSeqGCN",
+        paper="https://arxiv.org/abs/2110.06836",
+        entry="main.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "ITS INPUT IS AN UNDOCUMENTED PER-SNAPSHOT JSON BUNDLE SHIPPED AS A "
+            ".RAR. Verified at HEAD: `param_parser.py` takes `--graph-folder` with a "
+            "fixed `--number-of-nodes` (200 for its synthetic data, 100 for "
+            "Weibo/Digg) and `--sub_size`, and the only example data is "
+            "`synthetic_data_V2.rar` — an archive format `zipfile`/`tarfile` cannot "
+            "read and which needs a non-stdlib `unrar` binary. The per-graph JSON "
+            "schema is not documented anywhere in the repo, so an exporter would be "
+            "reverse-engineered from an archive we cannot open. The code itself is "
+            "PyTorch and Python 3."
+        ),
+        notes=(
+            "A cheaper CasCN: the node STATE varies across snapshots rather than "
+            "the structure, which is a modelling simplification worth comparing "
+            "against ours — our own state is exactly two channels varying over a "
+            "fixed graph. Not in any of 5's comparison tables."
+        ),
+    ),
+    "ccasgnn": ExternalBaseline(
+        name="ccasgnn",
+        kind=learned,
+        title="CCasGNN: collaborative cascade prediction with graph neural networks",
+        venue="CSCWD 2022",
+        repo="https://github.com/MrYansong/CCasGNN",
+        paper="https://arxiv.org/abs/2112.03644",
+        entry="main.py",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "The same undocumented per-snapshot JSON input as its sibling "
+            "`casseqgcn` (same authors, same `param_parser.py` shape), with no "
+            "example data shipped at all. Same blocker, one step worse."
+        ),
+        notes=(
+            "GAT and GCN with positional encoding, fused in sequence. Catalogued "
+            "from 4.1; not in any published comparison table this review could "
+            "extract."
+        ),
+    ),
+    "casft": ExternalBaseline(
+        name="casft",
+        kind=learned,
+        title="CasFT: neural-ODE dynamic cues with a conditional diffusion decoder",
+        venue="AAAI 2025",
+        repo="no public release located",
+        paper="https://arxiv.org/abs/2409.16619",
+        entry="none",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "NO PUBLIC CODE. Searched GitHub and the paper's own text; no release "
+            "was located [verified, 2026-08-05]. Registered rather than omitted "
+            "because it is the current best method on the standard protocol and a "
+            "reader will look for it."
+        ),
+        notes=(
+            "(key) The source of 5.1, which is the widest baseline set in this "
+            "literature and the only recent result table that survives "
+            "`pdftotext` — every published number our report prints as a context "
+            "marker comes from its Table 2. Its own rows are MSLE 2.1728 (Weibo "
+            "0.5h) / 3.8546 (Twitter 1d) / 1.2468 (APS 3y) [verified]. Warning: it "
+            "regresses TOTAL popularity (its Eq. 26) while CasFlow regresses the "
+            "INCREMENT, and 5.1 prints both in one table — 5.7 difference 3, and "
+            "the reason `--cp-target` exists."
+        ),
+    ),
+    "casdo": ExternalBaseline(
+        name="casdo",
+        kind=learned,
+        title="CasDO: probabilistic diffusion denoiser with a neural ODE",
+        venue="TKDE 2024",
+        repo="no public release located",
+        paper="https://doi.org/10.1109/TKDE.2024.3465241",
+        entry="none",
+        task="cascade_prediction",
+        status="blocked",
+        blocker=(
+            "NO PUBLIC CODE that this review could locate, despite being a 2024 "
+            "TKDE paper and despite CasTemp having re-run it — 11 records that "
+            "CasTemp presumably obtained it privately. GitHub search returned "
+            "nothing [verified]."
+        ),
+        notes=(
+            "Registered for one reason, and it is a cautionary one: under CasTemp's "
+            "leak-free split CasDO is the WORST method on all four corpora and falls "
+            "below a plain MLP on the diagnostic scenarios [verified, 5.3], despite "
+            "being the most recent published architecture in that comparison. 8.3 is "
+            "the lesson and this row is the evidence."
         ),
     ),
     "greedywalk": ExternalBaseline(

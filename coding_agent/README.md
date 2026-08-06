@@ -671,3 +671,25 @@ Timing semantics: `cost.rollout_seconds` vs `mc_rollout_seconds` is the WM-vs-MC
 - `--outer-iters 1` disables the repair loop; ≥3 recommended for any live model (the first script is frequently imperfect, and the traceback-as-feedback path is what fixes it).
 - The `.env` at the repo root provides `GATEWAY_BASE_URL`, `CLAUDE_GATEWAY_TOKEN`, `CHATGPT_GATEWAY_TOKEN` (gitignored; `chmod 600`).
 - Old results JSONs archive scripts written against the former `Action` alias; the exec namespace now exposes `ActionOp` — re-generated scripts are unaffected, but replaying archived pre-rename scripts verbatim would fail.
+
+---
+
+## Forecasting: the fourth contract (`--task cascade_prediction`)
+
+Three contracts above this one produce a NODE SET of some kind — a plan, a source set, a trajectory. This one produces a **number**, and it is the only task here whose reward MINIMIZES for a reason unrelated to containment.
+
+```python
+def predict(self, graph, observation, horizon) -> float | None
+```
+
+The popularity a REAL logged cascade will have reached by `horizon`, given its first `observation.observed_steps` timesteps. `None` DECLINES, which is a legitimate answer rather than an error: `research/cascade_prediction.md` §8.4 records that generative models refuse to score supercritical cascades (SEISMIC produced no prediction for 1,022 of ~20K News cascades at five minutes) and that papers reporting the mean over scoreable cascades alone "silently favour the model that gives up more often". Declines land in `n_failed`, never in the error — and `call_strategy(..., allow_none=True)` is the one place in this repo where a `None` return is not a missing implementation.
+
+**The one new primitive is `self.forecast_marginals(adopters, frontier, steps)`**, with `self.expected_popularity(...)` derived from the same call rather than being a second oracle. Its four bindings ARE conditions 3–6, exactly as `predict_marginals` and `step_marginals` are for the two inverse tasks — and here that is the ONLY thing that varies down the ladder, because §2.1's `a_t = NULL` empties the action space entirely. One call unrolls `steps` timesteps across `--cp-forecast-samples` sampled realizations, so an `@monte_carlo` arm pays `steps × samples × mc_runs` real episodes per call and a `@world_model` arm pays that many matmuls; `kernel_calls_per_instance` is where that shows.
+
+Pass `observation.frontier` rather than the whole adopter set: someone who adopted five steps ago has already had their chance to spread, and seeding a forward model from all of them over-predicts badly.
+
+**`@native` may win outright.** §3.1 records CasFlow's own ablation finding that feature models "in some cases even beat deep learning models", and §5.1 puts Feature-based at MSLE 1.9881 on APS-3y against CasFlow's 1.4370 — closer than a decade of architecture would suggest. That arm gets `cascade_features(graph, observation)`, which is Cheng et al.'s five classes minus content (our corpora carry no text), and the single most predictive quantity in this literature is in it: `rate_second_half`, the adoption rate in the SECOND HALF of the observation window, at 0.73 accuracy against 0.65 for the best structural feature.
+
+Scored mode gives the agent `growth_factor(features, graph, observation)` — a multiplier on the observed popularity — and that is the tightest of the four scored harnesses: Szabo & Huberman's founding result is that `log P(t_p)` is near-linear in `log P(t_o)`, i.e. that the whole problem IS a multiplier, so the constrained space is exactly the one this literature's feature line occupies rather than a subset of it.
+
+Two floors travel with every result and both are stronger than they sound. Under a LOG-space error the geometric mean of the training sizes is the minimizer over instance-blind rules (`trivial_predictor_error`), and predicting the already-observed count unchanged is right whenever a cascade is finished — which most are (`persistence_error`). An arm that does not clear both has learned the corpus's size distribution rather than anything about the instance. `coding_agent/check_cascade_prediction.py` asserts that and seven other properties.

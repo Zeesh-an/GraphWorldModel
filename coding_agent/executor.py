@@ -22,6 +22,7 @@ from coding_agent.tools import (
     dismantling_algorithms,
     immunization_algorithms,
     localization_algorithms,
+    prediction_algorithms,
     primitives,
     reconstruction_algorithms,
 )
@@ -183,6 +184,24 @@ if _unknown_blocked:
     )
 
 
+# Kernel-heavy POPULARITY predictors, on the same terms as every other pool's:
+# `mc_forward` unrolls the forward model `steps * forecast_samples` times per
+# cascade, and a generated program already HAS the metered oracle
+# (`self.forecast_marginals`) — so blocking it costs nothing and is the only way
+# that cost lands in the arm's own `kernel_calls`, which is the axis
+# research/cascade_prediction.md §2.4 says the whole comparison is read on.
+mc_blocked_prediction = prediction_algorithms.mc_prediction_algorithms
+
+_unknown_blocked = set(mc_blocked_prediction) - set(
+    prediction_algorithms.prediction_algorithms
+)
+if _unknown_blocked:
+    raise ValueError(
+        f"mc_prediction_algorithms names {sorted(_unknown_blocked)}, which are "
+        f"not in prediction_algorithms; fix the list or the rename"
+    )
+
+
 class StrategyError(RuntimeError):
     """A generated script failed to parse, execute, or expose a valid Strategy."""
 
@@ -326,6 +345,18 @@ def _blocked_decoder(name: str, *_args, **_kwargs) -> None:
     )
 
 
+def _blocked_predictor(name: str, *_args, **_kwargs) -> None:
+    raise StrategyError(
+        f"prediction_algorithms.{name} is not available: it unrolls the forward "
+        f"model steps x forecast_samples times per cascade, which dominates wall "
+        f"clock. Blocked: {', '.join(mc_blocked_prediction)}. You already have the "
+        f"metered oracle — call `self.forecast_marginals(adopters, frontier, steps)` "
+        f"or `self.expected_popularity(...)` and write the estimate around it "
+        f"yourself, which is also the only way its cost lands in this arm's "
+        f"kernel-call count."
+    )
+
+
 def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -> dict:
     if strategy_mode == "scored":
         # No algorithms module: the agent must write its own scoring logic
@@ -344,6 +375,10 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
             "GraphInfo": GraphInfo,
             "ScoredStrategy": ScoredStrategy,
             "primitives": SimpleNamespace(**allowed),
+            # The one library object scored mode DOES get, because the fixed
+            # `predict()` harness already calls it: a growth_factor() rule that
+            # could not read the features would be searching a space of constants.
+            "cascade_features": prediction_algorithms.cascade_features,
             "__builtins__": __builtins__,
         }
 
@@ -458,6 +493,22 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
                 for name, function in reconstruction_algorithms.reconstruction_algorithms.items()
             }
         ),
+        # POPULARITY predictors for cascade prediction, on the same terms again.
+        # `cascade_features` rides along because it is the shared feature extractor
+        # every §3.1 method here is defined over — Cheng et al.'s five classes, minus
+        # content — and the scored-mode harness takes its output directly, so hiding
+        # it would ask the model to reinvent the one thing that paper actually found.
+        "prediction_algorithms": SimpleNamespace(
+            **{
+                name: (
+                    function
+                    if allow_mc_algorithms or name not in mc_blocked_prediction
+                    else partial(_blocked_predictor, name)
+                )
+                for name, function in prediction_algorithms.prediction_algorithms.items()
+            }
+        ),
+        "cascade_features": prediction_algorithms.cascade_features,
         "primitives": primitives,
         # Containment helpers a canned dismantling baseline needs (removal_plan
         # filters the outbreak's sources out of a published algorithm's output).
@@ -555,24 +606,32 @@ def build_strategy(
     return strategy
 
 
-def call_strategy(method: Callable, *args) -> object:
+def call_strategy(method: Callable, *args, allow_none: bool = False) -> object:
     """
     Invoke generated-strategy code, converting any runtime failure into a
     StrategyError repair turn.
 
-    A `None` return is caught here rather than downstream: every entry point
-    (`plan_horizon`, `act`, and the scored hooks) must return a list, and the
+    A `None` return is caught here rather than downstream: `plan_horizon`, `act`,
+    `localize`, `reconstruct` and the scored hooks all must return a value, and the
     commonest way to get None is a model that implemented the wrong method for the
     task's own harness — `plan_horizon` when the method wanted `act`, or an `act`
     that falls off the end without returning. Left alone it surfaces as
     `TypeError: 'NoneType' object is not iterable` from inside validation, which
     is an opaque traceback instead of a turn the model can act on.
+
+    `allow_none` is the one exception, and it exists for exactly one contract:
+    `predict()` returns None to DECLINE scoring a cascade, which is a legitimate
+    answer rather than a failure (research/cascade_prediction.md §8.4 — a
+    generative model whose fit diverges on a supercritical cascade produces no
+    estimate, and reporting the mean over scoreable cascades alone "silently
+    favours the model that gives up more often"). Declines are COUNTED in
+    `n_failed`, never scored as errors.
     """
     try:
         with _time_limit(strategy_timeout_seconds):
             result = method(*args)
 
-        if result is None:
+        if result is None and not allow_none:
             raise StrategyError(
                 f"{getattr(method, '__name__', 'the strategy method')}() returned "
                 f"None; it must return a list of ActionOp bags. The usual cause is "

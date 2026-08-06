@@ -301,6 +301,23 @@ class GenConfig:
     outbreak_pct: float = 1.0
     outbreak_selectors: tuple = ("random", "degree", "pagerank")
     immunizer_selectors: tuple = default_immunizer_selectors
+    # Cascade prediction: REPLAY a real logged corpus instead of simulating. The one
+    # flag here that changes where the data comes from at all — when it is set,
+    # `run_generation` hands the whole stage to `data/wm_cascades.py` and no
+    # simulator runs. research/cascade_prediction.md §9.4: these corpora are the
+    # concrete, downloadable form of the "logged trajectories" our methodology note
+    # asserts exist, and §2.2 is why replaying them rather than NDlib is the point.
+    cascade_corpus: bool = False
+    cp_observation: int = 0
+    cp_horizon: int = 0
+    cp_step: int = 1
+    cp_min_size: int = 10
+    cp_truncate: int = 100
+    cp_split: str = "chronological"
+    cp_target: str = "increment"
+    cp_graph: str = "paths"
+    cp_max_cascades: int = 0
+    cp_max_nodes: int = 0
     ba_m: int = 3
     ws_k: int = 6
     ws_p: float = 0.1
@@ -825,6 +842,37 @@ def _competitive_algorithms(config: GenConfig) -> list[str]:
 
 
 def run_generation(config: GenConfig) -> dict[str, object]:
+    # A REPLAYED corpus never touches this function's simulator loop: there is no
+    # seed selector, no injection, no counterfactual fork and no MC marginal,
+    # because the cascade happened once and we are reading it back. Delegating
+    # rather than branching keeps the two paths honestly separate — a reader of
+    # either one can see which artifacts it writes without tracing a flag through
+    # 300 lines (research/cascade_prediction.md §2.4).
+    if config.cascade_corpus:
+        from data.wm_cascades import ReplayConfig, replay_corpus
+
+        return replay_corpus(
+            ReplayConfig(
+                dataset=config.dataset,
+                out_dir=config.out_dir,
+                observation=config.cp_observation,
+                horizon=config.cp_horizon,
+                step=config.cp_step,
+                gen_horizon=config.horizon,
+                min_observed=config.cp_min_size,
+                truncate=config.cp_truncate,
+                split=config.cp_split,
+                target=config.cp_target,
+                graph=config.cp_graph,
+                max_cascades=config.cp_max_cascades,
+                max_nodes=config.cp_max_nodes,
+                prob_model=config.prob_model,
+                uniform_p=config.uniform_p,
+                seed=config.seed,
+                diffusion_models=tuple(config.models),
+            )
+        )
+
     generation_start = time.perf_counter()
     out_dir = Path(config.out_dir)
     os.makedirs(out_dir, exist_ok=True)

@@ -259,11 +259,18 @@ def run_external_baseline(
         )
 
     if instances is not None:
-        # A DECODER's instances carry whole masked histories rather than endpoints,
-        # and what comes back is a trajectory per instance rather than a source
-        # set. `CascadeInstance` is the only thing with an `observation` object, so
-        # that is what selects the collector.
-        if hasattr(instances[0], "observation"):
+        # Three instance shapes now cross this boundary and all three carry an
+        # `observation`, so the collector is selected on the ANSWER's own field
+        # instead: a ForecastInstance knows its `actual` popularity, a
+        # CascadeInstance its `true_times`, and a SourceInstance neither. Dispatching
+        # on `observation` alone silently routed a forecast pool into the trajectory
+        # collector, which is the kind of wiring bug that surfaces as a weak method.
+        if hasattr(instances[0], "actual"):
+            return _collect_forecasts(
+                spec, name, graph, work_dir, completed, instances, elapsed
+            )
+
+        if hasattr(instances[0], "true_times"):
             return _collect_trajectories(
                 spec, name, graph, work_dir, completed, instances, elapsed
             )
@@ -559,6 +566,139 @@ def _collect_trajectories(
         "instances": len(instances),
         "instances_short": dropped,
     }
+
+
+def _collect_forecasts(
+    spec, name: str, graph, work_dir: Path, completed, instances: list, elapsed: float
+) -> dict:
+    """
+    Read one POPULARITY per cascade back across the boundary and validate it.
+
+    The forecasting counterpart of `_collect_sources`, and the simplest of the
+    three: what comes back is a number per cascade rather than a set or a tree. Two
+    checks matter and both would otherwise surface as a weak method rather than as
+    the export bug they are — a value below the OBSERVED popularity means the repo
+    predicted a cascade shrinking (impossible under progressive adoption, so it was
+    handed the wrong prefix), and a non-finite one means its fit diverged.
+
+    A non-finite value is kept as an explicit DECLINE rather than dropped, because
+    research/cascade_prediction.md §8.4 makes the decline count a reported column:
+    a mean over scoreable cascades alone "silently favours the model that gives up
+    more often", so a repo's give-ups have to reach the table.
+    """
+    try:
+        returned = spec.parse_seeds(work_dir, completed.stdout, instances)
+    except Exception as error:
+        raise BaselineError(
+            f"baseline {name!r} ran but its per-cascade popularity output could not "
+            f"be parsed ({type(error).__name__}: {error}). Logs in {work_dir} — "
+            f"check stdout.log and fix parse_seeds in baselines/registry.py."
+        ) from error
+
+    popularities = {}
+    declined = 0
+    impossible = 0
+
+    for instance in instances:
+        value = returned.get(instance.cascade_id)
+
+        if value is None:
+            declined += 1
+            popularities[instance.cascade_id] = None
+            continue
+
+        popularity = float(value)
+
+        if not np.isfinite(popularity):
+            declined += 1
+            popularities[instance.cascade_id] = None
+            continue
+
+        observed = float(instance.observation.popularity)
+
+        # Clamped rather than dropped, and counted: a repo that under-predicts the
+        # floor has answered a slightly different question (usually the INCREMENT
+        # rather than the total), and clamping keeps the row scoreable while the
+        # count says how often it happened
+        if popularity < observed:
+            impossible += 1
+            popularity = observed
+
+        popularities[instance.cascade_id] = min(
+            popularity, float(instance.observation.num_nodes)
+        )
+
+    scored = sum(1 for value in popularities.values() if value is not None)
+
+    if not scored:
+        raise BaselineError(
+            f"baseline {name!r} returned no usable popularity for any of "
+            f"{len(instances)} cascades. Logs in {work_dir}."
+        )
+
+    if impossible:
+        print(
+            f"[baseline:{name}] WARNING: {impossible}/{len(instances)} predictions "
+            f"were BELOW the already-observed popularity and were clamped up to it. "
+            f"That usually means the repo returned an INCREMENT where a total was "
+            f"expected — check the driver's target convention "
+            f"(research/cascade_prediction.md §5.7 difference 3)."
+        )
+
+    if declined:
+        print(
+            f"[baseline:{name}] {declined}/{len(instances)} cascades declined "
+            f"(counted, not scored as errors)"
+        )
+
+    print(f"[baseline:{name}] {scored} popularities in {elapsed:.1f}s")
+
+    return {
+        "name": name,
+        "popularities": popularities,
+        "instances": len(instances),
+        "instances_short": len(instances) - scored,
+        "seconds": round(elapsed, 2),
+        "work_dir": str(work_dir),
+    }
+
+
+def predict_script(popularities: dict[str, float | None]) -> str:
+    """
+    Wrap one popularity per cascade as a canned Strategy for a forecasting task.
+
+    Keyed by CASCADE ID rather than by an observation fingerprint, unlike
+    `localize_script` and `reconstruct_script`. That is possible here and not there
+    because `predict(graph, observation, horizon)` IS handed the id — a
+    `CascadeObservation` carries its own `cascade_id`, since a real cascade has a
+    name in its corpus and a masked simulated one does not.
+
+    A missing key RAISES rather than falling back, for the same reason theirs do: it
+    means the repo was handed a different instance pool than the one being scored,
+    and a silent guess would surface as a weak method. `None` is a DECLINE, which
+    the harness counts rather than penalizes.
+    """
+    return f"""\
+class ExternalPredictor(Strategy):
+    popularities = {popularities!r}
+
+    def predict(self, graph, observation, horizon):
+        found = self.popularities.get(str(observation.cascade_id), "missing")
+
+        if found == "missing":
+            raise KeyError(
+                "the external baseline returned no prediction for cascade "
+                + str(observation.cascade_id) + ". It was run on a different "
+                "instance pool than the one being scored — check that "
+                "--cp-instances, --cp-observation-steps and --seed match between "
+                "the export and the evaluation."
+            )
+
+        if found is None:
+            return None
+
+        return max(float(found), float(observation.popularity))
+"""
 
 
 def reconstruct_script(trajectories: dict[str, dict]) -> str:

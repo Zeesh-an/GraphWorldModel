@@ -299,13 +299,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                         trajectory,
                         previous_best[1],
                         sense=task.sense,
-                        unit=(
-                            "score"
-                            if task.decodes
-                            else "F1"
-                            if task.recovers
-                            else "nodes"
-                        ),
+                        unit=task.reward_unit,
                     )
                     if previous_best is not None
                     else None

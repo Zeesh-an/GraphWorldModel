@@ -198,6 +198,23 @@ Three rules, and each one is load-bearing:
 
 Tracing is off by default because it costs an append per successful flip and only one task scores it. `pipeline.run` turns it on from the task registry, so `--task cascade_reconstruction` gets it without a flag; `data.generate_wm_data --task cascade_reconstruction` does the same for a standalone invocation. A dataset generated without it makes `PathPrecision` unscoreable, and `coding_agent/reconstruction.py::load_cascades` **raises** rather than silently falling back to the node half — which is the exact failure the tree-weighted reward exists to prevent.
 
+### ...and REPLAYED FROM A REAL LOG (`--task cascade_prediction`)
+
+Everything above describes transitions a simulator produced. Cascade prediction is the one task whose transitions did not come from one at all: `data/wm_cascades.py` replays a **real observed cascade corpus** into the identical JSONL, so `wm_data.py`, the feature builder, the heads and the training loop need no branch — and `run_generation` DELEGATES to it rather than branching, because there is no seed selector, no injection, no counterfactual fork and no Monte-Carlo marginal on that path at all.
+
+Four differences, each forced rather than chosen (`research/cascade_prediction.md` §2.1, §2.4, §8.3):
+
+- **The action is `NULL` at every step.** Nothing intervenes; the cascade is only watched. The `t = 0` record still carries the root as an `add_node` bag — that is how every reader here recovers an episode's sources — and there is no injection at any later step and no fork, because a log has nothing to fork on.
+- **The targets are HARD.** Our soft targets are `P(infected)` averaged over `--mc-marginals` re-runs, and a real cascade **happened once**, so `next_marginal_infected` is the realized 0/1 indicator. §2.4 calls this the main technical risk of the whole exercise and §11 records that how much it costs our one-step `delta_f1` is unestablished by anything in that literature — they never had soft targets to lose.
+- **Elapsed time is BINNED.** The corpora publish seconds (or DAYS, for APS) since publication and our simulator is discrete-time. `--cp-step` is the bin width, derived from the OBSERVATION window rather than the horizon: these corpora observe a tiny fraction of their horizons (Weibo 0.5 h of 24 h), so binning the horizon uniformly would leave the prefix with one step and delete the wave series a predictor reads.
+- **A replayed episode stops only when NOTHING LATER is non-empty.** The simulator breaks on an empty frontier because that is a fixed point of a monotone cascade; a real log is not a Markov process and routinely goes quiet for a bin and resumes, so the simulator's rule would truncate every cascade at its first lull.
+
+`metadata.json` gains an `observed` block — corpus, time unit, both windows, the step, the split protocol, the participant filter, the truncation, the cascade counts and `hard_targets: true` — and that block is the ONLY thing that says `transitions_IC_train.jsonl` was not simulated. `world_model.wm_data` reads it through `data.wm_cascades.dataset_is_observed`, and `coding_agent.prediction.load_forecasts` **raises** on a simulated dataset rather than scoring it, because §2.2's whole argument collapses if the "real cascade" is an NDlib rollout.
+
+**The dynamics label names the KERNEL, not the source.** A replayed corpus is written under `--diffusion-model IC` and fits the IC head, and that is the experiment rather than a mislabelling: §2.2 records that the IC composition rule is a modelling commitment rather than a learned fact, so fitting it to real retweets is exactly the falsification test. Only ONE dynamics is written per replay — the transitions are identical whatever kernel label they carry, so writing both IC and LT would double the file for no second experiment.
+
+**A cascade corpus loader exposes three functions rather than two** (`data/datasets/cascade_common.py`): the usual `download_<name>()` and `load_<name>(path)`, plus `load_<name>_cascades(path) -> list[Cascade]`. Both halves come from one parse so a node id means the same thing in each, and the graph is built FROM the observed propagation paths for every corpus but Digg, which publishes a real friendship network and uses it. Eight are registered in `wm_graphs.cascade_corpora`: `casflow_weibo` / `casflow_twitter` / `casflow_aps` (one manual Drive bundle, three corpora, and the canonical five-field line format every repo in this literature reads), `weibo_cascades` and `aps` (the raw publisher routes, both manual), and `digg_cascades`, `memetracker` and `taoke` (auto-downloading).
+
 ---
 
 ## The 5 action ops (identical set for every dataset)
@@ -343,8 +360,10 @@ This determinism difference is why IC averages over `--mc-marginals` draws while
 | `wm_graphs.py`        | graph providers (real + synthetic) + edge probabilities → `GraphBundle`                                           |
 | `wm_simulator.py`     | `State` / `ActionOp` types + NDlib stepwise IC/LT sim with action injection, `advance_marginal`, snapshot/restore |
 | `wm_actions.py`       | spine seed selectors + MC spread oracle + injection schedule + counterfactual candidates                          |
+| `wm_cascades.py`      | **CP**: replay a REAL logged corpus as `(s_t, NULL, s_{t+1})` — the leak-free chronological split, the binning, hard targets, the `observed` metadata block |
 | `graph_utils.py`      | adjacency → `edge_index` + IC/LT edge probabilities (shared)                                                      |
 | `generate_wm_data.py` | graph store + JSONL transition writer + CLI orchestrator                                                          |
 | `validate_wm_data.py` | post-hoc gate-check harness                                                                                       |
 | `datasets/`           | per-dataset download + load helpers (lazy-imported by `wm_graphs.py`)                                             |
+| `datasets/cascade_common.py` | the CASCADE-corpus contract: `Cascade`, CasFlow's canonical line format, the published filters, the graph built from observed paths |
 | `old/`                | **legacy** diffusion-only CND/IM/SL generators (archived; superseded by `generate_wm_data.py`)                    |

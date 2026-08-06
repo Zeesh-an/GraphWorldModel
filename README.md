@@ -290,12 +290,14 @@ python -m pipeline.run --dataset ca_grqc \
 
 python -m pipeline.run --dataset hospital_lh10 \
     --task epidemic_control --compare                         # vaccinate under SIR/SIS/SEIR
+python -m pipeline.run --dataset casflow_weibo \
+    --task cascade_prediction --compare                       # forecast a REAL cascade's size
 python -m pipeline.run --dataset jazz --run gcnii_ablation \
     --wm-model gcnii --n-layers 8                              # a second variant
 python -c "from pipeline.tasks import runnable_task_names; print(runnable_task_names())"
 ```
 
-**Seven run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, `influence_blocking`, `cascade_reconstruction`, and `epidemic_control`. The other seven are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
+**Eight run today:** `influence_maximization`, `adaptive_online_im`, `critical_node_detection`, `source_localization`, `influence_blocking`, `cascade_reconstruction`, `epidemic_control`, and `cascade_prediction`. The other six are catalogued with a status and a blocker; `pipeline.run` refuses them up front with that blocker and a pointer to the research doc, instead of failing mid-stage:
 
 ```
 $ python -m pipeline.run --dataset ba --task cascading_failure
@@ -304,14 +306,14 @@ T_endo is global load redistribution, not local edge-wise propagation, so a
 k-hop encoder structurally cannot see the next failure. Motter-Lai (betweenness
 load + tolerance alpha) is the entry point that needs no electrical data. See
 research/cascading_failure.md for the full analysis. Runnable today:
-['adaptive_online_im', 'cascade_reconstruction', 'critical_node_detection',
-'epidemic_control', 'influence_blocking', 'influence_maximization',
-'source_localization']
+['adaptive_online_im', 'cascade_prediction', 'cascade_reconstruction',
+'critical_node_detection', 'epidemic_control', 'influence_blocking',
+'influence_maximization', 'source_localization']
 ```
 
 The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, the budget sweep, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it — it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
 
-The runnable **problem families** are further apart than a sign flip. A `maximize` task seeds a cascade, a `minimize` task fights one it did not start, and a **`recover`** task emits no action at all: `source_localization` hands the agent a graph and an observed diffusion state and asks which seed set produced it. That changes the CONTRACT, not just the objective — the generated program implements `localize(graph, observation, budget)` instead of `plan_horizon`, it is scored on F1 against the true sources, and the world model stops being the thing optimized against and becomes a subroutine the program calls through `self.predict_marginals(seeds)`. The four bindings of that one name ARE conditions 3–6. See [`research/source_localization.md`](research/source_localization.md) §2.3 for why the inversion and not the likelihood is the contribution, and `coding_agent/check_source_localization.py` for the runnable contract.
+The runnable **problem families** are further apart than a sign flip. A `maximize` task seeds a cascade, a `minimize` task fights one it did not start, a **`recover`** task emits no action at all and infers a hidden cause, and a **`forecast`** task emits no action either and predicts a scalar the process produces. Two of the four report something whose name is not its direction — a recover task's F1 maximizes, a forecast task's error minimizes — so `Task.sense` rather than `Task.objective` is what every "is this better" reads. `source_localization` is the recover case: `source_localization` hands the agent a graph and an observed diffusion state and asks which seed set produced it. That changes the CONTRACT, not just the objective — the generated program implements `localize(graph, observation, budget)` instead of `plan_horizon`, it is scored on F1 against the true sources, and the world model stops being the thing optimized against and becomes a subroutine the program calls through `self.predict_marginals(seeds)`. The four bindings of that one name ARE conditions 3–6. See [`research/source_localization.md`](research/source_localization.md) §2.3 for why the inversion and not the likelihood is the contribution, and `coding_agent/check_source_localization.py` for the runnable contract.
 
 `cascade_reconstruction` splits the `recover` family in two, and it is the task [`research/cascade_reconstruction.md`](research/cascade_reconstruction.md) §9 calls the best both-loops fit in the folder. Source localization recovers `s_0`; this recovers the **whole hidden trajectory** — which nodes were infected, *when* each activated, and *who infected whom* — from a partial observation of a diffusion that already happened. The contract is `reconstruct(graph, observation, horizon)` returning `{node: (activation timestep, inferred parent)}`, and the recovered sources fall out for free as the nodes with no parent, which is why source localization is the *projection* of this task rather than a sibling of it.
 
@@ -322,6 +324,17 @@ That reward needs a ground-truth parent, and **NDlib never produces one**: its I
 `epidemic_control` is the one task whose **dynamics are not monotone**, and [`research/epidemic_control.md`](research/epidemic_control.md) §2.6 calls that the reason to build it: every other runnable task keeps the assumption the structured heads rest on, so this is the one that tests whether "structured head" generalizes past IC or whether we built an IC-specific trick. Under SIR, SIS and SEIR a node RECOVERS and stops transmitting, and under SIS becomes susceptible again — and `ICTransmissionHead` composes `y_inf = infected + (1 − infected)·p_new`, which is monotone *by construction*: no weight assignment makes it predict a node leaving the infected set. The replacement is a per-node row-stochastic **transition matrix**, `CompartmentTransitionHead`, and under its oracle form it reproduces the simulator's own one-step marginals exactly across all three dynamics.
 
 It also needed its own simulator. NDlib ships SIR/SIS/SEIR and reusing them would have been ~60 lines, but all three carry **no per-arc transmission probability at all** — which deletes `set_edge_weight` (and with it the entire graded contact-reduction branch of that literature) and makes `structured_residual` inexpressible. `data/wm_epidemic.py` is four lines of transition rule and recovers both; **SIR at `γ = 1.0` reproduces IC exactly**, which is the cheapest correctness check it has. `--epi-lever` then picks which of four published interventions the budget buys — `vaccinate` (immune, uncounted), `quarantine` (isolated but still counted), `edge_cut`, `contact_reduce` — and the vaccinate/quarantine pair is the same node set scored two ways, which is the "recovered is not removed" distinction that makes two papers' "nodes saved" columns differ by a constant.
+
+`cascade_prediction` is the **real-data** task, and the only one here that runs no simulator at all. A cascade already spread on a real platform; you see its first `t_o` timesteps and predict how many nodes it reaches by `t_p`. [`research/cascade_prediction.md`](research/cascade_prediction.md) §9.3 says outright that it *cannot* demonstrate the capability this project is about — `a_t` is NULL at every step, so the action space goes idle — and §9.1 says why it ships anyway: **it is the only falsification test available for the IC/LT assumption every other task inherits.** Everywhere else a learned model is evaluated against traces drawn from the simulator that trained it, a closed loop that can only measure *learning* error. Weibo retweets break the loop: real adoption is not memoryless, exposure is repeated rather than one-shot per neighbour, and some adopters arrive with no adopting neighbour at all. `--compare` reports the **modelling error** of each arm's own forward model with no program in the loop, which is the number that experiment is actually about.
+
+Three things it gives up are the point. The targets go **hard** — a real cascade happened once, so `--mc-marginals` has nothing to average. The reward **minimizes** — it is MSLE, the only column in this pipeline that runs downward for a reason unrelated to containment. And conditions 3–6 survive an empty action space because what varies down the ladder becomes the **forward model the predictor may call** (`self.forecast_marginals(adopters, frontier, steps)`, absent under `@native`) rather than the intervention it may choose — and `@native` may win outright, because feature-driven regression is reported to beat deep models on these corpora.
+
+```bash
+python -m pipeline.run --dataset casflow_aps --task cascade_prediction --compare
+sbatch sbatch/cascade_prediction/sweep_splits.sbatch      # the leakage replication
+```
+
+`--cp-split` is the headline experiment rather than a knob. The field's standard 70/15/15 **random-over-cascades** split leaks the future: cascades overlap in wall-clock time, so a training cascade's prediction window can sit inside a test cascade's observation window and the model learns "there was a burst around time T". Under the leak-free fix, two 2021–24 SOTA methods fall **below a plain MLP** and the field's APS band moves from 1.19–2.11 to 2.28–4.82. `chronological` is our default from the first commit and `random` reproduces the leaky protocol on purpose, so the gap is measured here rather than cited — the source is an unreplicated preprint, and this is the cheapest second source anyone can produce. Eight new loaders carry the corpora (`casflow_weibo` / `casflow_twitter` / `casflow_aps`, `weibo_cascades`, `aps`, `digg_cascades`, `memetracker`, `taoke`); `coding_agent/check_cascade_prediction.py` is the runnable contract.
 
 ```bash
 python -m pipeline.run --dataset ca_grqc --task cascade_reconstruction --compare

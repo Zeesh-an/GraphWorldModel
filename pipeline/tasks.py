@@ -24,11 +24,24 @@ planned = "planned"
 out_of_scope = "out_of_scope"
 
 # Objective sense the planner optimizes. `recover` tasks invert the forward model
-# instead of choosing an intervention, so they have no action ops.
+# instead of choosing an intervention, so they have no action ops; `forecast` tasks
+# emit no action at all and predict a SCALAR the process produces.
 maximize = "maximize"
 minimize = "minimize"
 recover = "recover"
 forecast = "forecast"
+
+# What `coding_agent.types.improves` should do with each family's reward. Held here
+# rather than inferred at each call site because two of the four are not their own
+# name: a `recover` task's reward is an F1 and MAXIMIZES, and a `forecast` task's is
+# a prediction ERROR and MINIMIZES. A run that read the objective literally would
+# optimize a cascade-prediction arm toward the worst MSLE it could find.
+objective_sense = {
+    maximize: maximize,
+    minimize: minimize,
+    recover: maximize,
+    forecast: minimize,
+}
 
 default_run = "default"
 
@@ -105,11 +118,35 @@ class Task:
     # composition had to be replaced by a per-node transition matrix rather than
     # extended (research/epidemic_control.md §2.4).
     epidemic: bool = False
+    # The transitions are REPLAYED FROM A LOG rather than produced by a simulator,
+    # and it is the one field in this registry that changes where the data comes
+    # from at all. `data/wm_cascades.py` replays a real cascade corpus into the same
+    # JSONL every other task simulates, which costs three things nothing else here
+    # gives up: the targets go HARD (a real cascade happened once, so
+    # `--mc-marginals` has nothing to average), the counterfactual forks have
+    # nothing to fork on, and the split must be CHRONOLOGICAL because the cascades
+    # share a wall clock (research/cascade_prediction.md §2.4, §8.3).
+    #
+    # It is a field rather than a property of `forecast` because the two are
+    # genuinely separable: `influence_estimation` also forecasts and would do it on
+    # simulated episodes with soft targets, which is a different data path.
+    observational: bool = False
     blocker: str | None = None
 
     @property
     def research_doc(self) -> str:
         return f"research/{self.name}.md"
+
+    @property
+    def sense(self) -> str:
+        """
+        maximize or minimize, for the reward THIS task's arms actually report.
+
+        Never the objective read literally: a `recover` task reports an F1 and a
+        `forecast` task reports a prediction error, so two of the four families
+        would be optimized backwards by a call site that used `objective` directly.
+        """
+        return objective_sense.get(self.objective or maximize, maximize)
 
     @property
     def runnable(self) -> bool:
@@ -155,6 +192,22 @@ class Task:
         program calls (research/source_localization.md §2.5).
         """
         return self.objective == recover
+
+    @property
+    def forecasts(self) -> bool:
+        """
+        True when the program PREDICTS a scalar the process produces rather than
+        steering or inverting it.
+
+        The fourth family, and the one that gives up the most: `a_t` is NULL at
+        every step, so `T_exo` is the identity, none of the five ops fire, and the
+        world model degenerates from an action-conditioned simulator into a
+        forecaster (research/cascade_prediction.md §2.1). That is a bad property
+        for a headline task and the exact property that makes it a stress test —
+        conditions 3-6 still differ, because what varies down that ladder is the
+        FORWARD MODEL the predictor may call, not the intervention it may choose.
+        """
+        return self.objective == forecast
 
 
 tasks = {
@@ -539,13 +592,73 @@ tasks = {
     "cascade_prediction": Task(
         name="cascade_prediction",
         title="Cascade / Popularity Prediction",
-        status=planned,
+        status=implemented,
         objective=forecast,
+        # REAL LOGGED CASCADES, not NDlib. This is the one task in `research/` whose
+        # literature refuses to use a simulator, and §9.1 is why that is the point
+        # rather than an obstacle: every other task here evaluates a learned model
+        # against traces drawn from the same simulator that trained it, a closed loop
+        # that can only measure LEARNING error and never MODELLING error. Weibo
+        # retweets break the loop — our structured head's
+        # `p_new(v) = 1 - prod(1 - q(u->v) * frontier_u)` is either an adequate
+        # approximation of whatever produced them or it is not, and that is
+        # measurable. `observational` is what routes the data stage into
+        # `data/wm_cascades.py` instead of the simulator.
+        observational=True,
+        # The dynamics label names the KERNEL the transitions are read under, not a
+        # claim about what produced them. §2.2: the IC composition rule is a
+        # modelling commitment rather than a learned fact, so fitting the IC head to
+        # real retweets IS the experiment. `metadata.json` carries an `observed`
+        # block so nobody reads `transitions_IC_train.jsonl` as simulated.
         dynamics=("IC", "LT"),
+        # EMPTY, and it is the defining property of this task rather than an
+        # omission (§2.1): nothing intervenes, the cascade is only watched. None of
+        # the five ops fire, `action_sensitivity` is undefined, and the
+        # counterfactual forks that carry most of our training signal have nothing
+        # to fork on. What still varies across conditions 3-6 is the forward model
+        # the predictor may CALL, which is why the ladder survives at all.
         action_ops=(),
         summary="Predict a real cascade's final size from its early window.",
-        blocker="Needs real observed cascade corpora (Weibo, Twitter, APS), "
-        "which no loader emits — our transitions come from NDlib.",
+        # Diffusion-only, and here the constraint is stronger than source
+        # localization's: a logged cascade HAS no injection to replay, so an action
+        # op is not merely unhelpful but unrepresentable.
+        default_gen_action_ops=(),
+        # `budget` buys nothing: a predictor emits no action and is handed no k. The
+        # single point exists because the sweep axis is the OBSERVATION WINDOW
+        # (--cp-observation) and the SPLIT (--cp-split), and §8.2 requires two
+        # windows rather than four budgets — "a single-window result is not
+        # publishable in this literature".
+        default_budget_pcts=(10.0,),
+        # §3, one representative per family, ordered by how dangerous each is.
+        # `szabo_huberman` heads the list because it is the row that actually has to
+        # be beaten: one feature, one line, from 2008, and every paper in §5 still
+        # prints it as "Feature-S&H". `feature_linear` and `feature_gbt` are CTCP's
+        # own MLP/XGBoost rows, and CasFlow's ablation records that feature models
+        # "in some cases even beat deep learning models". `seismic` and `hawkes` are
+        # §3.2's generative pair — the closest classical analogue to a world model,
+        # and the ones that DECLINE to score supercritical cascades, which is the
+        # `n_failed` column §8.4 says almost nobody publishes. `persistence` and
+        # `mean_size` are the two floors MSLE rewards far more than people expect.
+        # `mc_forward` is deliberately absent for the same reason `celf` and
+        # `mcmc_decode` are: it pays kernel calls per instance and would dominate
+        # startup for a table that exists to set a bar. Run it as its own
+        # --baselines arm when you want its number.
+        default_baselines=(
+            "szabo_huberman",
+            "feature_linear",
+            "feature_gbt",
+            "seismic",
+            "hawkes",
+            "hawkes_hybrid",
+            "rpp",
+            "hip",
+            "branching_factor",
+            "weng_communities",
+            "persistence",
+            "mean_size",
+            "random_prediction",
+        ),
+        blocker=None,
     ),
     "cascading_failure": Task(
         name="cascading_failure",
@@ -608,7 +721,11 @@ for _task in tasks.values():
     # rejected at validation — cheaper to catch here than one budget in. Only the
     # runnable tasks are held to it: a planned entry's ops are documentation of
     # what it WOULD need, and `budget_op` is not settled until it ships.
-    if _task.runnable and _task.budget_op not in _task.allowed_ops:
+    #
+    # A forecast task is exempt because it spends NO budget at all: `a_t` is NULL at
+    # every step, no plan is ever validated, and naming an op it may emit would
+    # misdescribe the one property that defines it (§2.1).
+    if _task.runnable and not _task.forecasts and _task.budget_op not in _task.allowed_ops:
         raise ValueError(
             f"task {_task.name!r} spends budget on {_task.budget_op!r} but does "
             f"not allow the planner to emit it (allowed_ops={_task.allowed_ops})"
@@ -677,6 +794,25 @@ for _task in tasks.values():
         raise ValueError(
             f"task {_task.name!r} sets both epidemic and competitive; a dataset is "
             f"either four-COMPARTMENT or two-CASCADE, never both"
+        )
+
+    # A logged cascade has no injection to replay, so an action op here is not
+    # merely unhelpful but unrepresentable (research/cascade_prediction.md §2.1)
+    if _task.runnable and _task.forecasts and _task.gen_action_ops:
+        raise ValueError(
+            f"task {_task.name!r} forecasts an observed process but generates with "
+            f"action ops {_task.gen_action_ops}; a_t is NULL at every step, so it "
+            f"needs default_gen_action_ops=()"
+        )
+
+    # ...and a replayed corpus is the only thing that makes the falsification test
+    # of §9.1 a test at all: replaying NDlib would close the loop it exists to break
+    if _task.observational and not _task.forecasts:
+        raise ValueError(
+            f"task {_task.name!r} sets observational=True but its objective is "
+            f"{_task.objective!r}; replaying a real log rather than simulating is a "
+            f"{forecast!r} objective, and every other family needs the "
+            f"counterfactual forks a log cannot provide"
         )
 
     # ...and it cannot also fight an exogenous cascade: the sources ARE the unknown

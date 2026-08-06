@@ -27,7 +27,7 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | [`epidemic_control.md`](epidemic_control.md)               | yes **implemented**      | 745   | (key) GreedyWalk SDM'15 Table 2 — four published `λ₁` reproduce exactly    |
 | [`adaptive_online_im.md`](adaptive_online_im.md)           | yes **implemented**      | 572   | only DeepIM's re-run OIM row; the rest are figures                      |
 | [`network_inference.md`](network_inference.md)             | Warning: moderate             | 782   | no — Kronecker synthetics, not our graphs                               |
-| [`cascade_prediction.md`](cascade_prediction.md)           | Warning: moderate             | 567   | no — real cascade corpora only                                          |
+| [`cascade_prediction.md`](cascade_prediction.md)           | yes **implemented**      | 567   | (key) CasFT AAAI-25 Table 2 + CasTemp's leak-free re-run — context only, our preprocessing differs |
 | [`cascading_failure.md`](cascading_failure.md)             | Warning: moderate             | 728   | Jhun et al. Table I, via Motter–Lai on our `power_grid`                 |
 | [`graph_completion.md`](graph_completion.md)               | no poor fit             | 724   | SEAL NeurIPS'18 — `netscience`, `power_grid` byte-identical             |
 | [`temporal_forecasting.md`](temporal_forecasting.md)       | no poor fit             | 582   | no — zero dataset overlap                                               |
@@ -63,7 +63,10 @@ Things that emerged from more than one file, or that change what we should do.
    | `cascade_reconstruction` §2.4 | yes | yes | yes | yes | **best fit in the folder**; inner loop runs at ~10⁴ oracle calls per instance |
    | `source_localization` §2.3 | yes | yes | yes | yes | both loops, ~10² calls per instance |
    | `network_inference` §2.6 | yes | no | Warning: | no | **agent fits, world model does not**: `G` is the variable, and NETRATE's likelihood is already convex and closed-form |
-   | `influence_estimation`, `cascade_prediction` | no | yes | n/a | n/a | world model only; forecasting has no algorithm to search |
+   | `influence_estimation` | no | yes | n/a | n/a | world model only; forecasting has no algorithm to search |
+   | `cascade_prediction` §2.1 | Warning: | yes | yes | yes | **the criteria say no and it shipped anyway** — see below |
+
+   **Cascade prediction is the deliberate exception, and its own file says so.** Criterion 1 fails outright: §2.1 records that `a_t` is NULL at every step, so the action space goes idle, five of six arms have nothing to distinguish them, and §9.3 concludes it "cannot demonstrate the capability the project is about". It ships anyway for the reason §9.1 gives, which no other file in this folder can claim: **it is the only falsification test available for the IC/LT assumption every other task inherits.** Everywhere else, a learned model is evaluated against traces from the simulator that trained it — a closed loop that measures learning error and never modelling error. Real Weibo retweets break the loop, and `--compare` reports the modelling error directly. Two things follow that are worth carrying: criterion 1 turns out to be about whether the ALGORITHM search is interesting, not whether the task is, and conditions 3-6 survive an empty action space because what varies down the ladder becomes the forward model the predictor may CALL rather than the intervention it may choose.
 
    Two consequences worth carrying. **Network inference is the folder's only inverted case**: everywhere else that fails, it fails on the agent side. And **the reward is the specification**: `cascade_reconstruction.md` §2.6 shows that scoring a program search on the easy half of a metric pair (node set rather than tree) does not merely under-report, it makes the search discard the capability. Check that a trivial baseline scores badly under the chosen reward before running any search.
 

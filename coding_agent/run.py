@@ -97,6 +97,20 @@ from coding_agent.localization import (
     valid_budget_modes,
     valid_observations,
 )
+from data.wm_cascades import increment_target, valid_targets
+from world_model.wm_metrics import (
+    default_prediction_metric,
+    valid_prediction_metrics,
+)
+from coding_agent.prediction import (
+    default_forecast_samples,
+    evaluate_predictor,
+    load_forecasts,
+    referee_forecast_samples,
+    referee_modelling_error,
+    resolve_target,
+    trivial_predictor_error,
+)
 from coding_agent.reconstruction import (
     default_hidden_rate,
     default_observation_rate,
@@ -151,9 +165,14 @@ from coding_agent.tools.library_api import (
     dismantling_names,
     immunization_names,
     localization_names,
+    prediction_names,
     reconstruction_names,
 )
 from coding_agent.tools.localization_algorithms import localization_algorithms
+from coding_agent.tools.prediction_algorithms import (
+    fitted_prediction_algorithms,
+    prediction_algorithms,
+)
 from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
 from coding_agent.types import GraphInfo, TaskSpec, full_adoption, valid_feedback_models
 from data.wm_competitive import (
@@ -303,6 +322,24 @@ class ExperimentConfig:
     # Arm A knobs; read only by method="decode"
     cr_mcmc_proposals: int = 400
     cr_mcmc_burn_in: float = 0.3
+    # Cascade prediction. The two SPLITS are the load-bearing pair for the same
+    # reason source localization's are, plus one this task has and that one does
+    # not: research/cascade_prediction.md §8.3 shows that a decade of published
+    # numbers moved materially when the split stopped being random over cascades,
+    # and our replay is chronological from the first commit for exactly that reason.
+    # `cp_observation_steps` is how much of each cascade the predictor sees; 0 reads
+    # it back off the dataset's own `observed` block, which is where the corpus's
+    # published window landed after binning.
+    cp_select_split: str = "train"
+    cp_eval_split: str = "test"
+    cp_instances: int = 40
+    cp_observation_steps: int = 0
+    cp_metric: str = default_prediction_metric
+    cp_target: str = increment_target
+    # Unrolls averaged inside one `forecast_marginals` call. The cost knob of §2.4:
+    # an @monte_carlo arm pays `steps * samples * mc_runs` real episodes per call
+    # and a @world_model arm pays `steps * samples` matmuls.
+    cp_forecast_samples: int = default_forecast_samples
     # True when this arm is the @native condition. The evaluator has already been
     # resolved to monte_carlo with one episode by then, so the arm identity cannot
     # be recovered from `evaluator` — and it decides whether `predict_marginals`
@@ -728,7 +765,53 @@ def run_experiment(
     # first and badly on the second.
     select_instances, evaluate_instances, training_sources = [], [], []
 
-    if registry.reconstructs:
+    if registry.forecasts:
+        # The same two-pool split as both inverse tasks, and here it carries an
+        # extra load: `load_forecasts` RAISES on a SIMULATED dataset rather than
+        # scoring it, because §2.2's whole argument collapses if the "real cascade"
+        # is an NDlib rollout. The observation window comes off the dataset's own
+        # `observed` block unless overridden, so a run cannot silently show the
+        # predictor a different prefix than the one the corpus's published protocol
+        # defines.
+        common = dict(
+            graph_id=graph_id,
+            observed_steps=config.cp_observation_steps,
+            limit=config.cp_instances,
+            seed=config.seed,
+        )
+        select_instances = load_forecasts(
+            config.data_dir, config.diffusion_model, config.cp_select_split, **common
+        )
+        evaluate_instances = load_forecasts(
+            config.data_dir, config.diffusion_model, config.cp_eval_split, **common
+        )
+
+        from data.wm_cascades import observed_protocol
+
+        protocol = observed_protocol(config.data_dir)
+        print(
+            f"[run] cascade prediction: selecting on {len(select_instances)} "
+            f"{config.cp_select_split} cascades, held out on "
+            f"{len(evaluate_instances)} {config.cp_eval_split} cascades "
+            f"(corpus={protocol['corpus']}, "
+            f"t_o={protocol['observation']} {protocol['time_unit']}(s) = "
+            f"{protocol['observed_steps']} step(s), "
+            f"t_p={protocol['horizon']} {protocol['time_unit']}(s), "
+            f"split={protocol['split_protocol']}, metric={config.cp_metric}) "
+            f"— MINIMIZING the error"
+        )
+        if protocol["split_protocol"] != "chronological":
+            print(
+                "[run] WARNING: this dataset used a RANDOM split over cascades. "
+                "research/cascade_prediction.md §8.3 shows that protocol leaks the "
+                "future — cascades overlap in wall-clock time, so a training "
+                "cascade's prediction window can sit inside a test cascade's "
+                "observation window — and that two 2021-24 SOTA models fell BELOW a "
+                "plain MLP once it was fixed. Numbers from this run are comparable "
+                "to the published tables and not to a leak-free one."
+            )
+
+    elif registry.reconstructs:
         # The same two-pool split, and for the same reason: a decoder that
         # memorized specific cascades is indistinguishable from an algorithm until
         # it meets episodes the search never saw. `require_parents` RAISES on a
@@ -823,6 +906,17 @@ def run_experiment(
         objective_kind=registry.objective or maximize,
         instances=tuple(select_instances),
         source_budget_mode=config.sl_budget_mode,
+        # Cascade prediction; inert for every task that does not forecast, so one
+        # code path serves all seven runnable tasks
+        observational=registry.observational,
+        prediction_target=resolve_target(config.cp_target),
+        prediction_metric=config.cp_metric,
+        observation_window=(
+            select_instances[0].observation.observed_steps
+            if registry.forecasts and select_instances
+            else 0
+        ),
+        forecast_samples=config.cp_forecast_samples,
         # Cascade reconstruction; inert for every task that does not decode, so
         # one code path serves all six runnable tasks
         reconstructs=registry.reconstructs,
@@ -834,7 +928,10 @@ def run_experiment(
         # From the registry, never from a flag: the objective sign and what a unit
         # of budget buys are properties of the TASK, and a run that disagreed with
         # its own registry entry would optimize one thing and be reported as another
-        sense=registry.objective if registry.objective in (maximize, "minimize") else maximize,
+        # `.sense` rather than `.objective`: a recover task reports an F1 that
+        # MAXIMIZES and a forecast task an error that MINIMIZES, so reading the
+        # objective literally would run two of the four families backwards
+        sense=registry.sense,
         budget_op=budget_op,
         outbreak=outbreak,
         # Two-cascade fields; inert for every task that is not competitive, so one
@@ -919,7 +1016,9 @@ def run_experiment(
         )
         # A containment task's menu is the DISMANTLING pool; routing into the IM
         # pool would return a seed set the executor then rejects
-        if task.decodes:
+        if task.forecasts:
+            menu = prediction_names
+        elif task.decodes:
             menu = reconstruction_names
         elif task.recovers:
             menu = localization_names
@@ -982,6 +1081,7 @@ def run_experiment(
             + dismantling_names
             + immunization_names
             + localization_names
+            + prediction_names
             + reconstruction_names
         ):
             raise ValueError(
@@ -990,8 +1090,9 @@ def run_experiment(
                 f"{sorted(adaptive_algorithms)}, a blocker from {blocking_names}, a "
                 f"dismantler from {dismantling_names}, an immunizer from "
                 f"{immunization_names}, a source localizer from "
-                f"{localization_names}, or a trajectory decoder from "
-                f"{reconstruction_names}"
+                f"{localization_names}, a trajectory decoder from "
+                f"{reconstruction_names}, or a popularity predictor from "
+                f"{prediction_names}"
             )
 
         provider_label = (
@@ -1032,6 +1133,29 @@ class AdaptiveBaseline(Strategy):
                 total_budget={config.budget},
             )
         ]
+"""
+        elif config.baseline in prediction_algorithms:
+            # A published predictor returns a NUMBER, which is what makes this pool
+            # different from every other one here. `fit_examples` is passed only to
+            # the members that fit a constant (the pool names them explicitly), so a
+            # label can never reach an unfitted member; `predict` is the metered
+            # forward model, which `mc_forward` reads and everything else ignores
+            # through **kw.
+            canned_script = f"""\
+class PredictionBaseline(Strategy):
+    def predict(self, graph, observation, horizon):
+        return prediction_algorithms.{config.baseline}(
+            graph,
+            observation,
+            horizon,
+            fit_examples=(
+                list(getattr(self, "fit_examples", []))
+                if "{config.baseline}" in {tuple(fitted_prediction_algorithms)!r}
+                else None
+            ),
+            predict=getattr(self, "forecast_marginals", None),
+            seed={config.seed},
+        )
 """
         elif config.baseline in reconstruction_algorithms:
             # A published decoder is a whole-TRAJECTORY inference: it is handed the
@@ -1232,7 +1356,12 @@ class Baseline(Strategy):
     print(f"[run] optimizing with {config.method} (provider {provider_label})...")
     strategy, trajectory = method.optimize(agent, environment, task, graph)
 
-    if task.decodes:
+    if task.forecasts:
+        print(
+            f"[run] winner: {config.cp_metric.upper()}={trajectory.reward:.4f} on the "
+            f"{config.cp_select_split} split (selection error, LOWER is better)"
+        )
+    elif task.decodes:
         print(
             f"[run] winner: score={trajectory.reward:.4f} on the "
             f"{config.cr_select_split} split (selection score, higher is better)"
@@ -1254,7 +1383,30 @@ class Baseline(Strategy):
     # memorized specific cascades is indistinguishable from an algorithm until it
     # meets episodes the search never saw (research/source_localization.md §8.5.1).
     heldout = None
-    if task.decodes and evaluate_instances:
+    if task.forecasts and evaluate_instances:
+        print(
+            f"[run] re-running the winner on {len(evaluate_instances)} held-out "
+            f"{config.cp_eval_split} cascades..."
+        )
+        # `fit_examples` stays the SELECTION pool: a fitted predictor may calibrate
+        # on the cascades the search saw and never on the ones it is scored against,
+        # which is the one leak run_baseline's docstring forbids for external repos
+        # and holds identically for our own library rows.
+        heldout, _ = evaluate_predictor(
+            strategy,
+            environment,
+            task,
+            graph,
+            evaluate_instances,
+            fit_examples=select_instances,
+        )
+        print(
+            f"[run] held-out {config.cp_metric.upper()}={heldout.reward:.4f} "
+            f"(selection {trajectory.reward:.4f}, "
+            f"generalization gap {heldout.reward - trajectory.reward:+.4f} — "
+            f"POSITIVE means it did worse on cascades the search never saw)"
+        )
+    elif task.decodes and evaluate_instances:
         print(
             f"[run] re-running the winner on {len(evaluate_instances)} held-out "
             f"{config.cr_eval_split} cascades..."
@@ -1406,6 +1558,74 @@ class Baseline(Strategy):
     # Sense first, because everything downstream that picks a winner needs it and
     # the per-arm JSON is read standalone by plots/report/summary
     result["objective"] = task.sense
+
+    if task.forecasts:
+        # Same reasoning as both inverse blocks: the error is measured against a
+        # popularity we read off a log, so it carries no evaluator noise and is
+        # already comparable across conditions. `mc_reward` is filled from the
+        # held-out error so every reader that asks for "the number comparable across
+        # arms" gets the right one unchanged.
+        selection = trajectory.cost.get("metrics", {})
+        reported = heldout if heldout is not None else trajectory
+        metrics = reported.cost.get("metrics", {})
+        protocol = {}
+        try:
+            from data.wm_cascades import observed_protocol
+
+            protocol = observed_protocol(config.data_dir)
+        except (FileNotFoundError, ValueError):
+            protocol = {}
+
+        result["prediction"] = True
+        result["metrics"] = metrics
+        result["selection_metrics"] = selection
+        result["select_split"] = config.cp_select_split
+        result["eval_split"] = config.cp_eval_split
+        result["n_select_instances"] = len(select_instances)
+        result["n_eval_instances"] = len(evaluate_instances)
+        result["prediction_metric"] = config.cp_metric
+        result["prediction_target"] = task.prediction_target
+        result["observation_window"] = task.observation_window
+        result["prediction_horizon"] = (
+            select_instances[0].observation.horizon if select_instances else None
+        )
+        # The protocol block, verbatim from the dataset. §5.7 lists five independent
+        # incompatibilities between published tables and four of them are here; a
+        # row without them is comparable to nothing, which is why they travel with
+        # the number rather than living in a config file.
+        result["corpus"] = protocol.get("corpus")
+        result["corpus_time_unit"] = protocol.get("time_unit")
+        result["split_protocol"] = protocol.get("split_protocol")
+        result["observation_seconds"] = protocol.get("observation")
+        result["horizon_seconds"] = protocol.get("horizon")
+        result["min_observed_filter"] = protocol.get("min_observed")
+        result["truncate_filter"] = protocol.get("truncate")
+        result["hard_targets"] = protocol.get("hard_targets")
+        result["forecast_calls"] = reported.cost.get("forecast_calls")
+        result["kernel_calls"] = reported.cost.get("kernel_calls")
+        result["kernel_calls_per_instance"] = reported.cost.get(
+            "kernel_calls_per_instance"
+        )
+        result["generalization_gap"] = (
+            round(reported.reward - trajectory.reward, 6)
+            if heldout is not None
+            else None
+        )
+        result["mc_reward"] = reported.reward
+        result["reward"] = reported.reward
+        result["mc_reward_se"] = reported.cost.get("reward_se")
+        result["spread_pct"] = None
+        result["per_instance"] = reported.cost.get("per_instance")
+        result["summary"] = summarize(reported, graph, task)
+        # The two floors a reader needs to interpret a number at all: under a
+        # LOG-space error an instance-blind constant is far stronger than intuition
+        # suggests, and "predict what you already see" is right whenever a cascade
+        # is finished — which most are.
+        result |= trivial_predictor_error(
+            evaluate_instances or select_instances,
+            select_instances,
+            config.cp_metric,
+        )
 
     if task.decodes:
         # Same reasoning as the localization block below: the score is measured
@@ -1656,7 +1876,51 @@ class Baseline(Strategy):
     # single ground-truth referee that makes rewards comparable ACROSS conditions.
     # A native arm's own reward is one noisy episode; a monte_carlo arm's carries
     # the winner's curse from being the max over outer iterations.
-    if config.compare and task.decodes:
+    if config.compare and task.forecasts:
+        # THE number §9.1 is actually about, and the one no other task in this repo
+        # can produce. The reward already measures how good a PROGRAM is; this
+        # measures how good the MODEL is — roll the arm's own forward model forward
+        # from each observed prefix with no program in the loop, and compare its
+        # expected popularity against what the log says happened. That difference is
+        # MODELLING error against a process that is not IC, which is exactly the
+        # closed loop every other task cannot break: they evaluate a learned model
+        # against traces drawn from the simulator that trained it.
+        #
+        # Reported beside the program's own error because the two are separable and
+        # a reader cannot tell them apart from the reward column alone: a strong
+        # program on a badly misspecified kernel and a weak program on a good one
+        # post the same number.
+        # Only for arms that actually HAVE a forward model in their search loop.
+        # A condition-1 baseline's "own forward model" is just the shared evaluator,
+        # so the number would be identical across every classical row and computing
+        # it once per row is pure waste — on a 30K-node graph under @monte_carlo it
+        # is `instances x samples x steps x mc_runs` real episodes, which is millions.
+        if task.forward_model and canned_script is None and config.baseline is None:
+            print("[run] modelling-error referee (the arm's own forward model, no program)...")
+            result |= referee_modelling_error(
+                environment,
+                task,
+                evaluate_instances or list(task.instances),
+                # A DIAGNOSTIC rather than the reward, so it runs at a fixed small
+                # sample count instead of the search's: doubling its precision buys
+                # nothing a reader of §9.1 would act on, and under @monte_carlo it
+                # is the single most expensive thing in the run.
+                samples=referee_forecast_samples,
+            )
+            model_msle = result.get("model_msle")
+            if model_msle is not None:
+                print(
+                    f"[run] model_msle={model_msle:.4f} against the program's "
+                    f"{result['reward']:.4f} — the gap is what the SEARCH bought on "
+                    f"top of the kernel; the LEVEL is how far an IC-shaped kernel is "
+                    f"from a real adoption process"
+                )
+        elif not task.forward_model:
+            print(
+                "[run] @native has no forward model, so there is no modelling error "
+                "to measure — that is the condition, not a gap"
+            )
+    elif config.compare and task.decodes:
         # A decoder's score is already ground truth (it is measured against a
         # history we stored), so the referee measures the other thing: re-simulate
         # each decode's RECOVERED SOURCES on NDlib and compare against what the
@@ -1965,13 +2229,14 @@ if __name__ == "__main__":
             + blocking_names
             + dismantling_names
             + localization_names
+            + prediction_names
             + reconstruction_names
         ),
         metavar="NAME",
         help="evaluate this classical library algorithm instead of an LLM strategy: "
         "a static IM algorithm, a per-round adaptive policy, an influence blocker, a "
-        "network dismantler, a source localizer, or a trajectory decoder "
-        "(default: None).",
+        "network dismantler, a source localizer, a trajectory decoder, or a "
+        "popularity predictor (default: None).",
     )
     parser.add_argument(
         "--routing",
@@ -2304,6 +2569,69 @@ if __name__ == "__main__":
         "re-run on unmodified, and the number every table reports (default: test).",
     )
     parser.add_argument(
+        "--cp-select-split",
+        type=str,
+        default="train",
+        help="cascade prediction: which logged cascades the outer loop optimizes "
+        "the predictor on (default: train).",
+    )
+    parser.add_argument(
+        "--cp-eval-split",
+        type=str,
+        default="test",
+        help="cascade prediction: HELD-OUT cascades the winning predictor is re-run "
+        "on unmodified, and the number every table reports (default: test).",
+    )
+    parser.add_argument(
+        "--cp-instances",
+        type=int,
+        default=40,
+        help="cascade prediction: logged cascades one reward evaluation sweeps "
+        "over, per split (default: 40).",
+    )
+    parser.add_argument(
+        "--cp-observation-steps",
+        type=int,
+        default=0,
+        help="cascade prediction: replayed timesteps of each cascade the predictor "
+        "sees. 0 reads it off the dataset's own `observed` block, which is where "
+        "the corpus's published window landed after binning — research/"
+        "cascade_prediction.md 8.2 pairs TWO windows per corpus deliberately, so "
+        "sweep this rather than picking one (default: 0).",
+    )
+    parser.add_argument(
+        "--cp-metric",
+        type=str,
+        default=default_prediction_metric,
+        choices=list(valid_prediction_metrics),
+        help="cascade prediction: which error the reward IS. All of them MINIMIZE. "
+        "`msle` is CasFlow's own code (log2, clamped at 1, no offset); "
+        "`msle_offset` is CasFT's stated log2(P+1); `msle_natural` is CTCP's loss. "
+        "research/cascade_prediction.md 5.7 records that those three are printed "
+        "under one name in one published table "
+        f"(default: {default_prediction_metric}).",
+    )
+    parser.add_argument(
+        "--cp-target",
+        type=str,
+        default=increment_target,
+        choices=list(valid_targets),
+        help="cascade prediction: which quantity the reported table is about. "
+        "`increment` is CasFlow's own label (P(t_p) - P(t_o)) and `total` is "
+        "CasFT's Eq. 26; 5.7 difference 3 records that the two share a symbol and "
+        f"are not the same quantity (default: {increment_target}).",
+    )
+    parser.add_argument(
+        "--cp-forecast-samples",
+        type=int,
+        default=default_forecast_samples,
+        help="cascade prediction: unrolls averaged inside one forecast_marginals "
+        "call. Each costs `steps` metered kernel evaluations, so an @monte_carlo "
+        "arm pays steps x samples x mc_runs real episodes per call and a "
+        f"@world_model arm pays steps x samples matmuls "
+        f"(default: {default_forecast_samples}).",
+    )
+    parser.add_argument(
         "--cr-tree-weight",
         type=float,
         default=0.6,
@@ -2526,6 +2854,13 @@ if __name__ == "__main__":
         cr_instances=args.cr_instances,
         cr_select_split=args.cr_select_split,
         cr_eval_split=args.cr_eval_split,
+        cp_select_split=args.cp_select_split,
+        cp_eval_split=args.cp_eval_split,
+        cp_instances=args.cp_instances,
+        cp_observation_steps=args.cp_observation_steps,
+        cp_metric=args.cp_metric,
+        cp_target=args.cp_target,
+        cp_forecast_samples=args.cp_forecast_samples,
         cr_tree_weight=args.cr_tree_weight,
         cr_mcmc_proposals=args.cr_mcmc_proposals,
         cr_mcmc_burn_in=args.cr_mcmc_burn_in,

@@ -316,6 +316,14 @@
 #   CR_INSTANCES    masked cascades per split; every candidate decoder pays this
 #                   many executions
 #   CR_SELECT_SPLIT / CR_EVAL_SPLIT  the two disjoint pools, same reason as SL's
+#   CP_SPLIT        cascade prediction: `chronological` (leak-free, the default)
+#                   or `random` (the field's own, which LEAKS). The gap between
+#                   the two IS the experiment (research/cascade_prediction.md 8.3)
+#   CP_OBSERVATION  t_o in the CORPUS's own time unit; unset takes the corpus's
+#                   own first published window. 8.2 pairs TWO per corpus and a
+#                   single-window result is not publishable in this literature
+#   CP_HORIZON      t_p, same units; unset takes the corpus's own
+#   CP_METRIC       which error the reward is; all of them MINIMIZE
 #   CR_TREE_WEIGHT  lambda in lambda * PathPrecision + (1 - lambda) * EventF1.
 #                   At least 0.5 is a REQUIREMENT: recovering the node set is
 #                   nearly free, so a search rewarded mostly on Event F1
@@ -567,6 +575,30 @@ CR_INSTANCES="${CR_INSTANCES:-}"
 CR_SELECT_SPLIT="${CR_SELECT_SPLIT:-}"
 CR_EVAL_SPLIT="${CR_EVAL_SPLIT:-}"
 CR_TREE_WEIGHT="${CR_TREE_WEIGHT:-}"
+
+# Cascade prediction. `CP_SPLIT` is the load-bearing one: research/
+# cascade_prediction.md §8.3 shows the field's own random-over-cascades split LEAKS
+# the future, and that fixing it moved a decade of published numbers — two 2021-24
+# SOTA models fell below a plain MLP. `chronological` is the default and the leaky
+# protocol is available on purpose, because the GAP between them is the experiment.
+# CP_OBSERVATION / CP_HORIZON are in the CORPUS's own time unit (seconds for the
+# social corpora, DAYS for APS) and default to that corpus's own published windows.
+CP_OBSERVATION="${CP_OBSERVATION:-}"
+CP_HORIZON="${CP_HORIZON:-}"
+CP_STEP="${CP_STEP:-}"
+CP_MIN_SIZE="${CP_MIN_SIZE:-}"
+CP_TRUNCATE="${CP_TRUNCATE:-}"
+CP_SPLIT="${CP_SPLIT:-}"
+CP_TARGET="${CP_TARGET:-}"
+CP_GRAPH="${CP_GRAPH:-}"
+CP_MAX_CASCADES="${CP_MAX_CASCADES:-}"
+CP_MAX_NODES="${CP_MAX_NODES:-}"
+CP_SELECT_SPLIT="${CP_SELECT_SPLIT:-}"
+CP_EVAL_SPLIT="${CP_EVAL_SPLIT:-}"
+CP_INSTANCES="${CP_INSTANCES:-}"
+CP_OBSERVATION_STEPS="${CP_OBSERVATION_STEPS:-}"
+CP_METRIC="${CP_METRIC:-}"
+CP_FORECAST_SAMPLES="${CP_FORECAST_SAMPLES:-}"
 
 # Epidemic control. `EPI_LEVER` is the load-bearing one: the four interventions of
 # research/epidemic_control.md §2.5 are four different problems, and vaccinate and
@@ -834,6 +866,22 @@ fi
 [ -n "$CR_TREE_WEIGHT" ]       && flags+=(--cr-tree-weight "$CR_TREE_WEIGHT")
 [ -n "$CR_MCMC_PROPOSALS" ]    && flags+=(--cr-mcmc-proposals "$CR_MCMC_PROPOSALS")
 [ -n "$CR_MCMC_BURN_IN" ]      && flags+=(--cr-mcmc-burn-in "$CR_MCMC_BURN_IN")
+[ -n "$CP_OBSERVATION" ]       && flags+=(--cp-observation "$CP_OBSERVATION")
+[ -n "$CP_HORIZON" ]           && flags+=(--cp-horizon "$CP_HORIZON")
+[ -n "$CP_STEP" ]              && flags+=(--cp-step "$CP_STEP")
+[ -n "$CP_MIN_SIZE" ]          && flags+=(--cp-min-size "$CP_MIN_SIZE")
+[ -n "$CP_TRUNCATE" ]          && flags+=(--cp-truncate "$CP_TRUNCATE")
+[ -n "$CP_SPLIT" ]             && flags+=(--cp-split "$CP_SPLIT")
+[ -n "$CP_TARGET" ]            && flags+=(--cp-target "$CP_TARGET")
+[ -n "$CP_GRAPH" ]             && flags+=(--cp-graph "$CP_GRAPH")
+[ -n "$CP_MAX_CASCADES" ]      && flags+=(--cp-max-cascades "$CP_MAX_CASCADES")
+[ -n "$CP_MAX_NODES" ]         && flags+=(--cp-max-nodes "$CP_MAX_NODES")
+[ -n "$CP_SELECT_SPLIT" ]      && flags+=(--cp-select-split "$CP_SELECT_SPLIT")
+[ -n "$CP_EVAL_SPLIT" ]        && flags+=(--cp-eval-split "$CP_EVAL_SPLIT")
+[ -n "$CP_INSTANCES" ]         && flags+=(--cp-instances "$CP_INSTANCES")
+[ -n "$CP_OBSERVATION_STEPS" ] && flags+=(--cp-observation-steps "$CP_OBSERVATION_STEPS")
+[ -n "$CP_METRIC" ]            && flags+=(--cp-metric "$CP_METRIC")
+[ -n "$CP_FORECAST_SAMPLES" ]  && flags+=(--cp-forecast-samples "$CP_FORECAST_SAMPLES")
 [ "$HIDE_EDGE_WEIGHTS" = "1" ] && flags+=(--hide-edge-weights)
 
 # ---------------------------------------------------------------------------
