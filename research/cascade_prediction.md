@@ -322,6 +322,18 @@ Practical rule: **quote a row only together with the paper it came from.** The o
 
 ## 6. Datasets
 
+### 6.0 What `--dataset` accepts for this task
+
+**Every one of the 71 real graph loaders and all 7 synthetic families (`er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate`) runs on this task.** The loaders are task-agnostic; nothing in `pipeline/tasks.py` restricts a task to a dataset. The lists below are therefore an experimental CHOICE, not a constraint, and the only place that choice is currently encoded is `sbatch/`. Where the sweep and the benchmark family disagree, the sweep is the accident and the family is the intent.
+
+| | Datasets |
+| --- | --- |
+| **The only datasets this task accepts** (8 replay corpora) | `taoke`, `digg_cascades`, `casflow_aps`, `casflow_weibo`, `casflow_twitter`, `memetracker`, `aps`, `weibo_cascades` |
+| **Graph loaders** | **none apply.** This is the one `observational` task: `data/wm_cascades.py` replays a real log and no simulator runs, so no graph loader and no synthetic family is a valid `--dataset` here |
+| **In `sbatch/cascade_prediction/sweep_datasets.sbatch` today** | `taoke`, `digg_cascades`, `casflow_aps`, `casflow_weibo`, `casflow_twitter`, `memetracker` |
+
+`taoke` runs `--cp-split random` in the sweep while the other five run `chronological`, because at the default `--cp-min-size 10` its surviving pool is too concentrated in time for a leak-free split to exist (see §8.3 and the note above §11).
+
 ### 6.1 What we already load yes
 
 **None of them carry cascades.** Every graph in [`influence_maximization.md` §6.1](influence_maximization.md) is topology only: `jazz` 198/2,742 · `email_eu_core` 1,005/24,929 arcs · `netscience` 1,589/2,742 · `cora_ml` 2,810/7,981 · `facebook` 4,039/88,234 · `power_grid` 4,941/6,594 · `ca_grqc` 5,242/14,484 · `wiki_vote` 7,115/103,689 arcs · `lastfm_asia` 7,624/27,806 · `nethept` 15,229/62,752 arcs · `netphy` 37,154/174,161 · `twitter` 81,306/1.77M arcs · `digg` 116,893/≈2.6M · `youtube` 1,134,890/2,987,624 · `weibo` 1,787,443/≈216M arcs. Plus synthetic `er`, `ba`, `ws`, `sbm`, `karate`. All counts [verified] by running the loaders.

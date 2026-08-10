@@ -592,6 +592,19 @@ Top-5 accuracy, ± 95% CI over three seeds [verified, Table 4]:
 
 ## 6. Datasets
 
+### 6.0 What `--dataset` accepts for this task
+
+**Every one of the 71 real graph loaders and all 7 synthetic families (`er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate`) runs on this task.** The loaders are task-agnostic; nothing in `pipeline/tasks.py` restricts a task to a dataset. The lists below are therefore an experimental CHOICE, not a constraint, and the only place that choice is currently encoded is `sbatch/`. Where the sweep and the benchmark family disagree, the sweep is the accident and the family is the intent.
+
+| | Datasets |
+| --- | --- |
+| **Benchmark family** (§6.2) | `karate`, `dolphins`, `jazz`, `netscience`, `cora_ml`, `power_grid` |
+| **Cost target** (IVGD's scalability column) | `deezer` (the HU graph, 47,538 / 222,887) |
+| **Synthetic** | `er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker` |
+| **In `sbatch/source_localization/sweep_datasets.sbatch` today** | `karate`, `dolphins`, `jazz`, `netscience`, `cora_ml`, `power_grid` |
+
+**This is the only task whose sweep matches its benchmark family exactly.** The overlap with the rest of the repo is the highest of any task here: five of the six were already loaded for other tasks.
+
 ### 6.1 What we already load
 
 **Five of SL-VAE's seven graphs, and four of GraphSL's six, are already in `data/datasets/`.** This is the highest overlap of any task in this folder.

@@ -321,6 +321,19 @@ CELF / degree-discount    ← cheap strong baselines, tie at high budget
 
 ## 6. Datasets
 
+### 6.0 What `--dataset` accepts for this task
+
+**Every one of the 71 real graph loaders and all 7 synthetic families (`er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate`) runs on this task.** The loaders are task-agnostic; nothing in `pipeline/tasks.py` restricts a task to a dataset. The lists below are therefore an experimental CHOICE, not a constraint, and the only place that choice is currently encoded is `sbatch/`. Where the sweep and the benchmark family disagree, the sweep is the accident and the family is the intent.
+
+| | Datasets |
+| --- | --- |
+| **Benchmark family** (§6) | `jazz`, `email_eu_core`, `netscience`, `cora_ml`, `facebook`, `power_grid`, `ca_grqc`, `wiki_vote`, `lastfm_asia`, `nethept`, `netphy` |
+| **Synthetic** | `er`, `ba`, `ws`, `sbm`, `karate`, `powerlaw_cluster`, `kronecker` |
+| **Scale targets** (load, too slow to simulate today) | `twitter`, `digg`, `youtube`, `epinions`, `orkut`, `livejournal`, `weibo` |
+| **In `sbatch/influence_maximization/` today** | `ba`, `sbm`, `jazz`, `netscience`, `power_grid`, `nethept` |
+
+There is no `sweep_datasets.sbatch` for this task; the six above are its `generate_data_*.sbatch` targets. `karate`, `er` and `ws` are fully supported and simply have no generation script yet.
+
 `data/datasets/<name>.py`, dispatched by `data/wm_graphs.py::real_directed`. Raw downloads land in `data/raw/<dataset>/` (gitignored, shared across runs).
 
 ### 6.1 What we already load

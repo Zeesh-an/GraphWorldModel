@@ -333,6 +333,19 @@ All results are **figure-only** (Figs. 3-5); no result table is published [verif
 
 ## 6. Datasets
 
+### 6.0 What `--dataset` accepts for this task
+
+**Every one of the 71 real graph loaders and all 7 synthetic families (`er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate`) runs on this task.** The loaders are task-agnostic; nothing in `pipeline/tasks.py` restricts a task to a dataset. The lists below are therefore an experimental CHOICE, not a constraint, and the only place that choice is currently encoded is `sbatch/`. Where the sweep and the benchmark family disagree, the sweep is the accident and the family is the intent.
+
+| | Datasets |
+| --- | --- |
+| **Benchmark family** (§6.1, the static IM suite re-used) | `jazz`, `cora_ml`, `facebook`, `power_grid`, `nethept`, `netphy`, `digg`, `netscience` |
+| **Synthetic** | `powerlaw_cluster` (RL4IM's own family), plus `er`, `ba`, `ws`, `sbm`, `karate`, `kronecker` |
+| **Scale targets** (Han et al.'s, where their own method OOMs) | `twitter`, `youtube`, `livejournal` |
+| **In `sbatch/adaptive_online_im/` today** | `powerlaw_cluster`, `nethept` |
+
+This literature adds almost no new graphs: it re-uses the static IM suite and changes the PROTOCOL. `netscience` and `digg` both carry version caveats (§6.1).
+
 **Good news up front: this literature adds almost no new graphs.** Adaptive, online, and dynamic IM re-use the _static_ IM benchmark suite and change the _protocol_, not the data. The authoritative rows for every graph below live in [`influence_maximization.md`](influence_maximization.md) §6.2, this section records only which of them this family uses, plus the two genuinely new items (§6.3).
 
 ### 6.1 What we already load

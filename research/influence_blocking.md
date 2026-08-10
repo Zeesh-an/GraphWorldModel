@@ -438,6 +438,18 @@ Exact blocking of **four** nodes takes 22 hours; a greedy heuristic gets within 
 
 ## 6. Datasets
 
+### 6.0 What `--dataset` accepts for this task
+
+**Every one of the 71 real graph loaders and all 7 synthetic families (`er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate`) runs on this task.** The loaders are task-agnostic; nothing in `pipeline/tasks.py` restricts a task to a dataset. The lists below are therefore an experimental CHOICE, not a constraint, and the only place that choice is currently encoded is `sbatch/`. Where the sweep and the benchmark family disagree, the sweep is the accident and the family is the intent.
+
+| | Datasets |
+| --- | --- |
+| **Benchmark family** (§6.2, the 13 blocking benchmarks) | `p2p_gnutella08`, `p2p_gnutella24`, `cit_hepth`, `cit_hepph`, `email_enron`, `slashdot`, `epinions1`, `gowalla`, `email_euall`, `web_stanford`, `dblp`, `higgs_twitter`, `pokec` |
+| **Synthetic** | `er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate` |
+| **In `sbatch/influence_blocking/sweep_datasets.sbatch` today** | `email_eu_core`, `facebook`, `wiki_vote`, `netscience`, `nethept`, `netphy` |
+
+**The sweep and the benchmark family are disjoint.** The sweep runs the IM core; none of the 13 graphs this literature actually publishes on is in it. `higgs_twitter` and `pokec` are scalability targets rather than comparison rows (their counts come from SNAP's statistics page, not from our own count).
+
 Authoritative metadata for the social graphs below lives in [`influence_maximization.md`](influence_maximization.md) §6 (loader contract §6.6, name collisions §6.3). This section records **what the blocking literature evaluates on** and how it differs.
 
 ### 6.1 What we already load, and who blocks on it yes

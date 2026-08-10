@@ -496,6 +496,20 @@ Results: **[figure] only** (allocation vs. in-degree, and vs. PageRank).
 
 ## 6. Datasets
 
+### 6.0 What `--dataset` accepts for this task
+
+**Every one of the 71 real graph loaders and all 7 synthetic families (`er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate`) runs on this task.** The loaders are task-agnostic; nothing in `pipeline/tasks.py` restricts a task to a dataset. The lists below are therefore an experimental CHOICE, not a constraint, and the only place that choice is currently encoded is `sbatch/`. Where the sweep and the benchmark family disagree, the sweep is the accident and the family is the intent.
+
+| | Datasets |
+| --- | --- |
+| **Benchmark family, SocioPatterns contact traces** (§6.2, 12) | `primary_school`, `high_school_2011`, `high_school_2012`, `high_school_2013`, `hypertext09`, `sfhh`, `workplace_invs13`, `workplace_invs15`, `kenya_households`, `malawi_village`, `hospital_lh10`, `infectious_sociopatterns` |
+| **Benchmark family, spectral line** (§6.3, 7) | `oregon1`, `oregon2_010331`, `brightkite`, `p2p_gnutella05`, `p2p_gnutella06`, `deezer_ro`, `youtube` |
+| **Near-regular control** (§6.3) | `football` (115 nodes, 12 conferences, mean degree 10.7: the graph where the degree heuristic has nothing to grab) |
+| **Synthetic** | `er`, `ba`, `ws`, `sbm`, `karate`, `powerlaw_cluster`, `kronecker` |
+| **In `sbatch/epidemic_control/sweep_datasets.sbatch` today** | `hospital_lh10`, `primary_school`, `malawi_village`, `football`, `oregon1`, `oregon2_010331`, `brightkite`, `ca_grqc`, `deezer_ro`, `power_grid` |
+
+The sweep runs 3 of the 12 traces and 4 of the 7 spectral graphs, and adds `ca_grqc` and `power_grid`. **Aggregating a contact trace destroys half the problem** (§8.2 trap 5), which every SocioPatterns loader prints for itself.
+
 This literature uses a **different dataset family** from IM. The social graphs that dominate `influence_maximization.md` appear only as convenience benchmarks; the graphs that carry the field are **empirical contact traces**, **air transportation networks**, and **AS/infrastructure graphs**.
 
 ### 6.1 What we already load that this literature also uses

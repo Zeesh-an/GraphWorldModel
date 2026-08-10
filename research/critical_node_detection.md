@@ -601,6 +601,19 @@ Hospital and Workplace rows are in the paper's Table 3 as well; there the six me
 
 ## 6. Datasets
 
+### 6.0 What `--dataset` accepts for this task
+
+**Every one of the 71 real graph loaders and all 7 synthetic families (`er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate`) runs on this task.** The loaders are task-agnostic; nothing in `pipeline/tasks.py` restricts a task to a dataset. The lists below are therefore an experimental CHOICE, not a constraint, and the only place that choice is currently encoded is `sbatch/`. Where the sweep and the benchmark family disagree, the sweep is the accident and the family is the intent.
+
+| | Datasets |
+| --- | --- |
+| **Benchmark family** (§6.2, the 12 dismantling benchmarks) | `corruption`, `usair97`, `crime`, `road_eu`, `euroroad`, `hamsterster`, `ppi_yeast`, `openflights`, `human_ppi_vidal`, `intnet1`, `pgp`, `p2p_gnutella` |
+| **Also reported on** | `power_grid` (byte-identical to CoreHD/BPD/NIRM's file, the single best comparison target here) |
+| **Synthetic** | `er`, `ba`, `ws`, `sbm`, `karate`, `powerlaw_cluster`, `kronecker` |
+| **In `sbatch/critical_node_detection/sweep_datasets.sbatch` today** | `crime`, `corruption`, `ppi_yeast`, `hamsterster`, `intnet1`, `usair97`, `openflights`, `road_eu`, `power_grid` |
+
+The sweep runs 9 of the 12 and adds `power_grid`. Missing from it: `euroroad`, `human_ppi_vidal`, `pgp`.
+
 Counts below are tagged by source: **self-counted** = the file was downloaded and the nodes/edges counted; **repo** = the repository's own statistics page, curled and read; **paper** = the paper's own table via `pdftotext -layout`. Average degree uses `2m/n` throughout (directed rows therefore count in+out), matching KONECT's `d`. HTTP codes: **206** on a direct-download link means a range request succeeded, i.e. the file exists and is byte-servable, equivalent to 200 here. KONECT, networkrepository/nrvis, and Newman's `netdata` index require the browser `-A` string; Newman's index page 403s but every `.zip` under it serves 200.
 
 Authoritative rows for the social graphs we already load live in [`influence_maximization.md`](influence_maximization.md) §6; this section owns the **infrastructure and biological** graphs, which the IM literature does not use.

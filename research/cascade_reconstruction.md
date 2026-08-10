@@ -532,6 +532,19 @@ That 1% is the sober number to keep in mind: **retrospective reconstruction on r
 
 ## 6. Datasets
 
+### 6.0 What `--dataset` accepts for this task
+
+**Every one of the 71 real graph loaders and all 7 synthetic families (`er`, `ba`, `ws`, `sbm`, `powerlaw_cluster`, `kronecker`, `karate`) runs on this task.** The loaders are task-agnostic; nothing in `pipeline/tasks.py` restricts a task to a dataset. The lists below are therefore an experimental CHOICE, not a constraint, and the only place that choice is currently encoded is `sbatch/`. Where the sweep and the benchmark family disagree, the sweep is the accident and the family is the intent.
+
+| | Datasets |
+| --- | --- |
+| **Benchmark family** (§6, the 7 CR benchmarks) | `infectious`, `email_univ`, `uci_students`, `oregon2`, `rt_pol`, `ca_hepth`, `citeseer` |
+| **Also reported on** | `cora_ml`, `power_grid` (the two DIPT rows where our graph is known to match), `ca_grqc` (§8.2 trap 4's assortativity case), `jazz` |
+| **Synthetic** | `ba`, `er` at DITTO's own parameters (`generate_data_ba_er.sbatch`), plus `ws`, `sbm`, `karate`, `powerlaw_cluster`, `kronecker` |
+| **In `sbatch/cascade_reconstruction/sweep_datasets.sbatch` today** | `jazz`, `infectious`, `email_univ`, `uci_students`, `citeseer`, `cora_ml`, `ca_grqc`, `power_grid`, `ca_hepth`, `oregon2`, `rt_pol` |
+
+The sweep covers all 7 of the family plus the 4 context graphs. **`ca_hepth` is not `cit_hepth`** (8,638-node co-authorship vs 27,769-node citation).
+
 Cascade reconstruction needs **two things a plain IM graph does not have**: a per-node activation _time_, and (for tree metrics) a ground-truth who-infected-whom edge. Almost no real corpus has the second. That is why every paper in §5 that reports tree metrics **simulates** the cascade, and why our generator's stored `frontier` is a genuine asset rather than a shortcut.
 
 ### 6.1 What we already load yes
