@@ -687,6 +687,52 @@ def check_helpers() -> None:
     assert competitive_model_name(1.0) == "mcicm"
 
 
+def check_mia_scores_do_not_collapse_onto_the_periphery() -> None:
+    """
+    `cldag` and `cmia_o` must not re-weight their local DAG by the path probability.
+
+    The max-influence path underestimates P(infected) far worse for high-degree
+    nodes than for low-degree ones. Measured on email-Eu-core: 24x at a degree-544
+    hub against 2.5x at a degree-31 node, because the weighted-cascade model puts
+    p(u->v) = 1/in_degree(v) on every arc into a hub. Multiplying two such estimates
+    together ranked a node that only saves ITSELF above one that saves 217 others,
+    and both methods then scored barely better than `random_blocking` under IC and
+    LT alike. Pinned by the SYMPTOM rather than by the score, so rewriting the
+    scoring rule stays free as long as it does not reintroduce the collapse.
+    """
+    # A scale-free graph under the WEIGHTED-CASCADE model, which is where the
+    # distortion lives: p(u->v) = 1/in_degree(v) makes every arc into a hub weak,
+    # so the single best path to a hub is improbable even though the hub is reached
+    # almost surely. Uniform probabilities hide the bug entirely.
+    scale_free = nx.barabasi_albert_graph(160, 3, seed=5).to_directed()
+    pairs = list(scale_free.edges())
+    edge_index = np.asarray(pairs, dtype=np.int64).T
+    in_degree = np.zeros(160)
+    np.add.at(in_degree, edge_index[1], 1)
+    graph = GraphInfo(
+        num_nodes=160,
+        edge_index=edge_index,
+        ic_probs=(1.0 / np.maximum(in_degree[edge_index[1]], 1.0)).astype(np.float32),
+        directed=True,
+    )
+    sources = sorted(range(graph.num_nodes), key=graph.degree, reverse=True)[:3]
+    budget = 8
+    everyone = float(np.mean([graph.degree(n) for n in range(graph.num_nodes)]))
+
+    for name in ("cldag", "cmia_o"):
+        picks = all_blocking_algorithms[name](
+            graph, budget, "IC", negative_seeds=tuple(sources)
+        )
+        assert len(picks) == budget, (name, picks)
+
+        chosen = float(np.mean([graph.degree(node) for node in picks]))
+        assert chosen > everyone, (
+            f"{name} picked mean degree {chosen:.1f} against a graph mean of "
+            f"{everyone:.1f}: that is the periphery collapse the DAG re-weighting "
+            f"caused"
+        )
+
+
 checks = (
     check_registry,
     check_tie_break,
@@ -707,6 +753,7 @@ checks = (
     check_anchor_table,
     check_generated_script,
     check_helpers,
+    check_mia_scores_do_not_collapse_onto_the_periphery,
 )
 
 

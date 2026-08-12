@@ -636,7 +636,13 @@ def cmia_o(
 
             reach, hops = _max_probability_paths(graph, chosen + [candidate])
             saved = (hops < negative_hops) if strict else (hops <= negative_hops)
-            gain = float((negative_reach * reach * saved).sum())
+            # COUNT the nodes covered, for the same reason `cldag` does: the
+            # threshold already decides membership of the arborescence, and
+            # re-weighting by `negative_reach * reach` applies it twice and
+            # discounts high-degree nodes by about 10x (see `cldag`). Counting is
+            # also what makes the greedy loop below a submodular coverage
+            # maximization, which is what CMIA-O's guarantee rests on.
+            gain = float(((negative_reach > 0.0) & (reach > 0.0) & saved).sum())
 
             if gain > best_gain:
                 best_node, best_gain = candidate, gain
@@ -647,6 +653,56 @@ def cmia_o(
         chosen.append(int(best_node))
 
     return _pad(chosen, graph, budget, negative_seeds)
+
+
+def _dag_reach(
+    graph: GraphInfo, sources, threshold: float = mia_threshold
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    (reach probability, hop count) aggregating EVERY path in the local DAG.
+
+    `_max_probability_paths` returns the single best path's product, which is the
+    MIA family's arborescence and is what `proximity`-style ranking needs. It is a
+    severe underestimate wherever a node is reached by many weak paths rather than
+    one strong one, and under the weighted-cascade model `p(u->v) = 1/in_degree(v)`
+    that is exactly the high-degree nodes: the best single path into a 544-in-degree
+    hub is about 1/544, while the hub is in practice reached almost surely.
+
+    CLDAG's own contribution is that per-node influence is computed EXACTLY within
+    the thresholded DAG rather than along one path, so its score needs this. Nodes
+    are composed in hop order with the independent-cascade form the structured head
+    uses, `1 - prod(1 - p_uv * reach_u)`, which is exact on a DAG.
+    """
+    best, hops = _max_probability_paths(graph, sources, threshold)
+
+    reach = np.zeros(graph.num_nodes, dtype=np.float64)
+    for node in sources:
+        reach[int(node)] = 1.0
+
+    weights = {}
+    for edge in range(graph.edge_index.shape[1]):
+        weights[(int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge]))] = float(
+            graph.ic_probs[edge]
+        )
+
+    # Hop order makes the local DAG acyclic, so one sweep is exact on it
+    order = [node for node in np.argsort(hops) if np.isfinite(hops[node])]
+    for node in order:
+        node = int(node)
+        if reach[node] >= 1.0 or best[node] <= 0.0:
+            continue
+
+        survive = 1.0
+        for other in graph.in_neighbors(node):
+            other = int(other)
+            if hops[other] >= hops[node] or reach[other] <= 0.0:
+                continue
+
+            survive *= 1.0 - weights.get((other, node), 0.0) * reach[other]
+
+        reach[node] = 1.0 - survive
+
+    return reach, hops
 
 
 def cldag(
@@ -667,15 +723,26 @@ def cldag(
     hard-codes. Ranking is one-shot rather than greedy, because CLDAG's own
     contribution is the speed of the local computation, not the outer loop.
     """
-    negative_reach, negative_hops = _max_probability_paths(graph, negative_seeds)
+    negative_reach, negative_hops = _dag_reach(graph, negative_seeds)
     pool = _candidate_pool(graph, negative_seeds, budget)
     scores = np.zeros(graph.num_nodes, dtype=np.float64)
 
     for candidate in pool:
-        reach, hops = _max_probability_paths(graph, [candidate])
+        reach, hops = _dag_reach(graph, [candidate])
+        # COUNT the nodes saved inside the local DAG; do not re-weight them by the
+        # path probability. The threshold is what makes the DAG local, so a node is
+        # either in it or it is not, and multiplying by `negative_reach * reach`
+        # applies that cut a second time. Measured on email-Eu-core, the max-influence
+        # path underestimates P(infected) by 24x at a degree-544 hub against 2.5x at
+        # a degree-31 node, so the re-weighting is not a neutral rescaling: it
+        # discounts hubs by about 10x relative to the periphery and the ranking
+        # collapses onto low-degree nodes next to a source, which scored barely
+        # better than `random_blocking` under BOTH IC and LT.
+        #
         # CLT resolves a tie in favour of the rumour, so the blocker has to arrive
-        # STRICTLY earlier to save a node
-        scores[candidate] = float((negative_reach * reach * (hops < negative_hops)).sum())
+        # STRICTLY earlier, and a node the rumour never reaches is worth nothing.
+        saved = (negative_reach > 0.0) & (reach > 0.0) & (hops < negative_hops)
+        scores[candidate] = float(saved.sum())
 
     return _pad(
         [int(node) for node in np.argsort(-scores)[:budget] if scores[node] > 0.0],
