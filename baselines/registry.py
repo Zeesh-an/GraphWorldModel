@@ -2175,12 +2175,18 @@ def _casflow_entry(
 
     One driver covers both and `GWM_CASFLOW_SRC` picks the clone's source directory,
     which is the repo root for CasFlow and `src/` for CCGL. Both pin an exact
-    TensorFlow that no longer resolves on a current Python; the pin is patched away
-    rather than honoured, because the code uses plain Keras 2 APIs that every TF 2.x
-    provides and installing a 2021 wheel is not possible on most current platforms.
+    TensorFlow that no longer resolves on a current Python. The patches relax what
+    they can, but not every pin is reachable that way and the leftovers are fatal
+    on 3.10: CCGL still requires `tensorflow-gpu==2.3` (last wheel cp38), and
+    CasFlow's `scikit-learn==1.0.1` has no cp310 wheel at all, so uv falls back to
+    building it and dies inside `numpy.distutils` on `distutils.msvccompiler`,
+    which modern setuptools no longer ships. Both resolve cleanly on 3.8, where
+    binary wheels exist for every pin, so the venv is built there rather than
+    fighting two source builds.
     """
     return ExternalBaseline(
         name=name,
+        python="3.8",
         kind=learned,
         title=title,
         venue=venue,
@@ -3480,9 +3486,10 @@ external_baselines: dict[str, ExternalBaseline] = {
         task="adaptive_online_im",
         status="needs_setup",
         rounds_aware=True,
-        # torch 1.7.0 and torch_geometric 1.6.3 are 2020 pins with no wheels for
-        # a modern interpreter, so the venv has to be built on 3.9
-        python="3.9",
+        # torch 1.7.0 and torch_geometric 1.6.3 are 2020 pins with no wheels for a
+        # modern interpreter. 3.8, NOT 3.9: torch 1.7.0 publishes cp36m, cp37m,
+        # cp38 and cp38m and stops there [read from uv's resolver output]
+        python="3.8",
         patches=[
             # ipdb 0.12 builds with use_2to3, which setuptools removed in v58,
             # so the install dies before torch is even reached. It is a DEBUGGER,
@@ -4185,7 +4192,15 @@ external_baselines: dict[str, ExternalBaseline] = {
         # definition; GCC 10 made -fno-common the default and the link fails with
         # "multiple definition of N". Restoring the old default is the one-flag
         # fix and does not touch their source.
-        build=["make", "-C", "Library", "CFLAGS=-fcommon -O3 -w"],
+        # `clean` first: the objects from the previous attempt were compiled
+        # WITHOUT -fcommon and make relinks them rather than rebuilding, so the
+        # flag never reaches the compile step. -lm is restored explicitly because
+        # overriding CFLAGS drops the makefile's own copy of it (undefined sqrt).
+        build=[
+            "sh",
+            "-c",
+            "make -C Library clean; make -C Library CFLAGS='-fcommon -O3 -w' LIBS=-lm",
+        ],
         export=_ei_export,
         command=_ei_command,
         parse_seeds=_ei_parse,

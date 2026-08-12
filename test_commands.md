@@ -20,17 +20,18 @@ python -m baselines.setup_baselines --list     # confirm what is ready
 
 ### If `--all` reports failures
 
-A first run on the cluster failed 13 of 55, and **four of those were our bugs, now fixed**. Re-run `--all` after pulling; it is idempotent and skips what is already present.
+Two rounds of fixes against real cluster runs. **Re-run `--all` after pulling**; it is idempotent, and it now rebuilds any venv that is at the wrong interpreter version.
 
 | What failed | Cause | Status |
 | --- | --- | --- |
-| `rl4im`, `finder`, `finder_epi`, `glie` | `spec.python` was set on ~110 specs and **passed to nothing**: every venv was built at the system interpreter, so `torch==1.7.0` (cp36-cp38), `tensorflow-gpu==1.14.0` (cp27-cp37) and `torch==1.5.1` (cp35-cp38) could never resolve | **fixed**: `_create_venv` now runs `uv venv --python <ver>`, and uv fetches a managed CPython when it is absent. `glie` newly pinned to 3.8 |
-| `ditto`, `ditto_cri`, `ditto_dhrec`, `spin` | `torch-scatter` imports torch inside its own `setup.py`, so under build isolation it builds in a fresh env with no torch | **fixed**: torch is pre-installed and the extensions are built with `--no-build-isolation` |
-| `explosive_immunization`, `explosive_immunization_epi` | the repo declares globals in `macros.h` / `scores.h` with no `extern`. GCC 9 merged them; GCC 10 made `-fno-common` the default and the link fails on `multiple definition of N` | **fixed**: builds with `CFLAGS=-fcommon` |
-| `decycler` | the build line hardcoded `-I/opt/homebrew/include`, an **Apple Silicon** path, so Boost was never found on Linux | **fixed**: both include roots are passed, so one line builds on either platform. If it still fails Boost is genuinely absent: `module load boost`, or `apt install libboost-program-options-dev` |
-| `casflow`, `ccgl` | not diagnosed, the error was truncated in the log | re-run and read the message. Setup now appends the exact pin to add, for example `Set python="3.8" on the casflow spec` |
+| `rl4im`, `finder`, `finder_epi`, `glie`, `ccgl`, `casflow` | Two bugs stacked. `spec.python` was set on ~110 specs and **passed to nothing**, so every venv was built at the system interpreter; and once a 3.10 venv existed, setup **reused it forever** because it only tested whether the interpreter existed, never its version. The pin could therefore never take effect, even on a re-run | **fixed**: `_create_venv` runs `uv venv --python <ver>`, and a venv whose version disagrees with the spec is deleted and rebuilt. Pins corrected: `rl4im` 3.9 to **3.8** (torch 1.7.0 stops at cp38, my earlier 3.9 was wrong), `glie` **3.8**, `ccgl` and `casflow` **3.8** |
+| `ditto`, `ditto_cri`, `ditto_dhrec`, `spin` | `torch-scatter` compares the CUDA that built the torch wheel against the CUDA on the box and refuses to build when they differ: **12.9 on the node against 13.0 in the wheel** | **fixed**: the extension builds under `FORCE_ONLY_CPU=1`. These repos are driven through their MODEL by our own loop, not their training harness, and nothing we call needs a CUDA scatter kernel. `numpy` is also installed first, which silences torch's "Failed to initialize NumPy" |
+| `explosive_immunization`, `explosive_immunization_epi` | `-fcommon` was passed but **only the link step re-ran**: the objects from the first attempt were already compiled without it, and make relinks rather than rebuilds. Overriding `CFLAGS` also dropped the makefile's `-lm`, hence `undefined reference to sqrt` | **fixed**: `make clean` first, and `-lm` restored explicitly |
+| `decycler` | Boost is genuinely **not installed on the node**. The first failure was our Apple-Silicon path, now fixed; this one is real | **needs a system package**: `module load boost`, or `apt install libboost-program-options-dev`. Nothing in the repo can fix it |
 
-Any ABI failure is now self-diagnosing: uv's "no wheels with a matching Python ABI tag" is parsed and the setup line tells you which `python=` to put in `baselines/registry.py`.
+Any ABI failure is self-diagnosing: uv's "no wheels with a matching Python ABI tag" is parsed and the setup line names the `python=` to set. That is how `ccgl`, `finder`, `glie` and `rl4im` reported their own correct pins on the second run.
+
+**`casflow` is the one to watch.** Its `scikit-learn==1.0.1` has no cp310 wheel at all, so uv fell back to a source build that died inside `numpy.distutils` on `distutils.msvccompiler`, which modern setuptools no longer ships. That is not an ABI-tag error, so the hint does not fire; the 3.8 pin avoids the source build entirely.
 
 Two more traps worth knowing:
 

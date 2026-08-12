@@ -62,6 +62,7 @@ def _run(
     cwd: Path | None = None,
     timeout: int = 600,
     name: str | None = None,
+    env: dict | None = None,
 ) -> None:
     """
     Run a setup command, streaming stdout and capturing stderr.
@@ -73,7 +74,7 @@ def _run(
     """
     print(f"  $ {' '.join(argv)}")
     completed = subprocess.run(
-        argv, cwd=cwd, timeout=timeout, stderr=subprocess.PIPE, text=True
+        argv, cwd=cwd, timeout=timeout, stderr=subprocess.PIPE, text=True, env=env
     )
     errors = completed.stderr or ""
 
@@ -233,6 +234,35 @@ def _create_venv(name: str, venv: Path) -> None:
         ) from error
 
 
+def _venv_version(interpreter: Path) -> str:
+    """`major.minor` of an existing venv's interpreter, or "" if it cannot be read."""
+    try:
+        done = subprocess.run(
+            [
+                str(interpreter),
+                "-c",
+                "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+    return done.stdout.strip() if done.returncode == 0 else ""
+
+
+def _version_matches(interpreter: Path, wanted: str | None) -> bool:
+    """A compound pin ("2.7+3.6") names two interpreters and is a note to a human."""
+    if not wanted or "+" in wanted:
+        return True
+
+    found = _venv_version(interpreter)
+
+    return not found or found == wanted
+
+
 def install(name: str) -> None:
     spec = external_baselines[name]
 
@@ -255,8 +285,21 @@ def install(name: str) -> None:
     interpreter = spec.venv_python
 
     # Test for the interpreter, not the directory: a venv creation that failed
-    # part-way leaves a directory behind with no python and no pip in it
-    if not interpreter.exists():
+    # part-way leaves a directory behind with no python and no pip in it.
+    #
+    # A venv at the WRONG version is also rebuilt. Without this an existing 3.10
+    # venv from an earlier run survives, `_create_venv` is never called, and the
+    # `python=` pin silently does nothing: the install then fails on exactly the
+    # ABI wall the pin exists to avoid, and re-running never fixes it.
+    stale = interpreter.exists() and not _version_matches(interpreter, spec.python)
+
+    if stale:
+        print(
+            f"[setup] {name}: venv is {_venv_version(interpreter)}, spec wants "
+            f"{spec.python}; rebuilding"
+        )
+
+    if not interpreter.exists() or stale:
         shutil.rmtree(venv, ignore_errors=True)
         print(f"[setup] {name}: creating venv")
         _create_venv(name, venv)
@@ -284,11 +327,28 @@ def install(name: str) -> None:
 
     if needs_torch_build and uv is not None:
         print(f"[setup] {name}: pre-installing torch for {' '.join(needs_torch_build)}")
-        _run(command + ["-q", "torch"], timeout=install_timeout_seconds, name=name)
+        # numpy first: torch warns "Failed to initialize NumPy" without it and the
+        # extension's own setup.py imports torch, so the warning becomes noise in
+        # every subsequent build log
+        _run(
+            command + ["-q", "torch", "numpy"],
+            timeout=install_timeout_seconds,
+            name=name,
+        )
+
+        # FORCE_ONLY_CPU short-circuits torch-scatter's CUDA-version assertion,
+        # which compares the CUDA that built the torch wheel against the CUDA on
+        # the box and refuses to build when they differ (measured on the cluster:
+        # driver 12.9 against a torch built with 13.0). These three repos are
+        # driven through their MODEL by our own loop rather than through their
+        # training harness, and nothing we call needs a CUDA scatter kernel, so a
+        # CPU build is correct rather than merely expedient.
+        cpu_build = dict(os.environ, FORCE_ONLY_CPU="1", FORCE_CUDA="0")
         _run(
             command + ["-q", "--no-build-isolation", *needs_torch_build],
             timeout=install_timeout_seconds,
             name=name,
+            env=cpu_build,
         )
 
     if has_requirements:
