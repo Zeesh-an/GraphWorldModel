@@ -346,6 +346,19 @@ def install(name: str) -> None:
         if package.split("==")[0] in torch_extension_packages
     ]
 
+    # ...and the same packages named inside a requirements FILE. Scanning only
+    # `pip_packages` missed `glie`, whose torch-sparse pin lives in
+    # requirements.txt and hit the identical build-isolation wall. The line is
+    # taken verbatim so the pre-install satisfies the exact pin the file asks
+    # for, which makes the later full install a no-op for it rather than a
+    # second, isolated, failing build.
+    if has_requirements:
+        for line in requirements.read_text().splitlines():
+            entry = line.split("#")[0].strip()
+            name_only = re.split(r"[=<>!~\[]", entry)[0].strip()
+            if entry and name_only in torch_extension_packages:
+                needs_torch_build.append(entry)
+
     if needs_torch_build and uv is not None:
         print(f"[setup] {name}: pre-installing torch for {' '.join(needs_torch_build)}")
         # numpy first: torch warns "Failed to initialize NumPy" without it and the
