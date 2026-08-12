@@ -15,6 +15,7 @@ histories; MOEIM alone is ~128 MB. baselines/external/ is gitignored.
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -31,12 +32,59 @@ clone_timeout_seconds = 1800
 install_timeout_seconds = 1800
 
 
-def _run(argv: list[str], cwd: Path | None = None, timeout: int = 600) -> None:
+def _abi_hint(name: str, output: str) -> str:
+    """
+    Turn uv's "no wheels with a matching Python ABI tag" into the pin that fixes it.
+
+    That error names the interpreter you have and the tags the package publishes,
+    but never the conclusion, so every occurrence costs a manual read of the tag
+    list. These repos pin 2019-2021 dependency sets and the fix is almost always a
+    lower `python=` in the registry, so say which one.
+    """
+    if "matching Python ABI tag" not in output:
+        return ""
+
+    tags = set(re.findall(r"cp3(\d)", output))
+    if not tags:
+        return ""
+
+    best = max(int(tag) for tag in tags)
+
+    return (
+        f"\n[setup] {name}: the pinned dependency publishes wheels only up to "
+        f"CPython 3.{best}. Set python=\"3.{best}\" on the {name} spec in "
+        f"baselines/registry.py and re-run; the venv is created at that version."
+    )
+
+
+def _run(
+    argv: list[str],
+    cwd: Path | None = None,
+    timeout: int = 600,
+    name: str | None = None,
+) -> None:
+    """
+    Run a setup command, streaming stdout and capturing stderr.
+
+    stderr is captured rather than streamed so a failure can be READ before it is
+    re-raised: uv's ABI-tag error carries the fix (see `_abi_hint`) and losing it
+    to the terminal makes every occurrence a manual diagnosis. It is printed
+    verbatim either way, so nothing is hidden; only its timing changes.
+    """
     print(f"  $ {' '.join(argv)}")
-    completed = subprocess.run(argv, cwd=cwd, timeout=timeout)
+    completed = subprocess.run(
+        argv, cwd=cwd, timeout=timeout, stderr=subprocess.PIPE, text=True
+    )
+    errors = completed.stderr or ""
+
+    if errors:
+        print(errors, end="" if errors.endswith("\n") else "\n")
 
     if completed.returncode != 0:
-        raise RuntimeError(f"command failed ({completed.returncode}): {' '.join(argv)}")
+        raise RuntimeError(
+            f"command failed ({completed.returncode}): {' '.join(argv)}"
+            + (_abi_hint(name, errors) if name else "")
+        )
 
 
 class ManualFetch(RuntimeError):
@@ -132,18 +180,46 @@ def build(name: str) -> None:
     _run(spec.build, cwd=spec.directory, timeout=install_timeout_seconds)
 
 
+# Packages whose setup.py imports torch, so they cannot be built in isolation
+torch_extension_packages = frozenset(
+    {"torch-scatter", "torch-sparse", "torch-cluster", "torch-spline-conv"}
+)
+
+
 def _create_venv(name: str, venv: Path) -> None:
     """
-    Prefer `uv venv`.
+    Prefer `uv venv`, at the interpreter version the spec asks for.
 
     stdlib `python -m venv` needs ensurepip, which Debian/Ubuntu ship in a
     separate python3-venv package that is usually absent on a cluster node,
     and asking for sudo on a shared machine is not a fix. uv bootstraps its own
     pip, so it works where the stdlib path cannot.
+
+    `spec.python` is load-bearing and not decoration: these repos pin 2019-2021
+    dependency sets whose wheels simply do not exist for a modern interpreter.
+    `tensorflow-gpu==1.14.0` publishes cp27mu through cp37m, `torch==1.7.0`
+    cp36m through cp38, `torch==1.5.1` cp35m through cp38. Creating the venv at
+    whatever `python3` happens to be makes those unresolvable, and the error
+    ("no wheels with a matching Python ABI tag") names the interpreter rather
+    than the fix. uv fetches a managed CPython when the version is absent.
     """
     uv = shutil.which("uv")
+    wanted = external_baselines[name].python
 
     if uv is not None:
+        # A compound pin like gcomb's "2.7+3.6" names two interpreters and is a
+        # note to a human, not something uv can resolve
+        if wanted and "+" not in wanted:
+            try:
+                _run([uv, "venv", "--python", wanted, str(venv)], name=name)
+                return
+            except RuntimeError:
+                print(
+                    f"[setup] {name}: no CPython {wanted} available, falling back "
+                    f"to the default interpreter (pinned dependencies may not "
+                    f"resolve)"
+                )
+
         _run([uv, "venv", str(venv)])
         return
 
@@ -195,11 +271,32 @@ def install(name: str) -> None:
         else [str(venv / "bin" / "pip"), "install"]
     )
 
+    # torch-scatter / torch-sparse / torch-cluster compile against torch and
+    # `import torch` inside their own setup.py, so with build isolation they are
+    # built in a fresh env where torch is absent and die on ModuleNotFoundError.
+    # Installing torch first and then building them without isolation is the
+    # upstream-documented fix, and it has to happen BEFORE the main install.
+    needs_torch_build = [
+        package
+        for package in (spec.pip_packages or ())
+        if package.split("==")[0] in torch_extension_packages
+    ]
+
+    if needs_torch_build and uv is not None:
+        print(f"[setup] {name}: pre-installing torch for {' '.join(needs_torch_build)}")
+        _run(command + ["-q", "torch"], timeout=install_timeout_seconds, name=name)
+        _run(
+            command + ["-q", "--no-build-isolation", *needs_torch_build],
+            timeout=install_timeout_seconds,
+            name=name,
+        )
+
     if has_requirements:
         print(f"[setup] {name}: installing {spec.requirements}")
         _run(
             command + ["-q", "-r", str(requirements)],
             timeout=install_timeout_seconds,
+            name=name,
         )
 
     _install_packages(name, spec, command)
@@ -217,7 +314,11 @@ def _install_packages(name: str, spec, command: list[str]) -> None:
         return
 
     print(f"[setup] {name}: installing {' '.join(spec.pip_packages)}")
-    _run(command + ["-q", *spec.pip_packages], timeout=install_timeout_seconds)
+    _run(
+        command + ["-q", *spec.pip_packages],
+        timeout=install_timeout_seconds,
+        name=name,
+    )
 
 
 def setup(name: str) -> None:

@@ -3140,6 +3140,8 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2108.04623",
         entry="celf_glie.py (uses the stored GLIE model)",
         status="needs_setup",
+        # requirements.txt pins torch==1.5.1, whose last published wheel is cp38
+        python="3.8",
         export=_glie_export,
         command=_glie_command,
         parse_seeds=lambda work_dir, stdout, budget: parse_seed_integers(
@@ -4090,11 +4092,18 @@ external_baselines: dict[str, ExternalBaseline] = {
         # Boost lives under /opt/homebrew on macOS and /usr on most Linux; the
         # shipped Makefile assumes the latter, so the include/lib paths are made
         # explicit and harmless when the directory does not exist.
+        # Boost lives in a different place per platform, and hardcoding one
+        # breaks the other: /opt/homebrew is Apple-Silicon Homebrew only, and on
+        # a Linux cluster Boost is in the default search path (or supplied by a
+        # `module load boost`). Passing both include roots is harmless when one
+        # does not exist, so the same line builds in both places.
         build=[
-            "make",
-            "CXX=g++",
-            "FLAGS=-Wall -O3 -g -Wno-deprecated -I. -Wno-unknown-pragmas -I/opt/homebrew/include",
-            "LIBS=-L/opt/homebrew/lib -lboost_program_options",
+            "sh",
+            "-c",
+            "make CXX=g++ "
+            "FLAGS='-Wall -O3 -g -Wno-deprecated -I. -Wno-unknown-pragmas "
+            "-I/opt/homebrew/include -I/usr/local/include' "
+            "LIBS='-L/opt/homebrew/lib -L/usr/local/lib -lboost_program_options'",
         ],
         # treebreaker.py is Python 2 (four bare `print` statements). Ported here
         # rather than requiring a py2 interpreter; `scomp/2` is made explicitly
@@ -4170,7 +4179,13 @@ external_baselines: dict[str, ExternalBaseline] = {
         status="needs_setup",
         requirements=None,
         # The makefile lives in Library/ and writes ../exploimmun
-        build=["make", "-C", "Library"],
+        # -fcommon: this repo declares its globals (N, kk, kmm, eff_thr, root) in
+        # macros.h and scores.h with no `extern`, which every translation unit
+        # then defines. GCC 9 and earlier merged those into one tentative
+        # definition; GCC 10 made -fno-common the default and the link fails with
+        # "multiple definition of N". Restoring the old default is the one-flag
+        # fix and does not touch their source.
+        build=["make", "-C", "Library", "CFLAGS=-fcommon -O3 -w"],
         export=_ei_export,
         command=_ei_command,
         parse_seeds=_ei_parse,

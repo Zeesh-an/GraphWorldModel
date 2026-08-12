@@ -18,9 +18,23 @@ python -m baselines.setup_baselines --list     # confirm what is ready
 
 **55 of the 111 registered repos are wired** and appear below. The rest are `blocked` with a recorded reason (no public code, Python 2, wrong input object, wrong output type) and are not runnable by anyone. `setup_baselines --all` will report failures for repos whose upstream has drifted; those are safe to drop from a `BASELINES` string without changing anything else.
 
-Two environment traps, both already encoded as registry patches, worth knowing when a setup line fails:
+### If `--all` reports failures
 
-- `rl4im` pins `torch==1.7.0`, which needs **Python 3.9**; the registry sets that. It has no arm64 wheels, so it installs on the cluster and not on a Mac.
+A first run on the cluster failed 13 of 55, and **four of those were our bugs, now fixed**. Re-run `--all` after pulling; it is idempotent and skips what is already present.
+
+| What failed | Cause | Status |
+| --- | --- | --- |
+| `rl4im`, `finder`, `finder_epi`, `glie` | `spec.python` was set on ~110 specs and **passed to nothing**: every venv was built at the system interpreter, so `torch==1.7.0` (cp36-cp38), `tensorflow-gpu==1.14.0` (cp27-cp37) and `torch==1.5.1` (cp35-cp38) could never resolve | **fixed**: `_create_venv` now runs `uv venv --python <ver>`, and uv fetches a managed CPython when it is absent. `glie` newly pinned to 3.8 |
+| `ditto`, `ditto_cri`, `ditto_dhrec`, `spin` | `torch-scatter` imports torch inside its own `setup.py`, so under build isolation it builds in a fresh env with no torch | **fixed**: torch is pre-installed and the extensions are built with `--no-build-isolation` |
+| `explosive_immunization`, `explosive_immunization_epi` | the repo declares globals in `macros.h` / `scores.h` with no `extern`. GCC 9 merged them; GCC 10 made `-fno-common` the default and the link fails on `multiple definition of N` | **fixed**: builds with `CFLAGS=-fcommon` |
+| `decycler` | the build line hardcoded `-I/opt/homebrew/include`, an **Apple Silicon** path, so Boost was never found on Linux | **fixed**: both include roots are passed, so one line builds on either platform. If it still fails Boost is genuinely absent: `module load boost`, or `apt install libboost-program-options-dev` |
+| `casflow`, `ccgl` | not diagnosed, the error was truncated in the log | re-run and read the message. Setup now appends the exact pin to add, for example `Set python="3.8" on the casflow spec` |
+
+Any ABI failure is now self-diagnosing: uv's "no wheels with a matching Python ABI tag" is parsed and the setup line tells you which `python=` to put in `baselines/registry.py`.
+
+Two more traps worth knowing:
+
+- `rl4im`'s `torch==1.7.0` has no arm64 wheels at all, so it installs on the cluster and not on a Mac.
 - `adaptiveim` is C++ and needs `make -f Makefile_expepic`. Its `rdtsc()` is x86 inline asm, patched to `std::chrono` at setup.
 
 ---
