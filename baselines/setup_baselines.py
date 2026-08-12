@@ -58,10 +58,25 @@ def _abi_hint(name: str, output: str) -> str:
         return ""
 
     best = max(int(tag) for tag in tags)
+    wanted = f"3.{best}"
+
+    # The spec ALREADY asks for that version, so the pin is not the problem: the
+    # interpreter is simply not installable here (see `_create_venv`'s fallback,
+    # which will have printed "no CPython <x> available" just above). Repeating
+    # "set python=<x>" at that point sends the reader to a line that is already
+    # correct, which is worse than saying nothing.
+    if external_baselines[name].python == wanted:
+        return (
+            f"\n[setup] {name}: the pin is ALREADY python=\"{wanted}\", so the pin "
+            f"is not the problem. Either that interpreter could not be created "
+            f"(look for 'no CPython {wanted} available' above, in which case "
+            f"install it from pyenv, conda or a module) or another requirement in "
+            f"the same file contradicts it."
+        )
 
     return (
         f"\n[setup] {name}: the pinned dependency publishes wheels only up to "
-        f"CPython 3.{best}. Set python=\"3.{best}\" on the {name} spec in "
+        f"CPython {wanted}. Set python=\"{wanted}\" on the {name} spec in "
         f"baselines/registry.py and re-run; the venv is created at that version."
     )
 

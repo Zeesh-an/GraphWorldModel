@@ -18,27 +18,24 @@ python -m baselines.setup_baselines --list     # confirm what is ready
 
 **55 of the 111 registered repos are wired** and appear below. The rest are `blocked` with a recorded reason (no public code, Python 2, wrong input object, wrong output type) and are not runnable by anyone. `setup_baselines --all` will report failures for repos whose upstream has drifted; those are safe to drop from a `BASELINES` string without changing anything else.
 
-### If `--all` reports failures
+### Setup status: 52 of 55
 
-Four rounds against real cluster runs: **13 failures, then 7, then 4, and the last fixable one is now fixed.** Re-run `--all` after pulling; it is idempotent and rebuilds any venv at the wrong interpreter version. Expect **53 of 55**, with only the two environment-bound ones below outstanding.
+Five rounds against real cluster runs took this from 13 failures to 3, all of them fixes to OUR harness rather than to the repos. The three that remain are environment-bound and are **already removed from the `BASELINES` lists below**, so the commands run clean as written.
 
-| What failed | Cause | Status |
+| Still failing | Why | To enable it |
 | --- | --- | --- |
-| 5 patches across `ccgl` / `casflow` | **The patch idempotency test had the wrong sense for pin-relaxing patches.** It asked "is `new` already in the file?", and for `scikit-learn==0.21.1` to `scikit-learn` the replacement is a SUBSTRING of the original, so it matched the unpatched text and skipped forever. The four `patch already applied` lines in the log were the patches refusing to apply | **fixed**: the test depends on the patch SHAPE. A wrapping patch (`old` inside `new`) tests `new`; a replacing patch tests `old`, exact in both directions |
-| `rl4im`, `glie`, `ccgl`, `casflow`, `finder` | `spec.python` was passed to nothing, and a wrong-version venv was never rebuilt, so the pin could not take effect even on a re-run | **fixed**: `uv venv --python <ver>`, plus a version check that deletes and rebuilds a mismatched venv. `rl4im` corrected 3.9 to 3.8 |
-| `ditto` x3, `spin` | `torch-scatter` refused to build on a **CUDA 12.9 node against a torch wheel built with 13.0** | **fixed**: builds under `FORCE_ONLY_CPU=1`. These run through their MODEL, not their training harness, and need no CUDA scatter kernel |
-| `glie` | same build-isolation wall as `torch-scatter`, but for `torch-sparse`, and it slipped through TWICE: first because the scan only read `pip_packages` while glie's pin lives in `requirements.txt`, then because the file spells it `torch_sparse` while the extension set is hyphenated. Its requirements are also internally inconsistent (`torch==1.5.1` caps at cp38, `scipy==1.12.0` needs >=3.9) | **fixed**: the scan reads requirements files and normalizes names per PEP 503, so either spelling matches; the pinned line is pre-installed verbatim under `--no-build-isolation`. The torch pin is relaxed rather than the interpreter downgraded |
-| `explosive_immunization`, `_epi` | stale objects were relinked rather than recompiled so `-fcommon` never reached the compile step, and the makefile appends `CFLAGS` to its LINK line and **ignores `LIBS`**, so `-lm` never arrived | **fixed**: `make clean` first, `-lm` inside `CFLAGS` |
-| the ABI hint itself | scanned the whole error for `cp3(\d)`, so it picked up "You require CPython 3.8" and reported the interpreter you already have as the fix; it also read `cp310` as minor version 1 | **fixed**: parses only the published-tag list, with `\d+` |
+| `finder`, `finder_epi` | `tensorflow-gpu==1.14.0`'s newest wheel is cp37m, and CPython 3.7 is end-of-life and absent from uv's managed downloads, so the venv falls back to 3.8 and the pin can never resolve. Relaxing it is not a route: this is TF1 with custom Cython extensions, so the `compat.v1` shim that carries `coupledgnn` and `cascn` does not carry it | install a system 3.7 (pyenv, conda, module), then add `external:finder` back to the CND list and `external:finder_epi` to the EC list. The adapters are written and run the moment one exists |
+| `decycler` | Boost is not installed on the node | `module load boost`, or `apt install libboost-program-options-dev`, then add `external:decycler` back to the CND list |
 
-**Two remain, and neither is a repo bug.**
+**What was actually wrong, all of it in our own setup code.** Recorded because each one was silent rather than loud, and four of the five would have quietly produced a wrong or missing baseline rather than an error.
 
-| Still failing | Why | What to do |
-| --- | --- | --- |
-| `finder`, `finder_epi` | `tensorflow-gpu==1.14.0`'s newest wheel is cp37m, and CPython 3.7 is end-of-life and dropped from python-build-standalone, so `uv venv --python 3.7` finds no interpreter. Relaxing the pin is not a route: this is TF1 with custom Cython extensions, so the `compat.v1` shim that carries `coupledgnn` and `cascn` does not carry it | Install a system 3.7 (pyenv, conda, or a module) and re-run; the adapter is written and works the moment one exists. Otherwise **drop `external:finder` from the CND list and `external:finder_epi` from the EC list** |
-| `decycler` | Boost is not installed on the node. The earlier Apple-Silicon path bug is fixed; this is the genuine missing dependency | `module load boost`, or `apt install libboost-program-options-dev` |
-
-Note the setup line for `finder` still suggests `python="3.7"`, which is already set. That hint is right about the requirement and cannot know the interpreter is unavailable; the fallback message just above it ("no CPython 3.7 available") is the operative one.
+| Bug | Effect |
+| --- | --- |
+| the patch idempotency test asked "is `new` in the file?" | for a pin-relaxing patch the replacement is a SUBSTRING of the original, so it matched the unpatched text and skipped forever. **5 patches across `ccgl` and `casflow` had never once applied**, while printing `patch already applied` every run. Now the test depends on the patch shape |
+| `spec.python` was passed to nothing, and a wrong-version venv was never rebuilt | ~110 specs carried a pin that did nothing, and once a venv existed at the wrong version no re-run could fix it. Now `uv venv --python <ver>` plus a version check that rebuilds |
+| `torch-scatter` / `torch-sparse` built in isolation | their `setup.py` imports torch. Now pre-installed with `--no-build-isolation`, under `FORCE_ONLY_CPU=1` because the node's CUDA 12.9 disagreed with the wheel's 13.0. The scan reads requirements files as well as `pip_packages`, and normalizes names per PEP 503 (glie spells it `torch_sparse`) |
+| `explosive_immunization` relinked stale objects, and its makefile ignores `LIBS` | `-fcommon` never reached the compile step and `-lm` never reached the link. Now `make clean` first, with `-lm` inside `CFLAGS` |
+| the ABI hint scanned the whole error for `cp3(\d)` | it read "You require CPython 3.8" and reported the interpreter you already have as the fix, and parsed `cp310` as minor version 1. Now parses only the published-tag list with `\d+`, and says so plainly when the pin is already correct |
 
 Two more traps worth knowing:
 
@@ -130,8 +127,8 @@ SKIP_STAGES=train \
 BASELINES="adaptive_degree iterative_betweenness collective_influence_r corehd corehd_r \
 bpd_r decycling explosive_immunization gnd gndr netshield kshell_removal \
 degree_removal betweenness_removal acquaintance_immunization random_removal \
-external:finder external:gdm external:mind external:nirm external:dcrs external:selinda \
-external:gnd external:decycler external:collective_influence \
+external:gdm external:mind external:nirm external:dcrs external:selinda \
+external:gnd external:collective_influence \
 external:explosive_immunization external:dismantling_review" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
@@ -220,7 +217,7 @@ netshield netshield_plus dava dava_fast frontier_immunization greedy_walk \
 eigenvector_immunization kshell_immunization betweenness_immunization random_immunization \
 external:netimm_netshield external:netimm_dava external:netimm_dava_fast \
 external:netimm_netshape external:netimm_degree external:netimm_random \
-external:finder_epi external:gdm_epi external:collective_influence_epi \
+external:gdm_epi external:collective_influence_epi \
 external:explosive_immunization_epi external:dismantling_review_epi" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
