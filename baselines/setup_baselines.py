@@ -44,7 +44,16 @@ def _abi_hint(name: str, output: str) -> str:
     if "matching Python ABI tag" not in output:
         return ""
 
-    tags = set(re.findall(r"cp3(\d)", output))
+    # Parse ONLY the published-tag list. The same message also says "You require
+    # CPython 3.10 (`cp310`)", and scanning the whole text picks that up and
+    # reports the interpreter you already have as the fix.
+    listed = re.search(r"following Python ABI tags:(.*)", output, re.S)
+    if not listed:
+        return ""
+
+    # `\d+`, not `\d`: tags run cp37m and cp310, so a single digit reads the
+    # latter as minor version 1
+    tags = set(re.findall(r"cp3(\d+)", listed.group(1)))
     if not tags:
         return ""
 
@@ -130,12 +139,24 @@ def patch(name: str) -> None:
 
         text = path.read_text()
 
-        # Test for `new` BEFORE `old`. A patch that prepends a line keeps the
-        # original text inside its replacement, so `old in text` stays true
-        # forever and the edit would be applied again on every setup run.
-        # `new` must be non-empty to be a valid marker: a deletion patch has
-        # new == "", and "" is in every string, which would skip it forever.
-        if (new and new in text) or old not in text:
+        # Which side is the "already applied?" marker depends on the patch shape,
+        # and getting it wrong silently skips the edit forever.
+        #
+        # WRAPPING patch (`old` appears inside `new`, e.g. prepending an import):
+        # `old in text` stays true after applying, so it would re-apply on every
+        # run. Test `new`.
+        #
+        # REPLACING patch (`old` does not appear in `new`, e.g. relaxing a pin
+        # `scikit-learn==0.21.1` to `scikit-learn`): `new` is often a SUBSTRING of
+        # `old`, so testing `new` matches the UNPATCHED text and the edit never
+        # happens. Test `old`, which is exact in both directions.
+        #
+        # A deletion patch has new == "", which is in every string, so it is a
+        # replacing patch by this rule and tests `old`, which is what it needs.
+        wrapping = bool(new) and old in new
+        applied = (new in text) if wrapping else (old not in text)
+
+        if applied:
             print(f"[setup] {name}: patch already applied to {relative}")
             continue
 

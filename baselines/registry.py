@@ -3146,8 +3146,12 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2108.04623",
         entry="celf_glie.py (uses the stored GLIE model)",
         status="needs_setup",
-        # requirements.txt pins torch==1.5.1, whose last published wheel is cp38
-        python="3.8",
+        # The requirements are INTERNALLY inconsistent: torch==1.5.1 has no wheel
+        # past cp38 while scipy==1.12.0 requires >=3.9, so no interpreter can
+        # satisfy the file. The torch pin is the one to give: this repo ships a
+        # stored model and `celf_glie.py` only runs a forward pass, which every
+        # torch since 1.5 supports unchanged.
+        patches=[("requirements.txt", "torch==1.5.1", "torch>=1.13")],
         export=_glie_export,
         command=_glie_command,
         parse_seeds=lambda work_dir, stdout, budget: parse_seed_integers(
@@ -3872,6 +3876,7 @@ external_baselines: dict[str, ExternalBaseline] = {
         command=_runner_command,
         parse_seeds=_order_parse,
         notes=(
+            "BLOCKED ON THE INTERPRETER, not on the adapter [verified on the cluster 2026-08-12]: requirements.txt pins `tensorflow-gpu==1.14.0`, whose newest wheel is cp37m, and CPython 3.7 is end-of-life and dropped from python-build-standalone, so `uv venv --python 3.7` finds no interpreter. Relaxing the pin is not a route either: this is TF1 with custom Cython extensions, not plain Keras, so the `compat.v1` shim that carries `coupledgnn` and `cascn` does not carry it. It needs a system 3.7 (pyenv, conda, or a module) on the box; the adapter is written and runs as soon as one exists. "
             "The most-cited learned dismantler and the one every later paper "
             "compares to. Ships four trained variants (CN / ND, unit and "
             "node-weighted cost); pick the ND unit-cost one to match a cardinality "
@@ -4199,7 +4204,8 @@ external_baselines: dict[str, ExternalBaseline] = {
         build=[
             "sh",
             "-c",
-            "make -C Library clean; make -C Library CFLAGS='-fcommon -O3 -w' LIBS=-lm",
+            "make -C Library clean; "
+            "make -C Library CFLAGS='-fcommon -O3 -w -lm'",
         ],
         export=_ei_export,
         command=_ei_command,
@@ -6138,6 +6144,7 @@ external_baselines |= {
         "finder_epi",
         "finder",
         "FINDER, run as a vaccination allocation",
+        "Needs a system CPython 3.7 to install; see the `finder` entry. "
         "The strongest LEARNED node-removal baseline, scored here on the simulated "
         "attack rate rather than on the structural objective it was trained for. "
         "That gap is the point: §4.2 lists FINDER under this task while noting its "
