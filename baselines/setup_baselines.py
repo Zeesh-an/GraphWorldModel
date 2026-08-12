@@ -202,6 +202,19 @@ def build(name: str) -> None:
     _run(spec.build, cwd=spec.directory, timeout=install_timeout_seconds)
 
 
+def _canonical(name: str) -> str:
+    """
+    PEP 503 name normalization: lowercase, and `_` `.` runs collapsed to `-`.
+
+    Requirements files write these packages either way (`torch_sparse` and
+    `torch-sparse` are the same distribution) while uv always REPORTS the
+    hyphenated form, so matching the raw text against a hyphenated set silently
+    misses the underscore spelling. That is what let glie's `torch_sparse` pin
+    slip past the extension scan and hit the build-isolation wall anyway.
+    """
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
 # Packages whose setup.py imports torch, so they cannot be built in isolation
 torch_extension_packages = frozenset(
     {"torch-scatter", "torch-sparse", "torch-cluster", "torch-spline-conv"}
@@ -343,7 +356,7 @@ def install(name: str) -> None:
     needs_torch_build = [
         package
         for package in (spec.pip_packages or ())
-        if package.split("==")[0] in torch_extension_packages
+        if _canonical(package.split("==")[0]) in torch_extension_packages
     ]
 
     # ...and the same packages named inside a requirements FILE. Scanning only
@@ -356,7 +369,7 @@ def install(name: str) -> None:
         for line in requirements.read_text().splitlines():
             entry = line.split("#")[0].strip()
             name_only = re.split(r"[=<>!~\[]", entry)[0].strip()
-            if entry and name_only in torch_extension_packages:
+            if entry and _canonical(name_only) in torch_extension_packages:
                 needs_torch_build.append(entry)
 
     if needs_torch_build and uv is not None:

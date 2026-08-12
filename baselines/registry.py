@@ -3153,10 +3153,6 @@ external_baselines: dict[str, ExternalBaseline] = {
         # torch since 1.5 supports unchanged.
         patches=[
             ("requirements.txt", "torch==1.5.1", "torch>=1.13"),
-            # torch-sparse 0.6.17 is a 2023 build pinned against torch 2.0; let
-            # uv pick the one that matches whatever torch the line above resolves
-            ("requirements.txt", "torch-sparse==0.6.17", "torch-sparse"),
-            ("requirements.txt", "torch-scatter==2.1.1", "torch-scatter"),
         ],
         export=_glie_export,
         command=_glie_command,
