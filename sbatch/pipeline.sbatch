@@ -752,6 +752,11 @@ GRAPH_ID="${GRAPH_ID:-}"
 # Unquoted expansion is deliberate for the list-valued vars: each word becomes
 # its own argv entry, which is what nargs="+" wants.
 flags=(
+  # --task belongs here rather than beside --run below: the pre-flight
+  # --print-resources probe runs BEFORE the submit, and without it that probe
+  # answers for the DEFAULT task, which is a wrong gpu/stage decision on every
+  # other task and an outright crash when the baselines are task-registered
+  --task "$TASK"
   --dataset "$DATASET"
   --results-root "$RESULTS_ROOT" --seed "$SEED"
   --start-stage "$START_STAGE" --end-stage "$END_STAGE"
@@ -945,7 +950,7 @@ flags+=(--device "$DEVICE")
 # RUN_JOBID=0 to get a stable run label that every rerun appends to.
 run_label="$RUN"
 [ "$RUN_JOBID" = "1" ] && [ -n "${SLURM_JOB_ID:-}" ] && run_label="${RUN}_${SLURM_JOB_ID}"
-flags+=(--task "$TASK" --run "$run_label")
+flags+=(--run "$run_label")
 
 echo "[sbatch] job=${SLURM_JOB_NAME:-local} id=${SLURM_JOB_ID:-none} host=$(hostname)"
 echo "[sbatch] task=$TASK dataset=$DATASET run=$run_label device=$DEVICE stages=$START_STAGE..$END_STAGE"
