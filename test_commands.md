@@ -85,14 +85,14 @@ DATASET=netscience \
 RUN=testrun \
 RUN_JOBID=0 \
 SKIP_STAGES=train \
-BASELINES="high_degree degree_discount pagerank_seeds celf_pp imm voterank random_seeds \
+BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
 external:opim external:ssa external:subsim \
 external:touplegdd external:deepim external:moeim external:glie" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
-COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \
+COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -106,14 +106,14 @@ RUN=testrun \
 RUN_JOBID=0 \
 SKIP_STAGES=train \
 BASELINES="adapt_epic adapt_degree_discount adapt_degree adapt_pagerank adapt_random \
-static_split celf_pp imm \
+static_split imm \
 external:adaptiveim external:rl4im" \
 ARMS="adaptive_free@oracle evolve_free@oracle" \
 EVALUATOR=oracle \
 ROUNDS=3 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
-COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \
+COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -296,7 +296,7 @@ python -m coding_agent.run \
 
 ---
 
-## 5. Two cost traps
+## 5. Three cost traps
 
 **`adapt_greedy` costs about 37 minutes for one row** and is left out of submission 2 on purpose. One round is 14.7 s on a 198-node graph (40 candidates re-scored against 8 simulations each), and the policy is re-invoked inside *every* referee episode, so at `MC_RUNS=200` it is `14.7 s x rounds x 200`. That cost IS the finding adaptive IM exists to publish, so run it deliberately:
 
@@ -305,6 +305,19 @@ TASK=adaptive_online_im DATASET=netscience RUN=adaptgreedy RUN_JOBID=0 \
 SKIP_STAGES=train BASELINES="adapt_greedy adapt_epic static_split" ARMS=none \
 ROUNDS=3 BUDGET_PCTS="5" HORIZON=10 MC_RUNS=20 COMPARE=1 FORCE=1 \
 GRES=gpu:1 MEM=64G TIME=12:00:00 ./sbatch/pipeline.sbatch
+```
+
+**`celf_pp` was dropped from submissions 1 and 2, and the reason is cost, not correctness.** Its first pass scores every node with a full MC estimate before picking a single seed, and re-evaluation cost is flat in `|S|` (3.00 s at one seed, 3.78 s at 318) so the lazy loop gets linearly more expensive as `k` grows rather than cheaper [measured 2026-08-15, `MC_RUNS=200`, netscience-shaped graph]. The 1,589-node first pass alone is 4,767 s and is paid again at every budget point: about 1.4 h at pct1 rising to 2.9 h at pct20, roughly **8 h for that one row**, and the top two budgets exceed any cap worth setting. Nothing is lost by dropping it: `imm` carries the same `(1 - 1/e - eps)` guarantee, selects near-identical sets, and samples RR sets instead of per-node MC. Nothing else in either list is per-node MC.
+
+`STRATEGY_TIMEOUT=1800` is still raised above the 300 s default, for the AGENT arm rather than for any baseline: under `@oracle` at `MC_RUNS=200` one spread evaluation costs about 3 s, so a generated program that scores more than ~100 candidates blows the default cap while doing something entirely reasonable. 1,800 s buys the agent a real algorithm without letting a pathological one run for hours.
+
+If you want the classical CELF reference row for the paper, run it once at a single budget in its own job rather than across the sweep:
+
+```bash
+TASK=influence_maximization DATASET=netscience RUN=celfpp RUN_JOBID=0 \
+SKIP_STAGES=train BASELINES="celf_pp imm" ARMS=none \
+BUDGET_PCTS="1" HORIZON=10 MC_RUNS=200 COMPARE=1 FORCE=1 \
+STRATEGY_TIMEOUT=7200 MEM=64G TIME=6:00:00 ./sbatch/pipeline.sbatch
 ```
 
 **`BASELINE_TIMEOUT=21600` (6 h) is per external repo.** The learned ones train before they select: `finder`, `gdm`, `mind`, `rl4im`, `deepim` and `casflow` all fit a model first. With 11 externals on `critical_node_detection` the worst case is long, which is why `TIME=48:00:00`.

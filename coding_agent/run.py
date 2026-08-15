@@ -127,7 +127,7 @@ from coding_agent.methods.base import OuterLoopMethod, summarize
 from coding_agent.methods.decode import BarycenterDecoding
 from coding_agent.methods.evolve import EvolveSearch
 from coding_agent.methods.gradient import GradientInversion
-from coding_agent.methods.one_shot import OneShotSuperAlgorithm
+from coding_agent.methods.one_shot import OneShotSuperAlgorithm, default_max_repairs
 from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
 from coding_agent.prompts import (
@@ -420,6 +420,7 @@ def build_method(
     strategy_mode: str,
     allow_mc_algorithms: bool,
     use_anchor: bool = True,
+    canned: bool = False,
     checkpoint_path: Path | None = None,
     checkpoint_fingerprint: dict | None = None,
     instances: list | None = None,
@@ -482,6 +483,11 @@ def build_method(
             # A canned script ignores its prompt, so the anchor rollouts would only
             # burn real episodes and wall clock without informing anything
             use_anchor=use_anchor,
+            # ...and for the same reason a repair turn re-sends the IDENTICAL
+            # script, so it fails identically. A classical baseline or an external
+            # repo that blows the wall-clock cap once will blow it three times,
+            # costing 3x the timeout before the arm is abandoned anyway.
+            max_repairs=0 if canned else default_max_repairs,
             allow_mc_algorithms=allow_mc_algorithms,
             checkpoint_path=checkpoint_path,
             checkpoint_fingerprint=checkpoint_fingerprint,
@@ -1350,6 +1356,7 @@ class Baseline(Strategy):
         effective_mode,
         effective_allow_mc,
         use_anchor=canned_script is None,
+        canned=canned_script is not None,
         checkpoint_path=checkpoint_path,
         checkpoint_fingerprint=(
             None

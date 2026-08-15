@@ -1229,14 +1229,27 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 out_json=str(out_json),
             )
 
-            result = run_experiment(
-                experiment,
-                canned_script=(
-                    _external_script(external_seeds, config)
-                    if external_seeds
-                    else None
-                ),
-            )
+            # An agent arm that never produces a runnable program is a RESULT
+            # about that arm, not an infrastructure failure, so it is recorded
+            # like a dead external repo rather than killing the sweep. Letting it
+            # propagate cost the plots and the report for every arm that had
+            # already succeeded, which is the expensive half of the run.
+            try:
+                result = run_experiment(
+                    experiment,
+                    canned_script=(
+                        _external_script(external_seeds, config)
+                        if external_seeds
+                        else None
+                    ),
+                )
+            except executor.StrategyError as error:
+                tqdm.write(f"[agent] {label}/{arm.name}: SKIPPED, {error}")
+                _record_skip(layout, label, arm, str(error))
+                failed += 1
+                progress_bar.update(1)
+                continue
+
             result["arm"] = arm.name
             result["arm_spec"] = arm.spec
             result["condition"] = arm.condition
