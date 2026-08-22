@@ -456,8 +456,10 @@ def build_method(
             raise ValueError(
                 f"the gradient method needs GRADIENTS through the forward model, "
                 f"and the {config.evaluator!r} evaluator is a sampler with none. "
-                f"Use gradient_free@world_model (or @oracle for the analytic IC "
-                f"form); arms 3 and 4 are agent conditions, not this one."
+                f"Use gradient_free@world_model: arm A descends through f_theta "
+                f"itself, so it needs a CHECKPOINT and no other evaluator can "
+                f"stand in, @oracle included. Arms 3 and 4 are agent conditions, "
+                f"not this one."
             )
 
         return GradientInversion(

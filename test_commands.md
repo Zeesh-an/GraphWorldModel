@@ -155,7 +155,10 @@ external:graphsl_lpsi external:graphsl_netsleuth external:graphsl_ojc \
 external:graphsl_gcnsi external:graphsl_ivgd external:graphsl_slvae \
 external:cosasi_jordan external:cosasi_netsleuth external:cosasi_lisn \
 external:cosasi_rumor_centrality" \
-ARMS="evolve_free@oracle gradient_free@oracle" \
+# gradient_free is arm A, condition 8, and is DELIBERATELY absent here: it descends
+# through f_theta itself, so it needs a checkpoint and cannot run in a no-world-model
+# sweep under any evaluator. Add it back with the train stage on.
+ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \

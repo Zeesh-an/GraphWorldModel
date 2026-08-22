@@ -324,7 +324,14 @@ def resolve_evaluator(arm: Arm, mc_runs: int, native_mc_runs: int) -> tuple[str,
 
 
 def needs_world_model(arms: list[Arm]) -> bool:
-    return any(arm.evaluator == world_model for arm in arms)
+    # The gradient arm needs f_theta regardless of which evaluator it names: its
+    # loss is ||y - f_theta(x~)||^2 and it descends THROUGH the network, so a
+    # checkpoint is required even under @oracle. Keying only on the evaluator let
+    # `gradient_free@oracle` skip the train stage and then die inside the method,
+    # after every baseline in the sweep had already been paid for.
+    return any(
+        arm.evaluator == world_model or arm.method == gradient_method for arm in arms
+    )
 
 
 def ground_truth_reward(result: dict) -> float:
