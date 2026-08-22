@@ -271,6 +271,38 @@ def build_features(
     return X, y_inf, y_fr
 
 
+def split_membership(out_dir: Path, diffusion_model: str) -> dict[str, set[str]]:
+    """
+    graph_id -> the set of splits its transitions actually appear in.
+
+    Read from the written JSONL rather than from metadata.json, so it verifies
+    the FILES rather than the generator's claim about them. A graph mapping to
+    more than one split is leakage.
+    """
+    membership: dict[str, set[str]] = defaultdict(set)
+
+    for split in ("train", "val", "test"):
+        path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
+
+        if not path.exists():
+            continue
+
+        for line in path.read_text().splitlines():
+            if line.strip():
+                membership[json.loads(line)["graph_id"]].add(split)
+
+    return dict(membership)
+
+
+def graphs_straddling_splits(out_dir: Path, diffusion_model: str) -> list[str]:
+    """Graphs present in more than one split, sorted. Empty means leakage-free."""
+    return sorted(
+        graph_id
+        for graph_id, splits in split_membership(out_dir, diffusion_model).items()
+        if len(splits) > 1
+    )
+
+
 def load_graph_store(out_dir: Path) -> dict[str, dict]:
     """Load all graphs from disk and return graph_id -> {edge_index, ic_probs, lt_weights, num_nodes, base_edges, meta}."""
     out_dir = Path(out_dir)

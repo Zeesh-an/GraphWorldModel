@@ -40,6 +40,12 @@ python -m data.generate_wm_data \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
     --split 0.7 0.15 0.15 --seed 42 \
+    `# SINGLE REAL GRAPH: a graph-disjoint split is impossible here, so this
+     # dataset is split PER EPISODE and its test metrics are in-graph, not
+     # held-out-graph. Do not pool them with a graph_disjoint synthetic run.
+     # The leakage-free use of a real graph is as a TRANSFER TEST set for a
+     # model trained on synthetic families.` \
+    --split-mode episode_random \
     --out-dir "$OUT"
 
 python -m data.validate_wm_data --dir "$OUT"

@@ -351,6 +351,7 @@
 #                    every BUDGET_PCTS value you intend to evaluate at.
 #   ROLLOUTS         episodes per (graph, dynamics, selector)
 #   INJECT_P         probability an intermediate step injects an action
+#   SPLIT_MODE       graph_disjoint (default) | episode_random (legacy, leaks)
 #   CF_PROB          probability a step spawns counterfactual forks — the
 #                    signal that forces action-conditioning
 #   CF_BRANCHES      counterfactual branches per fork
@@ -516,6 +517,11 @@ CF_PROB="${CF_PROB:-0.4}"
 CF_BRANCHES="${CF_BRANCHES:-2}"
 MC_MARGINALS="${MC_MARGINALS:-30}"
 SPLIT="${SPLIT:-0.7 0.15 0.15}"
+# graph_disjoint is correct and is the default. A SINGLE-graph real dataset
+# (nethept, power_grid, ppi_yeast, jazz, netscience) cannot be split
+# disjointly at all and must set SPLIT_MODE=episode_random explicitly;
+# its test metrics are then in-graph, not held-out-graph.
+SPLIT_MODE="${SPLIT_MODE:-graph_disjoint}"
 
 # Train stage
 WM_MODEL="${WM_MODEL:-sage}"
@@ -598,6 +604,7 @@ flags=(
   --rollouts "$ROLLOUTS" --gen-horizon "$GEN_HORIZON"
   --inject-p "$INJECT_P" --cf-prob "$CF_PROB" --cf-branches "$CF_BRANCHES"
   --mc-marginals "$MC_MARGINALS" --split $SPLIT
+  --split-mode "$SPLIT_MODE"
 
   --wm-model "$WM_MODEL" --head "$HEAD"
   --hidden-dim "$HIDDEN_DIM" --n-layers "$N_LAYERS"

@@ -34,6 +34,12 @@ from world_model.wm_data import (
     num_input_channels,
     valid_action_encodings,
 )
+from world_model.checkpoint import (
+    ModelSpec,
+    checkpoint_format,
+    load_checkpoint,
+    save_checkpoint,
+)
 from world_model.wm_model import WorldModel, backbones
 from world_model.wm_action_eval import action_conditioning_report
 from world_model.wm_policies import resolve as resolve_policies
@@ -158,6 +164,53 @@ def check_remove_semantics(config: TrainConfig) -> None:
         )
 
 
+def dataset_split_mode(config: TrainConfig) -> str:
+    """
+    How the dataset under `--data-dir` assigned train/val/test.
+
+    Datasets generated before `--split-mode` existed carry no marker, and all of
+    them used the per-episode draw, so that is what an absent field means.
+    """
+    metadata_path = Path(config.data_dir) / "metadata.json"
+
+    if not metadata_path.exists():
+        return "unknown"
+
+    metadata = json.loads(metadata_path.read_text())
+
+    return metadata.get("split_mode") or metadata["config"].get(
+        "split_mode", "episode_random"
+    )
+
+
+def check_split_mode(config: TrainConfig) -> str:
+    """
+    Warn — loudly — when training on a dataset whose split leaks graphs.
+
+    A warning rather than a refusal, deliberately: the legacy mode is kept so
+    that pre-2026-08-22 numbers can be reproduced, and a run whose PURPOSE is
+    that reproduction must still be possible. What must not happen is a new
+    number being quoted without anyone knowing which regime produced it, which is
+    why the mode also lands in the checkpoint's train_meta and the results JSON.
+    """
+    mode = dataset_split_mode(config)
+
+    if mode == "graph_disjoint":
+        return mode
+
+    print(
+        f"[warn] dataset at {config.data_dir} was generated with "
+        f"split_mode={mode!r}: train/val/test were drawn PER EPISODE, so the same "
+        f"graph appears on both sides of the split. Test metrics from this run "
+        f"are optimistic by an unknown amount and are not comparable to a "
+        f"graph-disjoint run. Regenerate with "
+        f"`--split-mode graph_disjoint` unless you are deliberately reproducing "
+        f"a legacy result."
+    )
+
+    return mode
+
+
 def check_hide_edge_weights(config: TrainConfig) -> None:
     """
     Both anchored heads read w directly, so masking it is not an ablation of them
@@ -180,6 +233,7 @@ def check_hide_edge_weights(config: TrainConfig) -> None:
 def train_world_model(config: TrainConfig) -> dict:
     config = resolve_paths(config)
     check_remove_semantics(config)
+    check_split_mode(config)
     check_hide_edge_weights(config)
 
     torch.manual_seed(config.seed)
@@ -249,6 +303,21 @@ def train_world_model(config: TrainConfig) -> dict:
     checkpoint_path = (
         Path(config.ckpt_dir) / f"wm_{config.model}_{diffusion_model}.pt"
     )
+    # Built once: the checkpoint describes itself, so nothing downstream has to
+    # find this run's results JSON to know what architecture the weights belong to
+    model_spec = ModelSpec.from_train_config(config)
+    checkpoint_meta = {
+        "data_dir": str(config.data_dir),
+        "split_mode": dataset_split_mode(config),
+        "seed": config.seed,
+        "epochs": config.epochs,
+        "patience": config.patience,
+        "lr": config.lr,
+        "weight_decay": config.weight_decay,
+        "batch_size": config.batch_size,
+        "pos_weight": config.pos_weight,
+        "selection_metric": "val delta_f1",
+    }
     best_delta_f1, epochs_since_best = -1.0, 0
     train_start = time.perf_counter()
 
@@ -313,7 +382,13 @@ def train_world_model(config: TrainConfig) -> dict:
 
         if val_metrics["delta_f1"] > best_delta_f1:
             best_delta_f1, epochs_since_best = val_metrics["delta_f1"], 0
-            torch.save(model.state_dict(), checkpoint_path)
+            save_checkpoint(
+                model,
+                checkpoint_path,
+                model_spec,
+                train_meta={**checkpoint_meta, "best_val_delta_f1": best_delta_f1,
+                            "epoch": epoch},
+            )
         else:
             epochs_since_best += 1
             if epochs_since_best >= config.patience:
@@ -325,9 +400,14 @@ def train_world_model(config: TrainConfig) -> dict:
     train_seconds = time.perf_counter() - train_start
     print(f"[train] total training time: {train_seconds:.1f}s")
 
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model, _, _ = load_checkpoint(checkpoint_path, device=device)
+    model.train(False)
     results = {
         "config": vars(config),
+        # Which split regime produced these numbers. Recorded at the top level so
+        # an aggregator can refuse to pool a leaky run with a clean one.
+        "split_mode": checkpoint_meta["split_mode"],
+        "checkpoint_format": checkpoint_format,
         "train_seconds": train_seconds,
         "best_val_delta_f1": best_delta_f1,
         "history": history,

@@ -73,6 +73,7 @@ from coding_agent.tools.library_api import algorithm_names
 from coding_agent.containment import outbreak_selectors
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
 from data.wm_graphs import kronecker_seeds
+from data.generate_wm_data import graph_disjoint_split, valid_split_modes
 from data.wm_simulator import valid_action_ops, valid_remove_semantics
 from pipeline.conditions import (
     Arm,
@@ -131,6 +132,11 @@ class PipelineConfig:
     # head's T_exo is built, and what the agent is told remove_node does. One
     # value so they cannot disagree; defaulted from the task registry.
     remove_semantics: str | None = None
+    # How the generator assigns train/val/test. graph_disjoint is correct and
+    # is the generator's default; a SINGLE-graph real dataset cannot satisfy it
+    # and must opt into episode_random explicitly, which is why this is a knob
+    # rather than a constant. See data/generate_wm_data.py.
+    split_mode: str = graph_disjoint_split
     prob_model: str = "weighted"
     uniform_p: float = 0.1
     budget_pct_range: tuple = default_budget_pct_range
@@ -420,6 +426,7 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         inject_p=config.inject_p,
         action_ops=list(resolve_gen_action_ops(config)),
         remove_semantics=config.remove_semantics,
+        split_mode=config.split_mode,
         weight_lo=0.0,
         weight_hi=1.0,
         cf_prob=config.cf_prob,
@@ -1072,6 +1079,17 @@ if __name__ == "__main__":
         "cannot transmit or be infected (default: the task registry's value).",
     )
     parser.add_argument(
+        "--split-mode",
+        type=str,
+        default=graph_disjoint_split,
+        choices=list(valid_split_modes),
+        help="how train/val/test are assigned. graph_disjoint (default) keeps "
+        "every episode of a graph in one split. episode_random draws per episode "
+        "and LEAKS a graph across splits; it is required for a single-graph real "
+        "dataset, which cannot be split disjointly at all, and its test metrics "
+        "are in-graph rather than held-out-graph.",
+    )
+    parser.add_argument(
         "--prob-model",
         type=str,
         default="weighted",
@@ -1553,6 +1571,7 @@ if __name__ == "__main__":
             None if args.gen_action_ops is None else tuple(args.gen_action_ops)
         ),
         remove_semantics=args.remove_semantics,
+        split_mode=args.split_mode,
         prob_model=args.prob_model,
         uniform_p=args.uniform_p,
         budget_pct_range=tuple(args.budget_pct_range),

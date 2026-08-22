@@ -45,7 +45,7 @@ python -m data.generate_wm_data \
     --action-ops add_node remove_node \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
-    --split 0.7 0.15 0.15 --seed 42 \
+    --split 0.7 0.15 0.15 --seed 42 --split-mode graph_disjoint \
     --out-dir "$OUT"
 
 python -m data.validate_wm_data --dir "$OUT"

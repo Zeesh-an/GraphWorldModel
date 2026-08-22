@@ -18,6 +18,7 @@ from world_model.wm_data import (
     edges_to_arrays,
     num_input_channels,
 )
+from world_model.checkpoint import load_checkpoint
 from world_model.wm_model import WorldModel
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
 from data.wm_simulator import blocked, spent
@@ -96,26 +97,6 @@ class WorldModelEnvironment:
         # behaviour the defaults reproduce exactly
         hide_edge_weights = bool(config.get("hide_edge_weights", False))
         action_encoding = config.get("action_encoding", basic_encoding)
-        backbone_kwargs = {
-            "n_heads": config["n_heads"],
-            "ffn_dim": config["ffn_dim"],
-            "alpha": config["gcnii_alpha"],
-            "lamda": config["gcnii_lamda"],
-        }
-
-        # Reconstruct the exact WorldModel architecture from the config
-        model = WorldModel(
-            config["model"],
-            in_channels=num_input_channels(action_encoding),
-            hidden_dim=config["hidden_dim"],
-            n_layers=config["n_layers"],
-            dropout=config["dropout"],
-            head_type=config.get("head", "linear"),
-            diffusion_model=config["diffusion_model"],
-            remove_semantics=remove_semantics,
-            **backbone_kwargs,
-        )
-
         # Get the checkpoint path
         checkpoint_path = (
             Path(config["ckpt_dir"])
@@ -127,21 +108,28 @@ class WorldModelEnvironment:
                 f"world-model checkpoint not found: {checkpoint_path}"
             )
 
-        # Load the model weights from the checkpoint file
-        model.load_state_dict(
-            torch.load(checkpoint_path, map_location=device, weights_only=True)
+        # Reconstruction lives in world_model.checkpoint. A self-describing
+        # checkpoint carries its own spec and this config is ignored; a legacy
+        # bare-state_dict one is rebuilt from the config, which is the reason
+        # this path still takes one. strict_spec=False because the results JSON
+        # is the historical source of truth for pre-v2 runs and must keep working.
+        model, spec, _ = load_checkpoint(
+            checkpoint_path, config=config, device=device, strict_spec=False
         )
 
+        # Follow the CHECKPOINT, not the config block: for a v2 file the spec is
+        # what the weights were actually fit under, and a stale results JSON must
+        # not be able to flip remove_semantics or hide_edge_weights underneath it.
         return cls(
             model,
             graph,
-            config["diffusion_model"],
+            spec.diffusion_model,
             device=device,
             n_samples=n_samples,
             base_seed=base_seed,
-            remove_semantics=remove_semantics,
-            hide_edge_weights=hide_edge_weights,
-            action_encoding=action_encoding,
+            remove_semantics=spec.remove_semantics,
+            hide_edge_weights=spec.hide_edge_weights,
+            action_encoding=spec.action_encoding,
         )
 
     @classmethod
