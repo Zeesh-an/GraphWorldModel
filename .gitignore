@@ -66,3 +66,5 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 results/registry_manifest.json
+results/influence_maximization/*/*/data/
+logs/
