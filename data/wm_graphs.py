@@ -89,6 +89,21 @@ def bundle_from_nx(
     if prob_model == "uniform":
         ic_probs = np.full(ic_probs.shape, float(uniform_p), dtype=np.float32)
         lt_weights = ic_probs.copy()
+    elif prob_model == "random":
+        # Per-edge transmission drawn i.i.d., so it is NOT a function of anything
+        # else the model can see.
+        #
+        # This exists because `weighted` makes the hide-edge-weights ablation
+        # vacuous. There p(u->v) = 1 / in_degree(v) EXACTLY -- measured
+        # correlation 1.000000, max error 1e-8 -- and `log1p(degree)` is input
+        # channel 2, so masking w removes nothing the model cannot rebuild. The
+        # ablation is supposed to ask whether the model NEEDS the true
+        # transmission probability; under `weighted` it can only ever answer no.
+        #
+        # Seeded off the graph so a dataset regenerates identically.
+        draw = np.random.default_rng(abs(hash(graph_id)) % (2**32))
+        ic_probs = draw.uniform(0.02, 0.4, size=ic_probs.shape).astype(np.float32)
+        lt_weights = ic_probs.copy()
 
     ic_prob_map = {
         (int(edge_index[0, edge]), int(edge_index[1, edge])): float(ic_probs[edge])

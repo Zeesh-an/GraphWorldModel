@@ -708,8 +708,13 @@ def parse_args() -> GenConfig:
         "--prob-model",
         type=str,
         default="weighted",
-        choices=["weighted", "uniform"],
-        help="edge probability model (default: weighted).",
+        choices=["weighted", "uniform", "random"],
+        help="edge probability model. `weighted` sets p(u->v) = 1/in_degree(v), "
+        "`uniform` a constant, `random` an i.i.d. draw per edge. Use `random` for "
+        "the hide-edge-weights ablation: under `weighted` the probability is an "
+        "exact function of a node degree the model already reads as an input "
+        "channel, so masking it removes nothing and the ablation is vacuous "
+        "(default: weighted).",
     )
     parser.add_argument(
         "--uniform-p",
