@@ -68,3 +68,11 @@ __pycache__/
 results/registry_manifest.json
 results/influence_maximization/*/*/data/
 logs/
+
+# The repo ignores docs/ (it was a scratch area), but these are deliverables and
+# belong in version control. Negations must come after the `docs/` rule and name
+# the directory too, or git never descends into it to see them.
+!docs/
+docs/*
+!docs/*.md
+!docs/*.json
