@@ -19,7 +19,7 @@ from pipeline.conditions import (
     result_sense,
     reward_name,
 )
-from pipeline.tasks import minimize
+from pipeline.tasks import minimize, tasks
 
 # Headless: SLURM nodes have no display
 matplotlib.use("Agg")
@@ -37,6 +37,259 @@ condition_colors = {
     6: "#4C72B0",
     7: "#9370DB",
 }
+
+
+# Publication type for every string a figure shows. One dictionary and three
+# functions, applied at ONE choke point (_save walks the finished figure), so no
+# builder ever formats its own text and a new plot gets paper-ready labels for
+# free. Tokens are looked up lowercase; anything absent is first-letter
+# capitalized, with title-case minor words kept down.
+acronyms = {
+    # metrics and units
+    "msle": "MSLE", "male": "MALE", "mape": "MAPE", "mrse": "MRSE", "pcc": "PCC",
+    "auc": "AUC", "f1": "F1", "nrmse": "NRMSE", "mcc": "MCC", "r2": "R2",
+    "se": "SE", "gcc": "GCC", "anc": "ANC", "mae": "MAE",
+    # dynamics and evaluators
+    "ic": "IC", "lt": "LT", "sir": "SIR", "sis": "SIS", "seir": "SEIR",
+    "mc": "MC", "wm": "WM", "ga": "GA", "llm": "LLM", "rr": "RR", "ris": "RIS",
+    # influence maximization
+    "imm": "IMM", "celf": "CELF", "opim": "OPIM", "ssa": "SSA", "subsim": "SubSIM",
+    "tim": "TIM", "glie": "GLIE", "moeim": "MOEIM", "deepim": "DeepIM",
+    "touplegdd": "ToupleGDD", "pagerank": "PageRank", "voterank": "VoteRank",
+    # adaptive and online
+    "epic": "EPIC", "rl4im": "RL4IM", "adaptiveim": "AdaptiveIM", "mrim": "MRIM",
+    # dismantling
+    "hda": "HDA", "bi": "BI", "abi": "ABI", "ci": "CI", "corehd": "CoreHD",
+    "bpd": "BPD", "gnd": "GND", "gndr": "GNDR", "egnd": "EGND", "ei": "EI",
+    "finder": "FINDER", "gdm": "GDM", "mind": "MIND", "nirm": "NIRM",
+    "dcrs": "DCRS", "selinda": "SELINDA", "netshield": "NetShield",
+    "kshell": "K-Shell", "decycler": "Decycler", "netimm": "NetImm",
+    # source localization
+    "lpsi": "LPSI", "ojc": "OJC", "dmp": "DMP", "netsleuth": "NETSLEUTH",
+    "slvae": "SL-VAE", "ivgd": "IVGD", "gcnsi": "GCNSI", "cosasi": "cosasi",
+    "graphsl": "GraphSL", "lisn": "LISN",
+    # influence blocking
+    "rps": "RPS", "cldag": "CLDAG", "cmia": "CMIA", "imin": "IMIN",
+    "lhga": "LHGA", "lsbm": "LSBM", "joc": "JoC", "sandimin": "SandIMIN",
+    "diffim": "DiffIM", "stratlearner": "StratLearner",
+    # cascade reconstruction
+    "dhrec": "DHREC", "cri": "CRI", "cult": "CulT", "wpct": "WPCT",
+    "wbct": "WBCT", "ditto": "DITTO", "grin": "GRIN", "spin": "SPIN",
+    "netfill": "NetFill", "bfs": "BFS", "ppr": "PPR",
+    # epidemic control
+    "dava": "DAVA", "netshape": "NetShape",
+    # cascade prediction
+    "rpp": "RPP", "hip": "HIP", "seismic": "SEISMIC", "gbt": "GBT",
+    "casflow": "CasFlow", "ccgl": "CCGL", "ctcp": "CTCP", "cascn": "CasCN",
+    "wroperc": "WroPerc",
+    "coupledgnn": "CoupledGNN", "hawkes": "Hawkes",
+    # datasets
+    "aps": "APS", "eu": "EU", "usair97": "USAir97", "ppi": "PPI", "pgp": "PGP",
+    "p2p": "P2P", "grqc": "GrQc", "ca": "CA", "ml": "ML", "lastfm": "LastFM",
+    "ba": "BA", "er": "ER", "ws": "WS", "sbm": "SBM", "plc": "PLC",
+    "dblp": "DBLP", "sfhh": "SFHH", "invs13": "InVS13", "invs15": "InVS15",
+}
+
+# Whole-algorithm names whose published form token mapping cannot rebuild
+name_overrides = {
+    "netshield_plus": "NetShield+",
+    "dava_fast": "DAVA-Fast",
+    "cmia_o": "CMIA-O",
+    "collective_influence_r": "Collective Influence+R",
+    "collective_influence_removal": "Collective Influence",
+    "corehd_r": "CoreHD+R",
+    "bpd_r": "BPD+R",
+    "decycling_r": "Decycling+R",
+    "szabo_huberman": "Szabo-Huberman",
+    "one_hop": "One-Hop",
+    "consistent_tree_wpct": "Consistent Tree (WPCT)",
+    "consistent_tree_wbct": "Consistent Tree (WBCT)",
+    "routing": "GA Routing",
+}
+
+# Standard title case keeps these down unless they open the phrase
+minor_words = {
+    "a", "an", "and", "as", "at", "by", "for", "from", "in", "is", "of", "on",
+    "or", "per", "the", "to", "vs", "with", "over", "its", "this", "each",
+}
+
+# Substrings the underscore pass must not touch
+protected_literals = {"|S_P|": "\x00P\x00", "|S_N|": "\x00N\x00", "delta_f1": "\x00D\x00"}
+protected_display = {"\x00P\x00": "|S_P|", "\x00N\x00": "|S_N|", "\x00D\x00": "Delta F1"}
+
+
+def _pretty_token(token: str, first: bool) -> str:
+    # Digits belong to the word ("f1", "usair97"), so trim punctuation only
+    head = 0
+    while head < len(token) and not token[head].isalnum():
+        head += 1
+    tail = len(token)
+    while tail > head and not token[tail - 1].isalnum():
+        tail -= 1
+
+    prefix, word, suffix = token[:head], token[head:tail], token[tail:]
+    if not any(character.isalpha() for character in word):
+        return token
+
+    lowered = word.lower()
+    if lowered in acronyms:
+        return prefix + acronyms[lowered] + suffix
+    if sum(1 for character in word if character.isalpha()) == 1:
+        # A lone letter is a symbol (budget k, N nodes, Beta x1.0): keep its case
+        return token
+
+    # Shouted emphasis (LOWER IS BETTER) is normalized before the mixed-case
+    # test, or it would read as intentional casing and survive
+    if word.isupper():
+        word = lowered
+    elif any(character.isupper() for character in word[1:]):
+        # Mixed case is intentional (CasFlow, P(infected)): keep it
+        return token
+
+    sides = []
+    for side in word.split("="):
+        pieces = []
+        for position, segment in enumerate(side.split("-")):
+            segment_lower = segment.lower()
+            if segment_lower in acronyms:
+                pieces.append(acronyms[segment_lower])
+            elif not first and position == 0 and segment_lower in minor_words:
+                pieces.append(segment_lower)
+            elif segment:
+                pieces.append(segment[0].upper() + segment[1:])
+            else:
+                pieces.append(segment)
+        sides.append("-".join(pieces))
+
+    return prefix + "=".join(sides) + suffix
+
+
+def pretty_words(text: str) -> str:
+    """Underscores to spaces, acronyms restored, standard title case."""
+    for literal, marker in protected_literals.items():
+        text = text.replace(literal, marker)
+    text = text.replace("_", " ")
+
+    pieces = []
+    first = True
+    for token in text.split(" "):
+        pieces.append(_pretty_token(token, first) if token else token)
+        if token:
+            # A sentence-level break restarts the capitalization rule; a comma
+            # does not (", and the floors" stays lowercase)
+            first = token.endswith((":", ";", "."))
+
+    text = " ".join(pieces)
+    for marker, display in protected_display.items():
+        text = text.replace(marker, display)
+
+    return text
+
+
+def pretty_arm(name: str) -> str:
+    """`baseline_betweenness_blocking` -> `Betweenness Blocking (Baseline)`."""
+    if name.startswith("baseline_"):
+        return f"{_pretty_algorithm(name[len('baseline_'):])} (Baseline)"
+    if name.startswith("external_"):
+        return f"{_pretty_algorithm(name[len('external_'):])} (External)"
+    if "@" in name:
+        method, evaluator = name.split("@", 1)
+        return f"{pretty_words(method)} ({pretty_words(evaluator)})"
+
+    return _pretty_algorithm(name)
+
+
+def _pretty_algorithm(name: str) -> str:
+    return name_overrides.get(name, pretty_words(name))
+
+
+def _looks_like_arm(text: str) -> bool:
+    stripped = text.strip()
+    return " " not in stripped and (
+        stripped.startswith(("baseline_", "external_"))
+        or ("@" in stripped and "_" in stripped.split("@", 1)[0] + "_")
+    )
+
+
+def prettify(text: str) -> str:
+    if not text:
+        return text
+    stripped = text.strip()
+    if stripped in name_overrides:
+        return name_overrides[stripped]
+    if _looks_like_arm(text):
+        return pretty_arm(stripped)
+
+    return pretty_words(text)
+
+
+def _prettify_legend(legend) -> None:
+    if legend is None:
+        return
+
+    for text in legend.get_texts():
+        content = text.get_text()
+        # Math-formatted entries are already typeset
+        if "$" not in content:
+            text.set_text(prettify(content))
+
+    title = legend.get_title()
+    if title is not None and title.get_text():
+        title.set_text(prettify(title.get_text()))
+
+
+def _prettify_figure(figure: plt.Figure) -> None:
+    """The one choke point: walk every finished axes and set publication type."""
+    for legend in figure.legends:
+        _prettify_legend(legend)
+
+    suptitle = getattr(figure, "_suptitle", None)
+    if suptitle is not None:
+        suptitle.set_text(prettify(suptitle.get_text()))
+
+    for axes in figure.axes:
+        axes.set_title(prettify(axes.get_title()))
+        axes.set_xlabel(prettify(axes.get_xlabel()))
+        axes.set_ylabel(prettify(axes.get_ylabel()))
+
+        for annotation in axes.texts:
+            content = annotation.get_text()
+            has_words = any(character.isalpha() for character in content)
+            if has_words and "$" not in content:
+                annotation.set_text(prettify(content))
+
+        _prettify_legend(axes.get_legend())
+
+        for axis in (axes.xaxis, axes.yaxis):
+            # Only labels a builder set explicitly (categorical bars of arm names).
+            # A numeric formatter never emits letters, and mathtext carries "$", so
+            # "has a letter, no mathtext" identifies the categorical case without
+            # depending on which formatter this matplotlib wraps fixed labels in
+            ticks = axis.get_ticklabels()
+            labels = [label.get_text() for label in ticks]
+            has_words = any(
+                any(character.isalpha() for character in label) for label in labels
+            )
+            if not has_words or any("$" in label for label in labels):
+                continue
+
+            reference = ticks[0]
+            axis.set_ticklabels(
+                [prettify(label) for label in labels],
+                rotation=reference.get_rotation(),
+                ha=reference.get_ha(),
+                fontsize=reference.get_fontsize(),
+            )
+
+
+def display_prefix(label: str) -> str:
+    """`task/dataset/run` -> `Task Title: Dataset Name`, dropping the run."""
+    parts = label.split("/")
+    task = parts[0]
+    dataset = parts[1] if len(parts) > 1 else ""
+    task_title = tasks[task].title if task in tasks else pretty_words(task)
+
+    return f"{task_title}: {pretty_words(dataset)}" if dataset else task_title
 
 
 def _arm_style(index: int) -> dict:
@@ -129,6 +382,7 @@ def _spread_title(results: list[dict]) -> str:
 
 
 def _save(figure: plt.Figure, path: Path) -> Path:
+    _prettify_figure(figure)
     figure.tight_layout()
     figure.savefig(path, dpi=figure_dpi, bbox_inches="tight")
     plt.close(figure)
@@ -1762,6 +2016,8 @@ def build_plots(
     title_prefix: str,
 ) -> list[Path]:
     os.makedirs(plots_dir, exist_ok=True)
+    # `task/dataset/run` is a filesystem label, not a figure title
+    title_prefix = display_prefix(title_prefix)
 
     # Every figure below whose y-axis is a NODE COUNT. An inverse task's reward is
     # an F1 in [0, 1], and drawing it under a "spread (nodes)" axis would be off by
