@@ -1,0 +1,136 @@
+{
+  "question": "Q3_generalization + Q1_action_under_shift",
+  "frozen": true,
+  "checkpoint": "results/influence_maximization/ba100/wm_depth_L2/wm_sage_IC.pt",
+  "model": {
+    "backbone": "sage",
+    "head": "structured",
+    "diffusion_model": "IC",
+    "remove_semantics": "spent",
+    "action_encoding": "basic",
+    "hide_edge_weights": false
+  },
+  "source": {
+    "data_dir": "results/influence_maximization/ba100/data",
+    "split_mode": "graph_disjoint",
+    "seed": 42
+  },
+  "target": {
+    "data_dir": "results/influence_maximization/ba100/data",
+    "split": "test",
+    "split_mode": "graph_disjoint",
+    "dataset": "ba",
+    "syn_nodes": 100,
+    "n_graphs": 100,
+    "n_transitions": 4399,
+    "is_same_dataset_as_source": true,
+    "target_has_train_split": true
+  },
+  "test": {
+    "infected_acc": 0.9891293475789952,
+    "frontier_acc": 0.9891293475789952,
+    "new_infection_f1": 0.8559551780227724,
+    "delta_f1": 0.8559551780227724,
+    "add_seed_success": 1.0,
+    "remove_frontier_success": 1.0,
+    "action_sensitivity": 1.711191335740072,
+    "brier_infected": 0.001291980871734065,
+    "brier_frontier": 0.0012919808716760862,
+    "persistence": {
+      "infected_acc": 0.9628733803137076,
+      "frontier_acc": 0.9069697658558763,
+      "new_infection_f1": 0.0,
+      "delta_f1": 0.0,
+      "brier_infected": 0.038497222043723175,
+      "brier_frontier": 0.09440083650155451
+    }
+  },
+  "action_conditioning": {
+    "counterfactual_effect": {
+      "effect_pearson": 0.9106806516647339,
+      "effect_mae": 0.011995711363852024,
+      "effect_mae_norm": 0.5325209498405457,
+      "effect_sign_agree": 0.36106880194960617,
+      "effect_magnitude_ratio": 0.5456643104553223,
+      "n_nodes_scored": 166200,
+      "n_nodes_with_effect": 22979,
+      "n_pairs": 1662,
+      "per_op": {
+        "add_edge": {
+          "effect_pearson": 0.8918581008911133,
+          "effect_mae": 0.01100719254463911,
+          "effect_mae_norm": 0.5881394147872925,
+          "effect_sign_agree": 0.41919191919191917,
+          "effect_magnitude_ratio": 0.47752755880355835,
+          "n_nodes_scored": 4800,
+          "n_nodes_with_effect": 594
+        },
+        "add_node": {
+          "effect_pearson": 0.9322392344474792,
+          "effect_mae": 0.012436346150934696,
+          "effect_mae_norm": 0.4648430049419403,
+          "effect_sign_agree": 0.40595936259700255,
+          "effect_magnitude_ratio": 0.615169107913971,
+          "n_nodes_scored": 114300,
+          "n_nodes_with_effect": 16881
+        },
+        "remove_edge": {
+          "effect_pearson": 0.8745630383491516,
+          "effect_mae": 0.011134368367493153,
+          "effect_mae_norm": 0.6430068612098694,
+          "effect_sign_agree": 0.45519203413940257,
+          "effect_magnitude_ratio": 0.4251288175582886,
+          "n_nodes_scored": 5800,
+          "n_nodes_with_effect": 703
+        },
+        "remove_node": {
+          "effect_pearson": 0.8933543562889099,
+          "effect_mae": 0.011527852155268192,
+          "effect_mae_norm": 0.5586164593696594,
+          "effect_sign_agree": 0.35796401930671345,
+          "effect_magnitude_ratio": 0.5357485413551331,
+          "n_nodes_scored": 86000,
+          "n_nodes_with_effect": 11395
+        },
+        "set_edge_weight": {
+          "effect_pearson": 0.8566712141036987,
+          "effect_mae": 0.013815133832395077,
+          "effect_mae_norm": 0.6788145899772644,
+          "effect_sign_agree": 0.42648401826484017,
+          "effect_magnitude_ratio": 0.3671509027481079,
+          "n_nodes_scored": 7200,
+          "n_nodes_with_effect": 1095
+        }
+      }
+    },
+    "ablation": {
+      "n_swappable": 3898,
+      "n_with_action": 1855,
+      "baseline_delta_f1": 0.8559551780227724,
+      "baseline_brier_infected": 0.001291980871734065,
+      "shuffle_testable": true,
+      "null_delta_f1": 0.14006926502116432,
+      "null_delta_f1_drop": 0.7158859130016081,
+      "null_brier_infected": 0.030177473952061145,
+      "null_brier_rise": 0.02888549308032708,
+      "shuffle_delta_f1": 0.21975261655566128,
+      "shuffle_delta_f1_drop": 0.6362025614671112,
+      "shuffle_brier_infected": 0.03469954306375383,
+      "shuffle_brier_rise": 0.03340756219201976
+    },
+    "exogenous": {
+      "seeded_p_infected_n": 6950,
+      "seeded_p_infected_mean": 0.999998927116394,
+      "seeded_p_infected_worst": 0.999998927116394,
+      "seeded_p_infected_exact_frac": 1.0,
+      "removed_p_frontier_n": 552,
+      "removed_p_frontier_mean": 9.999997701015673e-07,
+      "removed_p_frontier_worst": 9.999997701015673e-07,
+      "removed_p_frontier_exact_frac": 1.0,
+      "tolerance": 0.001
+    },
+    "action_conditioned": true,
+    "verdict": "PASS: predicted action effects correlate with true ones at r=0.911 (mae_norm 0.533 < 1.0), and shuffling the actions costs 0.6362 delta_f1"
+  },
+  "runtime_seconds": 42.8
+}

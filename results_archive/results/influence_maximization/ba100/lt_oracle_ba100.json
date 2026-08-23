@@ -1,0 +1,16 @@
+{
+  "question": "Q2_structure / Workstream_F_LT_diagnostic",
+  "predictor": "analytic LT marginal, p_new(v) = active in-neighbour fraction f_v; exact because thresholds are U(0,1)",
+  "learned": false,
+  "data_dir": "results/influence_maximization/ba100/data",
+  "split": "test",
+  "rollout": {
+    "ens_marg_mae": 0.23015181105583907,
+    "ens_count_w1": 24.557323943661974,
+    "ens_count_bias": 24.359014000691158,
+    "ens_final_count_model": 93.47799983978271,
+    "ens_final_count_true": 60.79000020980835,
+    "ens_n_samples": 20.0,
+    "ens_n_episodes": 50.0
+  }
+}
