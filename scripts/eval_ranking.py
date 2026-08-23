@@ -42,6 +42,14 @@ from world_model.wm_ranking import (
 
 # The six selectors that harvested the world model's training trajectories,
 # under their coding-agent names. Everything else in the pool is unseen.
+# Torch grabs every core by default. On the tensors this repository actually
+# evaluates -- a 100-to-1000 node graph, one record at a time -- that is
+# catastrophic: measured on a 100-node OOD set, 14 threads cost 80.0 ms/record
+# against 2.02 ms/record at 1 thread, a 40x slowdown, because the intra-op
+# synchronisation dwarfs the arithmetic. It also makes parallel eval jobs fight.
+# 1 is therefore the default here, not a tuning choice.
+default_threads = 1
+
 seen_policy_names = {
     "random_seeds", "high_degree", "pagerank_seeds", "betweenness_seeds",
     "celf", "hill_climbing",
@@ -116,8 +124,12 @@ def main(argv=None) -> int:
     parser.add_argument("--pool", nargs="*", default=list(default_pool))
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--device", type=str, default="cpu")
+    parser.add_argument("--threads", type=int, default=default_threads,
+                        help=f"torch intra-op threads (default {default_threads}; "
+                             f"more is much slower on small graphs)")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
+    torch.set_num_threads(args.threads)
 
     results = json.loads(args.results.read_text())
     config = results["config"]

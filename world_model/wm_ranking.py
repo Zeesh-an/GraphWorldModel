@@ -496,7 +496,19 @@ def ranking_report(
 
 
 def aggregate(results: list[RankingResult]) -> dict:
-    """Mean and std across graphs for every scalar metric, plus the graph count."""
+    """
+    Mean and std across graphs for every scalar metric, plus POOLED call counts.
+
+    Call reduction must be pooled, not averaged per graph. A per-graph ratio has
+    the ranking's own call count in the denominator, and that denominator is
+    often 1 or 2 — so a graph where the random baseline got lucky contributes a
+    ratio of -1 or -2 and drags the mean anywhere. Measured on the first Q4 run,
+    the mean of per-graph ratios read -0.366 while the pooled estimate was
+    +0.044: the same data, one of them meaningless.
+
+    Both are reported; the pooled one carries the `_pooled` suffix and is the
+    one to quote.
+    """
     if not results:
         return {}
 
@@ -517,5 +529,33 @@ def aggregate(results: list[RankingResult]) -> dict:
             summary[key] = float(values.mean())
             summary[f"{key}_std"] = float(values.std())
             summary[f"{key}_n"] = int(values.size)
+
+    # Pooled call counts and the reduction derived from them.
+    call_keys = {
+        key.replace("calls_to_first_win_", "")
+        for key in results[0].metrics
+        if key.startswith("calls_to_first_win_")
+    }
+    totals = {
+        name: float(
+            sum(
+                result.metrics.get(f"calls_to_first_win_{name}", 0.0)
+                for result in results
+            )
+        )
+        for name in call_keys
+    }
+
+    for name, total in totals.items():
+        summary[f"total_calls_{name}"] = total
+
+    baseline = totals.get("random")
+
+    if baseline:
+        for name, total in totals.items():
+            if name != "random":
+                summary[f"call_reduction_pooled_vs_random_{name}"] = float(
+                    1.0 - total / baseline
+                )
 
     return summary

@@ -38,6 +38,14 @@ from world_model.wm_action_eval import action_conditioning_report
 from world_model.wm_data import TransitionDataset, load_graph_store
 from world_model.wm_eval import evaluate_one_step, rollout_ensemble
 
+# Torch grabs every core by default. On the tensors this repository actually
+# evaluates -- a 100-to-1000 node graph, one record at a time -- that is
+# catastrophic: measured on a 100-node OOD set, 14 threads cost 80.0 ms/record
+# against 2.02 ms/record at 1 thread, a 40x slowdown, because the intra-op
+# synchronisation dwarfs the arithmetic. It also makes parallel eval jobs fight.
+# 1 is therefore the default here, not a tuning choice.
+default_threads = 1
+
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
@@ -60,8 +68,12 @@ def main(argv=None) -> int:
         help="permit a target dataset that has a train split. Off by default: an "
              "OOD number measured where the model could have trained is not one.",
     )
+    parser.add_argument("--threads", type=int, default=default_threads,
+                        help=f"torch intra-op threads (default {default_threads}; "
+                             f"more is much slower on small graphs)")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args(argv)
+    torch.set_num_threads(args.threads)
 
     device = torch.device(args.device)
     model, spec, train_meta = load_checkpoint(
