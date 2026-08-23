@@ -64,6 +64,19 @@ class Task:
     # Fraction of N the exogenous outbreak seeds, for a task whose cascade the
     # planner does not start. 0 = the planner seeds it (every maximize task).
     outbreak_pct: float = 0.0
+    # World-family discriminators, ported from the 8-task branch. They decide the
+    # STATE LAYOUT, which is what makes a checkpoint loadable or not:
+    #
+    #   competitive  two campaigns, 8 input / 4 output channels
+    #   epidemic     S/E/I/R compartments, 9 input / 5 output channels
+    #   neither      the single-cascade IC/LT world, 6 input / 2 output
+    #
+    # `reconstructs` is not a layout flag: the task recovers a hidden trajectory
+    # rather than choosing an intervention, which changes the READOUT, not the
+    # state. Kept separate for exactly that reason.
+    competitive: bool = False
+    epidemic: bool = False
+    reconstructs: bool = False
     blocker: str | None = None
 
     @property
@@ -76,11 +89,23 @@ class Task:
 
     @property
     def allowed_ops(self) -> tuple:
-        return self.default_allowed_ops or self.action_ops
+        # `is None` rather than a falsy test: an EMPTY tuple is a real value
+        # meaning "this task emits no interventions", and it is exactly what the
+        # inverse and forecasting tasks declare. Falling back to `action_ops`
+        # there would give source localization a planner action vocabulary it
+        # never exercises, which is the difference between FORWARD_DYNAMICS and
+        # EXACT_CHECKPOINT in registry.task_families.
+        if self.default_allowed_ops is None:
+            return self.action_ops
+
+        return self.default_allowed_ops
 
     @property
     def gen_action_ops(self) -> tuple:
-        return self.default_gen_action_ops or self.action_ops
+        if self.default_gen_action_ops is None:
+            return self.action_ops
+
+        return self.default_gen_action_ops
 
     @property
     def contains(self) -> bool:
@@ -341,6 +366,83 @@ tasks = {
         "forks, no dataset overlap. Kept for its rollout-training techniques.",
     ),
 }
+
+# ---------------------------------------------------------------------------
+# Task Family Extension
+# ---------------------------------------------------------------------------
+#
+# Semantics ported from the 8-task branch, applied as an overlay rather than by
+# rewriting the entries above. Two reasons:
+#
+#   * the overlay IS the delta. Reading it tells you exactly what the 8-task
+#     branch settled that this file predated, with no diffing.
+#   * `status` is deliberately NOT overlaid. A task is `implemented` here only
+#     if THIS repository can build its head and step its dynamics; the 8-task
+#     branch marks all eight implemented because it carries CompetitiveICHead,
+#     CompetitiveLTHead and CompartmentTransitionHead, which have not been
+#     ported. Claiming their status without their code would make
+#     `runnable_task_names()` lie.
+#
+# `registry.task_families` derives transfer compatibility from these fields.
+task_family_extension = {
+    "source_localization": {
+        # The recovered source set is replayed as an add_node seed bag, so the
+        # action VOCABULARY is shared with IM -- but generation injects nothing
+        # mid-cascade, which is what keeps this out of EXACT_CHECKPOINT.
+        "action_ops": ("add_node",),
+        "default_allowed_ops": ("add_node",),
+        "default_gen_action_ops": (),
+    },
+    "cascade_reconstruction": {
+        "action_ops": ("add_node",),
+        "default_allowed_ops": ("add_node",),
+        "default_gen_action_ops": (),
+        "reconstructs": True,
+    },
+    "cascade_prediction": {
+        "action_ops": (),
+        "default_allowed_ops": (),
+        "default_gen_action_ops": (),
+    },
+    "influence_blocking": {
+        "action_ops": ("add_node", "remove_node", "remove_edge", "set_edge_weight"),
+        "default_allowed_ops": ("add_node",),
+        "default_gen_action_ops": (
+            "add_node", "remove_node", "remove_edge", "set_edge_weight",
+        ),
+        "budget_op": "add_node",
+        "outbreak_pct": 1.0,
+        "competitive": True,
+    },
+    "epidemic_control": {
+        "action_ops": ("remove_node", "remove_edge", "set_edge_weight"),
+        "default_allowed_ops": ("remove_node",),
+        "default_gen_action_ops": ("remove_node", "remove_edge", "set_edge_weight"),
+        "budget_op": "remove_node",
+        "outbreak_pct": 1.0,
+        "epidemic": True,
+    },
+    "critical_node_detection": {
+        "outbreak_pct": 1.0,
+    },
+}
+
+
+def _apply_task_family_extension() -> None:
+    for name, overrides in task_family_extension.items():
+        task = tasks.get(name)
+
+        if task is None:
+            raise ValueError(
+                f"task_family_extension names {name!r}, which is not registered"
+            )
+
+        for field, value in overrides.items():
+            setattr(task, field, value)
+
+
+_apply_task_family_extension()
+
 
 # A typo in an action op above would silently produce a task whose ops the
 # simulator rejects only at generation time
