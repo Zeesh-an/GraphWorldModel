@@ -22,20 +22,20 @@ python -m baselines.setup_baselines --list     # confirm what is ready
 
 Five rounds against real cluster runs took this from 13 failures to 3, all of them fixes to OUR harness rather than to the repos. The three that remain are environment-bound and are **already removed from the `BASELINES` lists below**, so the commands run clean as written.
 
-| Still failing | Why | To enable it |
-| --- | --- | --- |
+| Still failing          | Why                                                                                                                                                                                                                                                                                                                                          | To enable it                                                                                                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `finder`, `finder_epi` | `tensorflow-gpu==1.14.0`'s newest wheel is cp37m, and CPython 3.7 is end-of-life and absent from uv's managed downloads, so the venv falls back to 3.8 and the pin can never resolve. Relaxing it is not a route: this is TF1 with custom Cython extensions, so the `compat.v1` shim that carries `coupledgnn` and `cascn` does not carry it | install a system 3.7 (pyenv, conda, module), then add `external:finder` back to the CND list and `external:finder_epi` to the EC list. The adapters are written and run the moment one exists |
-| `decycler` | Boost is not installed on the node | `module load boost`, or `apt install libboost-program-options-dev`, then add `external:decycler` back to the CND list |
+| `decycler`             | Boost is not installed on the node                                                                                                                                                                                                                                                                                                           | `module load boost`, or `apt install libboost-program-options-dev`, then add `external:decycler` back to the CND list                                                                         |
 
 **What was actually wrong, all of it in our own setup code.** Recorded because each one was silent rather than loud, and four of the five would have quietly produced a wrong or missing baseline rather than an error.
 
-| Bug | Effect |
-| --- | --- |
-| the patch idempotency test asked "is `new` in the file?" | for a pin-relaxing patch the replacement is a SUBSTRING of the original, so it matched the unpatched text and skipped forever. **5 patches across `ccgl` and `casflow` had never once applied**, while printing `patch already applied` every run. Now the test depends on the patch shape |
-| `spec.python` was passed to nothing, and a wrong-version venv was never rebuilt | ~110 specs carried a pin that did nothing, and once a venv existed at the wrong version no re-run could fix it. Now `uv venv --python <ver>` plus a version check that rebuilds |
-| `torch-scatter` / `torch-sparse` built in isolation | their `setup.py` imports torch. Now pre-installed with `--no-build-isolation`, under `FORCE_ONLY_CPU=1` because the node's CUDA 12.9 disagreed with the wheel's 13.0. The scan reads requirements files as well as `pip_packages`, and normalizes names per PEP 503 (glie spells it `torch_sparse`) |
-| `explosive_immunization` relinked stale objects, and its makefile ignores `LIBS` | `-fcommon` never reached the compile step and `-lm` never reached the link. Now `make clean` first, with `-lm` inside `CFLAGS` |
-| the ABI hint scanned the whole error for `cp3(\d)` | it read "You require CPython 3.8" and reported the interpreter you already have as the fix, and parsed `cp310` as minor version 1. Now parses only the published-tag list with `\d+`, and says so plainly when the pin is already correct |
+| Bug                                                                              | Effect                                                                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the patch idempotency test asked "is `new` in the file?"                         | for a pin-relaxing patch the replacement is a SUBSTRING of the original, so it matched the unpatched text and skipped forever. **5 patches across `ccgl` and `casflow` had never once applied**, while printing `patch already applied` every run. Now the test depends on the patch shape          |
+| `spec.python` was passed to nothing, and a wrong-version venv was never rebuilt  | ~110 specs carried a pin that did nothing, and once a venv existed at the wrong version no re-run could fix it. Now `uv venv --python <ver>` plus a version check that rebuilds                                                                                                                     |
+| `torch-scatter` / `torch-sparse` built in isolation                              | their `setup.py` imports torch. Now pre-installed with `--no-build-isolation`, under `FORCE_ONLY_CPU=1` because the node's CUDA 12.9 disagreed with the wheel's 13.0. The scan reads requirements files as well as `pip_packages`, and normalizes names per PEP 503 (glie spells it `torch_sparse`) |
+| `explosive_immunization` relinked stale objects, and its makefile ignores `LIBS` | `-fcommon` never reached the compile step and `-lm` never reached the link. Now `make clean` first, with `-lm` inside `CFLAGS`                                                                                                                                                                      |
+| the ABI hint scanned the whole error for `cp3(\d)`                               | it read "You require CPython 3.8" and reported the interpreter you already have as the fix, and parsed `cp310` as minor version 1. Now parses only the published-tag list with `\d+`, and says so plainly when the pin is already correct                                                           |
 
 Two more traps worth knowing:
 
@@ -48,9 +48,9 @@ Two more traps worth knowing:
 
 Checked 2026-08-12:
 
-| Family | State |
-| --- | --- |
-| all 7 `gpt-*` models | `429 model_cooldown`, reset ~146 h (about 2026-08-18) |
+| Family                  | State                                                        |
+| ----------------------- | ------------------------------------------------------------ |
+| all 7 `gpt-*` models    | `429 model_cooldown`, reset ~146 h (about 2026-08-18)        |
 | all 7 `claude-*` models | `503 auth_unavailable: no auth available (providers=claude)` |
 
 Until one family answers, set `ARMS=none` and the submissions below run baselines only. Everything else is unaffected. When the gateway returns, re-submit the same line with the `ARMS` value shown and `START_STAGE=agent`; the `data/` stage is already on disk and only the agent arm runs.
@@ -63,16 +63,16 @@ If a different model is live, set `LLM_MODEL=<name>`.
 
 Chosen to finish in reasonable time while still being a graph the task's own literature publishes on.
 
-| Task | Dataset | Size | Why |
-| --- | --- | --- | --- |
-| `influence_maximization` | `netscience` | 1,589 / 2,742 | your existing IM run's graph, so this is directly comparable |
-| `adaptive_online_im` | `netscience` | 1,589 / 2,742 | same graph, so the adaptivity gap divides against the IM row |
-| `critical_node_detection` | `power_grid` | 4,941 / 6,594 | byte-identical to the file CoreHD, BPD and NIRM all report. §9.4 predicts we LOSE here, which is the informative case |
-| `source_localization` | `jazz` | 198 / 2,742 | SL-VAE's own graph; reward is exact F1, so no evaluator noise |
-| `influence_blocking` | `email_eu_core` | 1,005 / 24,929 | SandIMIN Table 5 |
-| `cascade_reconstruction` | `infectious` | 410 / 2,765 | Xiao ICDM'18 Table I, digit for digit |
-| `epidemic_control` | `primary_school` | 242 | SocioPatterns, 11 ground-truth classes, dense enough to test the DAVA/NetShield reversal |
-| `cascade_prediction` | `casflow_aps` | corpus | CasFlow's own bundle, this literature's de-facto benchmark |
+| Task                      | Dataset          | Size           | Why                                                                                                                   |
+| ------------------------- | ---------------- | -------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `influence_maximization`  | `netscience`     | 1,589 / 2,742  | your existing IM run's graph, so this is directly comparable                                                          |
+| `adaptive_online_im`      | `netscience`     | 1,589 / 2,742  | same graph, so the adaptivity gap divides against the IM row                                                          |
+| `critical_node_detection` | `power_grid`     | 4,941 / 6,594  | byte-identical to the file CoreHD, BPD and NIRM all report. §9.4 predicts we LOSE here, which is the informative case |
+| `source_localization`     | `jazz`           | 198 / 2,742    | SL-VAE's own graph; reward is exact F1, so no evaluator noise                                                         |
+| `influence_blocking`      | `email_eu_core`  | 1,005 / 24,929 | SandIMIN Table 5                                                                                                      |
+| `cascade_reconstruction`  | `infectious`     | 410 / 2,765    | Xiao ICDM'18 Table I, digit for digit                                                                                 |
+| `epidemic_control`        | `primary_school` | 242            | SocioPatterns, 11 ground-truth classes, dense enough to test the DAVA/NetShield reversal                              |
+| `cascade_prediction`      | `casflow_aps`    | corpus         | CasFlow's own bundle, this literature's de-facto benchmark                                                            |
 
 ---
 
@@ -124,14 +124,14 @@ GRES=gpu:1 MEM=64G TIME=48:00:00 \
 # outbreak-aware arm: the first run at 1% had a 129-node ring under a 247/494/988 sweep and
 # the agent posted exactly 49 (= the source count) against 98-160 for every dismantler.
 # 10% puts the ring above the 20% budget; the report names any budget that still clears it.
+# frontier_removal is the outbreak-aware control: every other row is blind to where
+# the cascade is, and the first run's agent win (49.0 against 98-160) was this ring.
+# iterative_betweenness is out: exact BI on 4,941 nodes blew the 300 s cap at k=49.
 TASK=critical_node_detection \
 DATASET=power_grid \
 RUN=testrun \
 RUN_JOBID=0 \
 SKIP_STAGES=train \
-# frontier_removal is the outbreak-aware control: every other row is blind to where
-# the cascade is, and the first run's agent win (49.0 against 98-160) was this ring.
-# iterative_betweenness is out: exact BI on 4,941 nodes blew the 300 s cap at k=49.
 BASELINES="adaptive_degree approx_iterative_betweenness collective_influence_r corehd corehd_r \
 bpd_r decycling explosive_immunization gnd gndr netshield kshell_removal \
 frontier_removal degree_removal betweenness_removal acquaintance_immunization random_removal \
@@ -150,6 +150,9 @@ GRES=gpu:1 MEM=64G TIME=48:00:00 \
 # k is a property of the INSTANCE, so the budget sweep is a single point by design.
 # SL_OBSERVATION=binary is the comparable column: our default `marginal` is strictly
 # more informative than the single realization the literature observes.
+# gradient_free is arm A, condition 8, and is DELIBERATELY absent here: it descends
+# through f_theta itself, so it needs a checkpoint and cannot run in a no-world-model
+# sweep under any evaluator. Add it back with the train stage on.
 TASK=source_localization \
 DATASET=jazz \
 RUN=testrun \
@@ -163,9 +166,6 @@ external:graphsl_lpsi external:graphsl_netsleuth external:graphsl_ojc \
 external:graphsl_gcnsi external:graphsl_ivgd external:graphsl_slvae \
 external:cosasi_jordan external:cosasi_netsleuth external:cosasi_lisn \
 external:cosasi_rumor_centrality" \
-# gradient_free is arm A, condition 8, and is DELIBERATELY absent here: it descends
-# through f_theta itself, so it needs a checkpoint and cannot run in a no-world-model
-# sweep under any evaluator. Add it back with the train stage on.
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
@@ -315,7 +315,7 @@ python -m coding_agent.run \
 
 ## 5. Three cost traps
 
-**`adapt_greedy` costs about 37 minutes for one row** and is left out of submission 2 on purpose. One round is 14.7 s on a 198-node graph (40 candidates re-scored against 8 simulations each), and the policy is re-invoked inside *every* referee episode, so at `MC_RUNS=200` it is `14.7 s x rounds x 200`. That cost IS the finding adaptive IM exists to publish, so run it deliberately:
+**`adapt_greedy` costs about 37 minutes for one row** and is left out of submission 2 on purpose. One round is 14.7 s on a 198-node graph (40 candidates re-scored against 8 simulations each), and the policy is re-invoked inside _every_ referee episode, so at `MC_RUNS=200` it is `14.7 s x rounds x 200`. That cost IS the finding adaptive IM exists to publish, so run it deliberately:
 
 ```bash
 TASK=adaptive_online_im DATASET=netscience RUN=adaptgreedy RUN_JOBID=0 \
@@ -385,15 +385,15 @@ GRES=gpu:1 MEM=64G TIME=48:00:00 \
 
 ## 7. What to read, and what would mean a bug
 
-| Task | Column | Row to beat | A result that means something is wrong |
-| --- | --- | --- | --- |
-| `influence_maximization` | `spread_ground_truth` | `imm`, and `external:opim` | every arm within noise of `high_degree`: the graph is degree-trivial |
-| `adaptive_online_im` | the adaptivity gap table, and `evaluator_seconds` | `static_split` at matched `k` | a gap far above 1.0. Theory caps the myopic gap at 4 and non-adaptive greedy is provably no worse, so a large spread win is a bug. **The claim is cost** |
+| Task                      | Column                                                                      | Row to beat                                                                                                            | A result that means something is wrong                                                                                                                                                                                       |
+| ------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `influence_maximization`  | `spread_ground_truth`                                                       | `imm`, and `external:opim`                                                                                             | every arm within noise of `high_degree`: the graph is degree-trivial                                                                                                                                                         |
+| `adaptive_online_im`      | the adaptivity gap table, and `evaluator_seconds`                           | `static_split` at matched `k`                                                                                          | a gap far above 1.0. Theory caps the myopic gap at 4 and non-adaptive greedy is provably no worse, so a large spread win is a bug. **The claim is cost**                                                                     |
 | `critical_node_detection` | `spread_ground_truth`, plus the structural table and the ring note above it | `frontier_removal` (the known outbreak's one-hop ring); `adaptive_degree` (HDA) is the bar for the blind question only | an agent row at exactly the source count: the budget sat above the ring and the row measured information, not a method. `degree_rank_spearman` near 0.762: the arm re-derived the degree heuristic, MIND's finding about GDM |
-| `source_localization` | `f1`, and `generalization_gap` | `lpsi` / `external:graphsl_lpsi` | selection F1 far above held-out F1: the program memorized episodes |
-| `influence_blocking` | `prevented_influence` | `proximity`, `external:sandimin` | `cldag` or `cmia_o` near `random_blocking`: that was a real bug, fixed 2026-08-12, pinned by `check_mia_scores_do_not_collapse_onto_the_periphery` |
-| `cascade_reconstruction` | tree-weighted reward, `path_precision` vs `event_f1` | `delayed_bfs`, `external:ditto` | reward near `trivial_decoder_reward`, or `path_recall` under half |
-| `epidemic_control` | attack rate, `eigendrop_vs_attack.png` | `degree_immunization`, `external:netimm_dava` | our `netshield` and `dava` disagreeing with `netimm_*`: they produce byte-identical node sets, so a difference is an adapter bug |
-| `cascade_prediction` | `msle`, with `n_failed` beside it | `szabo_huberman`; `mean_size` is the real floor | any arm below `trivial_predictor_error` |
+| `source_localization`     | `f1`, and `generalization_gap`                                              | `lpsi` / `external:graphsl_lpsi`                                                                                       | selection F1 far above held-out F1: the program memorized episodes                                                                                                                                                           |
+| `influence_blocking`      | `prevented_influence`                                                       | `proximity`, `external:sandimin`                                                                                       | `cldag` or `cmia_o` near `random_blocking`: that was a real bug, fixed 2026-08-12, pinned by `check_mia_scores_do_not_collapse_onto_the_periphery`                                                                           |
+| `cascade_reconstruction`  | tree-weighted reward, `path_precision` vs `event_f1`                        | `delayed_bfs`, `external:ditto`                                                                                        | reward near `trivial_decoder_reward`, or `path_recall` under half                                                                                                                                                            |
+| `epidemic_control`        | attack rate, `eigendrop_vs_attack.png`                                      | `degree_immunization`, `external:netimm_dava`                                                                          | our `netshield` and `dava` disagreeing with `netimm_*`: they produce byte-identical node sets, so a difference is an adapter bug                                                                                             |
+| `cascade_prediction`      | `msle`, with `n_failed` beside it                                           | `szabo_huberman`; `mean_size` is the real floor                                                                        | any arm below `trivial_predictor_error`                                                                                                                                                                                      |
 
 Every arm also prints `evaluator_calls` / `evaluator_seconds` and `real_env_episodes`. At `@oracle` the last should be small; the comparison that matters later is against `@monte_carlo`.
