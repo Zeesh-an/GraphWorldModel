@@ -116,8 +116,17 @@ def test_episode_random_is_unchanged():
     assert observed == expected
 
 
-def test_both_modes_are_registered():
-    assert set(valid_split_modes) == {graph_disjoint_split, episode_random_split}
+def test_all_split_modes_are_registered():
+    """
+    Three, and each answers a different question: graph_disjoint for a source
+    dataset, episode_random for reproducing a pre-2026-08-22 result, eval_only
+    for an OOD target that must never become a training source.
+    """
+    from data.generate_wm_data import eval_only_split
+
+    assert set(valid_split_modes) == {
+        graph_disjoint_split, episode_random_split, eval_only_split,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -339,3 +348,70 @@ def test_training_on_a_clean_dataset_is_silent(tmp_path, capsys):
     check_split_mode(TrainConfig(data_dir=str(tmp_path)))
 
     assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------------------
+# eval_only: OOD target distributions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_eval_only_puts_every_graph_in_test(tmp_path):
+    """
+    An OOD target set exists to be SCORED by a model trained elsewhere. Giving it
+    a train split would invite exactly the accident it is built to rule out, so
+    the mode makes "never a training source" a property of the data rather than
+    a convention a script has to respect.
+    """
+    from data.generate_wm_data import eval_only_split
+    from world_model.wm_data import graphs_straddling_splits, split_membership
+
+    metadata, config = _generate(tmp_path, eval_only_split, num_graphs=4)
+
+    assert metadata["split_mode"] == eval_only_split
+    assert metadata["split_is_graph_disjoint"] is True
+    assert graphs_straddling_splits(config.out_dir, "IC") == []
+
+    membership = split_membership(config.out_dir, "IC")
+    assert membership, "expected transitions to be written"
+    for graph_id, splits in membership.items():
+        assert splits == {"test"}, f"{graph_id} landed in {splits}, not test only"
+
+
+@pytest.mark.slow
+def test_eval_only_writes_no_train_or_val_files(tmp_path):
+    from pathlib import Path
+
+    from data.generate_wm_data import eval_only_split
+
+    _, config = _generate(tmp_path, eval_only_split, num_graphs=4)
+
+    assert (Path(config.out_dir) / "transitions_IC_test.jsonl").exists()
+    assert not (Path(config.out_dir) / "transitions_IC_train.jsonl").exists()
+    assert not (Path(config.out_dir) / "transitions_IC_val.jsonl").exists()
+
+
+@pytest.mark.slow
+def test_eval_only_works_with_a_single_graph(tmp_path):
+    """
+    The mode graph_disjoint cannot serve: one real graph admits no disjoint
+    three-way split, but it is a perfectly good held-out transfer target.
+    """
+    from data.generate_wm_data import GenConfig, eval_only_split, run_generation
+    from world_model.wm_data import split_membership
+
+    config = GenConfig(
+        dataset="ba", num_graphs=1, syn_nodes=12, er_p=0.2, models=["IC"],
+        prob_model="uniform", uniform_p=0.3, budget=2, budget_pct=None,
+        budget_pct_range=None, algorithms=["degree"], rollouts=1, horizon=3,
+        inject_p=0.0, action_ops=[], weight_lo=0.1, weight_hi=0.5, cf_prob=0.0,
+        cf_branches=0, split=ratios, seed=3, mc_marginals=1,
+        out_dir=str(tmp_path / "single_eval"), split_mode=eval_only_split, ba_m=2,
+    )
+    metadata = run_generation(config)
+
+    assert metadata["split_mode"] == eval_only_split
+    assert all(
+        splits == {"test"}
+        for splits in split_membership(config.out_dir, "IC").values()
+    )

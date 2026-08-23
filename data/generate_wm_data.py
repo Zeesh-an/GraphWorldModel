@@ -67,9 +67,16 @@ default_budget_pct_range = (1.0, 20.0)
 #                    trained under it, and a comparison against those numbers has
 #                    to be able to reproduce their split. It is legacy, not an
 #                    alternative — nothing new should be generated with it.
+#   eval_only        every graph goes to `test` and nothing to train/val. For an
+#                    OOD TARGET distribution: the dataset exists to be scored by a
+#                    model trained somewhere else, and giving it a train split
+#                    would invite exactly the accident it is built to rule out.
+#                    Also the only mode that works with a single graph, which is
+#                    what a real-graph transfer set is.
 graph_disjoint_split = "graph_disjoint"
 episode_random_split = "episode_random"
-valid_split_modes = (graph_disjoint_split, episode_random_split)
+eval_only_split = "eval_only"
+valid_split_modes = (graph_disjoint_split, episode_random_split, eval_only_split)
 
 # Below this many graphs a disjoint split cannot honour three non-empty parts,
 # and a "split" that puts everything in train is worse than a loud failure.
@@ -465,6 +472,9 @@ def run_generation(config: GenConfig) -> dict[str, object]:
 
     split_plan = None
 
+    if config.split_mode == eval_only_split:
+        split_plan = ["test"] * graph_count
+
     if config.split_mode == graph_disjoint_split:
         if graph_count < min_graphs_for_disjoint:
             raise ValueError(
@@ -780,7 +790,9 @@ def parse_args() -> GenConfig:
         type=str,
         default=graph_disjoint_split,
         choices=list(valid_split_modes),
-        help=f"how train/val/test are assigned. {graph_disjoint_split} (default) "
+        help=f"how train/val/test are assigned. {eval_only_split} puts every "
+        f"graph in `test`, for an OOD target distribution scored by a model "
+        f"trained elsewhere. {graph_disjoint_split} (default) "
         f"keeps every episode of a graph in one split, so no graph straddles the "
         f"boundary. {episode_random_split} draws per episode and is LEGACY: it "
         f"leaks a graph across splits and makes test metrics optimistic. Use it "
