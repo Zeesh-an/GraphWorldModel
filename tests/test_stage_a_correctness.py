@@ -287,3 +287,96 @@ def test_train_config_defaults_to_the_test_split():
     from world_model.train_wm import TrainConfig
 
     assert TrainConfig(data_dir="x").planning_split == planning_split_test
+
+
+# ---------------------------------------------------------------------------
+# Q2: monotonicity is what the structured head buys, and what linear lacks
+# ---------------------------------------------------------------------------
+
+
+def _already_active_survival(model, graph, num_nodes=40, active=12):
+    """P(still infected next step) for nodes that are ALREADY infected."""
+    features = torch.zeros(num_nodes, 6)
+    features[:active, ch_infected] = 1.0
+
+    with torch.no_grad():
+        return torch.sigmoid(model(features, graph))[:active, 0].numpy()
+
+
+@pytest.fixture
+def line_graph_lt():
+    num_nodes = 40
+    src = list(range(num_nodes - 1))
+    dst = list(range(1, num_nodes))
+    edge_index = np.array([src + dst, dst + src], dtype=np.int64)
+
+    return build_graph_input(
+        edge_index,
+        np.ones(edge_index.shape[1], dtype=np.float32),
+        num_nodes,
+        "LT",
+        torch.device("cpu"),
+    )
+
+
+def test_structured_head_cannot_forget_an_infected_node(line_graph_lt):
+    """
+    Monotonicity is structural: y_inf = active + (1 - active) * p_new, so an
+    already-active node comes out at 1 whatever the parameters say.
+
+    This is the property the free-running rollout depends on. Measured on the
+    trained BA-100 arms, the structured LT head violated it on 0% of active
+    nodes and an unconstrained linear head on 100%, at a mean survival of 0.91 —
+    i.e. the linear head quietly dropped ~9% of the infected set every step.
+    """
+    model = WorldModel(
+        "sage", hidden_dim=8, n_layers=1, dropout=0.0,
+        head_type="structured", diffusion_model="LT",
+    ).eval()
+    survival = _already_active_survival(model, line_graph_lt)
+
+    assert survival.min() > 0.999
+
+
+@pytest.mark.parametrize("scale", [1.0, 20.0, -20.0])
+def test_structured_monotonicity_survives_perturbation(line_graph_lt, scale):
+    model = WorldModel(
+        "sage", hidden_dim=8, n_layers=1, dropout=0.0,
+        head_type="structured", diffusion_model="LT",
+    ).eval()
+
+    with torch.no_grad():
+        for parameter in model.parameters():
+            parameter.mul_(scale)
+
+    assert _already_active_survival(model, line_graph_lt).min() > 0.999
+
+
+def test_linear_head_has_no_monotonicity_guarantee(line_graph_lt):
+    """
+    The control. A free head CAN forget an infected node — nothing stops it —
+    which is why a good `ens_count_bias` from a linear head has to be read
+    alongside this: on LT the two errors cancel, and cancellation is not calibration.
+
+    Stated as "there exists a parameter setting that violates it" rather than
+    "it always violates it", because the claim being tested is the absence of a
+    GUARANTEE, not the presence of a defect.
+    """
+    violated = False
+
+    for seed in range(20):
+        torch.manual_seed(seed)
+        model = WorldModel(
+            "sage", hidden_dim=8, n_layers=1, dropout=0.0,
+            head_type="linear", diffusion_model="LT",
+        ).eval()
+
+        with torch.no_grad():
+            for parameter in model.parameters():
+                parameter.mul_(5.0)
+
+        if _already_active_survival(model, line_graph_lt).min() < 0.99:
+            violated = True
+            break
+
+    assert violated, "a linear head must not be able to guarantee monotonicity"
