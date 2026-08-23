@@ -201,16 +201,35 @@ def reconstruct_episode_adjacency(
     return adjacency_by_step
 
 
+def log_degree(edge_index: np.ndarray, num_nodes: int) -> np.ndarray:
+    """`log1p(total degree)` for the CH_DEGREE column."""
+    degrees = np.zeros(num_nodes, dtype=np.float32)
+
+    if edge_index.size:
+        np.add.at(degrees, edge_index[0], 1.0)
+        np.add.at(degrees, edge_index[1], 1.0)
+
+    return np.log1p(degrees)
+
+
 def build_features(
     record: dict,
     edge_index: np.ndarray,
     num_nodes: int,
     action_encoding: str = basic_encoding,
+    degree_column: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (X (N, C) float32, y_inf (N) float32, y_fr (N) float32).
 
     C is 6 under `basic` and 9 under `typed`; the extra columns are appended, so
     X[:, :6] is identical either way.
+
+    `degree_column` lets a caller pass in a precomputed CH_DEGREE column. Degree
+    is a property of the ADJACENCY, so during a rollout with no edge operations
+    it is the same vector at every timestep for every ensemble sample — and
+    recomputing it was 11% of rollout time (4800 `np.add.at` calls per ten
+    rollouts) for a constant. Callers that mutate the graph must pass None, or
+    nothing, and let it be recomputed.
     """
     X = np.zeros((num_nodes, num_input_channels(action_encoding)), dtype=np.float32)
 
@@ -219,13 +238,9 @@ def build_features(
     X[np.asarray(state["frontier"], dtype=np.int64), ch_frontier] = 1.0
 
     # degree = log1p(total degree in A_t); input_proj + LayerNorm handle scaling.
-    degrees = np.zeros(num_nodes, dtype=np.float32)
-
-    if edge_index.size:
-        np.add.at(degrees, edge_index[0], 1.0)
-        np.add.at(degrees, edge_index[1], 1.0)
-
-    X[:, ch_degree] = np.log1p(degrees)
+    X[:, ch_degree] = (
+        log_degree(edge_index, num_nodes) if degree_column is None else degree_column
+    )
 
     for action_op in record["action"]:
         if action_op["op"] == "add_node":
