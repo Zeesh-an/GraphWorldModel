@@ -502,6 +502,7 @@ What changes under the fix [verified, §5.3]:
 | **Unscoreable cascades** | Generative models decline to predict supercritical cascades: SEISMIC failed on 1,022 / ~20K News cascades at 5 min [verified]. Papers report the mean over *scoreable* cascades only, which silently favours the model that gives up more often. Mishra et al. publish the failure counts; almost nobody else does. |
 | **Diurnal filtering** | Weibo keeps only 8 a.m., 6 p.m. posts [verified]. A model tested there has never seen an overnight cascade. |
 | **Metric direction** | MSLE/MALE/MAPE/MRSE/WroPerc: lower better. R²/PCC/COV-k/Hits@k: higher better. Mixed within single tables. |
+| **Participant caps** | CoupledGNN keeps the busiest 23,681 of 1.78M users; our `--cp-max-nodes` is the same move. It DELETES adopters from every cascade, so a size filter applied before it no longer holds after it: the first `casflow_aps` run at 30,000 nodes shipped held-out cascades with 2-4 observed adopters under a metadata line claiming `>= 10`, and every growth-predicting baseline scored an order of magnitude worse on the selection split than on the held-out one. The replay now re-applies the size filter after the cap. A capped corpus is a new version of its own name (§6.4) and its MSLE is comparable to nothing published. |
 
 ### 8.5 Is there a unified public benchmark?
 

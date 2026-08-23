@@ -1192,6 +1192,25 @@ def acquaintance_immunization(
     return _pad(chosen, graph, budget)
 
 
+def frontier_removal(
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", outbreak=(), **_
+) -> list[int]:
+    """
+    Delete the susceptible boundary of the observed outbreak, highest-degree first.
+
+    The only member of this pool that conditions on WHERE the outbreak is, and the
+    control every outbreak-aware arm has to beat: the first power_grid sweep had the
+    agent arm at exactly the source count (49.0) against 98-160 for every published
+    dismantler, and its whole program was this one-hop ring. Without this row that
+    gap reads as a method and is in fact the information asymmetry. Same rule as
+    `immunization_algorithms.frontier_immunization`, reused rather than copied.
+    """
+    # Function-local: immunization_algorithms imports from this module
+    from coding_agent.tools.immunization_algorithms import frontier_immunization
+
+    return frontier_immunization(graph, budget, diffusion_model, outbreak=outbreak)
+
+
 def random_removal(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 42, **_
 ) -> list[int]:
@@ -1293,6 +1312,8 @@ dismantling_algorithms = {
     "egnd": egnd,
     # spectral / epidemic
     "netshield": netshield,
+    # data-aware
+    "frontier_removal": frontier_removal,
     # floors
     "acquaintance_immunization": acquaintance_immunization,
     "random_removal": random_removal,

@@ -669,6 +669,7 @@ def _results_table(agent_results: list[dict]) -> list[str]:
             "still reached. The best arm is the one with the SMALLEST number.",
             "",
         ]
+        lines += _ring_note(agent_results)
 
     if has_mc:
         lines += [
@@ -1072,6 +1073,53 @@ def _structural_section(agent_results: list[dict]) -> list[str]:
     return lines
 
 
+def _ring_note(agent_results: list[dict]) -> list[str]:
+    """
+    Which budgets sit above the outbreak's one-hop ring, and so separate nothing.
+
+    Two information states share this table. The planner and `frontier_removal`
+    are handed the outbreak; every published dismantler is blind to it and would
+    pick the same set for any outbreak. A budget at or above the ring makes the
+    first group trivially exact (delete the ring, score |S|), so only the rows
+    below it compare methods rather than information.
+    """
+    rings = {
+        result["budget"]: result["outbreak_ring"]
+        for result in agent_results
+        if result.get("outbreak_ring") is not None
+    }
+    if not rings:
+        return []
+
+    ring = max(rings.values())
+    sources = max(
+        len(result.get("outbreak") or []) for result in agent_results
+    )
+    trivial = sorted(budget for budget in rings if budget >= ring)
+    lines = [
+        f"> **Two information states share this table.** The agent arms and "
+        f"`frontier_removal` are told the {sources} outbreak sources; every "
+        f"published dismantler is blind to them and returns the same set for any "
+        f"outbreak. The outbreak's one-hop ring is **{ring} nodes**, and a budget "
+        f"at or above it is trivial for any outbreak-aware arm: delete the ring "
+        f"and the cascade cannot leave the sources, so the row reads exactly "
+        f"{sources} and separates information, not methods.",
+    ]
+    if trivial:
+        lines.append(
+            f"> Trivial budgets in this run: k = {', '.join(str(k) for k in trivial)}. "
+            f"Read only the rows below {ring}; raise `--outbreak-pct` to put the "
+            f"whole sweep under the ring."
+        )
+    else:
+        lines.append(
+            "> Every budget in this run sits below the ring, so every row is a "
+            "choice of WHICH neighbours to delete."
+        )
+
+    return lines + [""]
+
+
 def _winner_section(agent_results: list[dict]) -> list[str]:
     """Best arm at the largest budget, with the program it produced."""
     if not agent_results:
@@ -1104,6 +1152,15 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
             f"`{winner.get('eval_split', '?')}` episodes"
         )
         title = f"## Winning arm at k={largest} (sources per episode)"
+    elif is_forecast(at_largest):
+        # An error, not a count: "spread 0.06 (0.00% of N)" is what the cascade
+        # branch printed over an MSLE on the first casflow_aps run
+        headline = (
+            f"held-out {reward_name(at_largest)} {_format_number(spread, 4)} "
+            f"(lower is better) over {winner.get('n_eval_instances', '?')} "
+            f"`{winner.get('eval_split', '?')}` cascades"
+        )
+        title = "## Winning arm (held-out cascades)"
     else:
         judged = (
             "ground-truth MC" if is_ground_truth(at_largest) else "its own evaluator"

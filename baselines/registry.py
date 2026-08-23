@@ -515,37 +515,75 @@ def _deepim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
 
 def _glie_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
     """
-    GLIE reads the IMM-style pair: a weighted edgelist `<name>.inf` (src dst prob)
-    plus an `attribute.txt` giving n and m.
+    `celf_glie.py` has NO command line: its `main()` loops six hardcoded graphs
+    under `data/real/`, fixes `seed_size = 100`, and then re-scores each set with
+    its own Python IC, which is the slow half. Verified against upstream
+    2026-08-23, after the first cluster sweep died on `data/real/crime_ic.inf`.
+    So the adapter imports the module for its model class, stored checkpoint and
+    CELF primitive, and drives the same lazy-greedy loop on OUR edgelist at OUR k.
+    Importing is safe: `main()` sits under an `__main__` guard.
     """
     spec = external_baselines["glie"]
-    data_dir = spec.directory / "data" / "gwm"
-    os.makedirs(data_dir, exist_ok=True)
     arcs = graph.edge_index.shape[1]
+    edgelist = work_dir / "graph_ic.inf"
 
-    with open(data_dir / "graph_ic.inf", "w") as handle:
+    with open(edgelist, "w") as handle:
         for column in range(arcs):
             source = int(graph.edge_index[0, column])
             target = int(graph.edge_index[1, column])
             handle.write(f"{source} {target} {float(graph.ic_probs[column]):.6f}\n")
 
-    (data_dir / "attribute.txt").write_text(f"n={graph.num_nodes}\nm={arcs}\n")
+    runner = _write_runner(
+        work_dir,
+        "import sys\n"
+        f"sys.path.insert(0, {str(spec.directory.resolve())!r})\n"
+        "import numpy as np, pandas as pd, scipy.sparse as sp, torch\n"
+        "from celf_glie import GNN_skip_small, gnn_eval, sparse_mx_to_torch_sparse_tensor\n"
+        "device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')\n"
+        "feat_d, hidden, dropout = 50, 64, 0.4\n"
+        "model = GNN_skip_small(feat_d, hidden, hidden // 2, hidden // 4, dropout).to(device)\n"
+        "checkpoint = torch.load('models/model_g.pth.tar', map_location=device)\n"
+        "model.load_state_dict(checkpoint['state_dict'])\n"
+        "model.eval()\n"
+        f"G = pd.read_csv({str(edgelist.resolve())!r}, header=None, sep=' ')\n"
+        f"n = {graph.num_nodes}\n"
+        "adj = sp.coo_matrix((G[2], (G[1], G[0])), shape=(n, n))\n"
+        "adj = sparse_mx_to_torch_sparse_tensor(adj).to(device)\n"
+        "G.columns = ['source', 'target', 'weight']\n"
+        # Upstream prunes candidates to the top out-degree bin before CELF; kept,
+        # since the stored model was evaluated that way and a full scan over N
+        # forward passes per pick is what makes the repo's own runs take hours
+        "outdegree = G.groupby('source').agg('target').count().reset_index()\n"
+        "deg_thres = np.histogram(outdegree.target, 20)[1][1]\n"
+        "nodes = [int(v) for v in outdegree.source[outdegree.target > deg_thres].values]\n"
+        f"k = min({budget}, len(nodes))\n"
+        "idx = torch.zeros(n, dtype=torch.long, device=device)\n"
+        "feature = torch.zeros((n, feat_d), device=device)\n"
+        "S, Q = [], []\n"
+        "with torch.no_grad():\n"
+        "    for u in nodes:\n"
+        "        Q.append([u, gnn_eval(model, adj, [u], feature.clone(), idx, device), 0])\n"
+        "Q.sort(key=lambda x: x[1], reverse=True)\n"
+        "S.append(Q[0][0]); infl = Q[0][1]; Q = Q[1:]\n"
+        "while len(S) < k and Q:\n"
+        "    u = Q[0]\n"
+        "    if u[2] != len(S):\n"
+        "        with torch.no_grad():\n"
+        "            u[1] = gnn_eval(model, adj, S + [u[0]], feature.clone(), idx, device) - infl\n"
+        "        u[2] = len(S)\n"
+        "        Q.sort(key=lambda x: x[1], reverse=True)\n"
+        "    else:\n"
+        "        infl += u[1]; S.append(u[0]); Q = Q[1:]\n"
+        "print('SEEDS ' + ' '.join(str(v) for v in S))\n",
+    )
 
-    return {"dataset": "gwm"}
+    return {"runner": str(runner.resolve())}
 
 
 def _glie_command(
     work_dir: Path, budget: int, diffusion_model: str, extras: dict, graph
 ) -> list[str]:
-    # celf_glie.py runs IM off the STORED GLIE model: no training required
-    return [
-        "python",
-        "celf_glie.py",
-        "--dataset",
-        extras["dataset"],
-        "--k",
-        str(budget),
-    ]
+    return ["python", extras["runner"]]
 
 
 # C++ RIS family -------------------------------------------------------------
@@ -2506,6 +2544,12 @@ algorithm = {algorithm!r}
 # THEIR graphs, so unless one is named explicitly we train on ours with their own
 # generate_dataset + train, which is the faithful thing to run.
 if algorithm.startswith("DiffIM") and not model_name:
+    # Their seed-size band is `randint(min(10, n), max(10, int(n * SEED_SIZE)))`
+    # with SEED_SIZE = 0.01, so on any graph under 1,100 nodes both bounds are 10
+    # and numpy raises `low >= high` (email_eu_core at 1,005 did, first sweep).
+    # DiffIM's own graphs are all larger. Widen the band to at least one size
+    # above the floor, which is what the formula does on their graphs.
+    namespace["SEED_SIZE"] = max(namespace["SEED_SIZE"], (min(10, n) + 1) / n)
     namespace["generate_dataset"](graph_name + ".txt", {samples}, saving_tag="-train")
     namespace["generate_dataset"](graph_name + ".txt", max(10, {samples} // 10), saving_tag="-test")
     model_name = graph_name + ".pt"
@@ -2987,6 +3031,10 @@ external_baselines: dict[str, ExternalBaseline] = {
         paper="https://arxiv.org/abs/2210.07500",
         entry="main.py (inference with the shipped tripling.ckpt)",
         status="needs_setup",
+        # Its requirements never list `torch_scatter`, and the first cluster sweep
+        # died on exactly that import. Installed after them, through the
+        # torch-extension pre-install path where one is needed.
+        pip_packages=('torch-scatter',),
         export=_touplegdd_export,
         command=_touplegdd_command,
         parse_seeds=_touplegdd_parse,
@@ -3157,7 +3205,7 @@ external_baselines: dict[str, ExternalBaseline] = {
         export=_glie_export,
         command=_glie_command,
         parse_seeds=lambda work_dir, stdout, budget: parse_seed_integers(
-            stdout, budget
+            stdout.split("SEEDS", 1)[-1], budget
         ),
         notes=(
             "Found at geopanag/learn_im, NOT the geopanag/GLIE URL commonly "
@@ -3505,6 +3553,11 @@ external_baselines: dict[str, ExternalBaseline] = {
             # setup_baselines' idempotency check ("already applied?") matches
             # the unpatched line and skips the patch silently
             ("requirements.txt", "ipdb==0.12", "ipdb>=0.13"),
+            # The file pins networkx==2.3 but leaves numpy bare, and on 3.8 that
+            # resolves to 1.24.x, which removed the `np.int` alias networkx 2.3's
+            # graphml writer still reads at import. Measured on the cluster: the
+            # arm died at `import networkx` on every budget of the first sweep.
+            ("requirements.txt", "\nnumpy\n", "\nnumpy<1.24\n"),
         ],
         export=_rl4im_export,
         command=_rl4im_command,
@@ -3927,6 +3980,10 @@ external_baselines: dict[str, ExternalBaseline] = {
         entry="PyTorch",
         task="critical_node_detection",
         status="needs_setup",
+        # Its requirements never list `torch_scatter`, and the first cluster sweep
+        # died on exactly that import. Installed after them, through the
+        # torch-extension pre-install path where one is needed.
+        pip_packages=('torch-scatter',),
         export=_mind_export,
         command=_runner_command,
         parse_seeds=_order_parse,
@@ -3980,6 +4037,10 @@ external_baselines: dict[str, ExternalBaseline] = {
         entry="PyTorch (GAT)",
         task="critical_node_detection",
         status="needs_setup",
+        # Its requirements never list `torch_geometric`, and the first cluster sweep
+        # died on exactly that import. Installed after them, through the
+        # torch-extension pre-install path where one is needed.
+        pip_packages=('torch-geometric',),
         export=_nirm_export,
         command=_runner_command,
         parse_seeds=_order_parse,
@@ -4005,6 +4066,10 @@ external_baselines: dict[str, ExternalBaseline] = {
         entry="PyTorch",
         task="critical_node_detection",
         status="needs_setup",
+        # Its requirements never list `dgl`, and the first cluster sweep
+        # died on exactly that import. Installed after them, through the
+        # torch-extension pre-install path where one is needed.
+        pip_packages=('dgl',),
         export=_dcrs_export,
         command=_runner_command,
         parse_seeds=_order_parse,

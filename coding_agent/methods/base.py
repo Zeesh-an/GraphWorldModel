@@ -2,7 +2,7 @@
 
 import math
 import time
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Protocol
 
@@ -712,6 +712,63 @@ def paired_delta(
     )
 
 
+@dataclass
+class PlanOracle:
+    """
+    `self.score_plan(plan)`, bound to one arm's evaluator: the intervention analogue
+    of source localization's `predict_marginals`, and the same design (§2.4.3
+    there): four bindings of one name, so the generated program is byte-identical
+    across conditions 3-6 and only the oracle behind it changes.
+
+    It exists because the containment tasks' question ("the outbreak is already
+    running; how far does it get under MY intervention?") had no bound answer, so
+    generated programs rebuilt simulation inside `plan_horizon` from `graph.ic_probs`:
+    the winning influence-blocking program spent 260 of every iteration's 262
+    seconds on a hand-rolled live-edge sampler, off every cost meter and against
+    dynamics it had to re-derive. This call wraps the candidate in the SAME
+    exogenous machinery the real evaluation uses (outbreak seeding, rumour commit,
+    lever and deletion-bag expansion, the edit stream), rolls it out on the arm's
+    environment, and returns the reward the arm is optimizing (lower is better on
+    every task this is bound for). Every call goes through `environment.rollout`,
+    so it lands in `evaluator_calls` / `evaluator_seconds` / `real_env_episodes`
+    and the ladder's cost accounting stays honest.
+
+    Validated first with the same `validate_plan` as the outer evaluation: a plan
+    this refuses is a plan the evaluation would refuse, learned for the cost of a
+    message instead of an iteration.
+    """
+
+    environment: object
+    task: TaskSpec
+    graph: GraphInfo
+    stream: object = None
+    calls: int = field(default=0)
+
+    def __call__(self, plan: list) -> float:
+        plan = [list(bag) for bag in plan]
+        validate_plan(plan, self.task, self.graph)
+        action_fn = wrap_exogenous(
+            partial(planned_action, plan), self.task, self.graph, self.stream
+        )
+        trajectory = self.environment.rollout(
+            action_fn, self.task.horizon, self.task.budget
+        )
+        self.calls += 1
+
+        return float(trajectory.reward)
+
+
+def unavailable_plan_oracle(_plan) -> float:
+    """The @native binding: this arm has no forward model, by design."""
+    raise StrategyError(
+        "self.score_plan is not available in this condition (@native): this arm "
+        "has NO forward model, by design. It exists to measure whether a forward "
+        "model in the search loop is worth anything at all. Choose the intervention "
+        "from structure and the outbreak's position alone: distance-to-source "
+        "rings, boundary cuts, centralities on the residual graph."
+    )
+
+
 def validate_plan(plan: list, task: TaskSpec, graph: GraphInfo) -> None:
     """Validate every bag and the whole-plan budgeted total against the task budget."""
     total_units = 0
@@ -794,6 +851,25 @@ def attach_context(
 
     if environment is not None:
         strategy.predict_marginals = bind_predict_marginals(environment, task)
+        # ...and the INTERVENTION oracle, for the three tasks whose cascade is
+        # exogenous (containment, blocking, epidemic control): `predict_marginals`
+        # answers "what if the cascade had STARTED from these seeds", which is the
+        # wrong question when the outbreak is fixed and the plan is the variable.
+        # Same stream as evaluate_strategy builds (deterministic in the same
+        # arguments), so what this scores is what the evaluation will score.
+        if task.contains:
+            strategy.score_plan = (
+                PlanOracle(
+                    environment=environment,
+                    task=task,
+                    graph=environment.graph,
+                    stream=build_stream(
+                        environment.graph, task.horizon, task.edit_rate, task.seed
+                    ),
+                )
+                if task.forward_model
+                else unavailable_plan_oracle
+            )
         # ...and the TRANSITION kernel, the one new primitive of cascade
         # reconstruction (research/cascade_reconstruction.md §2.5.2). Same four
         # bindings and the same reason: the generated decoder is byte-identical
@@ -873,10 +949,23 @@ def wrap_exogenous(
 
 
 def evaluate_strategy(
-    strategy: Strategy, environment: object, task: TaskSpec, graph: GraphInfo
+    strategy: Strategy,
+    environment: object,
+    task: TaskSpec,
+    graph: GraphInfo,
+    seed: int | None = None,
 ) -> tuple[Trajectory, float]:
     """
     Score one generated program, and return how long building its plan took.
+
+    `seed` picks the evaluator's realization for THIS call. `None` is the
+    environment's fixed base seed, which is right for a one-off score and wrong
+    inside a search: every candidate then faces the identical sampled cascade and
+    the loop tunes to its noise. Measured on epidemic_control/primary_school: the
+    search reported 40.6 at k=48 on seed 42, the same program re-scored 67-76 on
+    seeds 43-45, and the ground-truth referee said 63.7. Search loops pass a
+    per-generation seed and `rescore` the incumbent on it, so a comparison is
+    paired (common random numbers) within a generation and never across.
 
     The single point where the three problem families diverge. An INVERSE task
     never rolls out at all: it calls localize() once per labelled episode and
@@ -956,16 +1045,47 @@ def evaluate_strategy(
         # policy's own compute lands in the environment's rollout_seconds
         action_fn = adaptive_action_fn(strategy, task, graph, batches, stream)
     else:
-        plan = call_strategy(strategy.plan_horizon, graph, task.budget, task.horizon)
-        validate_plan(plan, task, graph)
+        # The plan is a function of (graph, budget, horizon) and never of the
+        # evaluator's seed, so a re-score of the same program on a fresh
+        # realization reuses it: plan_horizon() is the expensive half of an
+        # agent iteration (minutes on influence_blocking) and the rollout is
+        # seconds
+        plan = getattr(strategy, "_plan", None)
+        if plan is None:
+            plan = call_strategy(strategy.plan_horizon, graph, task.budget, task.horizon)
+            validate_plan(plan, task, graph)
+            strategy._plan = plan
+
         action_fn = partial(planned_action, plan)
 
     action_fn = wrap_exogenous(action_fn, task, graph, stream)
 
     plan_seconds = time.perf_counter() - start
-    trajectory = environment.rollout(action_fn, task.horizon, task.budget)
+    trajectory = environment.rollout(action_fn, task.horizon, task.budget, seed=seed)
 
     return trajectory, plan_seconds
+
+
+def rescore(
+    best: tuple | None,
+    environment: object,
+    task: TaskSpec,
+    graph: GraphInfo,
+    seed: int,
+) -> tuple | None:
+    """
+    Re-run the incumbent on the challenger's seed so the two are compared paired.
+
+    A no-op for the three families whose reward is exact (F1, path precision,
+    MSLE): there is no realization to overfit, and their evaluation is the
+    expensive half of the loop (a localizer pays ~250 s per score on jazz).
+    """
+    if best is None or task.forecasts or task.decodes or task.recovers:
+        return best
+
+    trajectory, _ = evaluate_strategy(best[0], environment, task, graph, seed=seed)
+
+    return (best[0], trajectory)
 
 
 class _BlockingAnchor:

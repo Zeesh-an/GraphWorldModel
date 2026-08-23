@@ -392,6 +392,7 @@ class WorldModelEnvironment:
                     sorted(pos_frontier[sample]),
                     sorted(exposed[sample]),
                     sorted(recovered[sample]),
+                    sample=sample,
                 )
                 bags[sample] = action_fn(state, timestep)
                 bag_dicts[sample] = [action.to_dict() for action in bags[sample]]

@@ -11,6 +11,7 @@ from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
     evaluate_strategy,
+    rescore,
     paired_delta,
     reference_diff,
     summarize,
@@ -32,7 +33,7 @@ default_max_repairs = 3
 class OneShotSuperAlgorithm(OuterLoopMethod):
     def __init__(
         self,
-        outer_iters: int = 3,
+        outer_iters: int = 20,
         credit: bool = False,
         strategy_mode: str = "free",
         use_anchor: bool = True,
@@ -165,9 +166,13 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 # composition scripts this internal planning dominates wall-clock
                 tqdm.write(f"[one_shot] iter {iteration}: executing plan_horizon()...")
 
+                # Same pairing rule as evolve: a fresh seed per attempt, and the
+                # incumbent re-scored on it before the two are compared
+                seed = task.seed + evaluations + 1
                 trajectory, plan_seconds = evaluate_strategy(
-                    strategy, environment, task, graph
+                    strategy, environment, task, graph, seed=seed
                 )
+                best = rescore(best, environment, task, graph, seed)
             except StrategyError as error:
                 last_error = str(error)
                 repairs += 1

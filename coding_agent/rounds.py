@@ -24,6 +24,7 @@ are shaped rather than of the task:
     and the slot is spent instead. See prepare_round_bag.
 """
 
+import copy
 import math
 
 from coding_agent.executor import StrategyError, call_strategy, validate_actions
@@ -174,6 +175,23 @@ def prepare_round_bag(
     return [action for action in bag if id(action) not in dropped]
 
 
+def _fresh_policy(strategy: Strategy) -> Strategy:
+    """
+    A copy with its own data attributes and the same bound primitives.
+
+    Shallow, then deep-copy everything that is not callable: the context
+    `attach_context` binds (`predict_marginals` and friends) closes over the
+    environment and its model and must be shared; anything the policy stores about
+    its own progress must not be.
+    """
+    clone = copy.copy(strategy)
+    for key, value in vars(strategy).items():
+        if not callable(value):
+            setattr(clone, key, copy.deepcopy(value))
+
+    return clone
+
+
 def adaptive_action_fn(
     strategy: Strategy,
     task: TaskSpec,
@@ -193,15 +211,23 @@ def adaptive_action_fn(
     you are re-queried about has actually changed.
     """
     schedule = round_schedule(batches, task.round_gap, task.horizon)
+    # One policy per possible world. A generated policy routinely keeps state
+    # across act() calls ("what have I already chosen"), and the world-model
+    # environment queries it once per ensemble member per round, interleaved, so a
+    # single object saw 50 different histories as one: see `State.sample`.
+    policies = {}
 
     def action_fn(state: State, timestep: int) -> list[ActionOp]:
         batch_size = schedule.get(timestep)
         if batch_size is None:
             return []
 
+        if timestep == 0 or state.sample not in policies:
+            policies[state.sample] = _fresh_policy(strategy)
+
         live_graph = graph if stream is None else stream.graph_at(timestep)
         bag = call_strategy(
-            strategy.act,
+            policies[state.sample].act,
             observed_state(state, task.feedback_model),
             live_graph,
             timestep,

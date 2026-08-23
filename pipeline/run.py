@@ -169,6 +169,10 @@ from world_model.wm_model import backbones
 
 stages = ("data", "train", "agent", "plots", "report")
 native_mc_runs_default = 1
+# The sample-count ceiling for adaptive arms: their per-round act() runs once per
+# ensemble member, so evaluation cost scales linearly in this where every other
+# arm's is one batched forward pass
+adaptive_n_samples = 50
 
 
 @dataclass
@@ -248,7 +252,7 @@ class PipelineConfig:
     temperature: float | None = None
     diffusion_model: str = "IC"
     horizon: int = 10
-    outer_iters: int = 5
+    outer_iters: int = 20
     windows: int = 3
     mc_runs: int = 200
     n_samples: int = 50
@@ -1208,7 +1212,17 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 ),
                 mc_runs=mc_runs,
                 referee_mc_runs=config.mc_runs,
-                n_samples=config.n_samples,
+                # Adaptive arms are capped: act() runs once per ensemble member per
+                # round, so the policy's own compute scales linearly with the sample
+                # count and 200 samples turns a 500 s evaluation into a 30-minute
+                # one. Every other arm takes the flag as given; 200 is the ladder
+                # default because 50 samples put the reward SE (2.5-12 nodes) above
+                # the deltas the late search iterations are deciding between.
+                n_samples=(
+                    min(config.n_samples, adaptive_n_samples)
+                    if arm.method == "adaptive"
+                    else config.n_samples
+                ),
                 seed=config.seed,
                 device=config.device,
                 data_dir=str(layout.data_dir),
@@ -2531,8 +2545,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--outer-iters",
         type=int,
-        default=5,
-        help="outer-loop iterations per LLM arm (default: 5).",
+        default=20,
+        help="outer-loop iterations per LLM arm (default: 20).",
     )
     parser.add_argument(
         "--windows",

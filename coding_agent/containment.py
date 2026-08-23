@@ -119,6 +119,24 @@ def neighbour_sets(graph: GraphInfo) -> list[set[int]]:
     return groups
 
 
+def ring_size(graph: GraphInfo, outbreak) -> int:
+    """
+    |N_1(S) \\ S|: how many deletions wall the outbreak off completely.
+
+    The number every containment budget has to be read against. A budget at or
+    above it makes the task trivial: delete the ring and an IC cascade cannot cross
+    it, so every outbreak-aware arm scores exactly |S| and the row separates
+    nothing. The first power_grid sweep had three of four budgets there.
+    """
+    sources = {int(node) for node in outbreak}
+    neighbours = neighbour_sets(graph)
+    ring = set()
+    for source in sources:
+        ring |= neighbours[source]
+
+    return len(ring - sources)
+
+
 def delete_node_ops(graph: GraphInfo, node: int) -> list[ActionOp]:
     """
     `remove_node(v)` plus a `remove_edge` per incident arc: node deletion, in the

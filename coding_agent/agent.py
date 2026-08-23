@@ -168,7 +168,9 @@ class CodingAgent:
 
 # Opening turn (task + graph profile + anchor) plus this many recent exchanges
 # are sent; the middle is dropped so a long refinement loop cannot grow context
-# without bound. 6 exchanges covers every default --outer-iters we run.
+# without bound. At the default 20 iterations the middle IS dropped, by design:
+# the population best and its diagnostics ride in every prompt, so an old
+# exchange carries nothing the search still needs.
 default_history_exchanges = 6
 
 

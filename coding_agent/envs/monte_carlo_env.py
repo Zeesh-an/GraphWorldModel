@@ -5,6 +5,8 @@ This is the baseline the world-model environment is compared against.
 """
 
 import time
+from dataclasses import replace
+
 import numpy as np
 
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
@@ -157,7 +159,7 @@ class MonteCarloEnvironment:
 
             for timestep in range(horizon + 1):
                 # Each timestep, get the action bag and apply the action affect (T_exo) and one diffusion step (T_endo)
-                bag = action_fn(state, timestep)
+                bag = action_fn(replace(state, sample=run), timestep)
                 state = simulator.advance(bag)
 
                 states.append(state)

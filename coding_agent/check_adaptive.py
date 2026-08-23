@@ -644,6 +644,54 @@ def adaptive_runs_under_the_world_model_loop_order() -> None:
     assert union.cost["campaigns"] == 3
 
 
+def a_stateful_policy_gets_one_copy_per_sample() -> None:
+    """
+    A policy that remembers its own picks must see ONE history, not the ensemble's.
+
+    The world-model environment interleaves every sample's act() call at each
+    round. With one shared object, a policy that excludes "what I already chose"
+    excluded the OTHER samples' picks too, so every sample committed a different
+    seed set and the in-loop reward was a mean over 50 crippled policies: 506 in
+    the loop against 724 on the referee on netscience at k=318. `State.sample`
+    routes each member to its own copy; this pins that every sample ends up with
+    the same plan as a sequential run would.
+    """
+    bundle = make_synthetic_bundle("powerlaw_cluster", index=7, num_nodes=70, seed=11)
+    graph = GraphInfo(
+        num_nodes=70,
+        edge_index=bundle.edge_index.astype(np.int64),
+        ic_probs=bundle.ic_probs.astype(np.float32),
+        directed=False,
+    )
+    environment = WorldModelEnvironment.oracle(graph, "IC", n_samples=8, base_seed=0)
+
+    class Remembering:
+        source_script = ""
+
+        def act(self, state, graph, timestep):
+            if timestep == 0:
+                self.chosen = set()
+            taken = self.chosen | set(state.infected) | set(state.frontier)
+            picks = [node for node in range(graph.num_nodes) if node not in taken][:2]
+            self.chosen.update(picks)
+            return [ActionOp("add_node", node) for node in picks]
+
+    task = TaskSpec(budget=6, horizon=5, rounds=3)
+    trajectory, _ = evaluate_strategy(Remembering(), environment, task, graph)
+
+    # Replay the rule against the representative's OWN states: with one shared
+    # object the third round excluded every other sample's second-round picks
+    # and landed far down the node order
+    chosen = set()
+    for timestep in range(task.rounds):
+        state = trajectory.states[timestep]
+        taken = chosen | set(state.infected) | set(state.frontier)
+        expected = [node for node in range(graph.num_nodes) if node not in taken][:2]
+        committed = [action.target for action in trajectory.actions[timestep]]
+        assert committed == expected, (timestep, committed, expected)
+        chosen.update(expected)
+
+
 def the_expensive_adaptive_baseline_is_metered() -> None:
     """
     adapt_greedy must be blocked from GENERATED code and runnable as a baseline.
@@ -799,6 +847,7 @@ if __name__ == "__main__":
         multi_round_unions_separate_campaigns,
         the_spread_curve_makes_sigma_s_t_readable,
         adaptive_runs_under_the_world_model_loop_order,
+    a_stateful_policy_gets_one_copy_per_sample,
         the_expensive_adaptive_baseline_is_metered,
         published_baselines_cannot_cross_tasks,
         external_round_replay_preserves_the_batches,

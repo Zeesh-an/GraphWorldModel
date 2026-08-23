@@ -14,6 +14,7 @@ from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
     evaluate_strategy,
+    rescore,
     paired_delta,
     reference_diff,
     summarize,
@@ -39,7 +40,7 @@ reward_improvement_epsilon = 1e-9
 class EvolveSearch(OuterLoopMethod):
     def __init__(
         self,
-        outer_iters: int = 10,
+        outer_iters: int = 20,
         strategy_mode: str = "scored",
         stagnation_patience: int = 2,
         inspiration_count: int = 2,
@@ -193,9 +194,13 @@ class EvolveSearch(OuterLoopMethod):
                 entry_point = "act() per round" if task.adaptive else "plan_horizon()"
                 tqdm.write(f"[{self.label}] iter {iteration + 1}: {entry_point}...")
 
+                # One fresh realization per generation, shared by challenger and
+                # incumbent: see evaluate_strategy for why a fixed seed is a bug here
+                seed = task.seed + iteration + 1
                 trajectory, plan_seconds = evaluate_strategy(
-                    strategy, environment, task, graph
+                    strategy, environment, task, graph, seed=seed
                 )
+                best = rescore(best, environment, task, graph, seed)
             except StrategyError as error:
                 last_error = str(error)
                 stagnation += 1

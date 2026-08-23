@@ -51,6 +51,11 @@ run_dataset () {
 # with the numbers rather than failing silently
 run_dataset taoke           CP_SPLIT=random CP_MAX_CASCADES=2000
 
+# CP_MAX_NODES deletes adopters from every cascade and the size filter is
+# re-applied after it, so a capped corpus keeps fewer cascades than the
+# uncapped one and is comparable only to itself (§8.4). casflow_aps is left
+# uncapped here on purpose: its first run needed a cap to fit in 64 GB during
+# the agent stage and that run's numbers are on a censored corpus.
 run_dataset digg_cascades   CP_SPLIT=chronological
 run_dataset casflow_aps     CP_SPLIT=chronological
 run_dataset casflow_weibo   CP_SPLIT=chronological CP_MAX_NODES=50000

@@ -91,7 +91,7 @@ external:touplegdd external:deepim external:moeim external:glie" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -112,28 +112,36 @@ ARMS="adaptive_free@oracle evolve_free@oracle" \
 EVALUATOR=oracle \
 ROUNDS=3 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 3. critical node detection
 # remove_semantics=blocked comes from the registry and is asserted; do not override it.
+# The outbreak is 10% of N by registry default (494 sources on power_grid). The planner is
+# TOLD where it is, so any budget at or above the outbreak's one-hop ring is trivial for an
+# outbreak-aware arm: the first run at 1% had a 129-node ring under a 247/494/988 sweep and
+# the agent posted exactly 49 (= the source count) against 98-160 for every dismantler.
+# 10% puts the ring above the 20% budget; the report names any budget that still clears it.
 TASK=critical_node_detection \
 DATASET=power_grid \
 RUN=testrun \
 RUN_JOBID=0 \
 SKIP_STAGES=train \
-BASELINES="adaptive_degree iterative_betweenness collective_influence_r corehd corehd_r \
+# frontier_removal is the outbreak-aware control: every other row is blind to where
+# the cascade is, and the first run's agent win (49.0 against 98-160) was this ring.
+# iterative_betweenness is out: exact BI on 4,941 nodes blew the 300 s cap at k=49.
+BASELINES="adaptive_degree approx_iterative_betweenness collective_influence_r corehd corehd_r \
 bpd_r decycling explosive_immunization gnd gndr netshield kshell_removal \
-degree_removal betweenness_removal acquaintance_immunization random_removal \
+frontier_removal degree_removal betweenness_removal acquaintance_immunization random_removal \
 external:gdm external:mind external:nirm external:dcrs external:selinda \
 external:gnd external:collective_influence \
 external:explosive_immunization external:dismantling_review" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -160,7 +168,7 @@ external:cosasi_rumor_centrality" \
 # sweep under any evaluator. Add it back with the train stage on.
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -180,7 +188,7 @@ external:sandimin external:imin_joc external:diffim" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGETS="10 20 30 40 50" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -201,7 +209,7 @@ external:ditto external:ditto_dhrec external:ditto_cri \
 external:grin external:spin external:deep_demixing" \
 ARMS="decode_free@oracle evolve_free@oracle" \
 EVALUATOR=oracle \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -225,7 +233,7 @@ external:explosive_immunization_epi external:dismantling_review_epi" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=15 MC_RUNS=200 OUTER_ITERS=10 N_SAMPLES=50 \
+HORIZON=15 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -233,6 +241,12 @@ GRES=gpu:1 MEM=64G TIME=48:00:00 \
 # ---------------------------------------------------------------- 8. cascade prediction
 # No simulator: real logs replayed. CP_SPLIT=chronological is the leak-free protocol
 # and the headline experiment; run CP_SPLIT=random afterwards as the A/B.
+# Uncapped APS (616k nodes) was OOM-killed at 64 GB in the agent stage, on the very
+# first canned arm, so the cost is setup and still unprofiled. CP_MAX_NODES=30000
+# CP_MAX_CASCADES=20000 N_SAMPLES=16 got it through, at a price: the cap deletes
+# adopters, the size filter is now re-applied after it, and the resulting corpus is
+# a censored version comparable only to itself (research/cascade_prediction.md §8.4).
+# Profile before capping: /usr/bin/time -v on the agent stage, MEM=128G first.
 TASK=cascade_prediction \
 DATASET=casflow_aps \
 RUN=testrun \
@@ -245,7 +259,7 @@ neighborhood_size degree_scaled reachability persistence mean_size random_predic
 external:casflow external:ccgl external:ctcp external:cascn external:coupledgnn" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
-HORIZON=10 OUTER_ITERS=10 N_SAMPLES=50 \
+HORIZON=10 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -268,7 +282,7 @@ python -m coding_agent.run \
     --method evolve --strategy-mode free \
     --evaluator oracle --budget-pct 5 --horizon 10 \
     --allowed-ops add_node \
-    --outer-iters 10 --n-samples 50 \
+    --outer-iters 20 --n-samples 50 \
     --mc-runs 200 --compare \
     --out-json results/influence_maximization/netscience/testrun/agent/pct5/evolve_free@oracle.json
 
@@ -280,7 +294,7 @@ python -m coding_agent.run \
     --method evolve --strategy-mode scored \
     --evaluator oracle --budget-pct 5 --horizon 10 \
     --allowed-ops add_node \
-    --outer-iters 10 --n-samples 50 \
+    --outer-iters 20 --n-samples 50 \
     --mc-runs 200 --compare \
     --out-json results/influence_maximization/netscience/testrun/agent/pct5/evolve_scored@oracle.json
 
@@ -292,7 +306,7 @@ python -m coding_agent.run \
     --method evolve --strategy-mode free \
     --evaluator oracle --budget-pct 5 --horizon 10 \
     --allowed-ops remove_node \
-    --outer-iters 10 --n-samples 50 \
+    --outer-iters 20 --n-samples 50 \
     --mc-runs 200 --compare \
     --out-json results/critical_node_detection/power_grid/testrun/agent/pct5/evolve_free@oracle.json
 ```
@@ -327,13 +341,55 @@ STRATEGY_TIMEOUT=7200 MEM=64G TIME=6:00:00 ./sbatch/pipeline.sbatch
 
 ---
 
-## 6. What to read, and what would mean a bug
+## 6. The ladder: conditions 3-6, with the world model
+
+Everything above is the smoke test, and it leaves condition 6 unmeasured: `evolve_free@oracle` is the CEILING of model-based guidance (a perfect internal model), not our method. The method is `evolve_free@world_model`, and the claim is that it sits near the oracle's spread at a fraction of `@monte_carlo`'s cost. These submissions resume from the `data/` the smoke test wrote (no `FORCE`, `START_STAGE=train`), train the checkpoint the registry's head needs, and run the four agent arms that share one method and differ only in evaluator. Read the result as two columns: `spread` (ground-truth MC replay, all four comparable) and `eval s` / `real episodes` (where `@monte_carlo` pays and `@world_model` does not).
+
+Six things changed under the loop since the smoke test, and each one moves these numbers: the search no longer scores every candidate on one fixed RNG draw (epidemic_control overfit a 50-sample rollout by 30 nodes at k=48); an adaptive policy gets one copy per ensemble member (the adaptive arm was scoring 50 cross-contaminated policies); `frontier_removal` sits in the CND pool as the outbreak-aware control and the CND outbreak defaults to 10% of N so the sweep sits below its ring; the three exogenous-cascade tasks bind `self.score_plan(plan)` so a generated program tests candidate interventions on its own arm's evaluator, metered, instead of hand-rolling numpy simulation (the first IB winner burned 260 of every 262 seconds doing exactly that); the default search budget is `OUTER_ITERS=20`; and the ladder runs at `N_SAMPLES=200`, because at 50 the reward SE (2.5 to 12 nodes across tasks) sat above the deltas the late iterations were deciding between. Adaptive arms are capped at 50 samples by the pipeline whatever the flag says, since their per-round `act()` runs once per ensemble member and 200 would turn one evaluation into half an hour. The CND smoke-test rows at k >= 247 are void and that block needs a re-run before its ladder means anything.
+
+```bash
+# ---------------------------------------------------------------- IM, the cheapest and the one to run first
+TASK=influence_maximization DATASET=netscience RUN=ladder RUN_JOBID=0 \
+START_STAGE=train \
+BASELINES="imm degree_discount external:opim" \
+ARMS="evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+WM_MODEL=sage HEAD=structured_residual \
+BUDGET_PCTS="1 5 10 20" \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
+COMPARE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=48:00:00 \
+./sbatch/pipeline.sbatch
+
+# ---------------------------------------------------------------- the other simulator tasks: same four arms
+# Swap TASK / DATASET / the task flags from §3. The data stage is already on disk for
+# every task that ran there. adaptive_online_im adds `adaptive_free@<evaluator>` for the
+# same four evaluators; cascade_reconstruction keeps `decode_free@world_model` (condition 8)
+# beside them; source_localization adds `gradient_free@world_model` (condition 8). Two
+# stay out: cascade_prediction trains on hard 0/1 targets and its own report already
+# measures the forward model's modelling error, and the smoke test showed its agent never
+# called the forward model at all, so run it last.
+TASK=epidemic_control DATASET=primary_school RUN=ladder RUN_JOBID=0 \
+START_STAGE=train \
+DIFFUSION_MODEL=SIR GEN_MODELS=SIR EPI_LEVER=vaccinate EPI_GAMMA=0.3 \
+BASELINES="frontier_immunization dava degree_immunization" \
+ARMS="evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+WM_MODEL=sage HEAD=structured_residual \
+BUDGET_PCTS="1 5 10 20" \
+HORIZON=15 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
+COMPARE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=48:00:00 \
+./sbatch/pipeline.sbatch
+```
+
+`START_STAGE=train` with a different `RUN` needs the data: copy or symlink `results/<task>/<dataset>/testrun/data` to `results/<task>/<dataset>/ladder/data` first, or keep `RUN=testrun` and let the pipeline resume in place (it skips finished arms and adds the new ones).
+
+## 7. What to read, and what would mean a bug
 
 | Task | Column | Row to beat | A result that means something is wrong |
 | --- | --- | --- | --- |
 | `influence_maximization` | `spread_ground_truth` | `imm`, and `external:opim` | every arm within noise of `high_degree`: the graph is degree-trivial |
 | `adaptive_online_im` | the adaptivity gap table, and `evaluator_seconds` | `static_split` at matched `k` | a gap far above 1.0. Theory caps the myopic gap at 4 and non-adaptive greedy is provably no worse, so a large spread win is a bug. **The claim is cost** |
-| `critical_node_detection` | `spread_ground_truth`, plus the structural table | `adaptive_degree` (HDA) | `degree_rank_spearman` near 0.762: the arm re-derived the degree heuristic, MIND's finding about GDM |
+| `critical_node_detection` | `spread_ground_truth`, plus the structural table and the ring note above it | `frontier_removal` (the known outbreak's one-hop ring); `adaptive_degree` (HDA) is the bar for the blind question only | an agent row at exactly the source count: the budget sat above the ring and the row measured information, not a method. `degree_rank_spearman` near 0.762: the arm re-derived the degree heuristic, MIND's finding about GDM |
 | `source_localization` | `f1`, and `generalization_gap` | `lpsi` / `external:graphsl_lpsi` | selection F1 far above held-out F1: the program memorized episodes |
 | `influence_blocking` | `prevented_influence` | `proximity`, `external:sandimin` | `cldag` or `cmia_o` near `random_blocking`: that was a real bug, fixed 2026-08-12, pinned by `check_mia_scores_do_not_collapse_onto_the_periphery` |
 | `cascade_reconstruction` | tree-weighted reward, `path_precision` vs `event_f1` | `delayed_bfs`, `external:ditto` | reward near `trivial_decoder_reward`, or `path_recall` under half |

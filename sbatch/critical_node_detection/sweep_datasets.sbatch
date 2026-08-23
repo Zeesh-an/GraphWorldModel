@@ -30,6 +30,13 @@
 # Every arm faces the same outbreak (deterministic in SEED), and the structural
 # columns land in each run's report.md beside the spread column, which is what
 # lets a row be placed against the published dismantling tables at all (§8.3).
+#
+# The outbreak is 10% of N by registry default, and that is load-bearing: the
+# planner is told where it is, so a budget at or above the outbreak's one-hop
+# ring is trivial for any outbreak-aware arm (§8.2 trap 10). On hamsterster and
+# intnet1 (dense, hub-dominated) even 10% can leave the ring under the 20%
+# budget; the report's ring note names any budget that cleared it, and
+# `frontier_removal` in the default pool is the row an agent arm has to beat.
 
 set -euo pipefail
 cd /home/rrishab/GraphWorldModel/

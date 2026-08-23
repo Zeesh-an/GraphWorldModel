@@ -1921,6 +1921,55 @@ def build_round_block(task: TaskSpec) -> str:
 max_listed_outbreak = 60
 
 
+def build_plan_oracle_block(task: TaskSpec) -> str:
+    """
+    `self.score_plan`, for the three tasks whose cascade is exogenous.
+
+    Advertised only where it is bound: a seeding task's oracle is
+    `predict_marginals`, and a task without a forward model gets the raiser text
+    so the condition is stated rather than discovered through a traceback.
+    """
+    if not task.contains:
+        return ""
+
+    if not task.forward_model:
+        return """\
+NO FORWARD MODEL IN THIS CONDITION. `self.score_plan` raises if you call it:
+this arm measures what structure and the outbreak's position achieve alone. Do
+not re-implement simulation with numpy either; that is the condition you are in.
+"""
+
+    unit = {
+        "remove_node": "removals",
+        "add_node": "counter-seeds",
+        "remove_edge": "edge cuts",
+        "set_edge_weight": "reweights",
+    }.get(task.budget_op, "actions")
+
+    return f"""\
+THE PLAN ORACLE: `self.score_plan(plan)` -> float.
+    Takes a FULL candidate plan (the same list-of-bags shape plan_horizon
+    returns), applies the fixed outbreak and every expansion the real evaluation
+    applies, rolls it out on THIS arm's evaluator, and returns the objective
+    (LOWER is better here). Use it to compare a few candidate plans of {unit}
+    before committing one:
+
+        candidate = [[ActionOp("{task.budget_op}", node) for node in picks]] + [
+            [] for _ in range(horizon)
+        ]
+        reward = self.score_plan(candidate)
+
+    It is not free: every call is a full metered rollout, so narrow to a SHORT
+    list of candidate plans with cheap structural reasoning first, then spend
+    calls ranking them. Do NOT hand-roll a Monte Carlo simulator with numpy
+    instead: it burns your wall-clock budget re-deriving dynamics this call
+    already has exactly, and an internal test against the wrong tie-break or
+    lever optimizes the wrong problem. An illegal plan (over budget, wrong op,
+    targeting a protected source) raises here with the same message the
+    evaluation would give.
+"""
+
+
 def build_outbreak_block(task: TaskSpec) -> str:
     """
     The source nodes, spelled out, or nothing for a task that seeds its own cascade.
@@ -2411,7 +2460,7 @@ TASK: {task.task}, {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
-{ops_line}{build_outbreak_block(task)}{build_round_block(task)}{build_observation_block(task)}{build_mask_block(task)}{build_cascade_block(task)}
+{ops_line}{build_outbreak_block(task)}{build_plan_oracle_block(task)}{build_round_block(task)}{build_observation_block(task)}{build_mask_block(task)}{build_cascade_block(task)}
 {build_graph_profile(graph)}
 
 {reference}

@@ -866,6 +866,8 @@ These are the ways two published numbers that look comparable are not.
 8. **Decycling ≠ dismantling.** Min-Sum's guarantee is about the feedback vertex set. On graphs with many short loops (dense social graphs) the decycling set is far larger than the dismantling set, which is exactly why the reinsertion pass exists.
 9. **Directedness.** Almost the entire literature is undirected. Our `email_eu_core`, `wiki_vote`, `nethept`, and `weibo` are directed; the only dismantling paper found that treats direction natively is [arXiv 2512.11416](https://arxiv.org/abs/2512.11416) (Dec 2025). Symmetrizing to reuse a published baseline changes the graph.
 
+10. **Information state: blind dismantling vs reactive containment.** Every method in §3 picks its set from topology alone, before anyone knows where an outbreak starts; our harness seeds a fixed outbreak and the planner is told where it is. Those are different problems, and the budget decides whether the second one is a problem at all: at `k >= |N_1(S) \ S|` any outbreak-aware arm deletes the one-hop ring and scores exactly `|S|`. Measured on `power_grid` at a 1% outbreak (49 sources, ring 129): the agent arm read 49.00 at every budget from 5% up while every dismantler sat at 98-160, and its whole program was the ring. That 2x is the asymmetry, not a method. Any table that mixes the two must say which rows condition on the outbreak and must keep its budgets below the ring, which is why the default outbreak is now 10% of `N`, why `frontier_removal` is the control, and why the report names the trivial budgets.
+
 ### 8.3 What we would report
 
 For the diffusion-based variant (§2.2), the honest metric set is:
@@ -917,6 +919,8 @@ From §5.2 and §5.12, in ascending order of danger:
 
 Our existing `coding_agent/tools/algorithms.py` already has degree, pagerank and betweenness selectors; the adaptive/iterated variants are a `for` loop around them, not new algorithms.
 
+**And the row that decides whether there is a result at all is `frontier_removal`** (§8.2 trap 10). `adaptive_degree` is the bar for the blind question the literature asks; the harness asks the reactive one, and there the one-hop ring of the known outbreak, highest degree first, is the zero-intelligence answer. An agent arm that does not beat it at a budget below the ring has re-derived it; one that ties it at a budget above the ring has measured nothing.
+
 ### 9.4 Expect to lose on `power_grid`, and say so first
 
 `power_grid` is simultaneously our best-matched benchmark (§7) and the graph class where learned dismantlers demonstrably fail. MIND Table 5: on `eu-powergrid` FINDER scores **161.7** and on `roads-california` **116.3** while EI scores **80.6** and **23.4**, the physics heuristic beats the RL method by up to 5×. Diameter-46 mesh graphs exhaust a 3-6 layer receptive field. Reporting this as a predicted-and-confirmed limitation is a stronger result than reporting a surprise.
@@ -932,14 +936,14 @@ Our existing `coding_agent/tools/algorithms.py` already has degree, pagerank and
 
 **Shipped for this task** (`--task critical_node_detection` is runnable):
 
-- `pipeline/tasks.py`: the registry entry, `status=implemented`. It carries `objective=minimize`, `remove_semantics=blocked` (asserted, not defaulted), `budget_op="remove_node"`, `default_allowed_ops=("remove_node",)`, `default_gen_action_ops=("remove_node",)`, `outbreak_pct=1.0`, and the nine-member `default_baselines` pool.
+- `pipeline/tasks.py`: the registry entry, `status=implemented`. It carries `objective=minimize`, `remove_semantics=blocked` (asserted, not defaulted), `budget_op="remove_node"`, `default_allowed_ops=("remove_node",)`, `default_gen_action_ops=("remove_node",)`, `outbreak_pct=10.0` (so the 1-20% sweep sits below the outbreak's one-hop ring on the sparse benchmarks, §8.2 trap 10), and the twelve-member `default_baselines` pool, `frontier_removal` included.
 - `coding_agent/containment.py`: outbreak selection (deterministic in `--seed`, so every arm faces the same one), the `t=0` injection wrapper, `delete_node_ops` / `expand_removals` (node deletion as a bag), and `removal_plan` (filters sources out of a published dismantler's output and tops the set back up).
-- `coding_agent/tools/dismantling_algorithms.py`: nineteen node-removal selectors: HDA, BI/ABI, CI, CoreHD(+R), decycling, articulation points, EI, GND(+R), NetShield, k-shell, PageRank, degree, betweenness, acquaintance immunization, random, and the simulation-based `greedy_blocking`.
+- `coding_agent/tools/dismantling_algorithms.py`: twenty-five node-removal selectors: HDA, BI/ABI, CI(+R), CoreHD(+R), BPD(+R), decycling(+R), articulation points, EI, GND(+R)/EGND, NetShield, k-shell, PageRank, degree, betweenness, acquaintance immunization, random, the outbreak-aware `frontier_removal` (§8.2 trap 10), and the simulation-based `greedy_blocking`.
 - `coding_agent/types.py`: `improves` / `best_by` / `rank_by`, the single sign-aware comparison every winner-picking site in the search, the report, the plots and the summary routes through.
 - `world_model/wm_metrics.py`: `containment_metrics`, computing §1.1's objectives 1, 2, 4 and 6 exactly by BFS, plus Schneider `R`, ANC (with σ named), ρ-at-Θ, and §9.5's degree-rank Spearman.
 - `data/datasets/`: twelve dismantling benchmarks from §6.2, each documenting which of §6.4's colliding versions it is.
-- `coding_agent/check_containment.py`: fourteen runnable assertions on the contract: the sign, the outbreak, the removal budget, the source protection, and the structural metrics.
-- `baselines/registry.py`: twelve published repos under `task="critical_node_detection"`, none wired.
+- `coding_agent/check_containment.py`: twenty runnable assertions on the contract: the sign, the outbreak, the removal budget, the source protection, the structural metrics, and the ring budget that makes the task trivial.
+- `baselines/registry.py`: twelve published repos under `task="critical_node_detection"`, eleven wired (`spr` is an empty repository). On the first cluster sweep the five learned ones died on torch extensions their own requirements omit (`torch_scatter`, `torch_geometric`, `dgl`, now declared as `pip_packages`) and `dismantling_review` on `graph_tool`, which is not pip-installable.
 - `sbatch/critical_node_detection/`: generation, training and the cross-dataset sweep.
 
 **Pre-existing, and still what §2.1 argues against reviving:**

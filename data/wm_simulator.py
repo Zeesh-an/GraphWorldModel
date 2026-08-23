@@ -119,6 +119,14 @@ class State:
     pos_frontier: list[int] = field(default_factory=list)
     exposed: list[int] = field(default_factory=list)
     recovered: list[int] = field(default_factory=list)
+    # Which ensemble member (or Monte Carlo run) this state belongs to. Never
+    # serialized: it exists so an adaptive policy that keeps state across act()
+    # calls can be given one copy per possible world. The world-model rollout
+    # advances its samples in lockstep and queried ONE policy object with all 50
+    # of them interleaved; a policy tracking "what I already chose" then excluded
+    # every other sample's picks, and every sample ended up committing a different
+    # seed set (netscience k=318: oracle 506 in the loop, 724 on the referee).
+    sample: int = 0
 
     def to_dict(self) -> dict:
         infected = sorted(int(node) for node in self.infected)

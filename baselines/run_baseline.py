@@ -189,7 +189,12 @@ def run_external_baseline(
             f"in baselines/registry.py"
         )
 
-    work_dir = Path(work_dir or spec.directory / "_runs" / f"k{budget}")
+    # Absolute, because the child runs with cwd=spec.directory: the pipeline hands
+    # in a RELATIVE results/... path, and every driver-style adapter passes
+    # `work_dir / driver.py` straight into argv, which the interpreter then looked
+    # for inside the repo clone. That one slip took out 26 external rows across
+    # four tasks on the first cluster sweep.
+    work_dir = Path(work_dir or spec.directory / "_runs" / f"k{budget}").resolve()
     os.makedirs(work_dir, exist_ok=True)
 
     if spec.rounds_aware:

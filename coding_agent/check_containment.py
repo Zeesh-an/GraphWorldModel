@@ -22,6 +22,7 @@ from coding_agent.containment import (
     expand_removals,
     removal_plan,
     removal_set,
+    ring_size,
     select_outbreak,
 )
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
@@ -33,7 +34,10 @@ from coding_agent.methods.base import (
     validate_plan,
 )
 import coding_agent.run
-from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.dismantling_algorithms import (
+    dismantling_algorithms,
+    frontier_removal,
+)
 from coding_agent.tools.immunization_algorithms import immunization_algorithms
 from coding_agent.types import ActionOp, GraphInfo, State, TaskSpec, best_by, improves
 from data.wm_simulator import blocked
@@ -490,6 +494,74 @@ def outbreak_wrap_lets_a_removal_beat_a_source_seed() -> None:
     assert any(op.op == "remove_edge" for op in bag), bag
 
 
+def the_ring_is_the_budget_that_makes_the_task_trivial() -> None:
+    """
+    `ring_size` counts |N_1(S) \\ S|, and `frontier_removal` at that budget contains
+    everything: the row reads |S| exactly, whatever the graph beyond the ring does.
+
+    That is the number the sweep has to sit under, and the one the first
+    power_grid run sat over at three of four budgets, which is why the agent's
+    49.00 there was an information asymmetry rather than a result.
+    """
+    # A star of 3 around source 0, one of which leads on to a tail 4 -> 5
+    graph = _graph([(0, 1), (0, 2), (0, 3), (3, 4), (4, 5)], 6, directed=False)
+    assert ring_size(graph, (0,)) == 3
+    assert ring_size(graph, (0, 3)) == 3, "3 is a source now, 4 joins the ring"
+
+    environment = MonteCarloEnvironment(graph, "IC", mc_runs=1, remove_semantics=blocked)
+    task = _task(budget=3, outbreak=(0,))
+    picks = frontier_removal(graph, 3, "IC", outbreak=(0,))
+    assert sorted(picks) == [1, 2, 3], picks
+    contained = evaluate_strategy(_RemovePlan(picks), environment, task, graph)[0]
+    assert contained.reward == 1.0, contained.reward
+
+    # One short of the ring and the cascade gets out through whichever
+    # neighbour was left, so the row separates choices again
+    short = frontier_removal(graph, 2, "IC", outbreak=(0,))
+    leaky = evaluate_strategy(_RemovePlan(short), environment, task, graph)[0]
+    assert leaky.reward > 1.0, leaky.reward
+
+
+def the_plan_oracle_scores_the_problem_the_evaluation_scores() -> None:
+    """
+    `self.score_plan` must agree with the outer evaluation and rank interventions.
+
+    The binding exists so a generated program tests candidate removals against the
+    arm's own metered evaluator instead of hand-rolling simulation off-meter; that
+    is only sound if what it scores IS what the evaluation scores.
+    """
+    graph = _graph(path, 4)
+    environment = MonteCarloEnvironment(graph, "IC", mc_runs=4, remove_semantics=blocked)
+    task = _task()
+
+    plan = [[ActionOp("remove_node", 1)]] + [[] for _ in range(task.horizon)]
+    late = [[ActionOp("remove_node", 3)]] + [[] for _ in range(task.horizon)]
+
+    class Probe:
+        source_script = ""
+
+        def plan_horizon(self, graph, budget, horizon):
+            return plan
+
+    probe = Probe()
+    before = environment.rollout_calls
+    trajectory, _ = evaluate_strategy(probe, environment, task, graph)
+
+    # Same problem: the oracle's number for the committed plan is the evaluation's
+    assert probe.score_plan(plan) == trajectory.reward == 1.0
+    assert probe.score_plan(late) == 3.0
+    # Metered: every oracle call is a real rollout the cost columns see
+    assert environment.rollout_calls - before == 3
+
+    # The @native binding raises with the condition named, never a traceback
+    blind = attach_context(Probe(), _task(forward_model=False), environment)
+    try:
+        blind.score_plan(plan)
+        raise AssertionError("@native score_plan must raise")
+    except StrategyError as error:
+        assert "@native" in str(error)
+
+
 if __name__ == "__main__":
     checks = [
         registry_says_minimize_and_blocked,
@@ -511,6 +583,8 @@ if __name__ == "__main__":
         removals_expand_even_without_an_outbreak,
         the_shared_names_resolve_to_the_dismantling_pool,
         outbreak_wrap_lets_a_removal_beat_a_source_seed,
+        the_ring_is_the_budget_that_makes_the_task_trivial,
+        the_plan_oracle_scores_the_problem_the_evaluation_scores,
     ]
 
     for check in checks:

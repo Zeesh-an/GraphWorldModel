@@ -308,10 +308,15 @@ tasks = {
         default_allowed_ops=("remove_node",),
         default_gen_action_ops=("remove_node",),
         budget_op="remove_node",
-        # The cascade is exogenous: 1% of N is the standard immunization setup
-        # and matches the smallest point of our own --budget-pcts sweep, so the
-        # k=1% row is "one blocker per source"
-        outbreak_pct=1.0,
+        # The cascade is exogenous and the planner is TOLD where it is, which makes
+        # this reactive containment rather than the literature's blind dismantling
+        # (§2.1). The budget must then sit BELOW the outbreak's one-hop ring, or
+        # deleting the ring contains everything and every outbreak-aware arm ties at
+        # |S|: at 1% on power_grid the ring was 129 nodes and three of the four
+        # sweep budgets cleared it. 10% of N puts the ring above the 20% budget on
+        # every sparse benchmark graph; `outbreak_ring` in each result and the
+        # report's note say whether a budget was trivial, whatever this is set to.
+        outbreak_pct=10.0,
         # §8.3 and §9.3, in ascending order of danger. `adaptive_degree` is the
         # one that hurts: MIND's Table 5 puts plain HDA at 119.9 against FINDER's
         # 115.0, so a learned dismantler that does not clearly beat it has
@@ -333,6 +338,9 @@ tasks = {
             "explosive_immunization",
             "gnd",
             "netshield",
+            # The outbreak-aware control: every other row is blind to where the
+            # cascade is, and the agent's first power_grid win was this ring
+            "frontier_removal",
             "degree_removal",
             "random_removal",
         ),

@@ -549,7 +549,7 @@ They are the task's registry `default_baselines`, `--baselines adapt_greedy` run
 | repo | state |
 | --- | --- |
 | `adaptiveim` (Han et al.) | **WIRED, built and run.** Condition-7 arm, replays per round |
-| `rl4im` (Chen et al.) | **WIRED**, adapter written from source; install blocked on this machine only (below) |
+| `rl4im` (Chen et al.) | **WIRED**, adapter written from source; install blocked on this machine only (below). On the cluster it then died at `import networkx`: its requirements pin `networkx==2.3` beside a bare `numpy`, which resolves to 1.24 on 3.8 and drops the `np.int` alias that version's graphml writer reads at import. Patched to `numpy<1.24` in the registry |
 | `mrim` (Sun et al.) | **BLOCKED: the code is not in the repository.** The README says to email the author. What ships is Wei Chen's older single-round `maxinf` toolkit plus Windows `.exe` files; no file under `code/` mentions multi-round. Wiring it would put static IM code in the table under MRIM's name |
 | `oim`, `oim_lt`, `timlinucb` | interfaces recorded, not wired: all three are **repeated-campaign** methods whose published metric is union-over-trials or cumulative regret, so there is no single seed set to return. `oim_lt`'s `Main.py` is a simulation harness with no selector entry point at all |
 
@@ -618,6 +618,8 @@ Honest list of what this review could **not** establish.
 - **DeepIM's `OIM` baseline is Lei, Maniu, Mo, Cheng & Senellart, "Online Influence Maximization", KDD 2015.** Determined by text extraction from DeepIM's own PDF: the baseline paragraph reads _"Online IM: OIM (Lei et al., 2015)"_ and the reference list contains exactly one matching entry [verified, DeepIM PMLR PDF §5.1 + references]. Its numbers are already transcribed in [`influence_maximization.md`](influence_maximization.md) §5.1 and are deliberately **not** duplicated here.
 
 ### Found while implementing (2026-08-01)
+
+- **The first cluster sweep's adaptive arm was scoring fifty different policies (found 2026-08-23).** `WorldModelEnvironment` advances its ensemble in lockstep and calls `act()` once per member per round, interleaved; the generated policy kept `self._chosen` across calls, so member 1's second batch excluded member 0's picks and by member 49 every possible world had committed a different seed set. Netscience at `k=318`: 506 in the loop, 724 on the ground-truth referee, and a gap column of 0.66-0.78 that was this artefact rather than adaptivity. `State.sample` now names the member and `rounds.adaptive_action_fn` hands each one its own copy of the policy; `check_adaptive.a_stateful_policy_gets_one_copy_per_sample` reproduces the old divergence. The sweep's adaptive rows are void and the gap table has not yet been measured under the fix.
 
 - **Epinions edge count reconciles exactly, and the 573-arc gap is self-loops.** Our loader builds **131,828 nodes / 840,799 arcs** against the `132K / 841K` Han et al. quote [verified]. The file has 841,372 lines, of which **573 are self-loops** and **zero are duplicate ordered pairs**; dropping self-loops (which every loader here does, since `p(u→v) = 1/in-degree(v)` is undefined when a node is its own in-neighbour) accounts for the difference to the arc. The sign column is discarded: Han et al.'s `132K / 841K` is the full signed arc count read as a plain directed graph, so keeping only trust arcs would give a different graph from the one their table describes.
 

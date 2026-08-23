@@ -469,6 +469,22 @@ def replay_corpus(config: ReplayConfig) -> dict:
             f"own name, and its numbers are comparable only to themselves"
         )
 
+        # The cap deletes participants, so the size filter above no longer holds on
+        # what is replayed: casflow_aps at 30,000 nodes shipped test cascades with
+        # 2-4 observed adopters under a metadata line claiming ">= 10", and every
+        # growth-predicting baseline scored an order of magnitude worse on the
+        # selection split than on the held-out one. Re-apply it so the protocol
+        # the metadata states is the protocol the numbers were measured under.
+        surviving = len(cascades)
+        cascades = filter_cascades(
+            cascades, config.observation, config.min_observed, config.truncate
+        )
+        print(
+            f"[replay] size filter re-applied after the node cap: "
+            f"{len(cascades)}/{surviving} cascades still have >= "
+            f"{config.min_observed} observed participants"
+        )
+
     if not cascades:
         raise ValueError(
             f"no cascade survived the filters on {config.dataset}. Lower "

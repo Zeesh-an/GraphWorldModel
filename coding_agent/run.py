@@ -75,6 +75,7 @@ from coding_agent.blocking import (
 from coding_agent.containment import (
     outbreak_selectors,
     removal_set,
+    ring_size,
     select_outbreak,
 )
 from coding_agent.credit import counterfactual_credit, planned_action
@@ -345,7 +346,7 @@ class ExperimentConfig:
     # be recovered from `evaluator`, and it decides whether `predict_marginals`
     # exists at all (§2.4.3).
     native_arm: bool = False
-    outer_iters: int = 3
+    outer_iters: int = 20
     mc_runs: int = 200
     # Runs for the --compare ground-truth replay; None -> mc_runs. Kept separate
     # so a native arm (mc_runs=1 inner loop) is still judged on a clean average
@@ -1824,6 +1825,9 @@ class Baseline(Strategy):
         result["outbreak"] = list(outbreak)
         result["outbreak_pct"] = outbreak_pct
         result["outbreak_selector"] = config.outbreak_selector
+        # The budget's meaning: at or above the ring the row is trivial
+        result["outbreak_ring"] = ring_size(graph, outbreak)
+        result["ring_fits"] = config.budget >= result["outbreak_ring"]
         # §8.3: the connectivity functionals reported ALONGSIDE the diffusion
         # number, computed exactly, as context: never as the learned target.
         # Read off the executed bags rather than re-planning, for the same reason
@@ -2732,8 +2736,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--outer-iters",
         type=int,
-        default=3,
-        help="outer refinement iterations (default: 3).",
+        default=20,
+        help="outer refinement iterations (default: 20).",
     )
     parser.add_argument(
         "--mc-runs",

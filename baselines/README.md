@@ -241,4 +241,6 @@ Add one `ExternalBaseline(...)` entry to `baselines/registry.py` with three call
 - `command(work_dir, budget, diffusion_model, extras, graph) -> list[str]`: argv
 - `parse_seeds(work_dir, stdout, budget) -> list[int]`: read the seeds back (helper: `parse_seed_integers` scrapes the last bracketed int list from stdout)
 
+`work_dir` is **absolute** by the time it reaches `export` and `command` (`run_external_baseline` resolves it), and it has to be: the child runs with `cwd=spec.directory`, so a relative `results/...` path embedded in argv resolves inside the repo clone. That one slip took 26 rows (every driver-style adapter across four tasks) out of the first cluster sweep with `can't open file '<repo>/results/.../driver.py'`. Two upstream entry points have no CLI at all and are driven through a generated runner instead: `celf_glie.py` loops six hardcoded graphs at `seed_size = 100` and never prints its seeds, and DiffIM's notebooks draw their training seed sizes from a band that is empty on any graph under 1,100 nodes.
+
 Nothing else needs to change: the arm spec, results routing, plots, and report pick it up automatically.
