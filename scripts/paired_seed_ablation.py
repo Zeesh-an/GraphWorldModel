@@ -1,13 +1,23 @@
 """
-Multi-seed aggregation with PAIRED intervals.
+Paired multi-seed comparison of ABLATION ARMS.
 
-Every arm is trained on the same data with seeds 0..4, so seed is a blocking
-factor: the honest comparison is the paired difference within a seed, not two
-independent means. Unpaired CIs on 5 runs are wide enough to hide a real effect
-that the paired test resolves cleanly, which is exactly the failure mode this
-avoids.
+Not the same thing as `world_model.aggregate_seeds`, and the distinction is the
+point. That module answers "how noisy is one configuration?" -- it takes N result
+JSONs of the SAME arm and reports mean +/- std, plus a Pareto front over the
+fidelity/cost plane. This module answers "is arm A better than arm B?" across a
+grid of (arm, seed).
 
-    python -m scripts.aggregate_seeds --out results/seeds/summary.json
+Both arms are trained on identical data with the same seeds, so **seed is a
+blocking factor**: run-to-run variation is shared and cancels in the difference.
+The honest comparison is therefore the paired within-seed difference, not two
+independent means. On five runs an unpaired interval is wide enough to hide an
+effect the paired test resolves at t > 80, which is not a hypothetical -- it is
+what the structured-vs-linear rollout comparison does.
+
+    python -m scripts.paired_seed_ablation \\
+        --root results/seeds --arms structured linear hidew \\
+        --seeds 0 1 2 3 4 --baseline structured \\
+        --out results/seeds/summary.json
 """
 
 import argparse
@@ -53,7 +63,7 @@ def ci95(values: np.ndarray) -> tuple[float, float]:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(description="Paired multi-seed summary")
+    parser = argparse.ArgumentParser(description="Paired multi-seed ablation comparison")
     parser.add_argument("--root", type=Path, default=Path("results/seeds"))
     parser.add_argument("--arms", nargs="+",
                         default=["structured", "linear", "hidew"])
