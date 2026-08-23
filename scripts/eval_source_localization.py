@@ -56,7 +56,17 @@ from world_model.wm_eval import rebuild_simulator, seed_upper_bound
 default_threads = 1
 
 
-def load_episodes(data_dir: Path, diffusion_model: str, split: str = "test"):
+# An episode is only a source-localization problem if the cascade AMPLIFIED.
+# Measured on the first attempt: with k = 5.5 seeds the observed set averaged 21.9
+# nodes, so k/|y| = 0.334 -- a third of the observation WAS the answer, and
+# picking at random from it scored 0.314. Every method then lands in 0.26-0.33 and
+# the benchmark cannot discriminate. Requiring |y| >= amplification * k keeps the
+# episodes where the source set is actually hidden in the observation.
+min_amplification = 5.0
+
+
+def load_episodes(data_dir: Path, diffusion_model: str, split: str = "test",
+                  min_amplification: float = min_amplification):
     """
     (graph_id, true_sources, observed_terminal_infected) per episode.
 
@@ -94,11 +104,15 @@ def load_episodes(data_dir: Path, diffusion_model: str, split: str = "test"):
         )
         observed = sorted(int(v) for v in records[-1]["next_state"]["infected"])
 
-        if len(sources) >= 1 and len(observed) > len(sources):
-            episodes.append(
-                {"graph_id": graph_id, "episode_id": episode_id,
-                 "sources": sources, "observed": observed}
-            )
+        if not sources or len(observed) < min_amplification * len(sources):
+            dropped += 1
+            continue
+
+        episodes.append(
+            {"graph_id": graph_id, "episode_id": episode_id,
+             "sources": sources, "observed": observed,
+             "amplification": len(observed) / len(sources)}
+        )
 
     return episodes, dropped
 
@@ -164,20 +178,23 @@ def explanation_score(predicted: np.ndarray, observed_mask: np.ndarray) -> float
     """
     How well a predicted terminal marginal explains the observation.
 
-    Log-likelihood of the observed binary terminal state under the predicted
-    per-node marginals, i.e. an independent-Bernoulli read of the forward model.
-    Chosen over an F1 on a thresholded prediction because thresholding throws
-    away exactly the calibration the structured head provides, and because the
-    inversion needs a score that moves smoothly as a candidate is added.
-    """
-    probabilities = np.clip(predicted, 1e-6, 1 - 1e-6)
+    Mass the forward model puts INSIDE the observed set, minus the mass it puts
+    outside it. A candidate is good when its cascade covers what was seen and
+    little else.
 
-    return float(
-        np.sum(
-            observed_mask * np.log(probabilities)
-            + (1 - observed_mask) * np.log(1 - probabilities)
-        )
-    )
+    NOT log-likelihood, which is the obvious choice and is wrong here. A
+    Monte-Carlo oracle at 16-32 draws quantises its marginals, so every observed
+    node it happens not to reach lands at p = 0, gets clipped to 1e-6, and
+    contributes log(1e-6) = -13.8. The score is then dominated by how many nodes
+    a candidate MISSED ENTIRELY rather than by which candidate is the source, and
+    the argmax tracks coverage instead of explanation. Measured: with that
+    objective the oracle scored F1 0.000 -- below random -- which is a broken
+    objective, not a broken oracle.
+
+    This form is linear in the marginals, bounded, and has no pathology at zero,
+    so a coarse estimator degrades gracefully instead of catastrophically.
+    """
+    return float(np.sum(predicted * observed_mask) - np.sum(predicted * (1 - observed_mask)))
 
 
 def greedy_invert(forward, observed, num_nodes, budget, candidates, rng):
@@ -287,8 +304,12 @@ def main(argv=None) -> int:
 
     print(f"[sl] frozen {spec.backbone}/{spec.head} {diffusion_model} as a FORWARD "
           f"oracle for source localization")
-    print(f"[sl] {len(episodes)} episodes ({dropped} dropped for carrying "
-          f"mid-cascade actions)")
+    amplifications = [episode["amplification"] for episode in episodes]
+    print(f"[sl] {len(episodes)} episodes ({dropped} dropped: injected actions, or "
+          f"amplification below {min_amplification}x)")
+    print(f"[sl] amplification |y|/k: mean {np.mean(amplifications):.1f}x, "
+          f"random-baseline precision k/|y| ~ "
+          f"{np.mean([1 / a for a in amplifications]):.3f}")
 
     arms = ("world_model", "oracle", "degree", "random")
     scores = {name: [] for name in arms}
@@ -378,7 +399,9 @@ def main(argv=None) -> int:
                    "split_mode": train_meta.get("split_mode")},
         "protocol": {
             "data_dir": str(args.data_dir), "n_episodes": len(episodes),
-            "episodes_dropped_for_actions": dropped,
+            "episodes_dropped": dropped,
+            "min_amplification": min_amplification,
+            "mean_amplification": float(np.mean(amplifications)),
             "candidates": args.candidates, "horizon": args.horizon,
             "oracle_mc": args.oracle_mc, "seed": args.seed,
         },
