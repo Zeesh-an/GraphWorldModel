@@ -37,6 +37,7 @@ count says.
 """
 
 import time
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -112,10 +113,17 @@ def _keep_twitter(publish_time: int) -> bool:
 
 
 def _keep_aps(publish_time: int) -> bool:
-    # APS publish times in this bundle are YEARS as integers, and CasFlow compares
-    # them as STRINGS against '1997'. Reproduced as a numeric comparison, which
-    # agrees on every four-digit year and does not depend on lexical ordering.
-    return int(publish_time) <= int(aps_cutoff_year)
+    # CasFlow compares APS publish times as STRINGS against '1997'. Reproduced as a
+    # numeric comparison on the YEAR, which agrees on every four-digit year and does
+    # not depend on lexical ordering.
+    #
+    # The bundle's own field is an ISO date (`1893-07-01`), which
+    # `parse_casflow_line` normalizes to a day ordinal so it shares the unit of the
+    # elapsed times. A four-digit value is a bare year instead, which is what the
+    # code here previously assumed the whole corpus was.
+    year = publish_time if publish_time <= 9999 else date.fromordinal(publish_time).year
+
+    return year <= int(aps_cutoff_year)
 
 
 def publication_filter(corpus: str, deephawkes_hours: bool = False):

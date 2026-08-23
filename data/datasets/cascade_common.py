@@ -47,6 +47,7 @@ than inferred from a number that looks wrong.
 
 import os
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 import numpy as np
@@ -107,6 +108,22 @@ class Cascade:
         return {adopter for adopter, _, _ in self.events}
 
 
+def _publish_time(token: str) -> int:
+    """
+    A corpus publish time as an int, in that corpus's own time unit.
+
+    Weibo and Twitter publish unix seconds. APS publishes an ISO date, and its
+    elapsed times are DAYS, so the date becomes a day ORDINAL rather than a year:
+    that is the unit the leak-free split needs, since `wm_cascades` compares
+    `publish_time + horizon` (7,305 days on APS) against another cascade's
+    publish time, which a bare year would make meaningless.
+    """
+    try:
+        return int(float(token))
+    except ValueError:
+        return date.fromisoformat(token).toordinal()
+
+
 def parse_casflow_line(line: str) -> Cascade | None:
     """
     One line of the canonical five-field format into a `Cascade`.
@@ -162,10 +179,17 @@ def parse_casflow_line(line: str) -> Cascade | None:
 
     events.sort(key=lambda event: (event[1], event[0]))
 
+    # Malformed like every other field on this line rather than fatal: these files
+    # run to millions of lines and one truncated tail is not worth the corpus
+    try:
+        published = _publish_time(publish_time)
+    except ValueError:
+        return None
+
     return Cascade(
         cascade_id=cascade_id,
         root=_identifier(root),
-        publish_time=int(float(publish_time)),
+        publish_time=published,
         events=events,
     )
 
