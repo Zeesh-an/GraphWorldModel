@@ -5,7 +5,7 @@ and what it does NOT support. Empty cells say `NOT_RUN`; nothing is estimated.
 
 Canonical setting: `influence_maximization`, BA-100 × **100 graphs**,
 graph-disjoint (70/15/15 → **15 held-out test graphs**), SAGE + `structured`,
-seed 42, run on grandriver (RTX A6000, `hongji_env`). 266 tests pass.
+seed 42, run on a single RTX A6000. 266 tests pass.
 
 ---
 

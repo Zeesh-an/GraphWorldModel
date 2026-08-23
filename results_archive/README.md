@@ -1,7 +1,8 @@
 # Results archive
 
 Every result JSON produced by the Q1–Q5 experiments, pulled from the run host
-(`grandriver.egr.msu.edu:/egr/research-dselab/lihang4/Coworker/hongji/GraphWorldModel`).
+(a single RTX A6000 node; paths in the archived JSONs are relative to the
+repository root).
 46 files, 784 KB. Committed because a result nobody can find is a result nobody
 can check.
 

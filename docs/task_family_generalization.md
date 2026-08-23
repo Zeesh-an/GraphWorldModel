@@ -152,7 +152,7 @@ is `clamp(y_inf - active_pre, min=0)`. IC is untouched.
 ### 5.2 Stage A3 — corrected canonical baseline (DONE)
 
 BA-100 × 20 graphs, graph-disjoint, SAGE + `structured`, seed 42, one A6000 each.
-Run on `grandriver`, `hongji_env`.
+Run on a single RTX A6000.
 
 | metric | IC | LT | LT before A2 |
 | --- | --- | --- | --- |
