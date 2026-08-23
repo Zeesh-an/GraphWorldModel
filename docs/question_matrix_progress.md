@@ -173,9 +173,56 @@ Does NOT support:
              distribution-independent null -- effect_mae_norm against 1.0 -- is
              comparable across families, which is why the Q1-under-shift claim
              rests on that column.
-Open:        receptive-field study (n_layers ∈ {1,2,3,5,8} at fixed N=1000) is
-             RUNNING. Hypothesis: a 3-layer field covers a shrinking fraction of
-             a larger graph.
+```
+
+### 4.1 Why the action mechanism decays with size — the receptive-field
+hypothesis is REFUTED
+
+```
+Experiment:  n_layers in {1, 2, 3, 8}, everything else identical, each frozen
+             checkpoint evaluated on BA-100 (ID) and BA-1000 (10x OOD)
+Hypothesis:  a 3-layer receptive field covers a shrinking fraction of a larger
+             graph, so depth should recover the lost action fidelity
+```
+
+| layers | BA-100 ΔF1 | BA-100 eff_mae | BA-1000 ΔF1 | **BA-1000 eff_mae** |
+| --- | --- | --- | --- | --- |
+| 1 | 0.8558 | 0.5328 | 0.8502 | **0.8677** |
+| 2 | 0.8560 | 0.5325 | 0.8499 | **0.8677** |
+| 3 | 0.8559 | 0.5325 | 0.8501 | **0.8676** |
+| 8 | 0.8552 | 0.5333 | 0.8493 | **0.8681** |
+
+**Flat to four decimals.** Depth buys nothing, at either size. The hypothesis is
+refuted, and the flatness says something sharper: a 1-layer encoder matches an
+8-layer one, so the ENCODER contributes almost nothing here. The structured IC
+head feeds `w_uv` straight into the edge MLP and largely reproduces `q = w` —
+which is the "IC consumes the true w" caveat, now measured rather than suspected.
+
+Decomposing the normalised metric shows what actually moves:
+
+| N | E\|d_true\| (signal) | E\|error\| | effect_mae_norm | magnitude_ratio |
+| --- | --- | --- | --- | --- |
+| 100 | 0.02253 | 0.01200 | 0.5325 | 0.549 |
+| 200 | 0.01468 | 0.00932 | 0.6346 | 0.428 |
+| 500 | 0.01030 | 0.00810 | 0.7861 | 0.251 |
+| 1000 | 0.00861 | **0.00747** | 0.8676 | **0.155** |
+
+```
+Supports:    the model's ABSOLUTE counterfactual error IMPROVES with graph size
+             (0.01200 -> 0.00747, -38%). Prediction quality does not degrade.
+Actual cause: under-reaction. The predicted effect magnitude falls to 15.5% of
+             the true one, while the true per-node effect also shrinks (one seed
+             touches a smaller fraction of a bigger graph). effect_mae_norm rises
+             because the denominator shrinks faster than the numerator AND the
+             model increasingly under-predicts -- not because it got worse at
+             predicting.
+Does NOT support:
+             "the action mechanism fails at scale". It attenuates. The right
+             follow-up is calibration of the effect magnitude, not capacity.
+Next:        the `--hide-edge-weights` run is now the priority it always was: if
+             the encoder is contributing nothing because `w` is handed to the
+             head, that ablation is the only thing separating "learned dynamics"
+             from "read the answer off the input".
 ```
 
 ---
