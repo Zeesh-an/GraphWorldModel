@@ -216,7 +216,47 @@ Treats the model as a **stochastic simulator**: for each test episode it rolls `
 
 Most meaningful for **IC** (genuinely stochastic). For LT the true re-run draws fresh hidden thresholds, so the comparison is indicative rather than exact.
 
-### 3. Planning regret (`planning_regret_multi`) — block `planning`
+### 2b. Off-policy rollout (`rollout_ensemble(action_policy=…)`) — block `rollout_ood`
+
+The rollout above replays the **recorded** action sequence, which data generation
+drew uniformly at random. That makes it an on-policy number: it says the model is
+faithful under the action distribution it was trained on, and says nothing about
+the distribution a coding agent proposes. `--ood-policies` re-runs the same
+comparison under a policy from `wm_policies.py`, applied identically to the model
+and to the simulator:
+
+| policy | action each step | what it isolates |
+| --- | --- | --- |
+| `null` | none | pure diffusion — if fidelity drops here, the action channels were compensating for a mis-learned diffusion term |
+| `degree_seed` | seed the t-th highest-degree node | the agent-like extreme, and the furthest from uniform injection |
+| `random_seed` | seed a uniformly random node | the control for `degree_seed`: same rate, no structural targeting |
+| `block_hubs` | remove the t-th highest-degree node | the containment counterpart |
+
+Policies are **state-independent by contract** — both sides must replay the same
+sequence, and a state-conditioned policy would diverge between them as soon as
+their states did — and **node-only**, because the adjacency map is reconstructed
+from the recorded edge ops.
+
+### 3. Action conditioning (`wm_action_eval.py`) — block `action_conditioning`
+
+`action_sensitivity` only counts how many *distinct* outputs a state produces
+across its counterfactual actions: it answers "did the output move", never "did it
+move the right way". A model reacting arbitrarily scores as well as one reacting
+correctly. These three tests answer the second question, and each has an explicit
+null so a failure is legible:
+
+| test | what it does | the null |
+| --- | --- | --- |
+| `counterfactual_effect` | the data records several actions from the *same* state, each with its own MC marginal, so the true causal effect `y(a) − y(a')` is known. Correlate it against the predicted one | **`effect_mae_norm = 1.0`** is exactly what a model predicting no effect scores. `< 1` means the action carries real signal |
+| `action_ablation` | re-score the same states with the actions dropped, and with them shuffled between records | **a `shuffle_delta_f1_drop` of ~0 is a failed test**: the reported accuracy is obtainable without reading the action |
+| `exogenous_fidelity` | `T_exo` has a closed form — check it is reproduced exactly, reporting the **worst** case, not the mean | a seeded node not at `P(infected) = 1` |
+
+The block carries a single `action_conditioned` bool and a `verdict` string.
+"Untestable" is **not** a pass: a split with no counterfactual pairs, or with
+fewer than two acting records to permute, says so rather than returning a number
+that reads as a verdict.
+
+### 4. Planning regret (`planning_regret_multi`) — block `planning`
 
 Uses the world model to _choose_ an intervention. At sampled states it scores candidate `add_node` actions by predicted one-step spread, picks the argmax, and measures **regret** = `oracle_spread − true_spread(chosen)` (true spread via MC on the real simulator). Averaged over `--plan-graphs` graphs (each with its own seed offset) for resolution + a cross-graph std.
 
@@ -228,6 +268,29 @@ Uses the world model to _choose_ an intervention. At sampled states it scores ca
 | `*_std`              | cross-graph standard deviation (error bar)                          |
 
 A useful planner must beat `random` decisively and at least match `degree`.
+
+⚠️ This block scores a **single** `add_node` by its **one-step** marginal against a
+**one-step** oracle. That is a much easier question than the one the outer loop
+asks, and it cannot separate a model that ranks seeds well for one step from one
+that is a usable multi-step simulator — which is the actual claim. Quote it as a
+sanity check, not as evidence the world model is a planner.
+
+### 4b. Budgeted planning (`planning_regret_budget_multi`) — block `planning_budget`
+
+The IM problem as posed: pick **k** seeds, measure **full-horizon** spread. The
+model builds its seed set greedily using its **own multi-step rollout** as the
+objective — the way the coding agent uses it — and every arm is then scored by the
+true simulator at the horizon. Enabled with `--plan-budget-k`.
+
+| metric | meaning |
+| --- | --- |
+| `budget_spread_model` / `_greedy_mc` / `_degree` / `_random` | true full-horizon spread of each arm's k-set |
+| `budget_regret_norm` | **the headline**: fraction of the achievable spread the model gives up. Scale-free, so it is comparable across graphs and k, which the raw regret is not |
+| `budget_seed_overlap` | fraction of greedy-MC's seed set the model also picked |
+
+The reference is greedy Monte Carlo over the same candidate pool, not a true
+optimum: exact k-subset IM is NP-hard, and greedy-MC is the (1−1/e) benchmark the
+literature reports against.
 
 ### Standalone re-eval CLIs (no retraining)
 
@@ -248,6 +311,10 @@ These rebuild a model from a results JSON's `config`, reload its `.pt` checkpoin
 | `train_wm.py`               | training loop, early stopping, results JSON                                                                                                      |
 | `wm_model.py`               | `WorldModel`, backbone registry, `ICTransmissionHead` / `LTThresholdHead` / linear head                                                          |
 | `wm_data.py`                | feature builder (`X`, channels), `GraphInput`, per-episode adjacency, dataset + collate                                                          |
+| `wm_action_eval.py`         | the action-conditioning suite: counterfactual causal effect, action ablation, exact `T_exo` fidelity, and the pass/fail verdict |
+| `wm_policies.py`            | off-policy action policies for the OOD rollout (`null`, `degree_seed`, `random_seed`, `block_hubs`) |
+| `pareto.py`                 | Pareto dominance and the fidelity/cost front over configurations |
+| `aggregate_seeds.py`        | multi-seed mean ± std, and whether a gap clears the pooled noise |
 | `wm_metrics.py`             | F1 / accuracy / Brier / persistence primitives, plus the exact connectivity functionals (`containment_metrics`: pairwise conn, GCC, components, Schneider `R`, ANC, `rho` at `Theta`, degree-rank Spearman) |
 | `wm_eval.py`                | one-step eval, ensemble rollout, planning regret, simulator rebuild                                                                              |
 | `eval_planning.py`          | recompute planning regret on a checkpoint                                                                                                        |

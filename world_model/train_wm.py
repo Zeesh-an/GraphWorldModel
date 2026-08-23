@@ -27,10 +27,19 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 from data.wm_simulator import spent, valid_remove_semantics
-from world_model.wm_data import TransitionDataset, collate_transitions, in_channels
+from world_model.wm_data import (
+    TransitionDataset,
+    basic_encoding,
+    collate_transitions,
+    num_input_channels,
+    valid_action_encodings,
+)
 from world_model.wm_model import WorldModel, backbones
+from world_model.wm_action_eval import action_conditioning_report
+from world_model.wm_policies import resolve as resolve_policies
 from world_model.wm_eval import (
     evaluate_one_step,
+    planning_regret_budget_multi,
     planning_regret_multi,
     rollout_ensemble,
 )
@@ -54,6 +63,15 @@ class TrainConfig:
     # Feed ones instead of p(u->v) to the encoder and the head: the online/bandit
     # information state, and the ablation for "our IC heads see the true w"
     hide_edge_weights: bool = False
+    # `basic` = the original 6 channels; `typed` adds 3 that split CH_EDGE by op,
+    # so add_edge and remove_edge at the same endpoints stop producing identical X
+    action_encoding: str = basic_encoding
+    # Off-policy rollout policies (world_model/wm_policies.py). Empty = skip.
+    ood_policies: tuple = ()
+    # k-seed full-horizon planning; 0 disables (it costs real simulator episodes)
+    plan_budget_k: int = 0
+    plan_budget_graphs: int = 3
+    plan_budget_horizon: int = 20
     hidden_dim: int = 64
     n_layers: int = 3
     n_heads: int = 4
@@ -170,9 +188,15 @@ def train_world_model(config: TrainConfig) -> dict:
     device = torch.device(config.device)
     diffusion_model = config.diffusion_model
 
-    train_dataset = TransitionDataset(config.data_dir, diffusion_model, "train")
-    validation_dataset = TransitionDataset(config.data_dir, diffusion_model, "val")
-    test_dataset = TransitionDataset(config.data_dir, diffusion_model, "test")
+    train_dataset = TransitionDataset(
+        config.data_dir, diffusion_model, "train", config.action_encoding
+    )
+    validation_dataset = TransitionDataset(
+        config.data_dir, diffusion_model, "val", config.action_encoding
+    )
+    test_dataset = TransitionDataset(
+        config.data_dir, diffusion_model, "test", config.action_encoding
+    )
 
     collate_fn = partial(
         collate_transitions,
@@ -197,7 +221,7 @@ def train_world_model(config: TrainConfig) -> dict:
 
     model = WorldModel(
         config.model,
-        in_channels=in_channels,
+        in_channels=num_input_channels(config.action_encoding),
         hidden_dim=config.hidden_dim,
         n_layers=config.n_layers,
         dropout=config.dropout,
@@ -315,6 +339,20 @@ def train_world_model(config: TrainConfig) -> dict:
             hide_edge_weights=config.hide_edge_weights,
         ),
     }
+    # IC is monotone, so "changed" == "newly infected" and delta_f1 is ALGEBRAICALLY
+    # identical to new_infection_f1. Reporting both as if they were two pieces of
+    # evidence overstates the one-step result; say so in the JSON rather than in a
+    # footnote nobody reads.
+    results["test"]["delta_f1_is_new_infection_f1"] = bool(
+        abs(results["test"]["delta_f1"] - results["test"]["new_infection_f1"]) < 1e-12
+    )
+
+    rollout_kwargs = dict(
+        seed=config.seed,
+        remove_semantics=config.remove_semantics,
+        hide_edge_weights=config.hide_edge_weights,
+        action_encoding=config.action_encoding,
+    )
     results["rollout"] = rollout_ensemble(
         model,
         config.data_dir,
@@ -322,10 +360,36 @@ def train_world_model(config: TrainConfig) -> dict:
         train_dataset.store,
         device,
         "test",
-        seed=config.seed,
-        remove_semantics=config.remove_semantics,
-        hide_edge_weights=config.hide_edge_weights,
+        **rollout_kwargs,
     )
+
+    # Does the model use the action at all, and does it use it CORRECTLY?
+    results["action_conditioning"] = action_conditioning_report(
+        model,
+        test_dataset,
+        diffusion_model,
+        device,
+        hide_edge_weights=config.hide_edge_weights,
+        seed=config.seed,
+    )
+
+    # Fidelity under action distributions the training data never contained. The
+    # recorded-sequence rollout above is on-policy by construction; this is the
+    # number that speaks to using f_theta as a coding agent's inner loop.
+    if config.ood_policies:
+        results["rollout_ood"] = {
+            name: rollout_ensemble(
+                model,
+                config.data_dir,
+                diffusion_model,
+                train_dataset.store,
+                device,
+                "test",
+                action_policy=policy,
+                **rollout_kwargs,
+            )
+            for name, policy in resolve_policies(list(config.ood_policies)).items()
+        }
 
     if config.plan_demo:
         results["planning"] = planning_regret_multi(
@@ -336,6 +400,23 @@ def train_world_model(config: TrainConfig) -> dict:
             n_graphs=config.plan_graphs,
             seed=config.seed,
             hide_edge_weights=config.hide_edge_weights,
+            remove_semantics=config.remove_semantics,
+            action_encoding=config.action_encoding,
+        )
+
+    if config.plan_budget_k > 0:
+        results["planning_budget"] = planning_regret_budget_multi(
+            model,
+            train_dataset.store,
+            diffusion_model,
+            device,
+            n_graphs=config.plan_budget_graphs,
+            seed=config.seed,
+            k=config.plan_budget_k,
+            horizon=config.plan_budget_horizon,
+            hide_edge_weights=config.hide_edge_weights,
+            remove_semantics=config.remove_semantics,
+            action_encoding=config.action_encoding,
         )
 
     os.makedirs(Path(config.results).parent, exist_ok=True)
@@ -392,6 +473,46 @@ if __name__ == "__main__":
         "encoder and head: the online/bandit information state, and the ablation "
         "for the IC heads otherwise seeing w. Requires --head structured or "
         "linear (default: False).",
+    )
+    parser.add_argument(
+        "--action-encoding",
+        type=str,
+        default=basic_encoding,
+        choices=list(valid_action_encodings),
+        help="action feature encoding; `typed` adds 3 channels splitting CH_EDGE "
+        "by op, so add_edge and remove_edge on the same endpoints stop producing "
+        "identical X. Changes in_channels, so a checkpoint is not portable across "
+        "the two (default: basic).",
+    )
+    parser.add_argument(
+        "--ood-policies",
+        type=str,
+        nargs="*",
+        default=[],
+        help="off-policy rollout tests, e.g. `degree_seed null`. The recorded "
+        "action sequence is on-policy by construction; these measure fidelity "
+        "under the action distribution an agent would actually propose "
+        "(default: none).",
+    )
+    parser.add_argument(
+        "--plan-budget-k",
+        type=int,
+        default=0,
+        help="k-seed full-horizon planning regret vs greedy-MC; 0 disables. This "
+        "is the IM problem as posed, unlike the single-step --plan-demo "
+        "(default: 0).",
+    )
+    parser.add_argument(
+        "--plan-budget-graphs",
+        type=int,
+        default=3,
+        help="graphs for the k-seed planning eval (default: 3).",
+    )
+    parser.add_argument(
+        "--plan-budget-horizon",
+        type=int,
+        default=20,
+        help="rollout horizon for the k-seed planning eval (default: 20).",
     )
     parser.add_argument(
         "--hidden-dim",

@@ -12,10 +12,11 @@ import torch.nn as nn
 from world_model.wm_data import (
     GraphInput,
     apply_edge_ops,
+    basic_encoding,
     build_features,
     build_graph_input,
     edges_to_arrays,
-    in_channels,
+    num_input_channels,
 )
 from world_model.wm_model import WorldModel
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
@@ -39,6 +40,8 @@ class WorldModelEnvironment:
         n_samples: int = 20,
         base_seed: int = 0,
         remove_semantics: str = spent,
+        hide_edge_weights: bool = False,
+        action_encoding: str = basic_encoding,
     ) -> None:
         self.model = model.to(device).eval()
         self.graph = graph
@@ -46,6 +49,13 @@ class WorldModelEnvironment:
         self.device = torch.device(device)
         self.n_samples = n_samples
         self.remove_semantics = remove_semantics
+        # Both MUST match what the checkpoint was trained under. hide_edge_weights
+        # used not to be threaded here at all, so a w-hidden model was rolled out
+        # against the true transmission probabilities — the one place in the
+        # pipeline where the masking silently did not apply. action_encoding sets
+        # in_channels, so a mismatch is a shape error rather than a silent one.
+        self.hide_edge_weights = hide_edge_weights
+        self.action_encoding = action_encoding
         # Seed every rollout uses unless one is named explicitly; shared across
         # candidates so the DIFFERENCE between two strategies is well resolved
         self.base_seed = base_seed
@@ -82,6 +92,10 @@ class WorldModelEnvironment:
         # Absent in checkpoints trained before --remove-semantics existed, all of
         # which were spent
         remove_semantics = config.get("remove_semantics", spent)
+        # Both absent in checkpoints trained before these flags existed, whose
+        # behaviour the defaults reproduce exactly
+        hide_edge_weights = bool(config.get("hide_edge_weights", False))
+        action_encoding = config.get("action_encoding", basic_encoding)
         backbone_kwargs = {
             "n_heads": config["n_heads"],
             "ffn_dim": config["ffn_dim"],
@@ -92,7 +106,7 @@ class WorldModelEnvironment:
         # Reconstruct the exact WorldModel architecture from the config
         model = WorldModel(
             config["model"],
-            in_channels=in_channels,
+            in_channels=num_input_channels(action_encoding),
             hidden_dim=config["hidden_dim"],
             n_layers=config["n_layers"],
             dropout=config["dropout"],
@@ -126,6 +140,8 @@ class WorldModelEnvironment:
             n_samples=n_samples,
             base_seed=base_seed,
             remove_semantics=remove_semantics,
+            hide_edge_weights=hide_edge_weights,
+            action_encoding=action_encoding,
         )
 
     @classmethod
@@ -148,7 +164,7 @@ class WorldModelEnvironment:
 
         model = WorldModel(
             "gcn",
-            in_channels=in_channels,
+            in_channels=num_input_channels(basic_encoding),
             hidden_dim=oracle_hidden_dim,
             n_layers=oracle_n_layers,
             dropout=0.0,
@@ -183,6 +199,7 @@ class WorldModelEnvironment:
             num_nodes * len(sample_arrays),
             self.diffusion_model,
             self.device,
+            self.hide_edge_weights,
         )
 
     @torch.inference_mode()
@@ -254,7 +271,12 @@ class WorldModelEnvironment:
                     "next_marginal_infected": {},
                     "next_marginal_frontier": {},
                 }
-                X, _, _ = build_features(record, sample_arrays[sample][0], num_nodes)
+                X, _, _ = build_features(
+                    record,
+                    sample_arrays[sample][0],
+                    num_nodes,
+                    self.action_encoding,
+                )
                 x_parts.append(X)
 
             features = torch.from_numpy(np.concatenate(x_parts, axis=0))

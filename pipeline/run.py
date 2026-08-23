@@ -91,7 +91,11 @@ from pipeline.plots import build_plots
 from pipeline.report import write_report
 from pipeline.summary import write_environment, write_summary
 from world_model.train_wm import TrainConfig, train_world_model
-from world_model.wm_data import load_graph_store
+from world_model.wm_data import (
+    basic_encoding,
+    load_graph_store,
+    valid_action_encodings,
+)
 from world_model.wm_model import backbones
 
 stages = ("data", "train", "agent", "plots", "report")
@@ -155,6 +159,18 @@ class PipelineConfig:
     patience: int = 50
     plan_demo: bool = True
     plan_graphs: int = 5
+    # k-seed FULL-HORIZON planning regret vs greedy-MC — the IM problem as posed,
+    # unlike the single-step plan_demo. Costs real simulator episodes, so it is
+    # opt-in: 0 disables.
+    plan_budget_k: int = 0
+    plan_budget_graphs: int = 3
+    plan_budget_horizon: int = 20
+    # Off-policy rollout fidelity (world_model/wm_policies.py). The recorded action
+    # sequence is on-policy by construction, so it says nothing about the action
+    # distribution an agent actually proposes.
+    ood_policies: tuple = ()
+    # `typed` splits the single act_edge channel by op
+    action_encoding: str = basic_encoding
     # Feed the world model ones instead of the true p(u->v): the online/bandit
     # information state (research/adaptive_online_im.md §2.4b, §9.3 item 7)
     hide_edge_weights: bool = False
@@ -456,6 +472,11 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
             results=str(results_path),
             plan_demo=config.plan_demo,
             plan_graphs=config.plan_graphs,
+            plan_budget_k=config.plan_budget_k,
+            plan_budget_graphs=config.plan_budget_graphs,
+            plan_budget_horizon=config.plan_budget_horizon,
+            ood_policies=tuple(config.ood_policies),
+            action_encoding=config.action_encoding,
             hide_edge_weights=config.hide_edge_weights,
         )
     )
@@ -1211,6 +1232,44 @@ if __name__ == "__main__":
         help="graphs used for the planning demo (default: 5).",
     )
     parser.add_argument(
+        "--plan-budget-k",
+        type=int,
+        default=0,
+        help="k-seed FULL-HORIZON planning regret vs greedy-MC — the IM problem as "
+        "posed, unlike the single-step --plan-graphs demo. 0 disables (default: 0).",
+    )
+    parser.add_argument(
+        "--plan-budget-graphs",
+        type=int,
+        default=3,
+        help="graphs for the k-seed planning eval (default: 3).",
+    )
+    parser.add_argument(
+        "--plan-budget-horizon",
+        type=int,
+        default=20,
+        help="rollout horizon for the k-seed planning eval (default: 20).",
+    )
+    parser.add_argument(
+        "--ood-policies",
+        type=str,
+        nargs="*",
+        default=[],
+        help="off-policy rollout fidelity tests, e.g. `degree_seed null`. The "
+        "recorded action sequence is on-policy by construction, so it says nothing "
+        "about the action distribution an agent proposes (default: none).",
+    )
+    parser.add_argument(
+        "--action-encoding",
+        type=str,
+        default=basic_encoding,
+        choices=list(valid_action_encodings),
+        help="`typed` adds 3 channels splitting act_edge by op, so add_edge and "
+        "remove_edge on the same endpoints stop producing identical X. Changes "
+        "in_channels, so checkpoints are not portable across the two "
+        "(default: basic).",
+    )
+    parser.add_argument(
         "--hide-edge-weights",
         action="store_true",
         help="train the world model on ones instead of the true IC transmission "
@@ -1522,6 +1581,11 @@ if __name__ == "__main__":
         plan_demo=not args.no_plan_demo,
         hide_edge_weights=args.hide_edge_weights,
         plan_graphs=args.plan_graphs,
+        plan_budget_k=args.plan_budget_k,
+        plan_budget_graphs=args.plan_budget_graphs,
+        plan_budget_horizon=args.plan_budget_horizon,
+        ood_policies=tuple(args.ood_policies),
+        action_encoding=args.action_encoding,
         baselines=None if args.baselines is None else tuple(args.baselines),
         arms=None if args.arms is None else tuple(args.arms),
         budget_pcts=tuple(args.budget_pcts),

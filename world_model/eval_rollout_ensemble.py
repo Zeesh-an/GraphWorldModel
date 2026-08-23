@@ -20,7 +20,7 @@ import torch
 
 from data.wm_simulator import spent
 from world_model.eval_planning import load_trained_model
-from world_model.wm_data import load_graph_store
+from world_model.wm_data import basic_encoding, load_graph_store
 from world_model.wm_eval import rollout_ensemble
 
 if __name__ == "__main__":
@@ -84,6 +84,10 @@ if __name__ == "__main__":
             max_episodes=args.max_episodes,
             seed=args.seed,
             remove_semantics=config.get("remove_semantics", spent),
+            # Follow the checkpoint: a w-hidden model rolled out against the true
+            # transmission probabilities is not the model that was trained
+            hide_edge_weights=bool(config.get("hide_edge_weights", False)),
+            action_encoding=config.get("action_encoding", basic_encoding),
         )
 
         results["rollout_ensemble"] = ensemble

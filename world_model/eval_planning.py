@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 
 from data.wm_simulator import spent
-from world_model.wm_data import in_channels, load_graph_store
+from world_model.wm_data import basic_encoding, load_graph_store, num_input_channels
 from world_model.wm_eval import planning_regret_multi
 from world_model.wm_model import WorldModel
 
@@ -35,7 +35,8 @@ def load_trained_model(config: dict, device: torch.device) -> nn.Module:
     }
     model = WorldModel(
         config["model"],
-        in_channels=in_channels,
+        # Absent in runs from before --action-encoding, all of which were `basic`
+        in_channels=num_input_channels(config.get("action_encoding", basic_encoding)),
         hidden_dim=config["hidden_dim"],
         n_layers=config["n_layers"],
         dropout=config["dropout"],
@@ -104,6 +105,12 @@ if __name__ == "__main__":
             device,
             n_graphs=args.plan_graphs,
             seed=args.seed,
+            # All three must follow the checkpoint, not this CLI's defaults: a
+            # w-hidden model re-scored against true weights, or a `blocked` model
+            # scored against a `spent` oracle, produces a number for the wrong run
+            hide_edge_weights=bool(config.get("hide_edge_weights", False)),
+            remove_semantics=config.get("remove_semantics", spent),
+            action_encoding=config.get("action_encoding", basic_encoding),
         )
 
         # Replace only the planning block; keep test + rollout intact.

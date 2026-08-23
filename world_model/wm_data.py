@@ -16,6 +16,40 @@ from torch.utils.data import Dataset
 in_channels = 6
 ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge = range(6)
 
+# `typed` action encoding: three extra channels that split the single CH_EDGE flag
+# by op. CH_EDGE stays set for all three, so the first 6 columns of a `typed` X are
+# byte-for-byte the `basic` X and the two encodings are nested, not alternatives.
+#
+# Why it exists: under `basic`, add_edge(u,v,w) and remove_edge(u,v) at the same
+# endpoints produce IDENTICAL X. The adjacency still differs, so a head that reads
+# the graph is not blind — but the encoder cannot tell the two apart from features
+# alone, and the `linear` head has no other path to the action at all.
+ch_edge_add, ch_edge_del, ch_edge_reweight = 6, 7, 8
+typed_in_channels = 9
+
+basic_encoding = "basic"
+typed_encoding = "typed"
+valid_action_encodings = (basic_encoding, typed_encoding)
+
+# Which op sets which extra channel under `typed`
+typed_edge_channel = {
+    "add_edge": ch_edge_add,
+    "remove_edge": ch_edge_del,
+    "set_edge_weight": ch_edge_reweight,
+}
+
+
+def num_input_channels(action_encoding: str = basic_encoding) -> int:
+    """Width of X for an action encoding. The model's in_channels must match."""
+    if action_encoding not in valid_action_encodings:
+        raise ValueError(
+            f"unknown action_encoding {action_encoding!r}; "
+            f"choose one of {valid_action_encodings}"
+        )
+
+    return typed_in_channels if action_encoding == typed_encoding else in_channels
+
+
 # Numerical floor for the symmetric renormalization (avoids 0^-0.5)
 degree_floor = 1e-12
 
@@ -171,9 +205,14 @@ def build_features(
     record: dict,
     edge_index: np.ndarray,
     num_nodes: int,
+    action_encoding: str = basic_encoding,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (X (N, 6) float32, y_inf (N) float32, y_fr (N) float32)."""
-    X = np.zeros((num_nodes, in_channels), dtype=np.float32)
+    """Return (X (N, C) float32, y_inf (N) float32, y_fr (N) float32).
+
+    C is 6 under `basic` and 9 under `typed`; the extra columns are appended, so
+    X[:, :6] is identical either way.
+    """
+    X = np.zeros((num_nodes, num_input_channels(action_encoding)), dtype=np.float32)
 
     state = record["state"]
     X[np.asarray(state["infected"], dtype=np.int64), ch_infected] = 1.0
@@ -194,8 +233,17 @@ def build_features(
         elif action_op["op"] == "remove_node":
             X[int(action_op["target"]), ch_remove] = 1.0
         elif action_op["op"] in edge_ops:
-            X[int(action_op["target"]), ch_edge] = 1.0
-            X[int(action_op["destination"]), ch_edge] = 1.0
+            source, destination = (
+                int(action_op["target"]),
+                int(action_op["destination"]),
+            )
+            X[source, ch_edge] = 1.0
+            X[destination, ch_edge] = 1.0
+
+            if action_encoding == typed_encoding:
+                channel = typed_edge_channel[action_op["op"]]
+                X[source, channel] = 1.0
+                X[destination, channel] = 1.0
 
     # Build the ground-truth next state s_{t + 1} the model is trying to predict,
     # as soft one-step marginals (MC-estimated in data gen via --mc-marginals).
@@ -269,8 +317,16 @@ def edges_to_arrays(
 class TransitionDataset(Dataset):
     """One item per transition (main + cf). Resolves A_t per episode."""
 
-    def __init__(self, out_dir: Path, diffusion_model: str, split: str) -> None:
+    def __init__(
+        self,
+        out_dir: Path,
+        diffusion_model: str,
+        split: str,
+        action_encoding: str = basic_encoding,
+    ) -> None:
         self.diffusion_model = diffusion_model
+        self.action_encoding = action_encoding
+        num_input_channels(action_encoding)  # validate early, not per-item
 
         # Load the store and the JSONL for one (diffusion_model, split)
         self.store = load_graph_store(out_dir)
@@ -302,7 +358,9 @@ class TransitionDataset(Dataset):
     def __getitem__(self, index: int) -> dict:
         record, edge_index, weights = self.samples[index]
         num_nodes = self.store[record["graph_id"]]["num_nodes"]
-        X, y_inf, y_fr = build_features(record, edge_index, num_nodes)
+        X, y_inf, y_fr = build_features(
+            record, edge_index, num_nodes, self.action_encoding
+        )
 
         return {
             "X": torch.from_numpy(X),

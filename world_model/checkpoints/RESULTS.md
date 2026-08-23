@@ -8,6 +8,18 @@ This document walks through **every** metric in the two GraphSAGE result files, 
 SAGE is the chosen backbone: across the 5-backbone sweep it was the only one faithful on **both** IC and LT rollouts, and the cheapest to run. Metric definitions live in [`../README.md`](../README.md) and [`../../data/README.md`](../../data/README.md). Numbers below are quoted verbatim from the JSONs.
 
 > **Caveat for both files:** results are a **single seed (42)** on **BA-100** graphs. BA is degree-trivial (hub structure makes degree a near-optimal seed heuristic), so the planning-vs-degree comparison is within noise here; it becomes meaningful on WS/SBM/real graphs. Treat these as a "the method works and does not saturate" result, not a final benchmark.
+>
+> **What these numbers do NOT establish**, each with the run that would settle it:
+>
+> | gap | why it matters | what closes it |
+> | --- | --- | --- |
+> | single seed | a 0.025 gap (planning 0.244 vs degree 0.269) cannot be told from run-to-run noise by one run | train ≥5 seeds, then `python -m world_model.aggregate_seeds <files> --out agg.json`; `separated()` reports whether the gap clears the pooled SE |
+> | on-policy rollout only | fidelity is measured under the recorded action sequence, which was drawn **uniformly at random**. A coding agent's actions are not | `--ood-policies degree_seed random_seed null` → the `rollout_ood` block |
+> | one-step planning only | `plan_regret_*` scores one `add_node` against a one-step oracle, not k seeds against full-horizon spread | `--plan-budget-k 5` → the `planning_budget` block |
+> | IC consumes the true `w` | the IC heads take `p(u→v)` as an input feature, so "recovers unknown dynamics from data" currently rests on LT | `--hide-edge-weights --head structured` |
+> | no transfer evidence | train and test are the same graph family and size | train on BA-100, evaluate on WS/SBM and on a larger N |
+> | `delta_f1` ≡ `new_infection_f1` under IC | IC is monotone, so "changed" == "newly infected" and the two columns are algebraically the same number, not two pieces of evidence | already flagged automatically as `test.delta_f1_is_new_infection_f1` |
+> | action-conditioning unproven | `action_sensitivity = 1.106` says the output *moved*, not that it moved *correctly* | the `action_conditioning` block (`wm_action_eval.py`), which has an explicit null and can return FAIL |
 
 ---
 
@@ -41,7 +53,7 @@ The only difference between the runs is `diffusion_model` (IC vs LT), which also
 
 | metric                  | value      | what it measures                                                              | reading                                                                                                                                                                                                                 |
 | ----------------------- | ---------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ens_marg_mae`          | **0.0946** | mean \|model marginal − true marginal\| over nodes & steps                    | Matches the IC **oracle** (~0.091, q = true edge prob). The learned per-edge transmission is essentially as good as knowing the true probabilities.                                                                     |
+| `ens_marg_mae`          | **0.0946** | mean \|model marginal − true marginal\| over nodes & steps                    | Matches the IC **oracle** (~0.091, q = true edge prob) — but read this as a **floor, not a ceiling**. The `structured` head takes `w` as an input (`MLP([h_u, h_v, w])`) and the oracle *is* `q = w`, so the model was handed the answer; failing to match would be the anomaly. It says the structural form is right, not that anything about the dynamics was learned. The claim "recovers unknown dynamics from data" needs the `--hide-edge-weights` run, where `q` has to be inferred from structure alone. **LT is currently the honest version of that claim** — its thresholds are re-drawn per episode and never stored, so there is no answer to copy. |
 | `ens_count_w1`          | **2.606**  | mean per-step Wasserstein-1 between model & true infected-count distributions | The _distribution_ of cascade sizes (not just the mean) tracks the truth to within ~2.6 nodes — tight on a ~37-node final cascade.                                                                                      |
 | `ens_count_bias`        | **−0.577** | mean per-step `E[model] − E[true]` count                                      | ≈0 ⇒ **no saturation**. Slightly negative = the model is marginally conservative mid-rollout. Compare the failed linear head: +49 (it ran away to the whole graph). This is the central success of the structured head. |
 | `ens_final_count_model` | **36.62**  | mean final infected count, model                                              | Essentially identical to truth ↓.                                                                                                                                                                                       |
@@ -56,6 +68,19 @@ The only difference between the runs is `diffusion_model` (IC vs LT), which also
 | `plan_regret_random` | **3.109 ± 0.595**   | same, random candidate                                  | The floor. The model is ~13× better than random — it is clearly using real structure to plan.                                       |
 
 **IC verdict:** at the one-step label ceiling (`delta_f1` 0.83, Brier 0.001), faithful as a free-running simulator (no saturation; final count within 0.1 node), and a competent one-step planner (crushes random, ties/edges degree on BA). The IC world model is working.
+
+**What that verdict is and is not.** Attribute the numbers above to what produced them, because most of them are not evidence about learning:
+
+| result | produced by |
+| --- | --- |
+| `add_seed_success` / `remove_frontier_success` = 1.0 | the **closed form**. `T_exo` is applied algebraically in the head, so `∂P(infected \| seeded)/∂W` is *exactly* zero — an untrained model scores 1.0 too |
+| no saturation, `count_bias` −0.58, monotonicity, self-termination | the **closed form**. The `frontier_u` gate makes `p_new = 0` structural for a node with no active in-neighbour |
+| `delta_f1` 0.83 | mostly the closed form (IC is monotone, so only "who lights up next" is open) |
+| `ens_marg_mae` 0.0946 | **the only column that scores the learned part**, and `w` was fed to it |
+
+Everything the model actually *learns* is one number per edge, `q(u→v)`. That is the whole learning problem here; the rest of the transition is hand-written IC. This is a deliberate, defensible trade — it buys structural guarantees a free head cannot have (`linear` head: `count_bias` **+49**) at the cost of needing a new head per dynamics — but it has to be stated as that trade rather than as "the world model learned the dynamics".
+
+It also matters for the intended use. A coding agent's inner loop compares *downstream* effects ("does seeding A beat seeding B at the horizon"), and that quantity is determined entirely by the learned `q`, with **no structural backstop at all**. The `action_conditioning` block exists because `delta_f1` and `count_bias` can both look good while the model predicts the *same* downstream effect for every action.
 
 ---
 

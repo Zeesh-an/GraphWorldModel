@@ -535,6 +535,13 @@ POS_WEIGHT="${POS_WEIGHT:-off}"
 PATIENCE="${PATIENCE:-50}"
 PLAN_GRAPHS="${PLAN_GRAPHS:-5}"
 NO_PLAN_DEMO="${NO_PLAN_DEMO:-0}"
+# k-seed full-horizon planning (0 = off), off-policy rollout tests, and the
+# action feature encoding. See world_model/README.md for what each one buys.
+PLAN_BUDGET_K="${PLAN_BUDGET_K:-0}"
+PLAN_BUDGET_GRAPHS="${PLAN_BUDGET_GRAPHS:-3}"
+PLAN_BUDGET_HORIZON="${PLAN_BUDGET_HORIZON:-20}"
+OOD_POLICIES="${OOD_POLICIES:-}"
+ACTION_ENCODING="${ACTION_ENCODING:-basic}"
 
 # Agent stage
 # Unset means "let pipeline.tasks decide": influence_maximization gets the
@@ -599,6 +606,9 @@ flags=(
   --dropout "$DROPOUT" --epochs "$EPOCHS" --lr "$LR"
   --weight-decay "$WEIGHT_DECAY" --batch-size "$BATCH_SIZE"
   --pos-weight "$POS_WEIGHT" --patience "$PATIENCE" --plan-graphs "$PLAN_GRAPHS"
+  --plan-budget-k "$PLAN_BUDGET_K" --plan-budget-graphs "$PLAN_BUDGET_GRAPHS"
+  --plan-budget-horizon "$PLAN_BUDGET_HORIZON"
+  --action-encoding "$ACTION_ENCODING"
 
   --baseline-timeout "$BASELINE_TIMEOUT" --native-mc-runs "$NATIVE_MC_RUNS"
   --evaluator "$EVALUATOR" --llm-model "$LLM_MODEL"
@@ -651,6 +661,10 @@ fi
 [ -n "$OUTBREAK_PCT" ]      && flags+=(--outbreak-pct "$OUTBREAK_PCT")
 [ -n "$OUTBREAK_SELECTOR" ] && flags+=(--outbreak-selector "$OUTBREAK_SELECTOR")
 [ "$HIDE_EDGE_WEIGHTS" = "1" ] && flags+=(--hide-edge-weights)
+# Space-separated list, e.g. OOD_POLICIES="degree_seed null"; unquoted on purpose
+# so the shell splits it into one argument per policy
+# shellcheck disable=SC2206
+[ -n "$OOD_POLICIES" ]      && flags+=(--ood-policies $OOD_POLICIES)
 
 # ---------------------------------------------------------------------------
 # SUBMIT — outside a job, queue ourselves with the allocation these flags need

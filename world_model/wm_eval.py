@@ -11,6 +11,7 @@ from scipy.stats import wasserstein_distance
 
 from world_model.wm_data import (
     TransitionDataset,
+    basic_encoding,
     build_features,
     build_graph_input,
     ch_frontier,
@@ -40,6 +41,37 @@ def _cat_arrays(arrays: list[np.ndarray]) -> np.ndarray:
     return np.concatenate(arrays) if arrays else np.zeros(0)
 
 
+def _reskin_action(dataset: TransitionDataset, index: int, action: list[dict]) -> dict:
+    """Rebuild dataset[index] with `action` substituted for the recorded bag.
+
+    The ADJACENCY is deliberately left as reconstructed for the recorded bag. That
+    is exact for node ops, which never touch the graph, and it is why
+    `wm_action_eval.action_ablation` only ever substitutes node-only bags: swapping
+    in an edge op without replaying it would score the model against a graph its
+    input claims it does not have, and the resulting "degradation" would measure
+    the inconsistency rather than the model's use of the action.
+    """
+    record, edge_index, weights = dataset.samples[index]
+    num_nodes = dataset.store[record["graph_id"]]["num_nodes"]
+
+    swapped = dict(record)
+    swapped["action"] = action
+
+    X, y_inf, y_fr = build_features(
+        swapped, edge_index, num_nodes, dataset.action_encoding
+    )
+
+    return {
+        "X": torch.from_numpy(X),
+        "y_inf": torch.from_numpy(y_inf),
+        "y_fr": torch.from_numpy(y_fr),
+        "edge_index": torch.from_numpy(edge_index),
+        "edge_weight": torch.from_numpy(weights),
+        "num_nodes": num_nodes,
+        "record": swapped,
+    }
+
+
 @torch.inference_mode()
 def evaluate_one_step(
     model: nn.Module,
@@ -48,9 +80,14 @@ def evaluate_one_step(
     device: torch.device,
     threshold: float = 0.5,
     hide_edge_weights: bool = False,
+    action_override: dict | None = None,
 ) -> dict[str, float]:
     """
     Teacher-forced one-step evaluation over an entire dataset.
+
+    `action_override` maps a dataset index to a replacement action list. It is how
+    `wm_action_eval.action_ablation` re-scores the same states under zeroed or
+    shuffled actions; leave it None for a normal evaluation.
 
     Aggregates the full metric suite (score_predictions), action-specific metrics
     (Add-Seed Success, Remove-Frontier Success), action sensitivity (how much the
@@ -72,6 +109,10 @@ def evaluate_one_step(
 
     for index in range(len(dataset)):
         item = dataset[index]
+
+        if action_override is not None and index in action_override:
+            item = _reskin_action(dataset, index, action_override[index])
+
         batch = collate_transitions(
             [item], diffusion_model, device, hide_edge_weights
         )
@@ -193,6 +234,7 @@ def rollout_episodes(
     split: str = "test",
     threshold: float = 0.5,
     hide_edge_weights: bool = False,
+    action_encoding: str = basic_encoding,
 ) -> dict[str, float]:
     """
     Feed the model its own thresholded prediction + recorded action; compare to truth.
@@ -240,7 +282,7 @@ def rollout_episodes(
                 "infected": sorted(current_infected),
                 "frontier": sorted(current_frontier),
             }
-            X, _, _ = build_features(rolled, edge_index, num_nodes)
+            X, _, _ = build_features(rolled, edge_index, num_nodes, action_encoding)
             graph_input = build_graph_input(
                 edge_index,
                 weights,
@@ -324,6 +366,8 @@ def rollout_ensemble(
     seed: int = 0,
     remove_semantics: str = spent,
     hide_edge_weights: bool = False,
+    action_encoding: str = basic_encoding,
+    action_policy: "ActionPolicy | None" = None,
 ) -> dict[str, float]:
     """
     Stochastic ensemble rollout (Lever 1): treat the world model as a stochastic
@@ -342,6 +386,14 @@ def rollout_ensemble(
     - ens_count_w1:   mean per-step Wasserstein-1 between model and true infected-count distributions
     - ens_count_bias: mean per-step (E[model count] - E[true count]); ~0 = unbiased, >0 = still over-predicting
     - ens_final_count_model / ens_final_count_true: mean final infected counts
+
+    `action_policy` replaces the recorded action sequence with one this policy
+    generates, on BOTH sides of the comparison, which is the off-policy
+    (out-of-distribution action) test. Training injects actions uniformly at
+    random; a coding agent does not, so fidelity under the recorded sequence alone
+    says nothing about fidelity under the sequence the agent will actually propose.
+    Policies are node-only by contract, because the adjacency map is reconstructed
+    from the RECORDED edge ops and replaying different ones would desynchronise it.
     """
     rng = np.random.default_rng(seed)
     path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
@@ -375,16 +427,24 @@ def rollout_ensemble(
         )
         num_steps = len(episode_records)
 
-        # True ensemble: n_samples simulator rollouts under the recorded action sequence.
+        # One action sequence per episode, replayed identically by both ensembles.
+        # Under the default (recorded) policy this is exactly the old behaviour.
+        if action_policy is None:
+            action_sequence = [record["action"] for record in episode_records]
+        else:
+            action_sequence = action_policy(store[graph_id], episode_records, rng)
+
+        # True ensemble: n_samples simulator rollouts under that action sequence.
         true_infected = np.zeros((n_samples, num_steps, num_nodes), dtype=np.float32)
         for sample in range(n_samples):
             simulator = rebuild_simulator(
                 store[graph_id],
                 diffusion_model,
                 seed=int(rng.integers(seed_upper_bound)),
+                remove_semantics=remove_semantics,
             )
-            for step, record in enumerate(episode_records):
-                state = simulator.advance(_action_bag(record["action"]))
+            for step, action in enumerate(action_sequence):
+                state = simulator.advance(_action_bag(action))
                 true_infected[
                     sample, step, np.asarray(state.infected, dtype=np.int64)
                 ] = 1.0
@@ -396,15 +456,19 @@ def rollout_ensemble(
             current_frontier = set(episode_records[0]["state"]["frontier"])
 
             for step, record in enumerate(episode_records):
+                action = action_sequence[step]
                 edge_index, weights = edges_to_arrays(
                     adjacency_map[(record["t"], "main")]
                 )
                 rolled = dict(record)
+                rolled["action"] = action
                 rolled["state"] = {
                     "infected": sorted(current_infected),
                     "frontier": sorted(current_frontier),
                 }
-                X, _, _ = build_features(rolled, edge_index, num_nodes)
+                X, _, _ = build_features(
+                    rolled, edge_index, num_nodes, action_encoding
+                )
                 graph_input = build_graph_input(
                     edge_index,
                     weights,
@@ -427,12 +491,12 @@ def rollout_ensemble(
                 # infected=0) that systematically inflate free-running rollouts
                 adds = {
                     int(action_op["target"])
-                    for action_op in record["action"]
+                    for action_op in action
                     if action_op["op"] == "add_node"
                 }
                 removes = {
                     int(action_op["target"])
-                    for action_op in record["action"]
+                    for action_op in action
                     if action_op["op"] == "remove_node"
                 }
 
@@ -487,9 +551,20 @@ def rollout_ensemble(
 
 
 def rebuild_simulator(
-    store_entry: dict, diffusion_model: str, seed: int = 0
+    store_entry: dict,
+    diffusion_model: str,
+    seed: int = 0,
+    remove_semantics: str = spent,
 ) -> Simulator:
-    """Reconstruct a data/wm_simulator.Simulator from a stored graph."""
+    """Reconstruct a data/wm_simulator.Simulator from a stored graph.
+
+    `remove_semantics` MUST be the dataset's. It used to be hard-defaulted to
+    `spent` here while the model side of every comparison honoured the configured
+    value, so on a `blocked` (containment) dataset the ground-truth ensemble kept
+    counting each removed node as infected and the model's did not: `ens_count_bias`
+    picked up a spurious offset of about -k, and planning regret was measured
+    against an oracle running different dynamics from the one the data came from.
+    """
     edge_index = store_entry["edge_index"]
     ic_probs = store_entry["ic_probs"]
     num_nodes = store_entry["num_nodes"]
@@ -506,7 +581,12 @@ def rebuild_simulator(
         for edge in range(edge_index.shape[1])
     }
 
-    simulator = Simulator(graph, ic_prob_map=ic_prob_map, seed=seed)
+    simulator = Simulator(
+        graph,
+        ic_prob_map=ic_prob_map,
+        seed=seed,
+        remove_semantics=remove_semantics,
+    )
     simulator.reset(diffusion_model)
 
     return simulator
@@ -524,6 +604,8 @@ def planning_regret(
     seed: int = 0,
     threshold: float = 0.5,
     hide_edge_weights: bool = False,
+    remove_semantics: str = spent,
+    action_encoding: str = basic_encoding,
 ) -> dict[str, float]:
     """One-step greedy: model picks argmax predicted spread; compare true spread to oracle."""
     rng = np.random.default_rng(seed)
@@ -545,7 +627,10 @@ def planning_regret(
         gains = []
         for _ in range(mc_runs):
             simulator = rebuild_simulator(
-                store_entry, diffusion_model, seed=int(rng.integers(seed_upper_bound))
+                store_entry,
+                diffusion_model,
+                seed=int(rng.integers(seed_upper_bound)),
+                remove_semantics=remove_semantics,
             )
 
             for node in infected:
@@ -578,7 +663,7 @@ def planning_regret(
                 "next_marginal_infected": {},  # y is unused here (only X is read)
                 "next_marginal_frontier": {},
             }
-            X, _, _ = build_features(record, edge_index, num_nodes)
+            X, _, _ = build_features(record, edge_index, num_nodes, action_encoding)
             probs = (
                 torch.sigmoid(model(torch.from_numpy(X).to(device), graph_input))
                 .cpu()
@@ -611,6 +696,283 @@ def planning_regret(
 
 
 @torch.inference_mode()
+def _model_spread(
+    model: nn.Module,
+    seeds: list[int],
+    store_entry: dict,
+    graph_input,
+    diffusion_model: str,
+    device: torch.device,
+    horizon: int,
+    n_samples: int,
+    rng: np.random.Generator,
+    action_encoding: str = basic_encoding,
+) -> float:
+    """Expected final infected count under the MODEL rolled to `horizon`.
+
+    This is the world model used the way the coding agent uses it — free-running,
+    multi-step, sampled — rather than the single-step marginal sum
+    `planning_regret` scores with. A one-step score can rank seeds correctly while
+    the multi-step rollout it is supposed to replace does not.
+    """
+    num_nodes = store_entry["num_nodes"]
+    edge_index = store_entry["edge_index"]
+    totals = []
+
+    for _ in range(n_samples):
+        infected: set[int] = set()
+        frontier: set[int] = set()
+
+        for step in range(horizon + 1):
+            action = (
+                [{"op": "add_node", "target": int(node)} for node in seeds]
+                if step == 0
+                else []
+            )
+            record = {
+                "state": {"infected": sorted(infected), "frontier": sorted(frontier)},
+                "action": action,
+                "next_state": {"infected": [], "frontier": []},
+                "next_marginal_infected": {},
+                "next_marginal_frontier": {},
+            }
+            X, _, _ = build_features(record, edge_index, num_nodes, action_encoding)
+            probs = (
+                torch.sigmoid(model(torch.from_numpy(X).to(device), graph_input))
+                .cpu()
+                .numpy()
+            )
+
+            post_exo = infected | {int(node) for node in seeds} if step == 0 else infected
+            new_nodes = set(
+                np.nonzero(rng.random(num_nodes) < probs[:, 1])[0].tolist()
+            ) - post_exo
+
+            infected = post_exo | new_nodes
+            frontier = new_nodes
+
+            if step > 0 and not frontier:
+                break
+
+        totals.append(float(len(infected)))
+
+    return float(np.mean(totals))
+
+
+def _true_spread_set(
+    seeds: list[int],
+    store_entry: dict,
+    diffusion_model: str,
+    horizon: int,
+    mc_runs: int,
+    rng: np.random.Generator,
+    remove_semantics: str = spent,
+) -> float:
+    """Ground-truth expected final spread of a seed SET, rolled to the horizon."""
+    if not seeds:
+        return 0.0
+
+    bag = [ActionOp("add_node", int(node)) for node in seeds]
+    totals = []
+
+    for _ in range(mc_runs):
+        simulator = rebuild_simulator(
+            store_entry,
+            diffusion_model,
+            seed=int(rng.integers(seed_upper_bound)),
+            remove_semantics=remove_semantics,
+        )
+        state = simulator.advance(bag)
+
+        for _ in range(horizon):
+            if not state.frontier:
+                break
+            state = simulator.advance([])
+
+        totals.append(float(len(state.infected)))
+
+    return float(np.mean(totals))
+
+
+@torch.inference_mode()
+def planning_regret_budget(
+    model: nn.Module,
+    store_entry: dict,
+    diffusion_model: str,
+    device: torch.device,
+    k: int = 5,
+    horizon: int = 20,
+    n_candidates: int = 20,
+    mc_runs: int = 8,
+    model_samples: int = 20,
+    seed: int = 0,
+    hide_edge_weights: bool = False,
+    remove_semantics: str = spent,
+    action_encoding: str = basic_encoding,
+) -> dict[str, float]:
+    """
+    The IM problem as actually posed: pick k seeds, measure FULL-HORIZON spread.
+
+    `planning_regret` scores a single `add_node` by its one-step marginal against a
+    one-step oracle. That is a much easier question than the one the outer loop
+    asks, and it cannot distinguish a model that ranks seeds well for one step from
+    one that is a usable multi-step simulator — which is the whole claim. Here the
+    model builds the seed set greedily using its OWN multi-step rollout as the
+    objective, and every arm is then scored by the true simulator at the horizon.
+
+    The reference is greedy Monte Carlo over the same candidate pool, not a true
+    optimum: exact k-subset IM is NP-hard, and greedy-MC is the (1-1/e) benchmark
+    the literature reports against. `budget_regret_norm` is the honest headline —
+    the fraction of the achievable spread the model's seed set gives up.
+    """
+    rng = np.random.default_rng(seed)
+    num_nodes = store_entry["num_nodes"]
+    edge_index = store_entry["edge_index"]
+
+    graph_input = build_graph_input(
+        edge_index,
+        store_entry["ic_probs"],
+        num_nodes,
+        diffusion_model,
+        device,
+        hide_edge_weights,
+    )
+    degrees = np.zeros(num_nodes)
+    np.add.at(degrees, edge_index[0], 1)
+    np.add.at(degrees, edge_index[1], 1)
+
+    k = min(k, num_nodes)
+    candidates = sorted(
+        int(node)
+        for node in rng.choice(
+            num_nodes, size=min(n_candidates, num_nodes), replace=False
+        )
+    )
+
+    model.eval()
+
+    def greedy(score) -> list[int]:
+        chosen: list[int] = []
+        for _ in range(k):
+            pool = [node for node in candidates if node not in chosen]
+            if not pool:
+                break
+            chosen.append(max(pool, key=lambda node: score(chosen + [node])))
+        return chosen
+
+    model_seeds = greedy(
+        lambda seeds: _model_spread(
+            model,
+            seeds,
+            store_entry,
+            graph_input,
+            diffusion_model,
+            device,
+            horizon,
+            model_samples,
+            rng,
+            action_encoding,
+        )
+    )
+    greedy_seeds = greedy(
+        lambda seeds: _true_spread_set(
+            seeds,
+            store_entry,
+            diffusion_model,
+            horizon,
+            mc_runs,
+            rng,
+            remove_semantics,
+        )
+    )
+    degree_seeds = sorted(candidates, key=lambda node: -degrees[node])[:k]
+    random_seeds = [
+        int(node) for node in rng.choice(candidates, size=k, replace=False)
+    ]
+
+    def truth(seeds: list[int]) -> float:
+        # A larger mc_runs for scoring than for search: the search only needs the
+        # ranking, the reported number is the result
+        return _true_spread_set(
+            seeds,
+            store_entry,
+            diffusion_model,
+            horizon,
+            mc_runs * 4,
+            rng,
+            remove_semantics,
+        )
+
+    spreads = {
+        "model": truth(model_seeds),
+        "greedy_mc": truth(greedy_seeds),
+        "degree": truth(degree_seeds),
+        "random": truth(random_seeds),
+    }
+    reference = spreads["greedy_mc"]
+
+    results = {f"budget_spread_{name}": value for name, value in spreads.items()}
+    results.update(
+        {
+            "budget_k": float(k),
+            "budget_horizon": float(horizon),
+            "budget_regret_model": reference - spreads["model"],
+            "budget_regret_degree": reference - spreads["degree"],
+            "budget_regret_random": reference - spreads["random"],
+            # Fraction of the achievable spread given up. Scale-free, so it is
+            # comparable across graphs and k, which the raw regret is not.
+            "budget_regret_norm": (
+                (reference - spreads["model"]) / reference if reference > 0 else 0.0
+            ),
+            "budget_seed_overlap": (
+                len(set(model_seeds) & set(greedy_seeds)) / max(len(greedy_seeds), 1)
+            ),
+        }
+    )
+
+    return results
+
+
+@torch.inference_mode()
+def planning_regret_budget_multi(
+    model: nn.Module,
+    store: dict[str, dict],
+    diffusion_model: str,
+    device: torch.device,
+    n_graphs: int = 3,
+    seed: int = 0,
+    **kwargs,
+) -> dict[str, float]:
+    """Average `planning_regret_budget` over the first n_graphs graphs, with a std."""
+    graph_ids = list(store)[:n_graphs]
+
+    if not graph_ids:
+        raise ValueError("planning_regret_budget_multi: empty graph store")
+
+    per_graph = [
+        planning_regret_budget(
+            model,
+            store[graph_id],
+            diffusion_model,
+            device,
+            seed=seed + offset,
+            **kwargs,
+        )
+        for offset, graph_id in enumerate(graph_ids)
+    ]
+
+    results = {"budget_n_graphs": float(len(per_graph))}
+    for key in per_graph[0]:
+        values = np.array(
+            [graph_result[key] for graph_result in per_graph], dtype=np.float64
+        )
+        results[key] = float(values.mean())
+        results[f"{key}_std"] = float(values.std())
+
+    return results
+
+
+@torch.inference_mode()
 def planning_regret_multi(
     model: nn.Module,
     store: dict[str, dict],
@@ -623,6 +985,8 @@ def planning_regret_multi(
     seed: int = 0,
     threshold: float = 0.5,
     hide_edge_weights: bool = False,
+    remove_semantics: str = spent,
+    action_encoding: str = basic_encoding,
 ) -> dict[str, float]:
     """
     Average planning regret over the first n_graphs graphs in the store.
@@ -648,6 +1012,8 @@ def planning_regret_multi(
             seed=seed + offset,
             threshold=threshold,
             hide_edge_weights=hide_edge_weights,
+            remove_semantics=remove_semantics,
+            action_encoding=action_encoding,
         )
         for offset, graph_id in enumerate(graph_ids)
     ]
