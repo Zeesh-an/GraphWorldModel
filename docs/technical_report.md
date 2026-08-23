@@ -27,7 +27,16 @@ a behaviour training may or may not discover.
 
 Every number in this report was measured on this repository. Where a result is
 negative it is reported as negative, and where a measurement turned out to be
-testing the wrong thing that is stated with the evidence that revealed it.
+testing the wrong thing that is stated with the evidence that revealed it —
+§9 lists thirteen such cases, several of which had already produced a conclusion.
+
+**On uncertainty.** The two ablations the argument actually rests on — structured
+versus unconstrained head (§6.1.1) and privileged information (§6.3) — are run
+across seeds with everything else held fixed, so seed is a *blocking factor* and
+differences are reported as **paired** within-seed intervals. On five runs an
+unpaired interval is wide enough to hide effects the paired test resolves at
+$t > 80$; quoting two independent means would have understated every result
+below.
 
 ---
 
@@ -307,6 +316,43 @@ each step and ignores the evidence in earlier non-activations, so it
 over-activates. The implied fix is state augmentation — carrying a posterior over
 $\theta$ — not more fitting.
 
+### 6.1.1 Multi-seed confirmation (paired, n = 5)
+
+The single-run table above is one seed. Seeds 0–4 were trained per arm on
+identical data and hyper-parameters, so **seed is a blocking factor**: the honest
+comparison is the paired within-seed difference, not two independent means. All
+intervals are 95% $t$-intervals, $\pm$ half-width.
+
+| metric | structured | linear | paired diff | $t$ | 95% CI excl. 0 |
+| --- | --- | --- | --- | --- | --- |
+| `delta_f1` (one-step) | 0.8558 ± 0.0003 | 0.8512 ± 0.0008 | **+0.0046** | 12.65 | yes |
+| `brier_infected` | 0.0013 ± 0.0000 | 0.0014 ± 0.0001 | −0.0002 | −4.87 | yes |
+| `add_seed_success` | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | 0.0000 | — | no |
+| `remove_frontier_success` | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | 0.0000 | — | no |
+| `action_sensitivity` | 1.7126 ± 0.0177 | 1.9126 ± 0.0759 | −0.2000 | −7.83 | yes |
+| **`ens_marg_mae`** (rollout) | **0.0948 ± 0.0017** | 0.4832 ± 0.0124 | **−0.3884** | **−85.93** | yes |
+| **`ens_count_bias`** (rollout) | **−0.64 ± 1.05** | **+49.07 ± 1.12** | **−49.70** | **−88.13** | yes |
+| `effect_mae_norm` | 0.5328 ± 0.0002 | 0.5412 ± 0.0060 | −0.0084 | −3.98 | yes |
+
+**The separation is entirely in the rollout, and it is not marginal.** One-step
+`delta_f1` differs by 0.0046 — statistically resolvable only *because* the pairing
+removes seed variance, and practically negligible. Two rows down, the same models
+differ by **49.7 nodes** of terminal count bias on a 100-node graph. A reader who
+saw only the one-step row would conclude the heads are interchangeable.
+
+> **Two ways to score 1.0000.** `add_seed_success` and
+> `remove_frontier_success` are $1.0000 \pm 0.0000$ for **both** arms across all
+> five seeds. For the structured head this is the algebraic identity of §4,
+> which holds at *any* parameter value. For the linear head it is a **side effect
+> of saturation**: a model that drives nearly every node toward infection marks
+> seeded nodes infected for free. The same number, earned two different ways —
+> which is why §4 is stated as a proof about the functional form and not as an
+> empirical row. For the same reason the `action_sensitivity` row, on which the
+> linear head scores *higher* (1.91 vs 1.71), carries no directional meaning: a
+> saturating model is trivially sensitive.
+
+---
+
 ### 6.2 Graph generalization
 
 Frozen BA-100 checkpoint, no fine-tuning, six targets. Every target has
@@ -349,24 +395,79 @@ The **absolute** counterfactual error *improves* with size (−38%). What grows 
 ratio reflects that plus a shrinking per-node signal, not worse prediction. The
 follow-up is effect-magnitude calibration, not capacity.
 
-### 6.3 Privileged information
+### 6.3 Privileged information — does it learn dynamics or read the answer?
 
 The ablation is `--hide-edge-weights`: feed ones instead of $w_{uv}$, so the model
-must infer transmission from structure.
+must infer transmission from structure and state alone. The question it settles is
+the one a skeptic asks first — *is the world model learning propagation, or is it
+simply reading the transmission probability off its own input?*
 
-> **This ablation was vacuous as originally configured, and the fix is part of the
-> result.** Under `--prob-model weighted`, $p(u\to v) = 1/\text{in-degree}(v)$
-> **exactly** — measured correlation 1.000000, max error $10^{-8}$ — and
-> `log1p(degree)` is input channel 2. Masking $w$ removes nothing the model
-> cannot rebuild, and the measurement showed exactly that: `delta_f1`
-> 0.8559 ± 0.0000 hidden against 0.8557 ± 0.0003 visible, `effect_mae_norm`
-> 0.5327 vs 0.5328. **Identical, because nothing was hidden.**
->
-> A `--prob-model random` mode was added, drawing each edge's probability i.i.d.
-> (correlation with $1/\text{in-degree}$ drops from 1.0000 to 0.0342). The
-> ablation is being rerun on it; that run is the one that can answer the
-> question. **Until it lands, this report makes no claim about whether the model
-> learns dynamics or reads them off the input.**
+**The ablation was vacuous as originally configured, and the fix is part of the
+result.** Under `--prob-model weighted` the generator sets
+
+$$p(u \to v) \;=\; \frac{1}{\deg_{\text{in}}(v)}$$
+
+**exactly** — measured correlation between $w_{uv}$ and $1/\deg_{\text{in}}(v)$ is
+$1.000000$, maximum absolute error $9.93\times10^{-9}$ — while $\log(1+\deg)$ is
+input channel 2. Masking $w$ therefore removes nothing the model cannot rebuild
+from a channel it still has. The five-seed measurement says so unambiguously:
+
+| metric (n = 5 seeds) | visible $w$ | hidden $w$ | paired diff | $t$ | excl. 0 |
+| --- | --- | --- | --- | --- | --- |
+| `delta_f1` | 0.8558 ± 0.0003 | 0.8559 ± 0.0001 | −0.0001 | −0.88 | **no** |
+| `brier_infected` | 0.0013 ± 0.0000 | 0.0013 ± 0.0000 | +0.0000 | 2.65 | **no** |
+| `action_sensitivity` | 1.7126 ± 0.0177 | 1.7162 ± 0.0203 | −0.0036 | −2.00 | **no** |
+| `ens_marg_mae` | 0.0948 ± 0.0017 | 0.0946 ± 0.0017 | +0.0002 | 0.95 | **no** |
+| `ens_count_bias` | −0.64 ± 1.05 | −0.24 ± 0.66 | −0.39 | −0.80 | **no** |
+| `effect_mae_norm` | 0.5328 ± 0.0002 | 0.5327 ± 0.0002 | +0.0000 | 0.36 | **no** |
+
+**Nine of nine metrics fail to separate.** This row is not a discarded experiment;
+it is the **control that establishes the confound**, and without it the corrected
+number below cannot be interpreted.
+
+A `--prob-model random` mode was therefore added, drawing each edge's probability
+i.i.d. $w_{uv} \sim U(0.02,\,0.4)$, which drops the correlation with
+$1/\deg_{\text{in}}(v)$ from $1.0000$ to $0.0342$. Now the edge weight carries
+information no other channel supplies. Rerunning the identical ablation on it
+(three seeds, paired):
+
+| metric (n = 3 seeds) | visible $w$ | hidden $w$ | paired diff | $t$ | excl. 0 |
+| --- | --- | --- | --- | --- | --- |
+| `delta_f1` | 0.8225 ± 0.0023 | **0.7125 ± 0.0001** | **+0.1100** | 197.72 | yes |
+| `brier_infected` | 0.0014 ± 0.0000 | 0.0041 ± 0.0000 | −0.0027 | −260.70 | yes |
+| `action_sensitivity` | 1.7223 ± 0.0203 | 1.6607 ± 0.0129 | +0.0616 | 8.04 | yes |
+| `ens_marg_mae` | 0.0962 ± 0.0035 | 0.1187 ± 0.0035 | −0.0224 | −83.15 | yes |
+| `ens_count_bias` | +1.24 ± 2.39 | +0.79 ± 0.39 | +0.45 | 0.71 | no |
+| **`effect_mae_norm`** | **0.5635 ± 0.0017** | **0.6167 ± 0.0002** | **−0.0533** | −125.86 | yes |
+
+**Both halves of the answer are required, and both hold.**
+
+1. **The edge weight is genuinely used.** Hiding it costs 0.110 `delta_f1` and
+   moves `effect_mae_norm` from 0.5635 to 0.6167. The earlier "hiding costs
+   nothing" reading was an artefact of the generator, not a property of the model.
+
+2. **The model is not merely reading the answer.** With the transmission
+   probability entirely withheld, `effect_mae_norm` is **0.6167, still far below
+   the reachable null of 1.0** — the value a model that predicts *no action
+   effect* attains by construction (§5). Roughly **38% of the counterfactual
+   action effect survives** with no access to $w$ at all. The degradation is
+   real; the collapse is not.
+
+> **Why the null matters here.** Against an unbounded error metric, 0.6167 would
+> be uninterpretable. Against a null that a trivial model provably attains, it is
+> a statement with content: the hidden-weight model is 38% of the way from
+> "predicts nothing" to "predicts the effect exactly", using structure and state
+> only.
+
+| generator | $\mathrm{corr}(w,\,1/\deg_{\text{in}})$ | cost of hiding $w$ |
+| --- | --- | --- |
+| `weighted` (deterministic) | **1.000000** | none — 9/9 metrics not significant |
+| `random` (i.i.d.) | 0.0342 | `delta_f1` −0.110, $t = 197.7$ |
+
+The lesson generalises past this ablation: **an ablation is only as strong as the
+independence of the thing it removes.** The first configuration removed a variable
+that three other channels reconstructed, and reported a null result that meant
+nothing.
 
 ---
 
@@ -605,11 +706,19 @@ appeared to. They are listed because several early conclusions rested on them.
 | Log-likelihood inversion objective | unreached nodes clamp to −13.8 and dominate | linear in/out-of-observation score |
 | SL sources chosen by degree | degree baseline F1 **0.808** by construction | `--algorithms random` |
 | SL amplification too low | $k/\lvert y\rvert = 0.334$; a third of the observation *is* the answer | require $\lvert y\rvert \ge 5k$ |
-| **`hide-edge-weights` vacuous** | $w = 1/\text{in-degree}$ exactly, and degree is an input channel | added `--prob-model random`; rerun in flight |
+| **`hide-edge-weights` vacuous** | $w = 1/\text{in-degree}$ exactly ($r = 1.000000$), and degree is an input channel, so 9/9 metrics showed no effect | added `--prob-model random` ($r = 0.0342$); rerun gives `delta_f1` −0.110, $t = 197.7$ (§6.3) |
 
-The pattern is consistent enough to state as a rule: **an oracle that loses is a
-broken oracle, not a finding.** Four separate faults were caught by exactly that
-check.
+The pattern is consistent enough to state as two rules.
+
+**An oracle that loses is a broken oracle, not a finding.** Four separate faults
+were caught by exactly that check — every one of them presented as an interesting
+negative result before it was traced.
+
+**An ablation is only as strong as the independence of what it removes.** The
+`hide-edge-weights` ablation ran to completion, across five seeds, and reported a
+clean null — because the quantity it masked was reconstructible from a channel it
+left in place. No amount of statistical care would have caught that; only
+measuring $\mathrm{corr}(w,\,1/\deg_{\text{in}}) = 1.000000$ did.
 
 ---
 
@@ -620,15 +729,19 @@ The intended chain, with each link's status:
 | # | claim | status |
 | --- | --- | --- |
 | 1 | The model genuinely responds to interventions | **established** — 0.53 against a reachable 1.0 null; both trivial arms reach it |
-| 2 | Structured transition guarantees correct intervention semantics | **established** — exact at any parameter value; the unconstrained head saturates at +49 |
+| 1b | It learns dynamics rather than reading them off privileged input | **established** — withholding $w$ entirely still leaves `effect_mae_norm` at 0.6167, far below the 1.0 null, while costing a significant 0.110 `delta_f1` ($t = 197.7$) |
+| 2 | Structured transition guarantees correct intervention semantics | **established** — exact at any parameter value; over 5 paired seeds the unconstrained head saturates at **+49.07 ± 1.12** count bias against **−0.64 ± 1.05** ($t = -88.1$), while one-step `delta_f1` differs by only 0.0046 |
 | 3 | Those dynamics survive graph and policy shift | **established for prediction**; the action mechanism attenuates with size, not topology |
 | 4 | The same frozen model transfers between tasks sharing the world | **established at two levels** — oracle-parity on Adaptive IM, 96.2% of oracle on Reconstruction; fails at `MECHANISM_ONLY` exactly as classified |
 | 5 | The resulting rankings reduce expensive evaluation | **established in trusted calls** (43–49%, and 3–4× budget efficiency in the closed loop); **not established in wall-clock** on this benchmark, with the break-even quantified |
 
 **Boundaries.** Single graph family for training. IC is the vehicle; LT is weaker
-and diagnosed. BA-100 is degenerate for ranking. The privileged-information
-question is open until the `--prob-model random` rerun lands. Every claim above is
-IM-trained; five of the eight registered tasks have no experiment.
+and diagnosed. BA-100 is degenerate for ranking, which is also why no large-graph
+wall-clock break-even is reported: the only large graphs available are BA, and a
+break-even computed where the ranking does not separate has an unbounded and
+uninterpretable denominator. Every claim above is IM-trained; five of the eight
+registered tasks have no experiment. The privileged-information result rests on
+three seeds, not five.
 
 **The honest one-sentence version.** An action-conditioned graph world model with
 a structured transition learns reusable dynamics that survive 10× size and three

@@ -219,15 +219,19 @@ Actual cause: under-reaction. The predicted effect magnitude falls to 15.5% of
 Does NOT support:
              "the action mechanism fails at scale". It attenuates. The right
              follow-up is calibration of the effect magnitude, not capacity.
-Next:        the `--hide-edge-weights` run is now the priority it always was: if
-             the encoder is contributing nothing because `w` is handed to the
-             head, that ablation is the only thing separating "learned dynamics"
-             from "read the answer off the input".
+Next:        RESOLVED -- see section 5.2. The `--hide-edge-weights` ablation was
+             vacuous as configured (w was exactly 1/in-degree, r = 1.000000, and
+             degree is an input channel). Rerun on i.i.d. weights: hiding w costs
+             0.110 delta_f1 (t = 197.7), and effect_mae_norm still reaches 0.6167
+             against the 1.0 null. Both halves hold -- w is used, and the model
+             does not merely read the answer off it.
 ```
 
 ---
 
 ## 5. Q2 — structured vs linear ✅
+
+### 5.1 Single-seed table
 
 Same data, split, seed, budget, evaluation suite. `linear` run at both
 `pos_weight` settings because `off` was chosen *for* the structured head.
@@ -265,6 +269,76 @@ non-activations. The fix is state augmentation, not more fitting.
 
 ---
 
+### 5.2 Multi-seed confirmation (paired, n = 5 seeds) ✅
+
+Seeds 0-4 per arm, identical data and hyper-parameters. Seed is a blocking
+factor, so differences are PAIRED within seed. 95% t-intervals.
+
+| metric | structured | linear | paired diff | t | excl. 0 |
+| --- | --- | --- | --- | --- | --- |
+| delta_f1 (one-step) | 0.8558 ± 0.0003 | 0.8512 ± 0.0008 | +0.0046 | 12.65 | yes |
+| **ens_marg_mae** | **0.0948 ± 0.0017** | 0.4832 ± 0.0124 | **−0.3884** | **−85.93** | yes |
+| **ens_count_bias** | **−0.64 ± 1.05** | **+49.07 ± 1.12** | **−49.70** | **−88.13** | yes |
+| effect_mae_norm | 0.5328 ± 0.0002 | 0.5412 ± 0.0060 | −0.0084 | −3.98 | yes |
+| add_seed_success | 1.0000 ± 0.0000 | 1.0000 ± 0.0000 | 0.0000 | — | no |
+| action_sensitivity | 1.7126 ± 0.0177 | 1.9126 ± 0.0759 | −0.2000 | −7.83 | yes |
+
+```
+Question:    is the single-seed +49.28 a fluke of one run?
+Answer:      no. +49.07 ± 1.12 across five seeds, t = -88.1 paired.
+Key point:   one-step delta_f1 separates the heads by 0.0046 and rollout count
+             bias separates them by 49.7 nodes on a 100-node graph. A reader who
+             saw only the one-step row would call the heads interchangeable.
+Careful:     add_seed_success is 1.0000 for BOTH arms. For structured that is the
+             algebraic identity; for linear it is a side effect of saturation --
+             a model that infects everything marks seeds infected for free. Same
+             number, two different mechanisms. Likewise action_sensitivity favours
+             linear (1.91 vs 1.71) and means nothing: a saturating model is
+             trivially sensitive.
+```
+
+Artefact: `results/seeds/summary.json` (15 runs).
+
+---
+
+## 5.3 Privileged information — learned dynamics vs reading the input ✅
+
+| generator | corr(w, 1/in-deg) | cost of hiding w |
+| --- | --- | --- |
+| `weighted` (deterministic) | **1.000000** | none -- 9/9 metrics not significant (n=5) |
+| `random` (i.i.d. U(0.02,0.4)) | 0.0342 | delta_f1 −0.110, t = 197.7 (n=3) |
+
+On the corrected generator, paired over 3 seeds:
+
+| metric | visible w | hidden w | paired diff | t | excl. 0 |
+| --- | --- | --- | --- | --- | --- |
+| delta_f1 | 0.8225 ± 0.0023 | **0.7125 ± 0.0001** | **+0.1100** | 197.72 | yes |
+| brier_infected | 0.0014 | 0.0041 | −0.0027 | −260.70 | yes |
+| ens_marg_mae | 0.0962 ± 0.0035 | 0.1187 ± 0.0035 | −0.0224 | −83.15 | yes |
+| **effect_mae_norm** | **0.5635 ± 0.0017** | **0.6167 ± 0.0002** | **−0.0533** | −125.86 | yes |
+
+```
+Question:    does the world model learn propagation, or read the transmission
+             probability off its own input channel?
+Answer:      it learns it. Both halves are needed and both hold.
+             (1) w IS used -- hiding it costs 0.110 delta_f1.
+             (2) w is NOT the whole story -- with w fully withheld,
+                 effect_mae_norm = 0.6167, still far below the reachable 1.0
+                 null, i.e. ~38% of the counterfactual action effect survives
+                 from structure and state alone.
+Supports:    "the encoder learns reusable graph dynamics".
+Does NOT     "the model is robust to losing edge weights" -- it degrades
+support:     significantly and measurably.
+Method note: the first configuration of this ablation ran to completion over five
+             seeds and reported a clean null, because the masked quantity was
+             exactly reconstructible from a channel left in place. An ablation is
+             only as strong as the independence of what it removes.
+```
+
+Artefact: `results/priv/summary.json` (6 runs).
+
+---
+
 ## 6. Q1 — action conditioning ✅
 
 | | IC (ID) | IC (worst OOD, BA-1000) | LT |
@@ -298,11 +372,16 @@ graph size (§4).
 
 | | status | headline |
 | --- | --- | --- |
-| **Q1** | 🟩 ~90% (IC) / 🟨 40% (LT) | 0.53 vs a 1.0 null; both trivial baselines fail; survives all 6 shifts |
-| **Q2** | 🟩 ~95% | linear +49.28 vs structured −0.197 on identical data; guarantees exact at any parameter |
+| **Q1** | 🟩 ~95% (IC) / 🟨 40% (LT) | 0.53 vs a 1.0 null; both trivial baselines fail; survives all 6 shifts; **withholding edge weights entirely still leaves 0.6167 < 1.0**, so it is not reading the answer off the input |
+| **Q2** | 🟩 ~98% | **5 paired seeds**: linear +49.07 ± 1.12 vs structured −0.64 ± 1.05 count bias, t = −88.1, while one-step ΔF1 differs by 0.0046; guarantees exact at any parameter |
 | **Q3** | 🟩 ~75% | prediction transfers to 10× size and 3 unseen topologies frozen; action mechanism decays with size, not topology |
 | **Q4** | 🟩 ~80% | **+43–49% trusted-call reduction on WS/SBM**; BA negative explained by candidate degeneracy |
 | **Q5** | 🟩 ~80% | **frozen IM checkpoint indistinguishable from a 372,480-call oracle** (t=1.05) at zero cost |
 
-Remaining: depth study (running), BA-500 ranking (running), LT extensions,
-synthetic→real, and the six unported tasks.
+Remaining: LT extensions, synthetic→real, and the six unported tasks. The depth
+study is complete (receptive-field hypothesis refuted, §4.1). Large-graph
+wall-clock break-even is **deliberately not reported**: the only large graphs
+available are BA, and BA is the family where ranking is degenerate, so the
+break-even denominator (calls saved) is ~0 and the threshold is unbounded and
+uninterpretable. That is a limitation of the available graph pool, not a
+negative result.

@@ -1,0 +1,324 @@
+{
+  "question": "Q2_structured_head_multi_seed",
+  "design": "same data, same hyper-parameters, seeds 0-4; seed is a blocking factor so differences are PAIRED within seed",
+  "provenance": {
+    "structured": {
+      "data_dir": "results/influence_maximization/ba100/data",
+      "head": "structured",
+      "hide_edge_weights": false,
+      "split_mode": "graph_disjoint"
+    },
+    "linear": {
+      "data_dir": "results/influence_maximization/ba100/data",
+      "head": "linear",
+      "hide_edge_weights": false,
+      "split_mode": "graph_disjoint"
+    },
+    "hidew": {
+      "data_dir": "results/influence_maximization/ba100/data",
+      "head": "structured",
+      "hide_edge_weights": true,
+      "split_mode": "graph_disjoint"
+    }
+  },
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "per_arm": {
+    "structured": {
+      "delta_f1": {
+        "mean": 0.8557975781402003,
+        "ci95": 0.0003103098725638352,
+        "n": 5
+      },
+      "new_inf_f1": {
+        "mean": 0.8557975781402003,
+        "ci95": 0.0003103098725638352,
+        "n": 5
+      },
+      "brier_inf": {
+        "mean": 0.0012951496399066862,
+        "ci95": 9.292584667001208e-06,
+        "n": 5
+      },
+      "add_seed": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 5
+      },
+      "rm_frontier": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 5
+      },
+      "act_sens": {
+        "mean": 1.7126353790613718,
+        "ci95": 0.01767339106058138,
+        "n": 5
+      },
+      "marg_mae": {
+        "mean": 0.0947542979642749,
+        "ci95": 0.001716848168667635,
+        "n": 5
+      },
+      "count_bias": {
+        "mean": -0.6362909331163376,
+        "ci95": 1.0483827661149596,
+        "n": 5
+      },
+      "effect_mae_norm": {
+        "mean": 0.5327600717544556,
+        "ci95": 0.00022944568585223473,
+        "n": 5
+      }
+    },
+    "linear": {
+      "delta_f1": {
+        "mean": 0.8512369395558463,
+        "ci95": 0.0008141321426358338,
+        "n": 5
+      },
+      "new_inf_f1": {
+        "mean": 0.8512369395558463,
+        "ci95": 0.0008141321426358338,
+        "n": 5
+      },
+      "brier_inf": {
+        "mean": 0.0014494125404431058,
+        "ci95": 8.51522028014257e-05,
+        "n": 5
+      },
+      "add_seed": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 5
+      },
+      "rm_frontier": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 5
+      },
+      "act_sens": {
+        "mean": 1.9126353790613717,
+        "ci95": 0.07592028069177731,
+        "n": 5
+      },
+      "marg_mae": {
+        "mean": 0.483162928700447,
+        "ci95": 0.012431711898220581,
+        "n": 5
+      },
+      "count_bias": {
+        "mean": 49.06841965994907,
+        "ci95": 1.1229193125205903,
+        "n": 5
+      },
+      "effect_mae_norm": {
+        "mean": 0.541170060634613,
+        "ci95": 0.00596549554638529,
+        "n": 5
+      }
+    },
+    "hidew": {
+      "delta_f1": {
+        "mean": 0.855907516823233,
+        "ci95": 0.00010507447374213123,
+        "n": 5
+      },
+      "new_inf_f1": {
+        "mean": 0.855907516823233,
+        "ci95": 0.00010507447374213123,
+        "n": 5
+      },
+      "brier_inf": {
+        "mean": 0.0012891104706091784,
+        "ci95": 9.528394463165524e-06,
+        "n": 5
+      },
+      "add_seed": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 5
+      },
+      "rm_frontier": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 5
+      },
+      "act_sens": {
+        "mean": 1.716245487364621,
+        "ci95": 0.02025516210021216,
+        "n": 5
+      },
+      "marg_mae": {
+        "mean": 0.09460070281475783,
+        "ci95": 0.001661291444459353,
+        "n": 5
+      },
+      "count_bias": {
+        "mean": -0.24317125228111003,
+        "ci95": 0.6551812261776351,
+        "n": 5
+      },
+      "effect_mae_norm": {
+        "mean": 0.5327334403991699,
+        "ci95": 0.0001596137873167462,
+        "n": 5
+      }
+    }
+  },
+  "paired_vs_structured": {
+    "structured_minus_linear": {
+      "delta_f1": {
+        "mean_diff": 0.004560638584353826,
+        "ci95": 0.0010008701821882734,
+        "t": 12.649325492429035,
+        "n_pairs": 5,
+        "excludes_zero": true,
+        "higher_is_better": true
+      },
+      "new_inf_f1": {
+        "mean_diff": 0.004560638584353826,
+        "ci95": 0.0010008701821882734,
+        "t": 12.649325492429035,
+        "n_pairs": 5,
+        "excludes_zero": true,
+        "higher_is_better": true
+      },
+      "brier_inf": {
+        "mean_diff": -0.00015426290053641972,
+        "ci95": 8.792936001492249e-05,
+        "t": -4.8702027606754505,
+        "n_pairs": 5,
+        "excludes_zero": true,
+        "higher_is_better": false
+      },
+      "add_seed": {
+        "mean_diff": 0.0,
+        "ci95": 0.0,
+        "t": NaN,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "rm_frontier": {
+        "mean_diff": 0.0,
+        "ci95": 0.0,
+        "t": NaN,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "act_sens": {
+        "mean_diff": -0.20000000000000004,
+        "ci95": 0.07092405073028701,
+        "t": -7.828092082773701,
+        "n_pairs": 5,
+        "excludes_zero": true,
+        "higher_is_better": true
+      },
+      "marg_mae": {
+        "mean_diff": -0.38840863073617216,
+        "ci95": 0.012547253383397895,
+        "t": -85.93293894505084,
+        "n_pairs": 5,
+        "excludes_zero": true,
+        "higher_is_better": false
+      },
+      "count_bias": {
+        "mean_diff": -49.704710593065414,
+        "ci95": 1.5656118435530462,
+        "t": -88.13185539859805,
+        "n_pairs": 5,
+        "excludes_zero": true,
+        "higher_is_better": null
+      },
+      "effect_mae_norm": {
+        "mean_diff": -0.008409988880157471,
+        "ci95": 0.0058720454853002065,
+        "t": -3.975808632572875,
+        "n_pairs": 5,
+        "excludes_zero": true,
+        "higher_is_better": false
+      }
+    },
+    "structured_minus_hidew": {
+      "delta_f1": {
+        "mean_diff": -0.00010993868303255105,
+        "ci95": 0.00034651551832169046,
+        "t": -0.8807391529721804,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "new_inf_f1": {
+        "mean_diff": -0.00010993868303255105,
+        "ci95": 0.00034651551832169046,
+        "t": -0.8807391529721804,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "brier_inf": {
+        "mean_diff": 6.0391692975079144e-06,
+        "ci95": 6.317607957975976e-06,
+        "t": 2.6536521546444654,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": false
+      },
+      "add_seed": {
+        "mean_diff": 0.0,
+        "ci95": 0.0,
+        "t": NaN,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "rm_frontier": {
+        "mean_diff": 0.0,
+        "ci95": 0.0,
+        "t": NaN,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "act_sens": {
+        "mean_diff": -0.0036101083032491488,
+        "ci95": 0.005010830324909633,
+        "t": -2.0000000000000737,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "marg_mae": {
+        "mean_diff": 0.00015359514951706344,
+        "ci95": 0.00044930612677206535,
+        "t": 0.9489746737321307,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": false
+      },
+      "count_bias": {
+        "mean_diff": -0.3931196808352274,
+        "ci95": 1.3619592346577372,
+        "t": -0.8012723187510359,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": null
+      },
+      "effect_mae_norm": {
+        "mean_diff": 2.6631355285644532e-05,
+        "ci95": 0.00020361029121795864,
+        "t": 0.36308892753269945,
+        "n_pairs": 5,
+        "excludes_zero": false,
+        "higher_is_better": false
+      }
+    }
+  }
+}

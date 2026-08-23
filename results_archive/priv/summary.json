@@ -1,0 +1,195 @@
+{
+  "question": "Q2_structured_head_multi_seed",
+  "design": "same data, same hyper-parameters, seeds 0-4; seed is a blocking factor so differences are PAIRED within seed",
+  "provenance": {
+    "seen": {
+      "data_dir": "results/priv/ba100_rand/data",
+      "head": "structured",
+      "hide_edge_weights": false,
+      "split_mode": "graph_disjoint"
+    },
+    "hidden": {
+      "data_dir": "results/priv/ba100_rand/data",
+      "head": "structured",
+      "hide_edge_weights": true,
+      "split_mode": "graph_disjoint"
+    }
+  },
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "per_arm": {
+    "seen": {
+      "delta_f1": {
+        "mean": 0.822455382102728,
+        "ci95": 0.0023342396713150926,
+        "n": 3
+      },
+      "new_inf_f1": {
+        "mean": 0.822455382102728,
+        "ci95": 0.0023342396713150926,
+        "n": 3
+      },
+      "brier_inf": {
+        "mean": 0.0013680843325518932,
+        "ci95": 4.204294747840238e-05,
+        "n": 3
+      },
+      "add_seed": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 3
+      },
+      "rm_frontier": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 3
+      },
+      "act_sens": {
+        "mean": 1.7223122636412753,
+        "ci95": 0.02026617196548406,
+        "n": 3
+      },
+      "marg_mae": {
+        "mean": 0.09623763666798672,
+        "ci95": 0.0034886528736220693,
+        "n": 3
+      },
+      "count_bias": {
+        "mean": 1.2380890559043762,
+        "ci95": 2.3947522536739547,
+        "n": 3
+      },
+      "effect_mae_norm": {
+        "mean": 0.5634810129801432,
+        "ci95": 0.0016821531059904716,
+        "n": 3
+      }
+    },
+    "hidden": {
+      "delta_f1": {
+        "mean": 0.7124882091495301,
+        "ci95": 6.833288908180532e-05,
+        "n": 3
+      },
+      "new_inf_f1": {
+        "mean": 0.7124882091495301,
+        "ci95": 6.833288908180532e-05,
+        "n": 3
+      },
+      "brier_inf": {
+        "mean": 0.004094325432475249,
+        "ci95": 4.577900361770945e-06,
+        "n": 3
+      },
+      "add_seed": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 3
+      },
+      "rm_frontier": {
+        "mean": 1.0,
+        "ci95": 0.0,
+        "n": 3
+      },
+      "act_sens": {
+        "mean": 1.6607239330091843,
+        "ci95": 0.01294332255713521,
+        "n": 3
+      },
+      "marg_mae": {
+        "mean": 0.11865278866142033,
+        "ci95": 0.003531058770066473,
+        "n": 3
+      },
+      "count_bias": {
+        "mean": 0.7887374421575623,
+        "ci95": 0.38672369231027265,
+        "n": 3
+      },
+      "effect_mae_norm": {
+        "mean": 0.6167482535044352,
+        "ci95": 0.00019727183492616117,
+        "n": 3
+      }
+    }
+  },
+  "paired_vs_seen": {
+    "seen_minus_hidden": {
+      "delta_f1": {
+        "mean_diff": 0.10996717295319787,
+        "ci95": 0.0023931917536152126,
+        "t": 197.72287135069735,
+        "n_pairs": 3,
+        "excludes_zero": true,
+        "higher_is_better": true
+      },
+      "new_inf_f1": {
+        "mean_diff": 0.10996717295319787,
+        "ci95": 0.0023931917536152126,
+        "t": 197.72287135069735,
+        "n_pairs": 3,
+        "excludes_zero": true,
+        "higher_is_better": true
+      },
+      "brier_inf": {
+        "mean_diff": -0.0027262410999233564,
+        "ci95": 4.499847926158389e-05,
+        "t": -260.6980423666274,
+        "n_pairs": 3,
+        "excludes_zero": true,
+        "higher_is_better": false
+      },
+      "add_seed": {
+        "mean_diff": 0.0,
+        "ci95": 0.0,
+        "t": NaN,
+        "n_pairs": 3,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "rm_frontier": {
+        "mean_diff": 0.0,
+        "ci95": 0.0,
+        "t": NaN,
+        "n_pairs": 3,
+        "excludes_zero": false,
+        "higher_is_better": true
+      },
+      "act_sens": {
+        "mean_diff": 0.06158833063209079,
+        "ci95": 0.03295815986995927,
+        "t": 8.040940020788065,
+        "n_pairs": 3,
+        "excludes_zero": true,
+        "higher_is_better": true
+      },
+      "marg_mae": {
+        "mean_diff": -0.02241515199343364,
+        "ci95": 0.001160043178017694,
+        "t": -83.14552497310041,
+        "n_pairs": 3,
+        "excludes_zero": true,
+        "higher_is_better": false
+      },
+      "count_bias": {
+        "mean_diff": 0.44935161374681404,
+        "ci95": 2.7343950611241,
+        "t": 0.7071253241503667,
+        "n_pairs": 3,
+        "excludes_zero": false,
+        "higher_is_better": null
+      },
+      "effect_mae_norm": {
+        "mean_diff": -0.05326724052429199,
+        "ci95": 0.001821113248518805,
+        "t": -125.86198917747404,
+        "n_pairs": 3,
+        "excludes_zero": true,
+        "higher_is_better": false
+      }
+    }
+  }
+}
