@@ -45,6 +45,8 @@ from world_model.wm_action_eval import action_conditioning_report
 from world_model.wm_policies import resolve as resolve_policies
 from world_model.wm_eval import (
     evaluate_one_step,
+    planning_split_test,
+    valid_planning_splits,
     planning_regret_budget_multi,
     planning_regret_multi,
     rollout_ensemble,
@@ -78,6 +80,10 @@ class TrainConfig:
     plan_budget_k: int = 0
     plan_budget_graphs: int = 3
     plan_budget_horizon: int = 20
+    # Which graphs the planning evaluators score. `test` (the default) restricts
+    # them to held-out graphs; `legacy` reproduces the historical
+    # `list(store)[:n]`, which mixes splits and is not a held-out number.
+    planning_split: str = planning_split_test
     hidden_dim: int = 64
     n_layers: int = 3
     n_heads: int = 4
@@ -479,6 +485,10 @@ def train_world_model(config: TrainConfig) -> dict:
             device,
             n_graphs=config.plan_graphs,
             seed=config.seed,
+            # Held-out graphs only. Without out_dir the selector cannot see split
+            # membership and falls back to `legacy`, which is not a test metric.
+            out_dir=config.data_dir,
+            planning_split=config.planning_split,
             hide_edge_weights=config.hide_edge_weights,
             remove_semantics=config.remove_semantics,
             action_encoding=config.action_encoding,
@@ -494,6 +504,8 @@ def train_world_model(config: TrainConfig) -> dict:
             seed=config.seed,
             k=config.plan_budget_k,
             horizon=config.plan_budget_horizon,
+            out_dir=config.data_dir,
+            planning_split=config.planning_split,
             hide_edge_weights=config.hide_edge_weights,
             remove_semantics=config.remove_semantics,
             action_encoding=config.action_encoding,
@@ -581,6 +593,16 @@ if __name__ == "__main__":
         help="k-seed full-horizon planning regret vs greedy-MC; 0 disables. This "
         "is the IM problem as posed, unlike the single-step --plan-demo "
         "(default: 0).",
+    )
+    parser.add_argument(
+        "--planning-split",
+        type=str,
+        default=planning_split_test,
+        choices=list(valid_planning_splits),
+        help="which graphs the planning evaluators score. `test` (default) uses "
+        "held-out graphs only and reports train_overlap/val_overlap so that can "
+        "be checked; `legacy` reproduces the old list(store)[:n] selection, which "
+        "mixes splits and is NOT a held-out number.",
     )
     parser.add_argument(
         "--plan-budget-graphs",

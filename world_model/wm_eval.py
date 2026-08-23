@@ -933,6 +933,107 @@ def planning_regret_budget(
     return results
 
 
+# Graph-selection modes for the planning evaluators.
+#
+#   test     score ONLY graphs whose transitions live in the test split. The
+#            correct default: `store` holds every graph the dataset was built
+#            from, so taking the first n of them scores the model on graphs it
+#            trained on, and the resulting regret is not a held-out number.
+#
+#   legacy   the historical `list(store)[:n]`, which mixes splits. Kept so a
+#            pre-2026-08-22 planning number can be reproduced, and named so it
+#            cannot be selected by accident.
+planning_split_test = "test"
+planning_split_legacy = "legacy"
+valid_planning_splits = (planning_split_test, planning_split_legacy)
+
+
+def graphs_in_split(
+    out_dir: str | Path, diffusion_model: str, split: str
+) -> list[str]:
+    """Graph ids whose transitions appear in one split, in store order."""
+    path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
+
+    if not path.exists():
+        return []
+
+    seen = {}
+
+    for line in path.read_text().splitlines():
+        if line.strip():
+            seen.setdefault(json.loads(line)["graph_id"], None)
+
+    return list(seen)
+
+
+def select_planning_graphs(
+    store: dict[str, dict],
+    n_graphs: int,
+    out_dir: str | Path | None,
+    diffusion_model: str,
+    planning_split: str = planning_split_test,
+) -> tuple[list[str], dict]:
+    """
+    Choose the graphs a planning metric scores, and report where they came from.
+
+    Returns `(graph_ids, provenance)`. The provenance block is not decoration: a
+    planning number is only a generalization claim if the graphs behind it were
+    held out, and `train_overlap` / `val_overlap` are what let a reader check
+    that instead of taking it on trust. Both must be 0 for a reported test
+    result.
+    """
+    if planning_split not in valid_planning_splits:
+        raise ValueError(
+            f"unknown planning_split {planning_split!r}; "
+            f"choose one of {list(valid_planning_splits)}"
+        )
+
+    if planning_split == planning_split_legacy or out_dir is None:
+        graph_ids = list(store)[:n_graphs]
+        provenance = {
+            "planning_split": planning_split_legacy,
+            "planning_graph_ids": graph_ids,
+            "n_planning_graphs": len(graph_ids),
+            # Unknown rather than 0: without the dataset directory there is no
+            # way to tell which split these graphs came from, and reporting 0
+            # would assert something that was never checked.
+            "train_overlap": None,
+            "val_overlap": None,
+        }
+
+        return graph_ids, provenance
+
+    in_split = {
+        name: set(graphs_in_split(out_dir, diffusion_model, name))
+        for name in ("train", "val", "test")
+    }
+    # Store order, not file order, so the choice is stable across reruns and
+    # independent of how the JSONL happens to be written.
+    candidates = [g for g in store if g in in_split["test"]]
+
+    if not candidates:
+        raise ValueError(
+            f"planning evaluation asked for split={planning_split!r} but no graph "
+            f"in the store appears in transitions_{diffusion_model}_test.jsonl. "
+            f"With a single-graph dataset, or one generated with --split-mode "
+            f"episode_random, there are no held-out graphs to plan on; pass "
+            f"planning_split={planning_split_legacy!r} to reproduce the old "
+            f"(non-held-out) behaviour explicitly."
+        )
+
+    graph_ids = candidates[:n_graphs]
+    chosen = set(graph_ids)
+    provenance = {
+        "planning_split": planning_split_test,
+        "planning_graph_ids": graph_ids,
+        "n_planning_graphs": len(graph_ids),
+        "train_overlap": len(chosen & in_split["train"]),
+        "val_overlap": len(chosen & in_split["val"]),
+    }
+
+    return graph_ids, provenance
+
+
 @torch.inference_mode()
 def planning_regret_budget_multi(
     model: nn.Module,
@@ -941,10 +1042,20 @@ def planning_regret_budget_multi(
     device: torch.device,
     n_graphs: int = 3,
     seed: int = 0,
+    out_dir: str | Path | None = None,
+    planning_split: str = planning_split_test,
     **kwargs,
 ) -> dict[str, float]:
-    """Average `planning_regret_budget` over the first n_graphs graphs, with a std."""
-    graph_ids = list(store)[:n_graphs]
+    """
+    Average `planning_regret_budget` over held-out graphs, with a std.
+
+    `out_dir` is the dataset directory; without it the selection falls back to
+    `legacy` and says so in the provenance, because split membership cannot be
+    determined from the store alone.
+    """
+    graph_ids, provenance = select_planning_graphs(
+        store, n_graphs, out_dir, diffusion_model, planning_split
+    )
 
     if not graph_ids:
         raise ValueError("planning_regret_budget_multi: empty graph store")
@@ -969,6 +1080,8 @@ def planning_regret_budget_multi(
         results[key] = float(values.mean())
         results[f"{key}_std"] = float(values.std())
 
+    results.update(provenance)
+
     return results
 
 
@@ -987,16 +1100,25 @@ def planning_regret_multi(
     hide_edge_weights: bool = False,
     remove_semantics: str = spent,
     action_encoding: str = basic_encoding,
+    out_dir: str | Path | None = None,
+    planning_split: str = planning_split_test,
 ) -> dict[str, float]:
     """
-    Average planning regret over the first n_graphs graphs in the store.
+    Average planning regret over held-out graphs, with a cross-graph std.
 
     Single-graph planning regret ties across backbones because the per-graph
     argmax choice is coarse (most models pick the same candidate). Averaging over
     several graphs — each with its own seed offset so the sampled states differ —
     gives the metric real resolution, plus a cross-graph std as an error bar.
+
+    The graphs come from the TEST split. Scoring `list(store)[:n]` instead — what
+    this did before — puts training graphs in a metric that is read as evidence
+    the model plans well on graphs it has not seen.
     """
-    graph_ids = list(store)[:n_graphs]
+    graph_ids, provenance = select_planning_graphs(
+        store, n_graphs, out_dir, diffusion_model, planning_split
+    )
+
     if not graph_ids:
         raise ValueError("planning_regret_multi: empty graph store")
 
@@ -1025,5 +1147,7 @@ def planning_regret_multi(
         )
         results[key] = float(values.mean())
         results[f"{key}_std"] = float(values.std())
+
+    results.update(provenance)
 
     return results

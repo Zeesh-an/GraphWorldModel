@@ -187,14 +187,37 @@ class LTThresholdHead(nn.Module):
     ) -> torch.Tensor:
         num_nodes = hidden.shape[0]
 
-        # Apply the exogenous action (T_exo): add_node -> active; remove_node -> susceptible.
-        # One expression covers both remove semantics: under `spent` the node resets to
-        # status 0 and may re-activate through its (intact) edges; under `blocked` those
-        # edges are gone from edge_index, so active_fraction is 0 and the gate holds it
-        # down. No remove_semantics branch is needed here.
-        active = torch.clamp(X[:, ch_infected] + X[:, ch_add], max=1.0) * (
+        # LT's frontier is defined relative to the state BEFORE the action:
+        # `Simulator.advance` snapshots `previous_active` first, applies the bag,
+        # steps, and returns `frontier = active - previous_active`. So the head
+        # needs both activities, not one.
+        #
+        #   active_pre   who was active at t, before the action. Only the frontier
+        #                channel reads it.
+        #   active_post  who is active after T_exo. This is what propagates, and
+        #                what the infected channel is monotone in.
+        #
+        # Collapsing the two (which this head used to do) breaks BOTH node ops in
+        # opposite directions, and the dataset says so:
+        #
+        #   add_node    true next-frontier at the target is 1.0 (it was not active
+        #               before, it is now) -- the head predicted 0.
+        #   remove_node true next-frontier at the target is 0.0 (it WAS active
+        #               before, so re-activating is not "new") -- the head
+        #               predicted p_new, measured up to 0.92.
+        #
+        # IC is unaffected and deliberately not changed: its frontier is the set of
+        # status-1 spreaders after the step, so a seeded node is correctly 0 there.
+        active_pre = X[:, ch_infected]  # shape: (N,)
+
+        # T_exo: add_node -> active; remove_node -> susceptible. One expression
+        # covers both remove semantics: under `spent` the node resets to status 0
+        # and may re-activate through its (intact) edges; under `blocked` those
+        # edges are gone from edge_index, so active_fraction is 0 and the gate
+        # holds it down.
+        active = torch.clamp(active_pre + X[:, ch_add], max=1.0) * (
             1.0 - X[:, ch_remove]
-        )  # shape: (N,)
+        )  # shape: (N,), post-action
 
         edge_index, edge_weight = graph.edge_index, graph.edge_weight
 
@@ -222,9 +245,15 @@ class LTThresholdHead(nn.Module):
         gate = (active_fraction > 0).to(active_fraction.dtype)
         p_new = gate * torch.sigmoid(tau * (active_fraction - theta_hat))  # shape: (N,)
 
-        p_newly = (1.0 - active) * p_new  # susceptibles only
+        p_newly = (1.0 - active) * p_new  # post-action susceptibles only
         y_inf = active + p_newly
-        y_fr = p_newly  # newly activated = new frontier
+
+        # Newly active RELATIVE TO THE PRE-ACTION STATE, which is what
+        # `Simulator.advance` labels. clamp at 0 because a `spent` removal makes
+        # y_inf < active_pre for exactly one step: the node was active, the action
+        # reset it to susceptible, and it may or may not re-cross its threshold.
+        # Negative mass there is not a frontier, it is a node leaving.
+        y_fr = torch.clamp(y_inf - active_pre, min=0.0)
 
         probs = torch.stack([y_inf, y_fr], dim=1).clamp(
             prob_epsilon, 1.0 - prob_epsilon
