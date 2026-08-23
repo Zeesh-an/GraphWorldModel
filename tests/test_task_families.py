@@ -279,3 +279,112 @@ def test_compatibility_is_serialisable():
     assert blob["level"] == exact_checkpoint
     assert blob["source"] == "influence_maximization"
     assert isinstance(Compatibility(**blob), Compatibility)
+
+
+# ---------------------------------------------------------------------------
+# Zero-shot transfer must actually be zero-shot
+# ---------------------------------------------------------------------------
+
+
+def test_frozen_checkpoint_parameters_do_not_change_during_transfer(tmp_path):
+    """
+    The claim `freeze_world_model: true` makes, checked rather than asserted.
+
+    Loading a checkpoint, scoring with it, and loading it again must give
+    bit-identical parameters. A scorer that silently put the module in train mode
+    (dropout active) or that any caller could step an optimizer through would
+    fail here.
+    """
+    import torch
+
+    from world_model.checkpoint import ModelSpec, build_model, save_checkpoint
+    from world_model.scorer import WorldModelScorer
+
+    spec = ModelSpec(backbone="sage", head="structured", diffusion_model="IC",
+                     hidden_dim=16, n_layers=2)
+    path = tmp_path / "frozen.pt"
+    save_checkpoint(build_model(spec), path, spec)
+
+    scorer = WorldModelScorer.load(path)
+    before = {k: v.clone() for k, v in scorer.model.state_dict().items()}
+
+    import numpy as np
+
+    from coding_agent.types import GraphInfo
+    from data.wm_simulator import ActionOp, State
+
+    graph = GraphInfo(
+        num_nodes=4,
+        edge_index=np.array([[0, 1, 2], [1, 2, 3]], dtype=np.int64),
+        ic_probs=np.array([0.5, 0.5, 0.5], dtype=np.float32),
+        directed=True,
+    )
+    scorer.predict_transition(graph, State([0], [0]), [ActionOp("add_node", 2)])
+
+    after = scorer.model.state_dict()
+
+    for name, tensor in before.items():
+        assert torch.equal(tensor, after[name]), f"{name} changed during scoring"
+
+
+def test_scorer_loads_in_eval_mode():
+    """Dropout active during transfer would make the frozen model stochastic."""
+    import torch
+
+    from world_model.checkpoint import ModelSpec, build_model, save_checkpoint
+    from world_model.scorer import WorldModelScorer
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as directory:
+        spec = ModelSpec(backbone="sage", head="structured", diffusion_model="IC",
+                         hidden_dim=16, n_layers=2, dropout=0.5)
+        path = Path(directory) / "m.pt"
+        save_checkpoint(build_model(spec), path, spec)
+
+        assert not WorldModelScorer.load(path).model.training
+
+
+def test_transfer_config_declares_zero_shot():
+    """
+    The shipped IM -> Adaptive IM config must not be able to drift into
+    fine-tuning without the test noticing.
+    """
+    from pathlib import Path
+
+    import yaml
+
+    config = yaml.safe_load(
+        (Path(__file__).resolve().parent.parent
+         / "configs" / "task_transfer" / "im_to_adaptive.yaml").read_text()
+    )
+
+    assert config["transfer_level"] == exact_checkpoint
+    assert config["freeze_world_model"] is True
+    assert config["target_finetuning"] is False
+    assert config["required_semantic_overrides"] == 0
+    assert config["reinitialized_components"] == []
+    assert (
+        level(config["source_task"], config["target_task"])
+        == config["transfer_level"]
+    )
+
+
+def test_a_disagreeing_spec_cannot_be_applied_silently(tmp_path):
+    """
+    `required_semantic_overrides: 0` is enforceable only because the loader
+    refuses a mismatch by default. Without this, a transfer run could quietly
+    flip remove_semantics and still call itself zero-shot.
+    """
+    import pytest as _pytest
+
+    from world_model.checkpoint import ModelSpec, build_model, load_checkpoint, save_checkpoint
+
+    spec = ModelSpec(backbone="sage", head="structured", diffusion_model="IC",
+                     hidden_dim=16, n_layers=2, remove_semantics="spent")
+    path = tmp_path / "m.pt"
+    save_checkpoint(build_model(spec), path, spec)
+    blocked_spec = ModelSpec(**{**spec.to_dict(), "remove_semantics": "blocked"})
+
+    with _pytest.raises(ValueError, match="Refusing to guess"):
+        load_checkpoint(path, config=blocked_spec)
