@@ -25,8 +25,18 @@
 #       sbatch sbatch/adaptive_online_im/train.sbatch
 
 set -euo pipefail
-cd /home/rrishab/GraphWorldModel/
-source venv/bin/activate
+# Repo root, derived from this script's own location so the file works in
+# any checkout rather than one person's home directory. Set REPO_ROOT to
+# override, e.g. when submitting a copy staged outside the tree.
+cd "${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# Activate the project virtualenv, unless one is already active or VENV
+# points somewhere else. Skipped silently when neither exists, so the
+# script still runs under a module-loaded or conda interpreter.
+VENV="${VENV:-venv}"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+fi
 mkdir -p results logs
 
 # model           = gcn | sage | gt | gat | gcnii   (default sage)

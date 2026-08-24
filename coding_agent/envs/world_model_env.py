@@ -12,13 +12,16 @@ import torch.nn as nn
 from world_model.wm_data import (
     GraphInput,
     apply_edge_ops,
+    basic_encoding,
     build_competitive_features,
     build_epidemic_features,
     build_features,
     build_graph_input,
     channels_for,
     edges_to_arrays,
+    log_degree,
 )
+from world_model.checkpoint import load_checkpoint
 from world_model.wm_eval import sample_competitive_step, sample_epidemic_step
 from world_model.wm_model import WorldModel
 from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
@@ -46,6 +49,8 @@ class WorldModelEnvironment:
         negative_seeds: tuple = (),
         competitive: bool = False,
         epidemic: bool = False,
+        hide_edge_weights: bool = False,
+        action_encoding: str = basic_encoding,
     ) -> None:
         self.model = model.to(device).eval()
         self.graph = graph
@@ -62,6 +67,19 @@ class WorldModelEnvironment:
         # size because State maps it onto `infected`.
         self.epidemic = epidemic
         self.negative_seeds = tuple(int(node) for node in negative_seeds)
+        # Both MUST match what the checkpoint was trained under. hide_edge_weights
+        # used not to be threaded here at all, so a w-hidden model was rolled out
+        # against the true transmission probabilities: the one place in the
+        # pipeline where the masking silently did not apply. action_encoding sets
+        # in_channels, so a mismatch is a shape error rather than a silent one.
+        self.hide_edge_weights = hide_edge_weights
+        self.action_encoding = action_encoding
+        # CH_DEGREE depends only on the adjacency, so during a rollout with no
+        # edge ops it is the same vector at every timestep for every ensemble
+        # sample. Recomputing it was 11% of rollout time for a constant. Keyed by
+        # id() of the edge array and cleared per rollout, so a recycled id can
+        # never alias across rollouts.
+        self._degree_cache = {}
         # Seed every rollout uses unless one is named explicitly; shared across
         # candidates so the DIFFERENCE between two strategies is well resolved
         self.base_seed = base_seed
@@ -96,42 +114,6 @@ class WorldModelEnvironment:
 
         # Read the config block of a results JSON file
         config = json.loads(Path(results_json).read_text())["config"]
-        # Absent in checkpoints trained before --remove-semantics existed, all of
-        # which were spent
-        remove_semantics = config.get("remove_semantics", spent)
-        # ...and absent in every checkpoint trained before influence blocking existed
-        competitive = bool(config.get("competitive", False))
-        # ...and absent in every checkpoint trained before epidemic control existed
-        epidemic = bool(config.get("epidemic", False))
-        backbone_kwargs = {
-            "n_heads": config["n_heads"],
-            "ffn_dim": config["ffn_dim"],
-            "alpha": config["gcnii_alpha"],
-            "lamda": config["gcnii_lamda"],
-        }
-
-        # Reconstruct the exact WorldModel architecture from the config
-        model = WorldModel(
-            config["model"],
-            in_channels=channels_for(competitive, epidemic)[0],
-            hidden_dim=config["hidden_dim"],
-            n_layers=config["n_layers"],
-            dropout=config["dropout"],
-            head_type=config.get("head", "linear"),
-            diffusion_model=config["diffusion_model"],
-            remove_semantics=remove_semantics,
-            competitive=competitive,
-            tie_break=config.get("tie_break", auto_dominance),
-            positive_prob=config.get("positive_prob"),
-            epidemic=epidemic,
-            # The rates the CHECKPOINT was fit under, not the ones a flag names:
-            # the oracle head pins its matrix to them and a mismatch would score
-            # the arm against a transition the simulator never produced
-            epi_beta=config.get("beta_scale", 1.0),
-            epi_gamma=config.get("gamma"),
-            epi_alpha=config.get("alpha"),
-            **backbone_kwargs,
-        )
 
         # Get the checkpoint path
         checkpoint_path = (
@@ -144,22 +126,32 @@ class WorldModelEnvironment:
                 f"world-model checkpoint not found: {checkpoint_path}"
             )
 
-        # Load the model weights from the checkpoint file
-        model.load_state_dict(
-            torch.load(checkpoint_path, map_location=device, weights_only=True)
+        # Reconstruction lives in world_model.checkpoint. A self-describing
+        # checkpoint carries its own spec and rebuilds from it; a legacy bare
+        # state_dict is rebuilt from this config, which is the reason this path
+        # still takes one. strict_spec=False because the results JSON is the
+        # historical source of truth for pre-v2 runs and must keep working.
+        model, spec, _ = load_checkpoint(
+            checkpoint_path, config=config, device=device, strict_spec=False
         )
 
+        # Follow the resolved SPEC rather than re-reading the config block: for a
+        # v2 file it is what the weights were actually fit under, and it carries
+        # every layout discriminator (remove_semantics, competitive, epidemic,
+        # hide_edge_weights, action_encoding) with the pre-flag defaults filled in
         return cls(
             model,
             graph,
-            config["diffusion_model"],
+            spec.diffusion_model,
             device=device,
             n_samples=n_samples,
             base_seed=base_seed,
-            remove_semantics=remove_semantics,
+            remove_semantics=spec.remove_semantics,
             negative_seeds=negative_seeds,
-            competitive=competitive,
-            epidemic=epidemic,
+            competitive=spec.competitive,
+            epidemic=spec.epidemic,
+            hide_edge_weights=spec.hide_edge_weights,
+            action_encoding=spec.action_encoding,
         )
 
     @classmethod
@@ -268,6 +260,7 @@ class WorldModelEnvironment:
             num_nodes * len(sample_arrays),
             self.diffusion_model,
             self.device,
+            self.hide_edge_weights,
         )
 
     @torch.inference_mode()
@@ -319,10 +312,17 @@ class WorldModelEnvironment:
         elif self.competitive:
             X, _ = build_competitive_features(record, edge_index, num_nodes)
         else:
-            X, _, _ = build_features(record, edge_index, num_nodes)
+            X, _, _ = build_features(
+                record, edge_index, num_nodes, self.action_encoding
+            )
 
         graph_input = build_graph_input(
-            edge_index, edge_weight, num_nodes, self.diffusion_model, self.device
+            edge_index,
+            edge_weight,
+            num_nodes,
+            self.diffusion_model,
+            self.device,
+            self.hide_edge_weights,
         )
         logits = self.model(
             torch.from_numpy(X).to(self.device), graph_input
@@ -337,13 +337,42 @@ class WorldModelEnvironment:
 
     @torch.inference_mode()
     def rollout(
-        self, action_fn: ActionFn, horizon: int, budget: int, seed: int | None = None
+        self,
+        action_fn: ActionFn,
+        horizon: int,
+        budget: int,
+        seed: int | None = None,
+        num_samples: int | None = None,
     ) -> Trajectory:
+        """
+        `action_fn` may be a single policy, or a LIST of one policy per block.
+
+        The list form is what makes candidate scoring affordable. Every block in
+        this rollout already advances in lockstep through ONE forward pass, so
+        putting K candidates x n_samples blocks in that pass costs the same FLOPs
+        as K separate rollouts but pays the per-call overhead once. Per-block final
+        infected counts land on `self.last_sample_counts` so a caller can split
+        them back into per-candidate means; the returned Trajectory keeps its
+        existing whole-ensemble meaning.
+        """
         start = time.perf_counter()
         seed = self.base_seed if seed is None else seed
         rng = np.random.default_rng(seed)
         num_nodes = self.graph.num_nodes
-        num_samples = self.n_samples
+        num_samples = self.n_samples if num_samples is None else num_samples
+        action_fns = (
+            list(action_fn)
+            if isinstance(action_fn, (list, tuple))
+            else [action_fn] * num_samples
+        )
+
+        if len(action_fns) != num_samples:
+            raise ValueError(
+                f"{len(action_fns)} action functions for {num_samples} blocks; "
+                f"the list form needs exactly one policy per block"
+            )
+
+        self._degree_cache.clear()
 
         # All samples advance in lockstep: each timestep is ONE block-diagonal
         # forward pass instead of n_samples separate ones. Edge state is
@@ -394,7 +423,7 @@ class WorldModelEnvironment:
                     sorted(recovered[sample]),
                     sample=sample,
                 )
-                bags[sample] = action_fn(state, timestep)
+                bags[sample] = action_fns[sample](state, timestep)
                 bag_dicts[sample] = [action.to_dict() for action in bags[sample]]
 
                 # Apply edge operations so the model sees the post-action graph
@@ -442,7 +471,21 @@ class WorldModelEnvironment:
                         record, sample_arrays[sample][0], num_nodes
                     )
                 else:
-                    X, _, _ = build_features(record, sample_arrays[sample][0], num_nodes)
+                    edge_array = sample_arrays[sample][0]
+                    key = id(edge_array)
+                    degrees = self._degree_cache.get(key)
+
+                    if degrees is None:
+                        degrees = log_degree(edge_array, num_nodes)
+                        self._degree_cache[key] = degrees
+
+                    X, _, _ = build_features(
+                        record,
+                        edge_array,
+                        num_nodes,
+                        self.action_encoding,
+                        degree_column=degrees,
+                    )
 
                 x_parts.append(X)
 
@@ -568,6 +611,8 @@ class WorldModelEnvironment:
             for sample in range(num_samples):
                 sample_curves[sample].append(float(len(infected[sample])))
                 sample_prevalence[sample].append(float(len(frontier[sample])))
+
+            self.last_sample_counts = [float(len(block)) for block in infected]
 
             if record_representative:
                 representative_actions.append(bags[0])

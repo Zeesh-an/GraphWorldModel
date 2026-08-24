@@ -421,7 +421,10 @@ python -m world_model.eval_structured_oracle \
 | `--n-heads` / `--ffn-dim`         | `4` / `128`   | attention backbones (GAT/GT)                                         |
 | `--gcnii-alpha` / `--gcnii-lamda` | `0.1` / `0.5` | GCNII initial-residual / decay                                       |
 | `--epochs` / `--patience`         | `200` / `30`  | training length / early-stop on val `delta_f1`                       |
-| `--plan-demo` / `--plan-graphs`   | off / `5`     | run multi-graph planning-regret eval                                 |
+| `--plan-demo` / `--plan-graphs`   | off / `5`     | single-step planning-regret eval (a sanity check, not a planner result) |
+| `--plan-budget-k`                 | `0`           | k-seed **full-horizon** planning regret vs greedy-MC — the IM problem as posed. `0` disables |
+| `--ood-policies`                  | none          | off-policy rollout fidelity, e.g. `degree_seed null`. The recorded sequence is on-policy by construction |
+| `--action-encoding`               | `basic`       | `typed` adds 3 channels splitting `act_edge` by op, so `add_edge` and `remove_edge` on the same endpoints stop producing identical `X` |
 
 ---
 
@@ -439,9 +442,9 @@ The structured SAGE world model is an accurate, calibrated, **non-saturating** o
 
 ---
 
-## Coding Agent (planned)
+## Coding Agent
 
-The world model is designed to become the **predictive environment** in a coding-agent loop for graph-algorithm evolution:
+The world model is the **predictive environment** in a coding-agent loop for graph-algorithm evolution. This is built — it is condition 6 (`evolve_free@world_model`) of the six-condition ladder above, implemented in [`coding_agent/`](coding_agent/) with the evaluator taxonomy in `pipeline/conditions.py`:
 
 ```
 π        = A_φ(G, task, history)          # agent proposes a candidate algorithm
@@ -449,7 +452,7 @@ The world model is designed to become the **predictive environment** in a coding
 rollout  = Rollout_GWM(π, G, task)  ──▶  Refine(π)   # predicted insights guide refinement
 ```
 
-The agent operates over parameterized graph action primitives (candidate expansion, node selection, score propagation, subgraph update, termination), so algorithms are compositions of the same `(operator, arguments)` actions the world model already simulates. Planned baselines: native coding agent (real execution only), pure graph algorithms (greedy IM, BFS, PageRank), GA routing over a fixed pool, and the full coding-agent + GWM. The non-saturating rollout demonstrated above is the prerequisite this component was waiting on.
+The agent operates over parameterized graph action primitives (candidate expansion, node selection, score propagation, subgraph update, termination), so algorithms are compositions of the same `(operator, arguments)` actions the world model already simulates. The baselines it is measured against — native coding agent (real execution only), the classical algorithm pool, GA routing over that pool, and MC/oracle evaluators — are conditions 1–5 of the same table.
 
 ---
 

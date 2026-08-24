@@ -21,8 +21,18 @@
 # publishes; CoreHD's Table I quotes the raw 2,361/6,646 network.
 
 set -euo pipefail
-cd /home/rrishab/GraphWorldModel/
-source venv/bin/activate
+# Repo root, derived from this script's own location so the file works in
+# any checkout rather than one person's home directory. Set REPO_ROOT to
+# override, e.g. when submitting a copy staged outside the tree.
+cd "${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# Activate the project virtualenv, unless one is already active or VENV
+# points somewhere else. Skipped silently when neither exists, so the
+# script still runs under a module-loaded or conda interpreter.
+VENV="${VENV:-venv}"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+fi
 mkdir -p results logs
 
 TASK=critical_node_detection \
@@ -36,6 +46,10 @@ ROLLOUTS="${ROLLOUTS:-30}" \
 MC_MARGINALS="${MC_MARGINALS:-30}" \
 INJECT_P="${INJECT_P:-0.6}" \
 BUDGET_PCT_RANGE="1 20" \
+`# SINGLE REAL GRAPH: no graph-disjoint split exists for one graph, so this
+ # dataset is split per episode and its test metrics are in-graph. Do not
+ # pool them with a graph_disjoint synthetic run.` \
+SPLIT_MODE=episode_random \
     ./sbatch/pipeline.sbatch
 
 echo "[cnd_gen] done -> results/critical_node_detection/ppi_yeast/${RUN:-default}/data"

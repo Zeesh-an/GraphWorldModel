@@ -429,6 +429,8 @@
 #                    every BUDGET_PCTS value you intend to evaluate at.
 #   ROLLOUTS         episodes per (graph, dynamics, selector)
 #   INJECT_P         probability an intermediate step injects an action
+#   SPLIT_MODE       graph_disjoint | episode_random; unset resolves per dataset
+#                    (disjoint for synthetic families with >= 3 graphs)
 #   CF_PROB          probability a step spawns counterfactual forks: the
 #                    signal that forces action-conditioning
 #   CF_BRANCHES      counterfactual branches per fork
@@ -510,8 +512,18 @@ set -euo pipefail
 # right file when it is launched from somewhere other than the repo root
 script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
-cd /home/rrishab/GraphWorldModel/
-source venv/bin/activate
+# Repo root, derived from this script's own location so the file works in
+# any checkout rather than one person's home directory. Set REPO_ROOT to
+# override, e.g. when submitting a copy staged outside the tree.
+cd "${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+
+# Activate the project virtualenv, unless one is already active or VENV
+# points somewhere else. Skipped silently when neither exists, so the
+# script still runs under a module-loaded or conda interpreter.
+VENV="${VENV:-venv}"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+fi
 mkdir -p results logs
 
 # ---------------------------------------------------------------------------
@@ -683,6 +695,11 @@ CF_PROB="${CF_PROB:-0.4}"
 CF_BRANCHES="${CF_BRANCHES:-2}"
 MC_MARGINALS="${MC_MARGINALS:-30}"
 SPLIT="${SPLIT:-0.7 0.15 0.15}"
+# Unset lets pipeline.run resolve it per dataset: graph_disjoint for a
+# synthetic family with >= 3 graphs, episode_random for a single real graph
+# (which cannot be split disjointly at all; its test metrics are then
+# in-graph, not held-out-graph). Set explicitly to force either.
+SPLIT_MODE="${SPLIT_MODE:-}"
 
 # Train stage
 WM_MODEL="${WM_MODEL:-sage}"
@@ -702,6 +719,13 @@ POS_WEIGHT="${POS_WEIGHT:-off}"
 PATIENCE="${PATIENCE:-50}"
 PLAN_GRAPHS="${PLAN_GRAPHS:-5}"
 NO_PLAN_DEMO="${NO_PLAN_DEMO:-0}"
+# k-seed full-horizon planning (0 = off), off-policy rollout tests, and the
+# action feature encoding. See world_model/README.md for what each one buys.
+PLAN_BUDGET_K="${PLAN_BUDGET_K:-0}"
+PLAN_BUDGET_GRAPHS="${PLAN_BUDGET_GRAPHS:-3}"
+PLAN_BUDGET_HORIZON="${PLAN_BUDGET_HORIZON:-20}"
+OOD_POLICIES="${OOD_POLICIES:-}"
+ACTION_ENCODING="${ACTION_ENCODING:-basic}"
 
 # Agent stage
 # Unset means "let pipeline.tasks decide": influence_maximization gets the
@@ -779,6 +803,9 @@ flags=(
   --dropout "$DROPOUT" --epochs "$EPOCHS" --lr "$LR"
   --weight-decay "$WEIGHT_DECAY" --batch-size "$BATCH_SIZE"
   --pos-weight "$POS_WEIGHT" --patience "$PATIENCE" --plan-graphs "$PLAN_GRAPHS"
+  --plan-budget-k "$PLAN_BUDGET_K" --plan-budget-graphs "$PLAN_BUDGET_GRAPHS"
+  --plan-budget-horizon "$PLAN_BUDGET_HORIZON"
+  --action-encoding "$ACTION_ENCODING"
 
   --baseline-timeout "$BASELINE_TIMEOUT" --native-mc-runs "$NATIVE_MC_RUNS"
   --evaluator "$EVALUATOR" --llm-model "$LLM_MODEL"
@@ -888,6 +915,11 @@ fi
 [ -n "$CP_METRIC" ]            && flags+=(--cp-metric "$CP_METRIC")
 [ -n "$CP_FORECAST_SAMPLES" ]  && flags+=(--cp-forecast-samples "$CP_FORECAST_SAMPLES")
 [ "$HIDE_EDGE_WEIGHTS" = "1" ] && flags+=(--hide-edge-weights)
+# Space-separated list, e.g. OOD_POLICIES="degree_seed null"; unquoted on purpose
+# so the shell splits it into one argument per policy
+# shellcheck disable=SC2206
+[ -n "$OOD_POLICIES" ]      && flags+=(--ood-policies $OOD_POLICIES)
+[ -n "$SPLIT_MODE" ]        && flags+=(--split-mode "$SPLIT_MODE")
 
 # ---------------------------------------------------------------------------
 # SUBMIT: outside a job, queue ourselves with the allocation these flags need

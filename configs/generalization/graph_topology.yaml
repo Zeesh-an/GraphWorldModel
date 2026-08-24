@@ -1,0 +1,24 @@
+# G1.3 topology generalization. Train on BA only; test on families whose
+# degree structure BA does not contain -- ER has no hubs, WS is near-regular
+# with high clustering, SBM has community structure.
+experiment_name: g1_3_graph_topology
+
+train:
+  task: influence_maximization
+  dataset: ba
+  syn_nodes: 100
+  num_graphs: 20
+  dynamics: [IC, LT]
+  split_mode: graph_disjoint
+
+test:
+  - {dataset: er, syn_nodes: 100, num_graphs: 10}
+  - {dataset: ws, syn_nodes: 100, num_graphs: 10}
+  - {dataset: sbm, syn_nodes: 100, num_graphs: 10}
+  - {dataset: powerlaw_cluster, syn_nodes: 100, num_graphs: 10}
+
+world_model: {backbone: sage, head: structured, hidden_dim: 64, num_layers: 3,
+              remove_semantics: spent, hide_edge_weights: false}
+seeds: [0, 1, 2, 3, 4]
+freeze_world_model: true
+target_finetuning: false

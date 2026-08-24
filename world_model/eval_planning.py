@@ -20,33 +20,20 @@ import torch
 import torch.nn as nn
 
 from data.wm_simulator import spent
-from world_model.wm_data import in_channels, load_graph_store
+from world_model.wm_data import basic_encoding, load_graph_store
 from world_model.wm_eval import planning_regret_multi
-from world_model.wm_model import WorldModel
+from world_model.checkpoint import load_checkpoint
 
 
 def load_trained_model(config: dict, device: torch.device) -> nn.Module:
-    """Rebuild the WorldModel from a saved run config and load its checkpoint."""
-    backbone_kwargs = {
-        "n_heads": config["n_heads"],
-        "ffn_dim": config["ffn_dim"],
-        "alpha": config["gcnii_alpha"],
-        "lamda": config["gcnii_lamda"],
-    }
-    model = WorldModel(
-        config["model"],
-        in_channels=in_channels,
-        hidden_dim=config["hidden_dim"],
-        n_layers=config["n_layers"],
-        dropout=config["dropout"],
-        head_type=config.get("head", "linear"),
-        diffusion_model=config["diffusion_model"],
-        # Absent in runs trained before --remove-semantics existed, all of which
-        # were spent
-        remove_semantics=config.get("remove_semantics", spent),
-        **backbone_kwargs,
-    ).to(device)
+    """
+    Rebuild the WorldModel from a saved run config and load its checkpoint.
 
+    Reconstruction lives in `world_model.checkpoint` now: a self-describing
+    checkpoint carries its own spec, and this config is used only as the
+    fallback for legacy bare-state_dict files. Keeping a second copy of the
+    "which architecture was this" logic here is exactly how the two drifted.
+    """
     # train_wm.py saves to <ckpt_dir>/wm_<model>_<dm>.pt
     checkpoint_path = (
         Path(config["ckpt_dir"])
@@ -59,7 +46,9 @@ def load_trained_model(config: dict, device: torch.device) -> nn.Module:
             f"ckpt_dir={config['ckpt_dir']})"
         )
 
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model, _, _ = load_checkpoint(checkpoint_path, config=config, device=device,
+                                  strict_spec=False)
+
     return model
 
 
@@ -104,6 +93,12 @@ if __name__ == "__main__":
             device,
             n_graphs=args.plan_graphs,
             seed=args.seed,
+            # All three must follow the checkpoint, not this CLI's defaults: a
+            # w-hidden model re-scored against true weights, or a `blocked` model
+            # scored against a `spent` oracle, produces a number for the wrong run
+            hide_edge_weights=bool(config.get("hide_edge_weights", False)),
+            remove_semantics=config.get("remove_semantics", spent),
+            action_encoding=config.get("action_encoding", basic_encoding),
         )
 
         # Replace only the planning block; keep test + rollout intact.

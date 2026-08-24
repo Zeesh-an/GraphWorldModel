@@ -106,6 +106,40 @@ def channels_for(competitive: bool = False, epidemic: bool = False) -> tuple[int
         else (in_channels, out_channels)
     )
 
+# `typed` action encoding: three extra channels that split the single CH_EDGE flag
+# by op. CH_EDGE stays set for all three, so the first 6 columns of a `typed` X are
+# byte-for-byte the `basic` X and the two encodings are nested, not alternatives.
+#
+# Why it exists: under `basic`, add_edge(u,v,w) and remove_edge(u,v) at the same
+# endpoints produce IDENTICAL X. The adjacency still differs, so a head that reads
+# the graph is not blind — but the encoder cannot tell the two apart from features
+# alone, and the `linear` head has no other path to the action at all.
+ch_edge_add, ch_edge_del, ch_edge_reweight = 6, 7, 8
+typed_in_channels = 9
+
+basic_encoding = "basic"
+typed_encoding = "typed"
+valid_action_encodings = (basic_encoding, typed_encoding)
+
+# Which op sets which extra channel under `typed`
+typed_edge_channel = {
+    "add_edge": ch_edge_add,
+    "remove_edge": ch_edge_del,
+    "set_edge_weight": ch_edge_reweight,
+}
+
+
+def num_input_channels(action_encoding: str = basic_encoding) -> int:
+    """Width of X for an action encoding. The model's in_channels must match."""
+    if action_encoding not in valid_action_encodings:
+        raise ValueError(
+            f"unknown action_encoding {action_encoding!r}; "
+            f"choose one of {valid_action_encodings}"
+        )
+
+    return typed_in_channels if action_encoding == typed_encoding else in_channels
+
+
 # Numerical floor for the symmetric renormalization (avoids 0^-0.5)
 degree_floor = 1e-12
 
@@ -262,26 +296,46 @@ def reconstruct_episode_adjacency(
     return adjacency_by_step
 
 
-def build_features(
-    record: dict,
-    edge_index: np.ndarray,
-    num_nodes: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return (X (N, 6) float32, y_inf (N) float32, y_fr (N) float32)."""
-    X = np.zeros((num_nodes, in_channels), dtype=np.float32)
-
-    state = record["state"]
-    X[np.asarray(state["infected"], dtype=np.int64), ch_infected] = 1.0
-    X[np.asarray(state["frontier"], dtype=np.int64), ch_frontier] = 1.0
-
-    # degree = log1p(total degree in A_t); input_proj + LayerNorm handle scaling.
+def log_degree(edge_index: np.ndarray, num_nodes: int) -> np.ndarray:
+    """`log1p(total degree)` for the CH_DEGREE column."""
     degrees = np.zeros(num_nodes, dtype=np.float32)
 
     if edge_index.size:
         np.add.at(degrees, edge_index[0], 1.0)
         np.add.at(degrees, edge_index[1], 1.0)
 
-    X[:, ch_degree] = np.log1p(degrees)
+    return np.log1p(degrees)
+
+
+def build_features(
+    record: dict,
+    edge_index: np.ndarray,
+    num_nodes: int,
+    action_encoding: str = basic_encoding,
+    degree_column: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return (X (N, C) float32, y_inf (N) float32, y_fr (N) float32).
+
+    C is 6 under `basic` and 9 under `typed`; the extra columns are appended, so
+    X[:, :6] is identical either way.
+
+    `degree_column` lets a caller pass in a precomputed CH_DEGREE column. Degree
+    is a property of the ADJACENCY, so during a rollout with no edge operations
+    it is the same vector at every timestep for every ensemble sample — and
+    recomputing it was 11% of rollout time (4800 `np.add.at` calls per ten
+    rollouts) for a constant. Callers that mutate the graph must pass None, or
+    nothing, and let it be recomputed.
+    """
+    X = np.zeros((num_nodes, num_input_channels(action_encoding)), dtype=np.float32)
+
+    state = record["state"]
+    X[np.asarray(state["infected"], dtype=np.int64), ch_infected] = 1.0
+    X[np.asarray(state["frontier"], dtype=np.int64), ch_frontier] = 1.0
+
+    # degree = log1p(total degree in A_t); input_proj + LayerNorm handle scaling.
+    X[:, ch_degree] = (
+        log_degree(edge_index, num_nodes) if degree_column is None else degree_column
+    )
 
     for action_op in record["action"]:
         if action_op["op"] == "add_node":
@@ -289,8 +343,17 @@ def build_features(
         elif action_op["op"] == "remove_node":
             X[int(action_op["target"]), ch_remove] = 1.0
         elif action_op["op"] in edge_ops:
-            X[int(action_op["target"]), ch_edge] = 1.0
-            X[int(action_op["destination"]), ch_edge] = 1.0
+            source, destination = (
+                int(action_op["target"]),
+                int(action_op["destination"]),
+            )
+            X[source, ch_edge] = 1.0
+            X[destination, ch_edge] = 1.0
+
+            if action_encoding == typed_encoding:
+                channel = typed_edge_channel[action_op["op"]]
+                X[source, channel] = 1.0
+                X[destination, channel] = 1.0
 
     # Build the ground-truth next state s_{t + 1} the model is trying to predict,
     # as soft one-step marginals (MC-estimated in data gen via --mc-marginals).
@@ -461,6 +524,38 @@ def build_epidemic_features(
     )  # shape: (N, 5)
 
     return X, Y
+
+
+def split_membership(out_dir: Path, diffusion_model: str) -> dict[str, set[str]]:
+    """
+    graph_id -> the set of splits its transitions actually appear in.
+
+    Read from the written JSONL rather than from metadata.json, so it verifies
+    the FILES rather than the generator's claim about them. A graph mapping to
+    more than one split is leakage.
+    """
+    membership: dict[str, set[str]] = defaultdict(set)
+
+    for split in ("train", "val", "test"):
+        path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
+
+        if not path.exists():
+            continue
+
+        for line in path.read_text().splitlines():
+            if line.strip():
+                membership[json.loads(line)["graph_id"]].add(split)
+
+    return dict(membership)
+
+
+def graphs_straddling_splits(out_dir: Path, diffusion_model: str) -> list[str]:
+    """Graphs present in more than one split, sorted. Empty means leakage-free."""
+    return sorted(
+        graph_id
+        for graph_id, splits in split_membership(out_dir, diffusion_model).items()
+        if len(splits) > 1
+    )
 
 
 def load_graph_store(out_dir: Path) -> dict[str, dict]:
@@ -809,6 +904,7 @@ class TransitionDataset(Dataset):
         out_dir: Path,
         diffusion_model: str,
         split: str,
+        action_encoding: str = basic_encoding,
         competitive: bool | None = None,
         epidemic: bool | None = None,
     ) -> None:
@@ -819,6 +915,8 @@ class TransitionDataset(Dataset):
         self.epidemic = (
             dataset_is_epidemic(out_dir) if epidemic is None else epidemic
         )
+        self.action_encoding = action_encoding
+        num_input_channels(action_encoding)  # validate early, not per-item
 
         # Load the store and the JSONL for one (diffusion_model, split)
         self.store = load_graph_store(out_dir)
@@ -856,7 +954,9 @@ class TransitionDataset(Dataset):
         elif self.competitive:
             X, targets = build_competitive_features(record, edge_index, num_nodes)
         else:
-            X, y_inf, y_fr = build_features(record, edge_index, num_nodes)
+            X, y_inf, y_fr = build_features(
+                record, edge_index, num_nodes, self.action_encoding
+            )
             targets = np.stack([y_inf, y_fr], axis=1)  # shape: (N, 2)
 
         return {

@@ -135,6 +135,12 @@ from data.wm_cascades import (
     valid_splits,
     valid_targets,
 )
+from data.generate_wm_data import (
+    episode_random_split,
+    graph_disjoint_split,
+    min_graphs_for_disjoint,
+    valid_split_modes,
+)
 from data.wm_graphs import cascade_corpora, kronecker_seeds
 from data.wm_epidemic import default_burn_in
 from data.wm_simulator import (
@@ -160,7 +166,11 @@ from pipeline.plots import build_plots
 from pipeline.report import write_report
 from pipeline.summary import write_environment, write_summary
 from world_model.train_wm import TrainConfig, train_world_model
-from world_model.wm_data import load_graph_store
+from world_model.wm_data import (
+    basic_encoding,
+    load_graph_store,
+    valid_action_encodings,
+)
 from world_model.wm_metrics import (
     default_prediction_metric,
     valid_prediction_metrics,
@@ -204,6 +214,13 @@ class PipelineConfig:
     # head's T_exo is built, and what the agent is told remove_node does. One
     # value so they cannot disagree; defaulted from the task registry.
     remove_semantics: str | None = None
+    # How the generator assigns train/val/test. graph_disjoint is correct and a
+    # SINGLE-graph real dataset cannot satisfy it at all, so None resolves per
+    # dataset in stage_data: graph_disjoint for a synthetic family with enough
+    # graphs, episode_random (in-graph metrics, stated loudly) otherwise. An
+    # explicit value always wins and a bad explicit value still raises in the
+    # generator. See data/generate_wm_data.py.
+    split_mode: str | None = None
     prob_model: str = "weighted"
     uniform_p: float = 0.1
     budget_pct_range: tuple = default_budget_pct_range
@@ -232,6 +249,18 @@ class PipelineConfig:
     patience: int = 50
     plan_demo: bool = True
     plan_graphs: int = 5
+    # k-seed FULL-HORIZON planning regret vs greedy-MC — the IM problem as posed,
+    # unlike the single-step plan_demo. Costs real simulator episodes, so it is
+    # opt-in: 0 disables.
+    plan_budget_k: int = 0
+    plan_budget_graphs: int = 3
+    plan_budget_horizon: int = 20
+    # Off-policy rollout fidelity (world_model/wm_policies.py). The recorded action
+    # sequence is on-policy by construction, so it says nothing about the action
+    # distribution an agent actually proposes.
+    ood_policies: tuple = ()
+    # `typed` splits the single act_edge channel by op
+    action_encoding: str = basic_encoding
     # Feed the world model ones instead of the true p(u->v): the online/bandit
     # information state (research/adaptive_online_im.md §2.4b, §9.3 item 7)
     hide_edge_weights: bool = False
@@ -644,6 +673,32 @@ def resolve_cascade_protocol(config: PipelineConfig) -> None:
     )
 
 
+def resolve_split_mode(config: PipelineConfig) -> str:
+    """
+    graph_disjoint where the dataset can honour it, episode_random where it cannot.
+
+    A synthetic family with >= 3 graphs gets the leakage-free split; a single real
+    graph cannot be split disjointly by graph at all, so it keeps the per-episode
+    draw and the choice is printed so no number gets quoted without its regime.
+    """
+    if config.split_mode is not None:
+        return config.split_mode
+
+    disjoint = (
+        config.dataset in synthetic_families
+        and config.num_graphs >= min_graphs_for_disjoint
+    )
+    resolved = graph_disjoint_split if disjoint else episode_random_split
+    reason = (
+        f"{config.num_graphs} graphs from the {config.dataset!r} family"
+        if disjoint
+        else f"{config.dataset!r} yields a single graph, which cannot be split by graph"
+    )
+    print(f"[data] split_mode resolved to {resolved}: {reason}")
+
+    return resolved
+
+
 def stage_data(config: PipelineConfig, layout: Layout) -> dict:
     if layout.data_metadata().exists() and not config.force:
         metadata = json.loads(layout.data_metadata().read_text())
@@ -687,6 +742,7 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         inject_p=config.inject_p,
         action_ops=list(resolve_gen_action_ops(config)),
         remove_semantics=config.remove_semantics,
+        split_mode=resolve_split_mode(config),
         weight_lo=0.0,
         weight_hi=1.0,
         cf_prob=config.cf_prob,
@@ -790,6 +846,11 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
             results=str(results_path),
             plan_demo=config.plan_demo,
             plan_graphs=config.plan_graphs,
+            plan_budget_k=config.plan_budget_k,
+            plan_budget_graphs=config.plan_budget_graphs,
+            plan_budget_horizon=config.plan_budget_horizon,
+            ood_policies=tuple(config.ood_policies),
+            action_encoding=config.action_encoding,
             hide_edge_weights=config.hide_edge_weights,
         )
     )
@@ -1741,6 +1802,18 @@ if __name__ == "__main__":
         "cannot transmit or be infected (default: the task registry's value).",
     )
     parser.add_argument(
+        "--split-mode",
+        type=str,
+        default=None,
+        choices=list(valid_split_modes),
+        help="how train/val/test are assigned. graph_disjoint keeps every episode "
+        "of a graph in one split; episode_random draws per episode and LEAKS a "
+        "graph across splits, but is the only option for a single-graph real "
+        "dataset, whose test metrics are then in-graph rather than "
+        "held-out-graph (default: graph_disjoint for a synthetic family with "
+        "at least 3 graphs, episode_random otherwise).",
+    )
+    parser.add_argument(
         "--prob-model",
         type=str,
         default="weighted",
@@ -1899,6 +1972,44 @@ if __name__ == "__main__":
         type=int,
         default=5,
         help="graphs used for the planning demo (default: 5).",
+    )
+    parser.add_argument(
+        "--plan-budget-k",
+        type=int,
+        default=0,
+        help="k-seed FULL-HORIZON planning regret vs greedy-MC — the IM problem as "
+        "posed, unlike the single-step --plan-graphs demo. 0 disables (default: 0).",
+    )
+    parser.add_argument(
+        "--plan-budget-graphs",
+        type=int,
+        default=3,
+        help="graphs for the k-seed planning eval (default: 3).",
+    )
+    parser.add_argument(
+        "--plan-budget-horizon",
+        type=int,
+        default=20,
+        help="rollout horizon for the k-seed planning eval (default: 20).",
+    )
+    parser.add_argument(
+        "--ood-policies",
+        type=str,
+        nargs="*",
+        default=[],
+        help="off-policy rollout fidelity tests, e.g. `degree_seed null`. The "
+        "recorded action sequence is on-policy by construction, so it says nothing "
+        "about the action distribution an agent proposes (default: none).",
+    )
+    parser.add_argument(
+        "--action-encoding",
+        type=str,
+        default=basic_encoding,
+        choices=list(valid_action_encodings),
+        help="`typed` adds 3 channels splitting act_edge by op, so add_edge and "
+        "remove_edge on the same endpoints stop producing identical X. Changes "
+        "in_channels, so checkpoints are not portable across the two "
+        "(default: basic).",
     )
     parser.add_argument(
         "--hide-edge-weights",
@@ -2662,6 +2773,7 @@ if __name__ == "__main__":
             None if args.gen_action_ops is None else tuple(args.gen_action_ops)
         ),
         remove_semantics=args.remove_semantics,
+        split_mode=args.split_mode,
         prob_model=args.prob_model,
         uniform_p=args.uniform_p,
         budget_pct_range=tuple(args.budget_pct_range),
@@ -2690,6 +2802,11 @@ if __name__ == "__main__":
         plan_demo=not args.no_plan_demo,
         hide_edge_weights=args.hide_edge_weights,
         plan_graphs=args.plan_graphs,
+        plan_budget_k=args.plan_budget_k,
+        plan_budget_graphs=args.plan_budget_graphs,
+        plan_budget_horizon=args.plan_budget_horizon,
+        ood_policies=tuple(args.ood_policies),
+        action_encoding=args.action_encoding,
         baselines=None if args.baselines is None else tuple(args.baselines),
         arms=None if args.arms is None else tuple(args.arms),
         budget_pcts=None if args.budget_pcts is None else tuple(args.budget_pcts),

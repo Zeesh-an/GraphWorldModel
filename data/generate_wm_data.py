@@ -70,6 +70,36 @@ default_task = "influence_maximization"
 # IM literature reports, so one checkpoint covers the whole sweep
 default_budget_pct_range = (1.0, 20.0)
 
+# How train/val/test are assigned.
+#
+#   graph_disjoint   every episode on a graph lands in the SAME split, so no
+#                    graph straddles the boundary. The correct default: two
+#                    episodes on one graph share its structure, its per-edge
+#                    transmission probabilities and (on the main branch) its
+#                    cascade, so scoring one after training on the other is
+#                    leakage, and every test number it produces is optimistic by
+#                    an unknown amount.
+#
+#   episode_random   the historical behaviour: an independent draw per episode.
+#                    Kept because every checkpoint produced before 2026-08-22 was
+#                    trained under it, and a comparison against those numbers has
+#                    to be able to reproduce their split. It is legacy, not an
+#                    alternative — nothing new should be generated with it.
+#   eval_only        every graph goes to `test` and nothing to train/val. For an
+#                    OOD TARGET distribution: the dataset exists to be scored by a
+#                    model trained somewhere else, and giving it a train split
+#                    would invite exactly the accident it is built to rule out.
+#                    Also the only mode that works with a single graph, which is
+#                    what a real-graph transfer set is.
+graph_disjoint_split = "graph_disjoint"
+episode_random_split = "episode_random"
+eval_only_split = "eval_only"
+valid_split_modes = (graph_disjoint_split, episode_random_split, eval_only_split)
+
+# Below this many graphs a disjoint split cannot honour three non-empty parts,
+# and a "split" that puts everything in train is worse than a loud failure.
+min_graphs_for_disjoint = 3
+
 
 # Storage
 def build_record(
@@ -318,6 +348,11 @@ class GenConfig:
     cp_graph: str = "paths"
     cp_max_cascades: int = 0
     cp_max_nodes: int = 0
+    # How train/val/test are assigned; see `valid_split_modes` above. Recorded in
+    # metadata.json for the same reason remove_semantics is: a number produced
+    # under a leaky split is not comparable to one produced under a clean one,
+    # and the difference must not be reconstructible only from memory.
+    split_mode: str = graph_disjoint_split
     ba_m: int = 3
     ws_k: int = 6
     ws_p: float = 0.1
@@ -370,7 +405,10 @@ def _resolve_budget(config: GenConfig, num_nodes: int, rng: np.random.Generator)
     return config.budget
 
 
+
+
 def _assign_split(rng: np.random.Generator, split: tuple) -> str:
+    """Legacy per-episode draw. Only reachable under `episode_random`."""
     draw = rng.random()
 
     if draw < split[0]:
@@ -379,6 +417,42 @@ def _assign_split(rng: np.random.Generator, split: tuple) -> str:
         return "val"
 
     return "test"
+
+
+def _graph_split_plan(
+    graph_count: int, split: tuple, seed: int
+) -> list[str]:
+    """
+    Assign each graph INDEX to a split, exactly honouring the requested ratios.
+
+    Stratified rather than sampled: with 20 graphs an independent draw per graph
+    lands a 70/15/15 split anywhere from 12 to 18 training graphs, and can empty
+    `val` outright. Cutting a deterministically shuffled index list at the ratio
+    boundaries makes the proportions exact and the assignment reproducible from
+    `--seed` alone.
+
+    The shuffle uses its own generator so that adding this mode does not perturb
+    the `base_rng` stream that draws budgets and simulator seeds — a dataset
+    regenerated with the same seed differs only in its split labels.
+    """
+    train_count = int(round(graph_count * split[0]))
+    val_count = int(round(graph_count * split[1]))
+
+    # Rounding can overshoot; the test split absorbs it, and train/val are
+    # clamped so neither can be emptied by a rounding artefact.
+    train_count = max(1, min(train_count, graph_count - 2))
+    val_count = max(1, min(val_count, graph_count - train_count - 1))
+
+    order = np.random.default_rng(seed).permutation(graph_count)
+    plan = ["test"] * graph_count
+
+    for position, index in enumerate(order):
+        if position < train_count:
+            plan[int(index)] = "train"
+        elif position < train_count + val_count:
+            plan[int(index)] = "val"
+
+    return plan
 
 
 def _episode_transitions(
@@ -924,12 +998,39 @@ def run_generation(config: GenConfig) -> dict[str, object]:
             f"{len(algorithms)} (attacker+blocker) pairs"
         )
 
+    if config.split_mode not in valid_split_modes:
+        raise ValueError(
+            f"unknown --split-mode {config.split_mode!r}; "
+            f"choose one of {list(valid_split_modes)}"
+        )
+
+    split_plan = None
+
+    if config.split_mode == eval_only_split:
+        split_plan = ["test"] * graph_count
+
+    if config.split_mode == graph_disjoint_split:
+        if graph_count < min_graphs_for_disjoint:
+            raise ValueError(
+                f"--split-mode {graph_disjoint_split} needs at least "
+                f"{min_graphs_for_disjoint} graphs to fill train/val/test without "
+                f"leaking, but this run has {graph_count} "
+                f"(dataset={config.dataset!r}). A single-graph dataset cannot be "
+                f"split disjointly by graph at all.\n"
+                f"  - for a synthetic family, raise --num-graphs\n"
+                f"  - to reproduce a pre-2026-08-22 dataset, pass "
+                f"--split-mode {episode_random_split} (leaky, legacy only)"
+            )
+
+        split_plan = _graph_split_plan(graph_count, config.split, config.seed)
+
     graphs_meta = []
     n_episodes = 0
+    split_by_graph: dict[str, str] = {}
     progress_bar = tqdm(total=total_episodes, desc="episodes")
 
     with TransitionWriter(out_dir) as writer:
-        for bundle in _iter_bundles(config):
+        for graph_index, bundle in enumerate(_iter_bundles(config)):
             graph_store.save(bundle)
 
             num_nodes = bundle.nx_graph.number_of_nodes()
@@ -950,7 +1051,26 @@ def run_generation(config: GenConfig) -> dict[str, object]:
             for model in config.models:
                 for algorithm in algorithms:
                     for rollout in range(config.rollouts):
-                        split = _assign_split(base_rng, config.split)
+                        # The draw happens in BOTH modes and is used in only one.
+                        # Keeping it unconditional holds the `base_rng` stream —
+                        # and therefore every budget and simulator seed below —
+                        # identical across the two modes, so regenerating a
+                        # dataset with --split-mode graph_disjoint changes the
+                        # split labels and nothing else. That makes the two
+                        # directly comparable, which is the whole point of
+                        # keeping the legacy mode around.
+                        episode_split = _assign_split(base_rng, config.split)
+                        split = (
+                            split_plan[graph_index]
+                            if split_plan is not None
+                            else episode_split
+                        )
+                        # A SET, not a single value: under episode_random a graph
+                        # legitimately carries several splits, and recording that
+                        # in metadata.json is what makes an existing leaky
+                        # dataset self-evident instead of a thing you have to
+                        # remember.
+                        split_by_graph.setdefault(bundle.graph_id, set()).add(split)
                         budget = _resolve_budget(config, num_nodes, base_rng)
                         episode_budgets.append(budget)
                         episode = (
@@ -996,12 +1116,34 @@ def run_generation(config: GenConfig) -> dict[str, object]:
     progress_bar.close()
     generation_seconds = time.perf_counter() - generation_start
 
+    splits_per_graph = {
+        graph_id: sorted(splits) for graph_id, splits in sorted(split_by_graph.items())
+    }
+    straddling = sorted(
+        graph_id for graph_id, splits in splits_per_graph.items() if len(splits) > 1
+    )
+
+    if straddling:
+        print(
+            f"[warn] {len(straddling)}/{len(splits_per_graph)} graphs appear in "
+            f"more than one split (split_mode={config.split_mode}). Test metrics "
+            f"from this dataset are optimistic: the model sees the same graph at "
+            f"train and at test time. Regenerate with --split-mode "
+            f"{graph_disjoint_split} for a leakage-free split."
+        )
+
     metadata = {
         "task": "IM_world_model_transitions",
         "config": config.__dict__,
         "n_episodes": n_episodes,
         "generation_seconds": round(generation_seconds, 1),
         "graphs": graphs_meta,
+        # Provenance for the split, so a results table can state which regime it
+        # was produced under without anyone reconstructing it from memory.
+        "split_mode": config.split_mode,
+        "splits_per_graph": splits_per_graph,
+        "graphs_straddling_splits": straddling,
+        "split_is_graph_disjoint": not straddling,
     }
 
     # The competitive dynamics parameters, RESOLVED. `auto` is not a value anything
@@ -1143,8 +1285,13 @@ def parse_args() -> GenConfig:
         "--prob-model",
         type=str,
         default="weighted",
-        choices=["weighted", "uniform"],
-        help="edge probability model (default: weighted).",
+        choices=["weighted", "uniform", "random"],
+        help="edge probability model. `weighted` sets p(u->v) = 1/in_degree(v), "
+        "`uniform` a constant, `random` an i.i.d. draw per edge. Use `random` for "
+        "the hide-edge-weights ablation: under `weighted` the probability is an "
+        "exact function of a node degree the model already reads as an input "
+        "channel, so masking it removes nothing and the ablation is vacuous "
+        "(default: weighted).",
     )
     parser.add_argument(
         "--uniform-p",
@@ -1340,6 +1487,19 @@ def parse_args() -> GenConfig:
         f"reference (default: {' '.join(default_immunizer_selectors)}).",
     )
     parser.add_argument(
+        "--split-mode",
+        type=str,
+        default=graph_disjoint_split,
+        choices=list(valid_split_modes),
+        help=f"how train/val/test are assigned. {eval_only_split} puts every "
+        f"graph in `test`, for an OOD target distribution scored by a model "
+        f"trained elsewhere. {graph_disjoint_split} (default) "
+        f"keeps every episode of a graph in one split, so no graph straddles the "
+        f"boundary. {episode_random_split} draws per episode and is LEGACY: it "
+        f"leaks a graph across splits and makes test metrics optimistic. Use it "
+        f"only to reproduce a dataset generated before 2026-08-22.",
+    )
+    parser.add_argument(
         "--weight-lo",
         type=float,
         default=0.0,
@@ -1456,6 +1616,7 @@ def parse_args() -> GenConfig:
         inject_p=args.inject_p,
         action_ops=args.action_ops,
         remove_semantics=args.remove_semantics,
+        split_mode=args.split_mode,
         weight_lo=args.weight_lo,
         weight_hi=args.weight_hi,
         cf_prob=args.cf_prob,

@@ -30,13 +30,24 @@ from data.wm_competitive import auto_dominance
 from data.wm_simulator import epidemic_dynamics, spent, valid_remove_semantics
 from world_model.wm_data import (
     TransitionDataset,
+    basic_encoding,
     channels_for,
     collate_transitions,
     dataset_is_competitive,
     dataset_is_epidemic,
     epidemic_rates,
+    num_input_channels,
+    valid_action_encodings,
+)
+from world_model.checkpoint import (
+    ModelSpec,
+    checkpoint_format,
+    load_checkpoint,
+    save_checkpoint,
 )
 from world_model.wm_model import WorldModel, backbones
+from world_model.wm_action_eval import action_conditioning_report
+from world_model.wm_policies import resolve as resolve_policies
 from data.wm_competitive import CompetitiveConfig, shared_positive_prob
 from data.wm_epidemic import EpidemicConfig, default_burn_in
 from world_model.wm_eval import (
@@ -45,6 +56,9 @@ from world_model.wm_eval import (
     epidemic_rollout_ensemble,
     evaluate_one_step,
     immunization_regret_multi,
+    planning_split_test,
+    valid_planning_splits,
+    planning_regret_budget_multi,
     planning_regret_multi,
     rollout_ensemble,
 )
@@ -90,6 +104,19 @@ class TrainConfig:
     # Feed ones instead of p(u->v) to the encoder and the head: the online/bandit
     # information state, and the ablation for "our IC heads see the true w"
     hide_edge_weights: bool = False
+    # `basic` = the original 6 channels; `typed` adds 3 that split CH_EDGE by op,
+    # so add_edge and remove_edge at the same endpoints stop producing identical X
+    action_encoding: str = basic_encoding
+    # Off-policy rollout policies (world_model/wm_policies.py). Empty = skip.
+    ood_policies: tuple = ()
+    # k-seed full-horizon planning; 0 disables (it costs real simulator episodes)
+    plan_budget_k: int = 0
+    plan_budget_graphs: int = 3
+    plan_budget_horizon: int = 20
+    # Which graphs the planning evaluators score. `test` (the default) restricts
+    # them to held-out graphs; `legacy` reproduces the historical
+    # `list(store)[:n]`, which mixes splits and is not a held-out number.
+    planning_split: str = planning_split_test
     hidden_dim: int = 64
     n_layers: int = 3
     n_heads: int = 4
@@ -274,6 +301,54 @@ def resolve_epidemic(config: TrainConfig) -> TrainConfig:
     return config
 
 
+def dataset_split_mode(config: TrainConfig) -> str:
+    """
+    How the dataset under `--data-dir` assigned train/val/test.
+
+    Datasets generated before `--split-mode` existed carry no marker, and all of
+    them used the per-episode draw, so that is what an absent field means.
+    """
+    metadata_path = Path(config.data_dir) / "metadata.json"
+
+    if not metadata_path.exists():
+        return "unknown"
+
+    metadata = json.loads(metadata_path.read_text())
+
+    return metadata.get("split_mode") or metadata["config"].get(
+        "split_mode", "episode_random"
+    )
+
+
+def check_split_mode(config: TrainConfig) -> str:
+    """
+    Warn — loudly — when training on a dataset whose split leaks graphs.
+
+    A warning rather than a refusal, deliberately: the legacy mode is kept so
+    that pre-2026-08-22 numbers can be reproduced, and a run whose PURPOSE is
+    that reproduction must still be possible. What must not happen is a new
+    number being quoted without anyone knowing which regime produced it, which is
+    why the mode also lands in the checkpoint's train_meta and the results JSON.
+    """
+    mode = dataset_split_mode(config)
+
+    if mode == "graph_disjoint":
+        return mode
+
+    print(
+        f"[warn] dataset at {config.data_dir} was generated with "
+        f"split_mode={mode!r}: train/val/test were drawn PER EPISODE, so the same "
+        f"graph appears on both sides of the split. Test metrics from this run "
+        f"are optimistic by an unknown amount and are not comparable to a "
+        f"graph-disjoint run. Regenerate with `--split-mode graph_disjoint` "
+        f"unless this is a single-graph real dataset (which cannot be split by "
+        f"graph at all: its metrics are in-graph by construction) or a "
+        f"deliberate reproduction of a legacy result."
+    )
+
+    return mode
+
+
 def check_hide_edge_weights(config: TrainConfig) -> None:
     """
     Both anchored heads read w directly, so masking it is not an ablation of them
@@ -298,6 +373,16 @@ def train_world_model(config: TrainConfig) -> dict:
     check_remove_semantics(config)
     config = resolve_competitive(config)
     config = resolve_epidemic(config)
+    check_split_mode(config)
+
+    if config.action_encoding != basic_encoding and (
+        config.competitive or config.epidemic
+    ):
+        raise ValueError(
+            f"--action-encoding {config.action_encoding!r} applies only to the "
+            f"single-cascade 6-channel layout; competitive and compartmental "
+            f"datasets have their own fixed layouts"
+        )
     check_hide_edge_weights(config)
 
     torch.manual_seed(config.seed)
@@ -306,7 +391,11 @@ def train_world_model(config: TrainConfig) -> dict:
     device = torch.device(config.device)
     diffusion_model = config.diffusion_model
 
-    layout = dict(competitive=config.competitive, epidemic=config.epidemic)
+    layout = dict(
+        competitive=config.competitive,
+        epidemic=config.epidemic,
+        action_encoding=config.action_encoding,
+    )
     train_dataset = TransitionDataset(
         config.data_dir, diffusion_model, "train", **layout
     )
@@ -341,7 +430,11 @@ def train_world_model(config: TrainConfig) -> dict:
     )
     model = WorldModel(
         config.model,
-        in_channels=model_in_channels,
+        in_channels=(
+            model_in_channels
+            if config.competitive or config.epidemic
+            else num_input_channels(config.action_encoding)
+        ),
         hidden_dim=config.hidden_dim,
         n_layers=config.n_layers,
         dropout=config.dropout,
@@ -374,6 +467,21 @@ def train_world_model(config: TrainConfig) -> dict:
     checkpoint_path = (
         Path(config.ckpt_dir) / f"wm_{config.model}_{diffusion_model}.pt"
     )
+    # Built once: the checkpoint describes itself, so nothing downstream has to
+    # find this run's results JSON to know what architecture the weights belong to
+    model_spec = ModelSpec.from_train_config(config)
+    checkpoint_meta = {
+        "data_dir": str(config.data_dir),
+        "split_mode": dataset_split_mode(config),
+        "seed": config.seed,
+        "epochs": config.epochs,
+        "patience": config.patience,
+        "lr": config.lr,
+        "weight_decay": config.weight_decay,
+        "batch_size": config.batch_size,
+        "pos_weight": config.pos_weight,
+        "selection_metric": "val delta_f1",
+    }
     best_delta_f1, epochs_since_best = -1.0, 0
     train_start = time.perf_counter()
 
@@ -441,7 +549,13 @@ def train_world_model(config: TrainConfig) -> dict:
 
         if val_metrics["delta_f1"] > best_delta_f1:
             best_delta_f1, epochs_since_best = val_metrics["delta_f1"], 0
-            torch.save(model.state_dict(), checkpoint_path)
+            save_checkpoint(
+                model,
+                checkpoint_path,
+                model_spec,
+                train_meta={**checkpoint_meta, "best_val_delta_f1": best_delta_f1,
+                            "epoch": epoch},
+            )
         else:
             epochs_since_best += 1
             if epochs_since_best >= config.patience:
@@ -453,9 +567,14 @@ def train_world_model(config: TrainConfig) -> dict:
     train_seconds = time.perf_counter() - train_start
     print(f"[train] total training time: {train_seconds:.1f}s")
 
-    model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+    model, _, _ = load_checkpoint(checkpoint_path, device=device)
+    model.train(False)
     results = {
         "config": vars(config),
+        # Which split regime produced these numbers. Recorded at the top level so
+        # an aggregator can refuse to pool a leaky run with a clean one.
+        "split_mode": checkpoint_meta["split_mode"],
+        "checkpoint_format": checkpoint_format,
         "train_seconds": train_seconds,
         "best_val_delta_f1": best_delta_f1,
         "history": history,
@@ -469,6 +588,14 @@ def train_world_model(config: TrainConfig) -> dict:
             epidemic=config.epidemic,
         ),
     }
+
+    # IC is monotone, so "changed" == "newly infected" and delta_f1 is ALGEBRAICALLY
+    # identical to new_infection_f1. Reporting both as if they were two pieces of
+    # evidence overstates the one-step result; say so in the JSON rather than in a
+    # footnote nobody reads.
+    results["test"]["delta_f1_is_new_infection_f1"] = bool(
+        abs(results["test"]["delta_f1"] - results["test"]["new_infection_f1"]) < 1e-12
+    )
 
     # Both halves fork on the same flag, and both forks measure the SAME quantity,
     # the negative cascade, so the two tasks' rollout and planning numbers sit in
@@ -497,6 +624,13 @@ def train_world_model(config: TrainConfig) -> dict:
         )
         if config.epidemic
         else None
+    )
+
+    rollout_kwargs = dict(
+        seed=config.seed,
+        remove_semantics=config.remove_semantics,
+        hide_edge_weights=config.hide_edge_weights,
+        action_encoding=config.action_encoding,
     )
 
     if config.epidemic:
@@ -531,10 +665,41 @@ def train_world_model(config: TrainConfig) -> dict:
             train_dataset.store,
             device,
             "test",
-            seed=config.seed,
-            remove_semantics=config.remove_semantics,
-            hide_edge_weights=config.hide_edge_weights,
+            **rollout_kwargs,
         )
+
+    # The action-conditioning suite and the off-policy rollouts read the plain
+    # 6-channel records; the two special layouts carry their own eval branches
+    if not config.competitive and not config.epidemic:
+        # Does the model use the action at all, and does it use it CORRECTLY?
+        results["action_conditioning"] = action_conditioning_report(
+            model,
+            test_dataset,
+            diffusion_model,
+            device,
+            hide_edge_weights=config.hide_edge_weights,
+            seed=config.seed,
+        )
+
+        # Fidelity under action distributions the training data never contained.
+        # The recorded-sequence rollout above is on-policy by construction; this is
+        # the number that speaks to using f_theta as a coding agent's inner loop.
+        if config.ood_policies:
+            results["rollout_ood"] = {
+                name: rollout_ensemble(
+                    model,
+                    config.data_dir,
+                    diffusion_model,
+                    train_dataset.store,
+                    device,
+                    "test",
+                    action_policy=policy,
+                    **rollout_kwargs,
+                )
+                for name, policy in resolve_policies(
+                    list(config.ood_policies)
+                ).items()
+            }
 
     if config.plan_demo:
         planner = (
@@ -549,7 +714,10 @@ def train_world_model(config: TrainConfig) -> dict:
             if config.epidemic
             else {"config": competitive_config}
             if config.competitive
-            else {}
+            else {
+                "remove_semantics": config.remove_semantics,
+                "action_encoding": config.action_encoding,
+            }
         )
         results["planning"] = planner(
             model,
@@ -558,8 +726,31 @@ def train_world_model(config: TrainConfig) -> dict:
             device,
             n_graphs=config.plan_graphs,
             seed=config.seed,
+            # Held-out graphs only. Without out_dir the selector cannot see split
+            # membership and falls back to `legacy`, which is not a test metric.
+            out_dir=config.data_dir,
+            planning_split=config.planning_split,
             hide_edge_weights=config.hide_edge_weights,
             **extra,
+        )
+
+    # The k-seed full-horizon planner greedily builds an IM seed set, which only
+    # means something on the plain single-cascade layout
+    if config.plan_budget_k > 0 and not config.competitive and not config.epidemic:
+        results["planning_budget"] = planning_regret_budget_multi(
+            model,
+            train_dataset.store,
+            diffusion_model,
+            device,
+            n_graphs=config.plan_budget_graphs,
+            seed=config.seed,
+            k=config.plan_budget_k,
+            horizon=config.plan_budget_horizon,
+            out_dir=config.data_dir,
+            planning_split=config.planning_split,
+            hide_edge_weights=config.hide_edge_weights,
+            remove_semantics=config.remove_semantics,
+            action_encoding=config.action_encoding,
         )
 
     os.makedirs(Path(config.results).parent, exist_ok=True)
@@ -617,6 +808,56 @@ if __name__ == "__main__":
         "encoder and head: the online/bandit information state, and the ablation "
         "for the IC heads otherwise seeing w. Requires --head structured or "
         "linear (default: False).",
+    )
+    parser.add_argument(
+        "--action-encoding",
+        type=str,
+        default=basic_encoding,
+        choices=list(valid_action_encodings),
+        help="action feature encoding; `typed` adds 3 channels splitting CH_EDGE "
+        "by op, so add_edge and remove_edge on the same endpoints stop producing "
+        "identical X. Changes in_channels, so a checkpoint is not portable across "
+        "the two (default: basic).",
+    )
+    parser.add_argument(
+        "--ood-policies",
+        type=str,
+        nargs="*",
+        default=[],
+        help="off-policy rollout tests, e.g. `degree_seed null`. The recorded "
+        "action sequence is on-policy by construction; these measure fidelity "
+        "under the action distribution an agent would actually propose "
+        "(default: none).",
+    )
+    parser.add_argument(
+        "--plan-budget-k",
+        type=int,
+        default=0,
+        help="k-seed full-horizon planning regret vs greedy-MC; 0 disables. This "
+        "is the IM problem as posed, unlike the single-step --plan-demo "
+        "(default: 0).",
+    )
+    parser.add_argument(
+        "--planning-split",
+        type=str,
+        default=planning_split_test,
+        choices=list(valid_planning_splits),
+        help="which graphs the planning evaluators score. `test` (default) uses "
+        "held-out graphs only and reports train_overlap/val_overlap so that can "
+        "be checked; `legacy` reproduces the old list(store)[:n] selection, which "
+        "mixes splits and is NOT a held-out number.",
+    )
+    parser.add_argument(
+        "--plan-budget-graphs",
+        type=int,
+        default=3,
+        help="graphs for the k-seed planning eval (default: 3).",
+    )
+    parser.add_argument(
+        "--plan-budget-horizon",
+        type=int,
+        default=20,
+        help="rollout horizon for the k-seed planning eval (default: 20).",
     )
     parser.add_argument(
         "--hidden-dim",

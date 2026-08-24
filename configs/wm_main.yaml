@@ -1,0 +1,53 @@
+# Main world-model experiment (§25). Nothing here is a final matrix — the
+# datasets, arms and seed count are exactly the knobs that are still open, which
+# is why they live in a file rather than in code.
+#
+# The group count is NOT written down. Derive it:
+#
+#   python -m scripts.inspect_registry --config configs/wm_main.yaml
+#
+# which prints the factorization (graphs x dynamics x arms x seeds, per task) and
+# the first few run ids.
+
+experiment_name: wm_main
+
+tasks:
+  - influence_maximization
+
+# Graph registry keys (`python -m scripts.inspect_registry` lists all 37).
+# Synthetic families are generated at `--syn-nodes`; graph SIZE is a generation
+# parameter, not a group dimension, so a size sweep belongs in a generalization
+# config with explicit train/test graph specs rather than here.
+datasets:
+  influence_maximization:
+    - ba
+
+# Must be a subset of the task's declared dynamics in pipeline/tasks.py;
+# enumerate_groups() rejects anything else rather than letting the results table
+# report a dynamics the task never claimed.
+dynamics:
+  influence_maximization:
+    - IC
+    - LT
+
+# Arm specs parsed by pipeline.conditions.parse_arm. `@world_model` is the
+# condition under test; `@oracle` and `@monte_carlo` are the trusted references
+# it has to be compared against.
+arms:
+  - evolve_free@world_model
+  - evolve_free@oracle
+  - evolve_free@monte_carlo
+
+# §13: five seeds is the floor before any "A beats B" claim. Raw per-seed
+# outputs are preserved; the aggregator reports mean, sd and n.
+seeds: [0, 1, 2, 3, 4]
+
+world_model:
+  backbone: sage
+  head: structured
+  hidden_dim: 64
+  num_layers: 3
+  # `spent` is the influence-maximization reading of remove_node and must match
+  # the dataset's; train_wm.check_remove_semantics fails fast on a mismatch.
+  remove_semantics: spent
+  hide_edge_weights: false

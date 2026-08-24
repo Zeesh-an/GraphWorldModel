@@ -9,8 +9,18 @@
 # Usage: sbatch sbatch/influence_maximization/generate_data_ba.sbatch
 
 set -euo pipefail
-cd /home/rrishab/GraphWorldModel/
-source venv/bin/activate
+# Repo root, derived from this script's own location so the file works in
+# any checkout rather than one person's home directory. Set REPO_ROOT to
+# override, e.g. when submitting a copy staged outside the tree.
+cd "${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# Activate the project virtualenv, unless one is already active or VENV
+# points somewhere else. Skipped silently when neither exists, so the
+# script still runs under a module-loaded or conda interpreter.
+VENV="${VENV:-venv}"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+fi
 mkdir -p results logs
 
 # Results land in results/<task>/<dataset>/<run>_<jobid>/data, the same way logs land in
@@ -48,7 +58,7 @@ python -m data.generate_wm_data \
     --action-ops add_node remove_node \
     --weight-lo 0.0 --weight-hi 1.0 \
     --mc-marginals 30 \
-    --split 0.7 0.15 0.15 --seed 42 \
+    --split 0.7 0.15 0.15 --seed 42 --split-mode graph_disjoint \
     --out-dir "$OUT"
 
 python -m data.validate_wm_data --dir "$OUT"

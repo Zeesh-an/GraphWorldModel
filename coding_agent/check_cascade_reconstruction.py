@@ -88,6 +88,9 @@ def generate(out_dir: Path) -> dict:
         GenConfig(
             dataset="er",
             num_graphs=1,
+            # One tiny in-graph dataset: a disjoint-by-graph split is impossible
+            # and irrelevant here, so opt into the per-episode draw explicitly
+            split_mode="episode_random",
             syn_nodes=check_nodes,
             er_p=check_edge_p,
             models=["IC"],

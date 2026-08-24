@@ -1,0 +1,29 @@
+# G1.2 size generalization: hold the topology family fixed, grow N.
+#
+# The control (G1.1, train BA-100 / test held-out BA-100) is already measured and
+# is NOT strong evidence: 20 BA(100,3) graphs are near-exchangeable, so holding
+# graphs out costs the model almost nothing. See docs/comparison_split_protocol.md.
+# This config is the first setting where "held out" means something.
+experiment_name: g1_2_graph_size
+
+train:
+  task: influence_maximization
+  dataset: ba
+  syn_nodes: 100
+  num_graphs: 20
+  dynamics: [IC, LT]
+  split_mode: graph_disjoint
+
+# Each entry is generated as its own dataset and used ONLY as a test set. No
+# graph here participates in training, which is what makes the number a transfer
+# number rather than an in-distribution one.
+test:
+  - {dataset: ba, syn_nodes: 200, num_graphs: 5}
+  - {dataset: ba, syn_nodes: 500, num_graphs: 5}
+  - {dataset: ba, syn_nodes: 1000, num_graphs: 3}
+
+world_model: {backbone: sage, head: structured, hidden_dim: 64, num_layers: 3,
+              remove_semantics: spent, hide_edge_weights: false}
+seeds: [0, 1, 2, 3, 4]
+freeze_world_model: true
+target_finetuning: false
