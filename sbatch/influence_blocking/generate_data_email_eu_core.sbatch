@@ -40,6 +40,9 @@ python -m data.generate_wm_data \
     --action-ops add_node remove_node remove_edge set_edge_weight \
     --rollouts "${ROLLOUTS:-20}" --horizon 10 \
     --inject-p 0.4 --cf-prob 0.4 --cf-branches 2 \
-    --mc-marginals 30 --budget-pct-range 1 20 --seed 42
+    --mc-marginals 30 --budget-pct-range 1 20 --seed 42 \
+    `# SINGLE REAL GRAPH: a graph-disjoint split is impossible here, so` \
+    `# episodes are split PER EPISODE and test metrics are in-graph` \
+    --split-mode episode_random
 
 echo "[ib_gen] done -> results/influence_blocking/email_eu_core/${RUN:-default}/data"

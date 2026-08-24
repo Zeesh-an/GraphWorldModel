@@ -292,6 +292,22 @@ The reference is greedy Monte Carlo over the same candidate pool, not a true
 optimum: exact k-subset IM is NP-hard, and greedy-MC is the (1−1/e) benchmark the
 literature reports against.
 
+### Pipeline figures and report section
+
+`python -m pipeline.run` draws every block of the results JSON into `results/<task>/<dataset>/<run>/plots/wm_*.png` and writes the same numbers under `## World Model` in `report.md`, with the same paper-ready labels as the algorithm-discovery figures. One figure per question the train stage answers:
+
+| figure | block drawn | what to read off it |
+| --- | --- | --- |
+| `wm_training.png` | `history` | train loss and validation `delta_f1` per epoch, with the checkpoint epoch marked |
+| `wm_one_step.png` | `test` + `test.persistence` | every one-step score beside the persistence floor, and Brier beside it |
+| `wm_calibration.png` | `test.calibration_*` | reliability diagrams against the simulator's own marginals, with ECE |
+| `wm_action_conditioning.png` | `action_conditioning` | ablation drop and normalized counterfactual effect against the 1.0 null, verdict in the title |
+| `wm_rollout.png` | `rollout` (+ `*_curve`) | mean cascade size per step, model against simulator, plus the final-count bars; prevalence panel on compartmental runs |
+| `wm_ood_rollout.png` | `rollout_ood` | the same fidelity under each `--ood-policies` policy (only when run) |
+| `wm_planning.png` | `planning` (+ `planning_budget`) | regret of the model's choice against the degree and random pickers, with cross-graph error bars |
+
+The report section adds what a figure cannot carry: provenance (layout, split mode and whether any graph straddles it, checkpoint format, checkpoint epoch), the exogenous-fidelity worst cases, the planning provenance (held-out split, train/val overlap), and an in-loop fidelity table that puts each `@world_model` and `@oracle` arm's own estimate beside the ground-truth Monte Carlo replay of its winning strategy.
+
 ### Standalone re-eval CLIs (no retraining)
 
 These rebuild a model from a results JSON's `config`, reload its `.pt` checkpoint, recompute one block, and write it back, for when only the metric changed, not the weights:

@@ -30,6 +30,7 @@ from world_model.wm_metrics import (
     binary_f1,
     brier_score,
     persistence_baseline,
+    reliability_bins,
     score_predictions,
 )
 
@@ -47,6 +48,42 @@ sensitivity_decimals = 3
 
 def _cat_arrays(arrays: list[np.ndarray]) -> np.ndarray:
     return np.concatenate(arrays) if arrays else np.zeros(0)
+
+
+# Curves that are padded with zero once an episode ends rather than held: a dead
+# epidemic's prevalence IS zero, the same rule the agent environments apply
+zero_padded_curves = ("prevalence_model", "prevalence_true")
+
+
+def _step_curves(per_episode: dict[str, list]) -> dict[str, list[float]]:
+    """
+    Per-step means across ALL episodes, one list per named accumulator.
+
+    Episodes differ in length, and averaging only over the episodes that reached
+    step t makes a cumulative count appear to fall once the large cascades have
+    ended. Each episode is padded to the longest one instead: a finished cascade
+    holds its final size (the true state does not change after the last step)
+    and a finished epidemic's prevalence is zero. This is the convention the
+    agent environments' `spread_curve` already follows.
+    """
+    curves = {}
+    for name, episodes in per_episode.items():
+        if not episodes:
+            curves[f"{name}_curve"] = []
+            continue
+
+        length = max(len(episode) for episode in episodes)
+        fill = 0.0 if name in zero_padded_curves else None
+        padded = np.array(
+            [
+                episode + [episode[-1] if fill is None else fill] * (length - len(episode))
+                for episode in episodes
+            ],
+            dtype=np.float64,
+        )  # shape: (n_episodes, length)
+        curves[f"{name}_curve"] = padded.mean(axis=0).tolist()
+
+    return curves
 
 
 def _reskin_action(dataset: TransitionDataset, index: int, action: list[dict]) -> dict:
@@ -299,6 +336,16 @@ def evaluate_one_step(
     results["brier_frontier"] = brier_score(
         _cat_arrays(prob_frontier_parts), target_frontier
     )
+    # Reliability against the simulator's own marginals: Brier alone cannot
+    # separate a sharp-but-miscalibrated model from a calibrated-but-vague one
+    results["calibration_infected"] = reliability_bins(
+        _cat_arrays(prob_infected_parts), target_infected
+    )
+    results["calibration_frontier"] = reliability_bins(
+        _cat_arrays(prob_frontier_parts), target_frontier
+    )
+    results["ece_infected"] = results["calibration_infected"]["ece"]
+    results["ece_frontier"] = results["calibration_frontier"]["ece"]
 
     results["persistence"] = persistence_baseline(
         target_infected_binary,
@@ -526,6 +573,7 @@ def rollout_ensemble(
     model.eval()
     marginal_mae, count_w1, count_bias = [], [], []
     final_model_counts, final_true_counts = [], []
+    per_episode = {"count_model": [], "count_true": [], "marginal_mae": []}
 
     for graph_id, episode_id in episode_keys:
         episode_records = sorted(
@@ -642,6 +690,12 @@ def rollout_ensemble(
                 float(model_counts[:, step].mean() - true_counts[:, step].mean())
             )
 
+        per_episode["count_model"].append(model_counts.mean(axis=0).tolist())
+        per_episode["count_true"].append(true_counts.mean(axis=0).tolist())
+        per_episode["marginal_mae"].append(
+            np.abs(model_marginal - true_marginal).mean(axis=1).tolist()
+        )
+
         final_model_counts.append(float(model_counts[:, -1].mean()))
         final_true_counts.append(float(true_counts[:, -1].mean()))
 
@@ -657,6 +711,7 @@ def rollout_ensemble(
         ),
         "ens_n_samples": float(n_samples),
         "ens_n_episodes": float(len(episode_keys)),
+        **_step_curves(per_episode),
     }
 
 
@@ -742,6 +797,9 @@ def competitive_rollout_ensemble(
     model.eval()
     marginal_mae, count_bias, pos_count_bias, count_w1 = [], [], [], []
     final_model_counts, final_true_counts = [], []
+    per_episode = {
+        "count_model": [], "count_true": [], "pos_count_model": [], "marginal_mae": [],
+    }
 
     for graph_id, episode_id in episode_keys:
         episode_records = sorted(
@@ -821,6 +879,15 @@ def competitive_rollout_ensemble(
             )
             pos_count_bias.append(float(positive_counts[:, step].mean()))
 
+        per_episode["count_model"].append(model_counts.mean(axis=0).tolist())
+        per_episode["count_true"].append(true_counts.mean(axis=0).tolist())
+        per_episode["pos_count_model"].append(positive_counts.mean(axis=0).tolist())
+        per_episode["marginal_mae"].append(
+            np.abs(model_infected.mean(axis=0) - true_infected.mean(axis=0))
+            .mean(axis=1)
+            .tolist()
+        )
+
         final_model_counts.append(float(model_counts[:, -1].mean()))
         final_true_counts.append(float(true_counts[:, -1].mean()))
 
@@ -837,6 +904,7 @@ def competitive_rollout_ensemble(
         ),
         "ens_n_samples": float(n_samples),
         "ens_n_episodes": float(len(episode_keys)),
+        **_step_curves(per_episode),
     }
 
 
@@ -1089,6 +1157,10 @@ def epidemic_rollout_ensemble(
     model.eval()
     marginal_mae, count_w1, count_bias, prevalence_bias = [], [], [], []
     final_model_counts, final_true_counts = [], []
+    per_episode = {
+        "count_model": [], "count_true": [], "prevalence_model": [],
+        "prevalence_true": [], "marginal_mae": [],
+    }
     peak_model, peak_true = [], []
 
     for graph_id, episode_id in episode_keys:
@@ -1171,6 +1243,14 @@ def epidemic_rollout_ensemble(
                 )
             )
 
+        per_episode["count_model"].append(model_counts.mean(axis=0).tolist())
+        per_episode["count_true"].append(true_counts.mean(axis=0).tolist())
+        per_episode["prevalence_model"].append(model_infectious.mean(axis=0).tolist())
+        per_episode["prevalence_true"].append(true_infectious.mean(axis=0).tolist())
+        per_episode["marginal_mae"].append(
+            np.abs(model_ever.mean(axis=0) - true_ever.mean(axis=0)).mean(axis=1).tolist()
+        )
+
         final_model_counts.append(float(model_counts[:, -1].mean()))
         final_true_counts.append(float(true_counts[:, -1].mean()))
         peak_model.append(float(model_infectious.max(axis=1).mean()))
@@ -1192,6 +1272,7 @@ def epidemic_rollout_ensemble(
         "ens_final_count_true": mean(final_true_counts),
         "ens_n_samples": float(n_samples),
         "ens_n_episodes": float(len(episode_keys)),
+        **_step_curves(per_episode),
     }
 
 

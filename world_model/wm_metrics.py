@@ -99,6 +99,53 @@ def score_predictions(
     }
 
 
+def reliability_bins(prob: np.ndarray, target: np.ndarray, n_bins: int = 10) -> dict:
+    """
+    Reliability diagram data for one probability column against its SOFT target.
+
+    The target is the MC marginal rather than a 0/1 label, so "empirical
+    frequency" here is the mean marginal in the bin: a well-calibrated model
+    lands on the diagonal against the simulator's own probabilities, which is
+    the calibration a planner consuming probabilities actually depends on. ECE
+    is the count-weighted mean |predicted - marginal| over the bins.
+    """
+    prob = np.asarray(prob, dtype=np.float64).ravel()
+    target = np.asarray(target, dtype=np.float64).ravel()
+    edges = np.linspace(0.0, 1.0, n_bins + 1)
+    # The top edge is inclusive, so a probability of exactly 1.0 lands in the last bin
+    bins = np.clip(np.digitize(prob, edges[1:-1], right=False), 0, n_bins - 1)
+
+    mean_predicted, mean_target, count = [], [], []
+    for index in range(n_bins):
+        mask = bins == index
+        count.append(int(mask.sum()))
+        mean_predicted.append(float(prob[mask].mean()) if mask.any() else float("nan"))
+        mean_target.append(float(target[mask].mean()) if mask.any() else float("nan"))
+
+    total = float(sum(count))
+    ece = (
+        float(
+            sum(
+                abs(predicted - observed) * bin_count / total
+                for predicted, observed, bin_count in zip(
+                    mean_predicted, mean_target, count, strict=True
+                )
+                if bin_count
+            )
+        )
+        if total
+        else float("nan")
+    )
+
+    return {
+        "bin_edges": edges.tolist(),
+        "mean_predicted": mean_predicted,
+        "mean_target": mean_target,
+        "count": count,
+        "ece": ece,
+    }
+
+
 def persistence_baseline(
     y_inf: np.ndarray,
     y_fr: np.ndarray,

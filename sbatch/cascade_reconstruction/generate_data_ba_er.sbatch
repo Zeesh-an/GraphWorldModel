@@ -53,6 +53,9 @@ for SPEC in "ba --ba-m 4" "er --er-p 0.008"; do
         --algorithms random degree pagerank betweenness \
         --inject-p 0 --cf-prob 0 --action-ops \
         --trace-parents --mc-marginals "$MC_MARGINALS" --seed 42 \
+    `# SINGLE GRAPH per dataset: a graph-disjoint split is impossible here, so` \
+    `# episodes are split PER EPISODE and test metrics are in-graph` \
+    --split-mode episode_random \
         --out-dir "results/cascade_reconstruction/$DATASET/default/data"
 done
 

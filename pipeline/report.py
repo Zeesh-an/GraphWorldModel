@@ -18,6 +18,7 @@ from pipeline.conditions import (
     reward_name,
 )
 from pipeline.layout import Layout
+from pipeline.plots import pretty_arm, prettify, wm_metric_name
 from pipeline.tasks import minimize
 
 # The agent writes its own `##` headings; demoting them one level keeps the
@@ -1212,38 +1213,324 @@ def _winner_section(agent_results: list[dict]) -> list[str]:
     return lines
 
 
-def _world_model_section(wm_results: dict | None) -> list[str]:
-    if wm_results is None:
-        return [
-            "## World model",
-            "",
-            "_Not trained for this run (oracle or Monte Carlo evaluator)._",
+# Result keys that are counts of things, printed without decimals
+wm_count_keys = (
+    "plan_n_graphs", "ens_n_samples", "ens_n_episodes", "n_pairs", "n_nodes_scored",
+    "n_nodes_with_effect", "n_with_action", "n_swappable", "seeded_p_infected_n",
+    "removed_p_frontier_n", "n_planning_graphs",
+)
+
+
+def _wm_value(value: object, digits: int = 4, key: str = "") -> str:
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+
+    if key in wm_count_keys and isinstance(value, (int, float)):
+        return str(int(round(float(value))))
+
+    if isinstance(value, (int, float)):
+        return _format_number(value, digits)
+
+    return str(value)
+
+
+def _wm_table(header: tuple, rows: list[tuple]) -> list[str]:
+    if not rows:
+        return []
+
+    lines = [
+        "| " + " | ".join(header) + " |",
+        "| " + " | ".join("---" for _ in header) + " |",
+    ]
+    lines += ["| " + " | ".join(str(cell) for cell in row) + " |" for row in rows]
+
+    return lines + [""]
+
+
+def _wm_provenance(wm_results: dict, metadata: dict | None) -> list[str]:
+    config = wm_results.get("config", {})
+    history = wm_results.get("history") or []
+    best_epoch = (
+        max(history, key=lambda entry: entry["val_delta_f1"])["epoch"] if history else None
+    )
+    straddling = (metadata or {}).get("graphs_straddling_splits")
+    split_mode = wm_results.get("split_mode") or (metadata or {}).get("split_mode")
+    split_note = (
+        f"{split_mode} ({len(straddling)} graph(s) straddle train/test)"
+        if split_mode and straddling
+        else f"{split_mode} (no graph straddles a split)"
+        if split_mode and straddling == []
+        else str(split_mode)
+    )
+    layout = (
+        "compartmental (9 channels in, 5 out)"
+        if config.get("epidemic")
+        else "competitive (8 channels in, 4 out)"
+        if config.get("competitive")
+        else f"single cascade (`{config.get('action_encoding', 'basic')}` action encoding)"
+    )
+    rows = [
+        ("Backbone / Head", f"`{config.get('model')}` / `{config.get('head')}`"),
+        ("Dynamics", f"`{config.get('diffusion_model')}`"),
+        ("State Layout", layout),
+        ("Hidden Dim / Layers", f"{config.get('hidden_dim')} / {config.get('n_layers')}"),
+        ("Remove Semantics", f"`{config.get('remove_semantics')}`"),
+        ("Edge Weights Hidden", _wm_value(bool(config.get("hide_edge_weights", False)))),
+        ("Split Mode", split_note),
+        ("Checkpoint Format", f"`{wm_results.get('checkpoint_format', 'bare state_dict')}`"),
+        ("Epochs Run / Checkpoint Epoch", f"{len(history)} / {best_epoch}"),
+        ("Best Validation Delta F1", _wm_value(wm_results.get("best_val_delta_f1"))),
+        ("Training Time", f"{_format_number(wm_results.get('train_seconds'), 1)} s"),
+    ]
+
+    return ["### Provenance", ""] + _wm_table(("Setting", "Value"), rows)
+
+
+def _wm_one_step(test: dict) -> list[str]:
+    persistence = test.get("persistence") or {}
+    scored = (
+        "delta_f1", "new_infection_f1", "infected_acc", "frontier_acc",
+        "brier_infected", "brier_frontier", "ece_infected", "ece_frontier",
+        "compartment_acc", "compartment_f1", "brier_compartment",
+        "pos_infected_acc", "pos_new_infection_f1",
+    )
+    rows = [
+        (wm_metric_name(key), _wm_value(test[key], key=key), _wm_value(persistence[key], key=key) if key in persistence else "n/a")
+        for key in scored
+        if key in test
+    ]
+    action_rows = [
+        (wm_metric_name(key), _wm_value(test[key]), "n/a")
+        for key in ("add_seed_success", "remove_frontier_success", "dose_success",
+                    "block_seed_success", "action_sensitivity")
+        if key in test
+    ]
+    lines = ["### One-Step Accuracy (Test Split)", ""]
+    lines += [
+        "The persistence baseline predicts `s_{t+1} = s_t`; its change-F1 is zero by "
+        "construction, so the Delta F1 and New-Infection F1 rows are the substantive "
+        "ones and the accuracy rows are dominated by unchanged nodes. Brier and ECE "
+        "score the probabilities against the simulator's own marginals (lower is better).",
+        "",
+    ]
+    lines += _wm_table(("Metric", "World Model", "Persistence Baseline"), rows + action_rows)
+
+    if test.get("delta_f1_is_new_infection_f1"):
+        brier_pair = (test.get("brier_infected"), test.get("brier_frontier"))
+        same_brier = (
+            None not in brier_pair and abs(brier_pair[0] - brier_pair[1]) < 1e-9
+        )
+        lines += [
+            "> The scored column is monotone, so a changed node is a newly infected node "
+            "and Delta F1 and New-Infection F1 are the same quantity: one piece of "
+            "evidence, not two."
+            + (
+                " The two Brier and ECE rows coincide for the same reason: the "
+                "structured head composes both columns from one per-node probability, so "
+                "their errors are identical node for node."
+                if same_brier
+                else ""
+            ),
             "",
         ]
 
-    test = wm_results.get("test", {})
-    rollout = wm_results.get("rollout", {})
-    lines = [
-        "## World model",
+    return lines
+
+
+def _wm_rollout(wm_results: dict) -> list[str]:
+    rollout = wm_results.get("rollout") or {}
+    if not rollout:
+        return []
+
+    rows = [
+        (wm_metric_name(key), _wm_value(value, 3, key=key))
+        for key, value in rollout.items()
+        if not key.endswith("_curve")
+    ]
+    bias = rollout.get("ens_count_bias")
+    reading = (
+        "" if bias is None
+        else "A count bias near zero means the free-running rollout neither saturates "
+        f"nor dies early; this run reads {float(bias):+.2f} nodes per step against "
+        f"a final cascade of {_format_number(rollout.get('ens_final_count_true'), 1)}."
+    )
+    lines = ["### Rollout Fidelity", ""]
+    lines += [
+        "A sampled ensemble of the world model is rolled forward under the recorded "
+        "action sequence and compared with the same number of simulator rollouts. "
+        + reading,
         "",
-        f"- **backbone / head**: `{wm_results['config'].get('model')}` / "
-        f"`{wm_results['config'].get('head')}`",
-        f"- **train time**: {_format_number(wm_results.get('train_seconds'), 1)}s "
-        f"over {len(wm_results.get('history', []))} epochs",
+    ]
+    lines += _wm_table(("Metric", "Value"), rows)
+
+    ood = wm_results.get("rollout_ood") or {}
+    if ood:
+        lines += ["### Off-Policy Rollouts", ""]
+        lines += [
+            "The same comparison under action policies the training data never "
+            "contained, which is the distribution a planner actually proposes.",
+            "",
+        ]
+        keys = ["ens_marg_mae", "ens_count_w1", "ens_count_bias", "ens_final_count_model", "ens_final_count_true"]
+        header = ("Policy",) + tuple(wm_metric_name(key) for key in keys)
+        rows = [("recorded",) + tuple(_wm_value(rollout.get(key), 3, key=key) for key in keys)]
+        rows += [
+            (name,) + tuple(_wm_value(block.get(key), 3, key=key) for key in keys)
+            for name, block in ood.items()
+        ]
+        lines += _wm_table(header, rows)
+
+    return lines
+
+
+def _wm_action_conditioning(block: dict | None) -> list[str]:
+    if not block:
+        return []
+
+    effect = block.get("counterfactual_effect") or {}
+    ablation = block.get("ablation") or {}
+    exogenous = block.get("exogenous") or {}
+    lines = ["### Action Conditioning", ""]
+    lines += [
+        "Three falsifiable tests of whether the prediction depends on the intervention "
+        "rather than on state persistence. The counterfactual effect compares the "
+        "predicted change between two actions at the same state with the simulator's "
+        "true change; a model that predicts no effect scores exactly 1.0 on the "
+        "normalized error, so that is the null to beat. The ablation re-scores the same "
+        "states with actions zeroed and shuffled. The exogenous test checks the closed "
+        "form of the immediate action effect at its worst case.",
         "",
-        "| metric | value |",
-        "| --- | --- |",
     ]
 
-    for key in ("delta_f1", "new_infection_f1", "infected_acc", "frontier_acc"):
-        if key in test:
-            lines.append(f"| one-step `{key}` | {_format_number(test[key], 4)} |")
+    effect_keys = ("effect_mae_norm", "effect_pearson", "effect_sign_agree", "effect_magnitude_ratio", "effect_mae", "n_pairs", "n_nodes_with_effect")
+    rows = [(wm_metric_name(key), _wm_value(effect[key], key=key)) for key in effect_keys if key in effect]
+    per_op = effect.get("per_op") or {}
+    for op, values in per_op.items():
+        if isinstance(values, dict) and values.get("effect_mae_norm") is not None:
+            rows.append((f"Normalized Effect MAE ({pretty_arm(op)})", _wm_value(values["effect_mae_norm"])))
+    if rows:
+        lines += ["**Counterfactual effect** (null = 1.0):", ""]
+        lines += _wm_table(("Metric", "Value"), rows)
 
-    for key in ("ens_count_bias", "ens_final_count_model", "ens_final_count_true"):
-        if key in rollout:
-            lines.append(f"| rollout `{key}` | {_format_number(rollout[key], 3)} |")
+    ablation_keys = ("baseline_delta_f1", "null_delta_f1", "null_delta_f1_drop", "shuffle_delta_f1", "shuffle_delta_f1_drop",
+                     "baseline_brier_infected", "null_brier_infected", "shuffle_brier_infected", "n_with_action", "n_swappable")
+    rows = [(wm_metric_name(key), _wm_value(ablation[key], key=key)) for key in ablation_keys if ablation.get(key) is not None]
+    if rows:
+        lines += ["**Action ablation** (a drop near zero means the accuracy was obtainable without reading the action):", ""]
+        lines += _wm_table(("Metric", "Value"), rows)
 
-    return lines + [""]
+    exo_keys = ("seeded_p_infected_worst", "seeded_p_infected_mean", "seeded_p_infected_exact_frac", "seeded_p_infected_n",
+                "removed_p_frontier_worst", "removed_p_frontier_mean", "removed_p_frontier_exact_frac", "removed_p_frontier_n")
+    rows = [(wm_metric_name(key), _wm_value(exogenous[key], 6, key=key)) for key in exo_keys if exogenous.get(key) is not None]
+    if rows:
+        lines += ["**Exogenous fidelity** (a seeded node must read 1.0, a removed node 0.0):", ""]
+        lines += _wm_table(("Metric", "Value"), rows)
+
+    verdict = block.get("verdict")
+    if verdict:
+        status = "PASS" if block.get("action_conditioned") else "FAIL"
+        lines += [f"> **Verdict: {status}.** {verdict}", ""]
+
+    return lines
+
+
+def _wm_planning(wm_results: dict) -> list[str]:
+    lines = []
+    for title, key in (("Planning Regret (One-Step)", "planning"), ("Planning Regret (k-Seed, Full Horizon)", "planning_budget")):
+        block = wm_results.get(key)
+        if not isinstance(block, dict):
+            continue
+
+        rows = [
+            (wm_metric_name(name), _wm_value(value), _wm_value(block.get(f"{name}_std"), 4) if f"{name}_std" in block else "n/a")
+            for name, value in block.items()
+            if "_regret_" in name and not name.endswith("_std") and value is not None
+        ]
+        if not rows:
+            continue
+
+        lines += [f"### {title}", ""]
+        lines += [
+            "Regret is the spread lost against the oracle's choice when the world model "
+            "picks the intervention, beside the same choice made by a degree heuristic "
+            "and at random. A useful planner beats random decisively and at least "
+            "matches degree. The one-step form scores a single intervention by its "
+            "next-step marginal, which is a sanity check rather than the multi-step "
+            "claim the outer loop rests on.",
+            "",
+        ]
+        lines += _wm_table(("Chooser", "Regret", "Std Across Graphs"), rows)
+        provenance = [
+            ("Planning Split", block.get("planning_split")),
+            ("Graphs Scored", block.get("plan_n_graphs")),
+            ("Overlap with Train / Val", f"{block.get('train_overlap')} / {block.get('val_overlap')}"
+             if "train_overlap" in block else None),
+        ]
+        lines += ["Provenance: " + "; ".join(f"{name} {_wm_value(value, 0)}" for name, value in provenance if value is not None) + ".", ""]
+
+    return lines
+
+
+def _wm_in_loop_fidelity(agent_results: list[dict]) -> list[str]:
+    """The world model as the outer loop saw it: its estimate against the ground-truth replay."""
+    paired = [
+        result for result in agent_results
+        if result.get("mc_reward") is not None and result.get("evaluator") in ("world_model", "oracle")
+    ]
+    if not paired:
+        return []
+
+    rows = []
+    for result in sorted(paired, key=lambda item: (item["arm"], item.get("budget", 0))):
+        estimate = result.get("wm_reeval_mean", result["reward"])
+        rows.append((
+            pretty_arm(result["arm"]),
+            _wm_value(result.get("budget"), 0),
+            _wm_value(estimate, 2),
+            _wm_value(result["mc_reward"], 2),
+            f"{float(estimate) - float(result['mc_reward']):+.2f}",
+        ))
+
+    return ["### In-Loop Evaluator Fidelity", "", 
+            "What each model-based evaluator believed about its own winning strategy against "
+            "the ground-truth Monte Carlo replay of that strategy. This is the number the "
+            "outer loop actually depends on; the offline rollout fidelity above is its "
+            "prediction.", ""] + _wm_table(
+        ("Arm", "Budget", "Evaluator Estimate", "Ground-Truth Spread", "Bias"), rows
+    )
+
+
+def _world_model_section(
+    wm_results: dict | None,
+    metadata: dict | None = None,
+    agent_results: list[dict] | None = None,
+) -> list[str]:
+    lines = ["## World Model", ""]
+
+    if wm_results is None:
+        lines += [
+            "_Not trained for this run (oracle or Monte Carlo evaluator)._",
+            "",
+        ]
+        lines += _wm_in_loop_fidelity(agent_results or [])
+
+        return lines
+
+    lines += [
+        "The learned transition model $f_\\theta(G, s_t, a_t) \\to s_{t+1}$ that the "
+        "`@world_model` arms use in place of the simulator. Every number below comes "
+        "from the train stage's results JSON; the figures `wm_*.png` draw the same "
+        "blocks.",
+        "",
+    ]
+    lines += _wm_provenance(wm_results, metadata)
+    lines += _wm_one_step(wm_results.get("test") or {})
+    lines += _wm_action_conditioning(wm_results.get("action_conditioning"))
+    lines += _wm_rollout(wm_results)
+    lines += _wm_planning(wm_results)
+    lines += _wm_in_loop_fidelity(agent_results or [])
+
+    return lines
 
 
 def _figures_section(plots_dir: Path, report_parent: Path) -> list[str]:
@@ -1253,7 +1540,8 @@ def _figures_section(plots_dir: Path, report_parent: Path) -> list[str]:
 
     lines = ["## Figures", ""]
     for figure in figures:
-        title = figure.stem.replace("_", " ")
+        # Same paper-ready naming as the figure titles themselves
+        title = prettify(figure.stem)
         lines += [
             f"### {title}",
             "",
@@ -1298,7 +1586,7 @@ def write_report(
     lines += _epidemic_section(agent_results)
     lines += _structural_section(agent_results)
     lines += _winner_section(agent_results)
-    lines += _world_model_section(wm_results)
+    lines += _world_model_section(wm_results, metadata, agent_results)
     lines += _figures_section(layout.plots_dir, layout.root)
 
     layout.report_path.write_text("\n".join(lines))

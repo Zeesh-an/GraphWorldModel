@@ -24,6 +24,7 @@ from pipeline.tasks import minimize, tasks
 # Headless: SLURM nodes have no display
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.ticker import MaxNLocator  # noqa: E402
 
 figure_dpi = 200
 figure_size = (7.0, 4.5)
@@ -45,6 +46,16 @@ condition_colors = {
 # free. Tokens are looked up lowercase; anything absent is first-letter
 # capitalized, with title-case minor words kept down.
 acronyms = {
+    "w1": "W1",
+    "ece": "ECE",
+    "ood": "OOD",
+    "gnn": "GNN",
+    "mlp": "MLP",
+    "gcn": "GCN",
+    "gcnii": "GCNII",
+    "sage": "SAGE",
+    "gat": "GAT",
+    "gt": "GT",
     # metrics and units
     "msle": "MSLE", "male": "MALE", "mape": "MAPE", "mrse": "MRSE", "pcc": "PCC",
     "auc": "AUC", "f1": "F1", "nrmse": "NRMSE", "mcc": "MCC", "r2": "R2",
@@ -114,6 +125,89 @@ minor_words = {
 }
 
 # Substrings the underscore pass must not touch
+# Display names for the world-model results JSON. Keys not listed here fall
+# through to `pretty_words`, so a new metric is readable without an entry.
+wm_metric_names = {
+    "delta_f1": "Delta F1",
+    "new_infection_f1": "New-Infection F1",
+    "infected_acc": "Infected Accuracy",
+    "frontier_acc": "Frontier Accuracy",
+    "add_seed_success": "Add-Seed Success",
+    "remove_frontier_success": "Remove-Frontier Success",
+    "dose_success": "Dose Success",
+    "block_seed_success": "Block-Seed Success",
+    "action_sensitivity": "Action Sensitivity",
+    "brier_infected": "Brier (Infected)",
+    "brier_frontier": "Brier (Frontier)",
+    "brier_compartment": "Brier (Compartments)",
+    "ece_infected": "ECE (Infected)",
+    "ece_frontier": "ECE (Frontier)",
+    "compartment_acc": "Compartment Accuracy",
+    "compartment_f1": "Compartment F1",
+    "pos_infected_acc": "Positive-Cascade Infected Accuracy",
+    "pos_new_infection_f1": "Positive-Cascade New-Infection F1",
+    "ens_marg_mae": "Ensemble Marginal MAE",
+    "ens_count_w1": "Ensemble Count W1",
+    "ens_count_bias": "Ensemble Count Bias",
+    "ens_final_count_model": "Final Count (World Model)",
+    "ens_final_count_true": "Final Count (Simulator)",
+    "ens_n_samples": "Ensemble Samples",
+    "ens_n_episodes": "Episodes Evaluated",
+    "ens_pos_count_mean": "Positive-Cascade Mean Count (World Model)",
+    "ens_prevalence_bias": "Prevalence Bias",
+    "ens_peak_model": "Peak Prevalence (World Model)",
+    "ens_peak_true": "Peak Prevalence (Simulator)",
+    "rollout_count_mae": "Rollout Count MAE",
+    "plan_n_graphs": "Planning Graphs",
+    "plan_regret_model": "World Model",
+    "plan_regret_degree": "Degree Heuristic",
+    "plan_regret_random": "Random",
+    "block_regret_model": "World Model",
+    "block_regret_degree": "Degree Heuristic",
+    "block_regret_random": "Random",
+    "block_regret_proximity": "Proximity",
+    "immun_regret_model": "World Model",
+    "immun_regret_degree": "Degree Heuristic",
+    "immun_regret_random": "Random",
+    "immun_regret_acquaintance": "Acquaintance",
+    "effect_mae": "Effect MAE",
+    "effect_mae_norm": "Normalized Effect MAE",
+    "effect_pearson": "Effect Pearson",
+    "effect_sign_agree": "Effect Sign Agreement",
+    "effect_magnitude_ratio": "Effect Magnitude Ratio",
+    "n_pairs": "Counterfactual Pairs",
+    "n_nodes_scored": "Nodes Scored",
+    "n_nodes_with_effect": "Nodes with a True Effect",
+    "baseline_delta_f1": "Delta F1 (Recorded Actions)",
+    "null_delta_f1": "Delta F1 (Actions Zeroed)",
+    "shuffle_delta_f1": "Delta F1 (Actions Shuffled)",
+    "null_delta_f1_drop": "Drop from Zeroing",
+    "shuffle_delta_f1_drop": "Drop from Shuffling",
+    "baseline_brier_infected": "Brier (Recorded Actions)",
+    "null_brier_infected": "Brier (Actions Zeroed)",
+    "shuffle_brier_infected": "Brier (Actions Shuffled)",
+    "null_brier_rise": "Brier Rise from Zeroing",
+    "shuffle_brier_rise": "Brier Rise from Shuffling",
+    "n_with_action": "Transitions with an Action",
+    "n_swappable": "Shuffle-Swappable Transitions",
+    "shuffle_testable": "Shuffle Testable",
+    "seeded_p_infected_mean": "Seeded Node P(Infected), Mean",
+    "seeded_p_infected_worst": "Seeded Node P(Infected), Worst",
+    "seeded_p_infected_exact_frac": "Seeded Nodes Exactly 1.0",
+    "seeded_p_infected_n": "Seeded Nodes Checked",
+    "removed_p_frontier_mean": "Removed Node P(Frontier), Mean",
+    "removed_p_frontier_worst": "Removed Node P(Frontier), Worst",
+    "removed_p_frontier_exact_frac": "Removed Nodes Exactly 0.0",
+    "removed_p_frontier_n": "Removed Nodes Checked",
+    "tolerance": "Tolerance",
+}
+
+
+def wm_metric_name(key: str) -> str:
+    """Paper-ready name for one world-model results key."""
+    return wm_metric_names.get(key, pretty_words(key))
+
+
 protected_literals = {"|S_P|": "\x00P\x00", "|S_N|": "\x00N\x00", "delta_f1": "\x00D\x00"}
 protected_display = {"\x00P\x00": "|S_P|", "\x00N\x00": "|S_N|", "\x00D\x00": "Delta F1"}
 
@@ -868,6 +962,26 @@ def plot_cascade(results: list[dict], out_path: Path, title_prefix: str) -> Path
     return _save(figure, out_path)
 
 
+model_color = "#4C72B0"
+simulator_color = "#55A868"
+persistence_color = "#B0B0B0"
+accent_color = "#C44E52"
+regret_colors = (model_color, "#8172B2", "#CCB974", "#64B5CD", "#DD8452")
+
+
+def _annotate_bars(axes, bars, values: list[float], digits: int = 3) -> None:
+    for bar, value in zip(bars, values, strict=True):
+        if np.isfinite(value):
+            axes.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                f"{value:.{digits}f}",
+                ha="center",
+                va="bottom",
+                fontsize=8,
+            )
+
+
 def plot_wm_training(
     wm_results: dict, out_path: Path, title_prefix: str
 ) -> Path | None:
@@ -877,25 +991,36 @@ def plot_wm_training(
 
     figure, loss_axes = plt.subplots(figsize=figure_size)
     epochs = [entry["epoch"] for entry in history]
+    val_f1 = [entry["val_delta_f1"] for entry in history]
 
     loss_axes.plot(
-        epochs, [entry["train_loss"] for entry in history], color="#4C72B0", label="train loss"
+        epochs, [entry["train_loss"] for entry in history], color=model_color, label="train loss"
     )
     loss_axes.set_xlabel("epoch")
-    loss_axes.set_ylabel("train loss", color="#4C72B0")
-    loss_axes.tick_params(axis="y", labelcolor="#4C72B0")
+    loss_axes.xaxis.set_major_locator(MaxNLocator(integer=True))
+    loss_axes.set_ylabel("train loss", color=model_color)
+    loss_axes.tick_params(axis="y", labelcolor=model_color)
     loss_axes.grid(alpha=0.3)
 
     f1_axes = loss_axes.twinx()
-    f1_axes.plot(
-        epochs,
-        [entry["val_delta_f1"] for entry in history],
-        color="#C44E52",
-        label="val delta_f1",
-    )
-    f1_axes.set_ylabel("val delta_f1", color="#C44E52")
-    f1_axes.tick_params(axis="y", labelcolor="#C44E52")
+    f1_axes.plot(epochs, val_f1, color=accent_color, label="validation delta_f1")
+    f1_axes.set_ylabel("validation delta_f1", color=accent_color)
+    f1_axes.tick_params(axis="y", labelcolor=accent_color)
 
+    # The checkpoint is the best-validation epoch, not the last one
+    best = int(np.argmax(val_f1))
+    f1_axes.axvline(epochs[best], color="k", linestyle=":", linewidth=1)
+    f1_axes.annotate(
+        f"checkpoint (epoch {epochs[best]})",
+        (epochs[best], val_f1[best]),
+        textcoords="offset points",
+        xytext=(6, -12),
+        fontsize=8,
+    )
+
+    handles = loss_axes.get_legend_handles_labels()[0] + f1_axes.get_legend_handles_labels()[0]
+    labels = loss_axes.get_legend_handles_labels()[1] + f1_axes.get_legend_handles_labels()[1]
+    loss_axes.legend(handles, labels, fontsize=8, loc="center right")
     loss_axes.set_title(f"{title_prefix}: world-model training")
 
     return _save(figure, out_path)
@@ -904,72 +1029,284 @@ def plot_wm_training(
 def plot_wm_one_step(
     wm_results: dict, out_path: Path, title_prefix: str
 ) -> Path | None:
+    """Model against the persistence floor: the change-F1 columns are the ones that matter."""
     test = wm_results.get("test") or {}
-    keys = [
-        "delta_f1",
-        "new_infection_f1",
-        "infected_acc",
-        "frontier_acc",
-        "action_sensitivity",
+    persistence = test.get("persistence") or {}
+    score_keys = [
+        key
+        for key in ("delta_f1", "new_infection_f1", "infected_acc", "frontier_acc",
+                    "compartment_f1", "pos_new_infection_f1")
+        if key in test
     ]
-    present = [key for key in keys if key in test]
-    if not present:
+    brier_keys = [key for key in ("brier_infected", "brier_frontier") if key in test]
+    if not score_keys:
         return None
 
-    figure, axes = plt.subplots(figsize=figure_size)
-    values = [float(test[key]) for key in present]
+    figure, (score_axes, brier_axes) = plt.subplots(
+        1, 2, figsize=(11.0, 4.5), gridspec_kw={"width_ratios": [3, 1.4]}
+    )
+    positions = np.arange(len(score_keys))
+    width = 0.38
+    model_values = [float(test[key]) for key in score_keys]
+    floor_values = [float(persistence.get(key, np.nan)) for key in score_keys]
 
-    bars = axes.bar(present, values, color="#4C72B0", width=0.6)
-    for bar, value in zip(bars, values, strict=True):
-        axes.text(
-            bar.get_x() + bar.get_width() / 2,
-            value,
-            f"{value:.3f}",
-            ha="center",
-            va="bottom",
-            fontsize=8,
-        )
+    bars = score_axes.bar(positions - width / 2, model_values, width, color=model_color, label="world model")
+    _annotate_bars(score_axes, bars, model_values)
+    bars = score_axes.bar(positions + width / 2, floor_values, width, color=persistence_color, label="persistence baseline")
+    _annotate_bars(score_axes, bars, floor_values)
+    score_axes.set_xticks(positions)
+    score_axes.set_xticklabels([wm_metric_name(key) for key in score_keys])
+    plt.setp(score_axes.get_xticklabels(), rotation=15, ha="right")
+    score_axes.set_ylim(0, 1.12)
+    score_axes.set_ylabel("score (higher is better)")
+    score_axes.set_title("one-step accuracy on the test split")
+    score_axes.grid(alpha=0.3, axis="y")
+    score_axes.legend(fontsize=8, loc="upper right")
 
-    axes.set_ylim(0, 1.05)
-    axes.set_ylabel("score")
-    axes.set_title(f"{title_prefix}: world-model one-step accuracy (test)")
-    axes.grid(alpha=0.3, axis="y")
-    plt.setp(axes.get_xticklabels(), rotation=20, ha="right")
+    if brier_keys:
+        positions = np.arange(len(brier_keys))
+        model_values = [float(test[key]) for key in brier_keys]
+        floor_values = [float(persistence.get(key, np.nan)) for key in brier_keys]
+        bars = brier_axes.bar(positions - width / 2, model_values, width, color=model_color)
+        _annotate_bars(brier_axes, bars, model_values, digits=4)
+        bars = brier_axes.bar(positions + width / 2, floor_values, width, color=persistence_color)
+        _annotate_bars(brier_axes, bars, floor_values, digits=4)
+        brier_axes.set_xticks(positions)
+        brier_axes.set_xticklabels([wm_metric_name(key) for key in brier_keys])
+        plt.setp(brier_axes.get_xticklabels(), rotation=15, ha="right")
+        brier_axes.set_ylabel("Brier score (lower is better)")
+        brier_axes.set_title("calibration")
+        brier_axes.grid(alpha=0.3, axis="y")
+
+    figure.suptitle(f"{title_prefix}: world-model one-step evaluation")
 
     return _save(figure, out_path)
 
 
 def plot_wm_rollout(wm_results: dict, out_path: Path, title_prefix: str) -> Path | None:
-    """Final cascade size, model vs truth: the saturation check."""
+    """Free-running rollout against the simulator: the saturation check, per step and at the end."""
     rollout = wm_results.get("rollout") or {}
     model_count = rollout.get("ens_final_count_model")
     true_count = rollout.get("ens_final_count_true")
     if model_count is None or true_count is None:
         return None
 
-    figure, axes = plt.subplots(figsize=(5.0, 4.0))
+    model_curve = rollout.get("count_model_curve")
+    true_curve = rollout.get("count_true_curve")
+    prevalence_model = rollout.get("prevalence_model_curve")
+    has_curves = bool(model_curve) and bool(true_curve)
+    panels = 1 + int(has_curves) + int(bool(prevalence_model))
+
+    figure, axes_list = plt.subplots(1, panels, figsize=(4.6 * panels, 4.2))
+    axes_list = np.atleast_1d(axes_list)
+    panel = 0
+
+    if has_curves:
+        axes = axes_list[panel]
+        steps = np.arange(len(model_curve))
+        axes.plot(steps, model_curve, color=model_color, marker="o", markersize=3, label="world model")
+        axes.plot(steps, true_curve, color=simulator_color, marker="s", markersize=3, linestyle="--", label="simulator")
+        axes.set_xlabel("timestep")
+        axes.set_ylabel("mean infected count")
+        axes.set_title("cumulative cascade size per step")
+        axes.grid(alpha=0.3)
+        axes.legend(fontsize=8)
+        panel += 1
+
+    if prevalence_model:
+        axes = axes_list[panel]
+        steps = np.arange(len(prevalence_model))
+        axes.plot(steps, prevalence_model, color=model_color, marker="o", markersize=3, label="world model")
+        axes.plot(steps, rollout.get("prevalence_true_curve", []), color=simulator_color, marker="s", markersize=3, linestyle="--", label="simulator")
+        axes.set_xlabel("timestep")
+        axes.set_ylabel("mean infectious count |I(t)|")
+        axes.set_title("prevalence per step")
+        axes.grid(alpha=0.3)
+        axes.legend(fontsize=8)
+        panel += 1
+
+    axes = axes_list[panel]
     values = [float(model_count), float(true_count)]
-
-    bars = axes.bar(
-        ["world model", "true simulator"], values, color=["#4C72B0", "#55A868"], width=0.55
-    )
-    for bar, value in zip(bars, values, strict=True):
-        axes.text(
-            bar.get_x() + bar.get_width() / 2,
-            value,
-            f"{value:.1f}",
-            ha="center",
-            va="bottom",
-            fontsize=9,
-        )
-
+    bars = axes.bar(["world model", "simulator"], values, color=[model_color, simulator_color], width=0.55)
+    _annotate_bars(axes, bars, values, digits=1)
     bias = rollout.get("ens_count_bias")
     axes.set_ylabel("final infected count")
     axes.set_title(
-        f"{title_prefix}: rollout fidelity"
+        "final cascade size"
         + (f" (count bias {float(bias):+.2f})" if bias is not None else "")
     )
     axes.grid(alpha=0.3, axis="y")
+
+    figure.suptitle(f"{title_prefix}: world-model rollout fidelity")
+
+    return _save(figure, out_path)
+
+
+def plot_wm_calibration(
+    wm_results: dict, out_path: Path, title_prefix: str
+) -> Path | None:
+    """Reliability diagrams against the simulator's own marginals."""
+    test = wm_results.get("test") or {}
+    blocks = [
+        (name, test[key])
+        for name, key in (("infected", "calibration_infected"), ("frontier", "calibration_frontier"))
+        if isinstance(test.get(key), dict)
+    ]
+    if not blocks:
+        return None
+
+    figure, axes_list = plt.subplots(1, len(blocks), figsize=(4.8 * len(blocks), 4.4))
+    axes_list = np.atleast_1d(axes_list)
+
+    for axes, (name, block) in zip(axes_list, blocks, strict=True):
+        predicted = np.array(block["mean_predicted"], dtype=np.float64)
+        observed = np.array(block["mean_target"], dtype=np.float64)
+        counts = np.array(block["count"], dtype=np.float64)
+        keep = counts > 0
+        sizes = 20 + 180 * counts[keep] / counts.max()
+
+        axes.plot([0, 1], [0, 1], "k--", linewidth=1, label="perfect calibration")
+        axes.scatter(predicted[keep], observed[keep], s=sizes, color=model_color, alpha=0.8, label="world model (size = bin count)")
+        axes.plot(predicted[keep], observed[keep], color=model_color, linewidth=1)
+        axes.set_xlim(0, 1)
+        axes.set_ylim(0, 1)
+        axes.set_xlabel(f"predicted P({name})")
+        axes.set_ylabel(f"simulator marginal P({name})")
+        axes.set_title(f"{name} column (ECE {block['ece']:.4f})")
+        axes.grid(alpha=0.3)
+        axes.legend(fontsize=8, loc="upper left")
+
+    figure.suptitle(f"{title_prefix}: world-model calibration")
+
+    return _save(figure, out_path)
+
+
+def plot_wm_action_conditioning(
+    wm_results: dict, out_path: Path, title_prefix: str
+) -> Path | None:
+    """Does the model read the action: ablation drop and counterfactual effect against their nulls."""
+    block = wm_results.get("action_conditioning") or {}
+    ablation = block.get("ablation") or {}
+    effect = block.get("counterfactual_effect") or {}
+    if not ablation and not effect:
+        return None
+
+    figure, (ablation_axes, effect_axes) = plt.subplots(1, 2, figsize=(11.0, 4.4))
+
+    ablation_keys = [
+        key for key in ("baseline_delta_f1", "null_delta_f1", "shuffle_delta_f1")
+        if key in ablation and ablation[key] is not None
+    ]
+    if ablation_keys:
+        values = [float(ablation[key]) for key in ablation_keys]
+        colors = [model_color, persistence_color, persistence_color][: len(values)]
+        bars = ablation_axes.bar([wm_metric_name(key) for key in ablation_keys], values, color=colors, width=0.55)
+        _annotate_bars(ablation_axes, bars, values)
+        ablation_axes.set_ylim(0, 1.12)
+        ablation_axes.set_ylabel("delta_f1 on the same states")
+        ablation_axes.set_title("action ablation: a small drop means the action was not read")
+        ablation_axes.grid(alpha=0.3, axis="y")
+        plt.setp(ablation_axes.get_xticklabels(), rotation=12, ha="right")
+    else:
+        ablation_axes.axis("off")
+
+    per_op = effect.get("per_op") or {}
+    rows = [("all ops", effect)] + [(op, values) for op, values in per_op.items() if isinstance(values, dict)]
+    rows = [(name, values) for name, values in rows if values.get("effect_mae_norm") is not None]
+    if rows:
+        labels = [name for name, _ in rows]
+        values = [float(values["effect_mae_norm"]) for _, values in rows]
+        bars = effect_axes.bar(labels, values, color=model_color, width=0.55, label="world model")
+        _annotate_bars(effect_axes, bars, values)
+        effect_axes.axhline(1.0, color=accent_color, linestyle="--", linewidth=1.2, label="action-ignorant null = 1.0")
+        effect_axes.set_ylim(0, max(1.15, max(values) * 1.15))
+        effect_axes.set_ylabel("normalized effect MAE (lower is better)")
+        pearson = effect.get("effect_pearson")
+        effect_axes.set_title(
+            "counterfactual effect vs the null"
+            + (f" (Pearson {float(pearson):.3f})" if pearson is not None else "")
+        )
+        effect_axes.grid(alpha=0.3, axis="y")
+        effect_axes.legend(fontsize=8)
+    else:
+        effect_axes.axis("off")
+
+    verdict = "PASS" if block.get("action_conditioned") else "FAIL"
+    figure.suptitle(f"{title_prefix}: world-model action conditioning ({verdict})")
+
+    return _save(figure, out_path)
+
+
+def _regret_rows(block: dict) -> list[tuple[str, float, float]]:
+    """(label, mean, std) for every `*_regret_*` mean in a planning block."""
+    rows = []
+    for key, value in block.items():
+        if "_regret_" in key and not key.endswith("_std") and value is not None:
+            rows.append((wm_metric_name(key), float(value), float(block.get(f"{key}_std", 0.0) or 0.0)))
+
+    return rows
+
+
+def plot_wm_planning(
+    wm_results: dict, out_path: Path, title_prefix: str
+) -> Path | None:
+    """One-step planning regret against the degree and random pickers, and the budgeted variant if run."""
+    blocks = [
+        (name, wm_results[key])
+        for name, key in (("one-step planning regret", "planning"), ("k-seed budgeted planning regret", "planning_budget"))
+        if isinstance(wm_results.get(key), dict) and _regret_rows(wm_results[key])
+    ]
+    if not blocks:
+        return None
+
+    figure, axes_list = plt.subplots(1, len(blocks), figsize=(5.4 * len(blocks), 4.4))
+    axes_list = np.atleast_1d(axes_list)
+
+    for axes, (name, block) in zip(axes_list, blocks, strict=True):
+        rows = _regret_rows(block)
+        labels = [row[0] for row in rows]
+        means = [row[1] for row in rows]
+        stds = [row[2] for row in rows]
+        bars = axes.bar(labels, means, yerr=stds, capsize=4, color=list(regret_colors[: len(rows)]), width=0.55)
+        _annotate_bars(axes, bars, means)
+        axes.set_ylabel("regret vs the oracle choice (lower is better)")
+        graphs = block.get("plan_n_graphs")
+        axes.set_title(name + (f" over {int(graphs)} held-out graphs" if graphs else ""))
+        axes.grid(alpha=0.3, axis="y")
+        plt.setp(axes.get_xticklabels(), rotation=12, ha="right")
+
+    figure.suptitle(f"{title_prefix}: world-model planning regret")
+
+    return _save(figure, out_path)
+
+
+def plot_wm_ood_rollout(
+    wm_results: dict, out_path: Path, title_prefix: str
+) -> Path | None:
+    """Rollout fidelity under off-policy action distributions, beside the recorded one."""
+    ood = wm_results.get("rollout_ood") or {}
+    rollout = wm_results.get("rollout") or {}
+    if not ood or not rollout:
+        return None
+
+    names = ["recorded"] + list(ood)
+    blocks = [rollout] + [ood[name] for name in ood]
+    metrics = [("ens_marg_mae", "marginal MAE"), ("ens_count_bias", "count bias")]
+
+    figure, axes_list = plt.subplots(1, 2, figsize=(10.5, 4.2))
+    for axes, (key, label) in zip(axes_list, metrics, strict=True):
+        values = [float(block.get(key, np.nan)) for block in blocks]
+        colors = [model_color] + ["#8172B2"] * len(ood)
+        bars = axes.bar(names, values, color=colors, width=0.55)
+        _annotate_bars(axes, bars, values)
+        if key == "ens_count_bias":
+            axes.axhline(0.0, color="k", linewidth=1)
+        axes.set_ylabel(label)
+        axes.set_title(f"{label} by action policy")
+        axes.grid(alpha=0.3, axis="y")
+        plt.setp(axes.get_xticklabels(), rotation=12, ha="right")
+
+    figure.suptitle(f"{title_prefix}: world-model off-policy rollout fidelity")
 
     return _save(figure, out_path)
 
@@ -2122,10 +2459,23 @@ def build_plots(
     ]
 
     if wm_results is not None:
+        # Every world-model diagnostic the train stage measured, in the order the
+        # report reads them: how it trained, how it predicts one step, whether it
+        # is calibrated, whether it reads the action, how it rolls out, how it plans
         builders += [
             plot_wm_training(wm_results, plots_dir / "wm_training.png", title_prefix),
             plot_wm_one_step(wm_results, plots_dir / "wm_one_step.png", title_prefix),
+            plot_wm_calibration(
+                wm_results, plots_dir / "wm_calibration.png", title_prefix
+            ),
+            plot_wm_action_conditioning(
+                wm_results, plots_dir / "wm_action_conditioning.png", title_prefix
+            ),
             plot_wm_rollout(wm_results, plots_dir / "wm_rollout.png", title_prefix),
+            plot_wm_ood_rollout(
+                wm_results, plots_dir / "wm_ood_rollout.png", title_prefix
+            ),
+            plot_wm_planning(wm_results, plots_dir / "wm_planning.png", title_prefix),
         ]
 
     return [figure for figure in builders if figure is not None]
