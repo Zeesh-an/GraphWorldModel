@@ -1579,6 +1579,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
                     load_wm_results(config, layout),
                     layout.plots_dir,
                     title_prefix=layout.label,
+                    diffusion_model=config.diffusion_model,
                 )
                 for figure in figures:
                     print(f"[plots]   {figure.name}")

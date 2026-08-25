@@ -63,8 +63,8 @@ from world_model.wm_data import (
     in_channels,
     load_graph_store,
 )
+from world_model.checkpoint import load_checkpoint
 from world_model.wm_metrics import localization_metrics, resimulation_error
-from world_model.wm_model import WorldModel
 
 no_prior = "none"
 vae_prior = "vae"
@@ -335,31 +335,17 @@ def invert(
 def load_world_model(results_json: str, device: str = "cpu") -> tuple[nn.Module, dict]:
     """Rebuild the trained WorldModel named by a train_wm.py results JSON, frozen."""
     config = json.loads(Path(results_json).read_text())["config"]
-    model = WorldModel(
-        config["model"],
-        in_channels=in_channels,
-        hidden_dim=config["hidden_dim"],
-        n_layers=config["n_layers"],
-        dropout=0.0,
-        head_type=config.get("head", "linear"),
-        diffusion_model=config["diffusion_model"],
-        remove_semantics=config.get("remove_semantics", "spent"),
-        n_heads=config["n_heads"],
-        ffn_dim=config["ffn_dim"],
-        alpha=config["gcnii_alpha"],
-        lamda=config["gcnii_lamda"],
-    )
-
     checkpoint = (
         Path(config["ckpt_dir"]) / f"wm_{config['model']}_{config['diffusion_model']}.pt"
     )
     if not checkpoint.exists():
         raise FileNotFoundError(f"world-model checkpoint not found: {checkpoint}")
 
-    model.load_state_dict(
-        torch.load(checkpoint, map_location=device, weights_only=True)
+    # One reconstruction path for every consumer of a checkpoint: a v2 file
+    # rebuilds from its own spec, a legacy bare state_dict from this config
+    model, _, _ = load_checkpoint(
+        checkpoint, config=config, device=device, strict_spec=False
     )
-    model.to(device).eval()
 
     # Frozen: §2.5's fifth row. The world model is never differentiated INTO here,
     # only through: the gradient flows to x~ and stops.

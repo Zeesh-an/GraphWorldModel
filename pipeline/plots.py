@@ -62,7 +62,7 @@ acronyms = {
     "se": "SE", "gcc": "GCC", "anc": "ANC", "mae": "MAE",
     # dynamics and evaluators
     "ic": "IC", "lt": "LT", "sir": "SIR", "sis": "SIS", "seir": "SEIR",
-    "mc": "MC", "wm": "WM", "ga": "GA", "llm": "LLM", "rr": "RR", "ris": "RIS",
+    "mc": "MC", "wm": "WM", "gwm": "GWM", "ga": "GA", "llm": "LLM", "rr": "RR", "ris": "RIS",
     # influence maximization
     "imm": "IMM", "celf": "CELF", "opim": "OPIM", "ssa": "SSA", "subsim": "SubSIM",
     "tim": "TIM", "glie": "GLIE", "moeim": "MOEIM", "deepim": "DeepIM",
@@ -376,14 +376,17 @@ def _prettify_figure(figure: plt.Figure) -> None:
             )
 
 
-def display_prefix(label: str) -> str:
-    """`task/dataset/run` -> `Task Title: Dataset Name`, dropping the run."""
+def display_prefix(label: str, diffusion_model: str | None = None) -> str:
+    """`task/dataset/run` -> `Task Title: Dataset Name (IC)`, dropping the run."""
     parts = label.split("/")
     task = parts[0]
     dataset = parts[1] if len(parts) > 1 else ""
     task_title = tasks[task].title if task in tasks else pretty_words(task)
+    # The dynamics are part of what a figure is about: the same graph under IC
+    # and LT are two different experiments and their figures must say which
+    dynamics = f" ({diffusion_model})" if diffusion_model else ""
 
-    return f"{task_title}: {pretty_words(dataset)}" if dataset else task_title
+    return f"{task_title}: {pretty_words(dataset)}{dynamics}" if dataset else task_title + dynamics
 
 
 def _arm_style(index: int) -> dict:
@@ -2351,10 +2354,11 @@ def build_plots(
     wm_results: dict | None,
     plots_dir: Path,
     title_prefix: str,
+    diffusion_model: str | None = None,
 ) -> list[Path]:
     os.makedirs(plots_dir, exist_ok=True)
     # `task/dataset/run` is a filesystem label, not a figure title
-    title_prefix = display_prefix(title_prefix)
+    title_prefix = display_prefix(title_prefix, diffusion_model)
 
     # Every figure below whose y-axis is a NODE COUNT. An inverse task's reward is
     # an F1 in [0, 1], and drawing it under a "spread (nodes)" axis would be off by
