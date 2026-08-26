@@ -419,10 +419,12 @@
 #                    in pure networkx, so it is dropped by default on the big
 #                    graphs (hours at 15K+ nodes).
 #   GEN_ACTION_OPS   ops injected during generation. UNSET = the task
-#                    registry's own set (add_node remove_node for influence
-#                    maximization, remove_node for critical node detection);
-#                    set it explicitly for diffusion-only data or to add the
-#                    three edge ops for the full action space.
+#                    registry's own set, which is the repo default of
+#                    add_node remove_node for every intervention task except
+#                    influence blocking and epidemic control (their levers add
+#                    the edge ops) and empty for the three pure-diffusion tasks;
+#                    set it explicitly to add the three edge ops for the full
+#                    action space.
 #   PROB_MODEL       weighted (p = 1/in_degree) | uniform (UNIFORM_P)
 #   BUDGET_PCT_RANGE per-episode k drawn from this band, which is what lets ONE
 #                    checkpoint serve the whole budget sweep. It must cover
@@ -703,7 +705,7 @@ SPLIT_MODE="${SPLIT_MODE:-}"
 
 # Train stage
 WM_MODEL="${WM_MODEL:-sage}"
-HEAD="${HEAD:-structured_residual}"
+HEAD="${HEAD:-structured}"
 HIDDEN_DIM="${HIDDEN_DIM:-$class_hidden}"
 N_LAYERS="${N_LAYERS:-3}"
 N_HEADS="${N_HEADS:-4}"

@@ -16,6 +16,7 @@ the dataclass or the readers that print it.
 from dataclasses import dataclass
 
 from data.wm_simulator import (
+    default_action_ops,
     blocked,
     epidemic_dynamics,
     spent,
@@ -167,8 +168,11 @@ class Task:
 
     @property
     def gen_action_ops(self) -> tuple:
+        # None = the repo-wide default, the two node ops; a task opts into the
+        # edge ops (influence blocking, epidemic control) or into none at all
+        # (the three tasks whose episodes must be pure diffusion) explicitly
         return (
-            self.action_ops
+            default_action_ops
             if self.default_gen_action_ops is None
             else self.default_gen_action_ops
         )
@@ -305,8 +309,10 @@ tasks = {
         # A planner emits `remove_node` only. Edge removals are the deletion bag
         # `containment.expand_removals` builds around each one, so charging the
         # planner for them would make k mean deg(v) different things per node.
+        # Generation injects the default two node ops: the outbreak itself is an
+        # `add_node` bag at t=0, so the head has to have seen that channel too.
         default_allowed_ops=("remove_node",),
-        default_gen_action_ops=("remove_node",),
+        default_gen_action_ops=("add_node", "remove_node"),
         budget_op="remove_node",
         # The cascade is exogenous and the planner is TOLD where it is, which makes
         # this reactive containment rather than the literature's blind dismantling

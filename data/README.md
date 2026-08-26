@@ -4,7 +4,7 @@ Generates `(G, s_t, a_t, s_{t+1}, R)` transition data for training a graph **wor
 
 - **Graph** `G`: a directed/undirected graph with per-edge IC transmission probabilities (`ic_probs`) and LT weights (`lt_weights`), saved once per graph.
 - **State** `s_t = (infected, frontier)`: `infected` = every node ever activated; `frontier` = the nodes that activated _this step_ (IC: the status-1 spreaders; LT: the fresh wave that flipped this iteration).
-- **Action** `a_t`: a bag of node/edge ops: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `set_edge_weight` (empty bag = `NULL`). Which ops are used is set by `--action-ops`; omitting it generates diffusion-only data.
+- **Action** `a_t`: a bag of node/edge ops: `add_node`, `remove_node`, `add_edge`, `remove_edge`, `set_edge_weight` (empty bag = `NULL`). Which ops are used is set by `--action-ops`; the default is the two node ops, `add_node remove_node`, and passing the flag with no values generates diffusion-only data.
 - **Next state** `s_{t+1}`: the realized next state, **plus** soft Monte-Carlo marginals `P(infected)` / `P(frontier)` per node (`--mc-marginals`), which are the actual training targets.
 - **Reward** `R`: spread gain (Δ activated-node count this step).
 
@@ -26,26 +26,26 @@ source .venv/bin/activate
 # selectors: celf and local_search are MC-greedy and turn a minutes-long
 # generation into hours. Pass the four analytic selectors for fast generation.
 
-# Diffusion-only (no actions): the default when --action-ops is omitted
+# Node action interventions (add_node remove_node): the default when --action-ops is omitted
 python -m data.generate_wm_data --dataset ba --num-graphs 1
 
-# Node action interventions
-python -m data.generate_wm_data --dataset ba --num-graphs 1 \
-    --action-ops add_node remove_node
+# Diffusion-only (no actions): the flag with no values
+python -m data.generate_wm_data --dataset ba --num-graphs 1 --action-ops
 
 # Edge action interventions
 python -m data.generate_wm_data --dataset ba --num-graphs 1 \
     --action-ops add_edge remove_edge set_edge_weight
 
 # Multi-graph synthetic set (trustworthy ranking): 20 BA graphs, both dynamics,
-# all five ops, four cheap selectors (the ba20_marg_structured recipe)
+# the default two node ops, four cheap selectors (the ba20_marg_structured recipe;
+# add the three edge ops for the full action space)
 python -m data.generate_wm_data --dataset ba --num-graphs 20 \
-    --action-ops add_node remove_node add_edge remove_edge set_edge_weight --models IC LT \
+    --action-ops add_node remove_node --models IC LT \
     --algorithms random degree pagerank betweenness \
     --out-dir results/influence_maximization/ba/default/data
 
-# Real dataset (downloads on first use)
-python -m data.generate_wm_data --dataset jazz --action-ops add_node remove_node add_edge remove_edge set_edge_weight
+# Real dataset (downloads on first use), default ops
+python -m data.generate_wm_data --dataset jazz
 
 # Tiny end-to-end check
 python -m data.generate_wm_data --smoke --out-dir /tmp/wm_smoke
@@ -255,10 +255,10 @@ Two consequences worth knowing before reading a `blocked` dataset:
 
 The three data "settings" are just which ops you pass to `--action-ops`:
 
-- **Setting 1 (diffusion-only):** omit `--action-ops`
-- **Setting 2 (node):** `--action-ops add_node remove_node`
+- **Setting 2 (node), the default:** `--action-ops add_node remove_node`, or omit the flag
+- **Setting 1 (diffusion-only):** `--action-ops` with no values
 - **Setting 3 (edge):** `--action-ops add_edge remove_edge set_edge_weight`
-- **Containment (critical node detection):** `--action-ops remove_node --remove-semantics blocked`. Through `pipeline.run --task critical_node_detection` neither flag is needed: `pipeline/tasks.py` supplies both, so the ops the data teaches and the ops the planner may emit come from one registry entry and cannot disagree.
+- **Containment (critical node detection):** the default node ops under `--remove-semantics blocked`. Through `pipeline.run --task critical_node_detection` no flag is needed: `pipeline/tasks.py` supplies both, so the ops the data teaches and the ops the planner may emit come from one registry entry and cannot disagree.
 
 How these become model inputs is documented in [`world_model/README.md`](../world_model/README.md): node ops set the `act_add` / `act_remove` input channels, and edge ops set the `act_edge_endpoint` channel and mutate the per-episode adjacency.
 
@@ -323,7 +323,7 @@ This determinism difference is why IC averages over `--mc-marginals` draws while
 | `--algorithms`                    | all 6 spine     | which seed selectors to roll out                                                                           |
 | `--rollouts` / `--horizon`        | `10` / `10`     | episodes per (graph, model, algo) / max timesteps                                                          |
 | `--inject-p`                      | `0.3`           | P(an intermediate step injects an action at all vs NULL)                                                   |
-| `--action-ops`                    | `[]`            | which ops to inject; empty = diffusion-only                                                                |
+| `--action-ops`                    | `add_node remove_node` | which ops to inject; the flag with no values = diffusion-only; the three edge ops are opt-in         |
 | `--weight-lo` / `--weight-hi`     | `0.0` / `1.0`   | range for `add_edge`/`set_edge_weight` weights, sampled `U(lo, hi)`                                        |
 | `--cf-prob`                       | `0.2`           | P(spawn counterfactual forks at a step)                                                                    |
 | `--cf-branches`                   | `2`             | # alternate-action branches per fork                                                                       |

@@ -109,7 +109,7 @@ Every action is `(op, target, [destination], [weight])`. `target` is the node (o
 | `remove_edge`     | `target=u, destination=v`           | remove arc `u→v`                    | remove edge structurally               |
 | `set_edge_weight` | `target=u, destination=v, weight=w` | set arc `u→v` transmission `w`      | no-op (LT ignores edge weights)        |
 
-Node ops set the `act_add` / `act_remove` input channels; edge ops set the `act_edge` channel **and** mutate the per-episode adjacency. The three data settings are simply which ops you enable via `--action-ops` (omit = diffusion-only; `add_node remove_node` = node; `add_edge remove_edge set_edge_weight` = edge).
+Node ops set the `act_add` / `act_remove` input channels; edge ops set the `act_edge` channel **and** mutate the per-episode adjacency. The default everywhere (generator, pipeline, sbatch, task registry) is the two node ops, `add_node remove_node`. The three data settings are simply which ops you pass to `--action-ops` (the default = node; `--action-ops` with no values = diffusion-only; `add_edge remove_edge set_edge_weight` = edge, or all five for the full action space).
 
 ---
 
@@ -386,10 +386,11 @@ Raw dataset downloads live outside the results tree, in `data/raw/<dataset>/`, s
 ```bash
 source .venv/bin/activate
 
-# 1. Generate data: 20 BA graphs, IC + LT, all five action ops, four cheap
-#    seed selectors, MC-marginal targets
+# 1. Generate data: 20 BA graphs, IC + LT, the default two node ops, four cheap
+#    seed selectors, MC-marginal targets (add the three edge ops to --action-ops
+#    for the full action space)
 python -m data.generate_wm_data --dataset ba --num-graphs 20 \
-    --action-ops add_node remove_node add_edge remove_edge set_edge_weight \
+    --action-ops add_node remove_node \
     --models IC LT --algorithms random degree pagerank betweenness \
     --out-dir results/influence_maximization/ba/default/data
 

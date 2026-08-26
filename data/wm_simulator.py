@@ -24,6 +24,10 @@ valid_action_ops = (
     "remove_edge",
     "set_edge_weight",
 )
+# What generation injects unless a task or a flag says otherwise: the two node
+# ops. The three edge ops stay available and are opted into per task
+# (influence blocking and epidemic control) or by passing --action-ops.
+default_action_ops = ("add_node", "remove_node")
 
 # The three COMPARTMENTAL dynamics, which `data/wm_epidemic.py` simulates rather
 # than NDlib. Named here because `--diffusion-model` is one flag across every task

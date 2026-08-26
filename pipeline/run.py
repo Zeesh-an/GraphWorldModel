@@ -233,7 +233,7 @@ class PipelineConfig:
     split: tuple = (0.7, 0.15, 0.15)
     # train stage
     wm_model: str = "sage"
-    head: str = "structured_residual"
+    head: str = "structured"
     hidden_dim: int = 64
     n_layers: int = 3
     n_heads: int = 4
@@ -1791,7 +1791,7 @@ if __name__ == "__main__":
         nargs="+",
         default=None,
         choices=list(valid_action_ops),
-        help="action ops injected during generation. Unset = the task registry's own set, which is add_node remove_node for influence maximization and remove_node for critical node detection (default: None).",
+        help="action ops injected during generation. Unset = the task registry's own set: add_node remove_node for every intervention task except influence blocking and epidemic control, whose levers add the edge ops, and empty for the three tasks whose episodes must be pure diffusion (default: None).",
     )
     parser.add_argument(
         "--remove-semantics",
@@ -1891,9 +1891,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--head",
         type=str,
-        default="structured_residual",
+        default="structured",
         choices=["linear", "structured", "structured_residual"],
-        help="world-model output head (default: structured_residual).",
+        help="world-model output head (default: structured).",
     )
     # The checkpoint is located via `ckpt_dir` inside this JSON, and the
     # architecture flags are read from its `config` block, so this one path

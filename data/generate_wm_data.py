@@ -44,6 +44,7 @@ from data.wm_graphs import (
     real_directed,
 )
 from data.wm_simulator import (
+    default_action_ops,
     ActionOp,
     Simulator,
     State,
@@ -1354,9 +1355,9 @@ def parse_args() -> GenConfig:
         "--action-ops",
         type=str,
         nargs="*",
-        default=[],
+        default=list(default_action_ops),
         choices=list(valid_action_ops),
-        help="ops to inject; empty = diffusion-only (default: []).",
+        help="ops to inject; pass the flag with no values for diffusion-only data (default: add_node remove_node).",
     )
     parser.add_argument(
         "--remove-semantics",

@@ -348,12 +348,63 @@ Everything above is the smoke test, and it leaves condition 6 unmeasured: `evolv
 Six things changed under the loop since the smoke test, and each one moves these numbers: the search no longer scores every candidate on one fixed RNG draw (epidemic_control overfit a 50-sample rollout by 30 nodes at k=48); an adaptive policy gets one copy per ensemble member (the adaptive arm was scoring 50 cross-contaminated policies); `frontier_removal` sits in the CND pool as the outbreak-aware control and the CND outbreak defaults to 10% of N so the sweep sits below its ring; the three exogenous-cascade tasks bind `self.score_plan(plan)` so a generated program tests candidate interventions on its own arm's evaluator, metered, instead of hand-rolling numpy simulation (the first IB winner burned 260 of every 262 seconds doing exactly that); the default search budget is `OUTER_ITERS=20`; and the ladder runs at `N_SAMPLES=200`, because at 50 the reward SE (2.5 to 12 nodes across tasks) sat above the deltas the late iterations were deciding between. Adaptive arms are capped at 50 samples by the pipeline whatever the flag says, since their per-round `act()` runs once per ensemble member and 200 would turn one evaluation into half an hour. The CND smoke-test rows at k >= 247 are void and that block needs a re-run before its ladder means anything.
 
 ```bash
+# ---------------------------------------------------------------- IM, submission 1 plus the world model, IC and LT
+# Submission 1 from section 3 with three edits, submitted once per dynamics: SKIP_STAGES=train
+# is gone so the train stage runs, evolve_free@world_model joins the oracle arm, and
+# DIFFUSION_MODEL picks which transition file the train and agent stages use. Two RUNs
+# because agent/<budget>/<arm>.json is keyed by budget and arm only, so IC and LT in one run
+# directory would overwrite each other (the sbatch header's own pattern is
+# `RUN=lt DIFFUSION_MODEL=LT`). GEN_MODELS defaults to "IC LT" for this task, so each job's
+# data stage writes both transition files; FORCE=1 on both keeps the jobs independent and
+# submittable together, at the price of generating the seed-identical data twice. Every
+# baseline runs under both dynamics: opim, ssa, subsim, moeim and deepim switch to their LT
+# modes, while touplegdd and glie select under their own internal IC whatever the flag says
+# and are scored by our LT referee like any other seed set. HEAD=structured is the default
+# now: the residual head anchors q on the true w and starts at the oracle, while structured
+# has to learn q from scratch, which is the claim these two arms test. GEN_ACTION_OPS is
+# the repo default and is stated so the data recipe is visible: the two node ops, no edge ops.
+TASK=influence_maximization \
+DATASET=netscience \
+RUN=testrun_ic \
+RUN_JOBID=0 \
+DIFFUSION_MODEL=IC \
+BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
+external:opim external:ssa external:subsim \
+external:touplegdd external:deepim external:moeim external:glie" \
+ARMS="evolve_free@oracle evolve_free@world_model" \
+WM_MODEL=sage HEAD=structured \
+GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=oracle \
+BUDGET_PCTS="1 5 10 20" \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=48:00:00 \
+./sbatch/pipeline.sbatch
+
+TASK=influence_maximization \
+DATASET=netscience \
+RUN=testrun_lt \
+RUN_JOBID=0 \
+DIFFUSION_MODEL=LT \
+BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
+external:opim external:ssa external:subsim \
+external:touplegdd external:deepim external:moeim external:glie" \
+ARMS="evolve_free@oracle evolve_free@world_model" \
+WM_MODEL=sage HEAD=structured \
+GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=oracle \
+BUDGET_PCTS="1 5 10 20" \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=48:00:00 \
+./sbatch/pipeline.sbatch
+
 # ---------------------------------------------------------------- IM, the cheapest and the one to run first
 TASK=influence_maximization DATASET=netscience RUN=ladder RUN_JOBID=0 \
 START_STAGE=train \
 BASELINES="imm degree_discount external:opim" \
 ARMS="evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
-WM_MODEL=sage HEAD=structured_residual \
+WM_MODEL=sage HEAD=structured \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
@@ -373,7 +424,7 @@ START_STAGE=train \
 DIFFUSION_MODEL=SIR GEN_MODELS=SIR EPI_LEVER=vaccinate EPI_GAMMA=0.3 \
 BASELINES="frontier_immunization dava degree_immunization" \
 ARMS="evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
-WM_MODEL=sage HEAD=structured_residual \
+WM_MODEL=sage HEAD=structured \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=15 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
