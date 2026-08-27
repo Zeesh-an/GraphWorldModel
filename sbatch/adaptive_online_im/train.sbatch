@@ -28,7 +28,17 @@ set -euo pipefail
 # Repo root, derived from this script's own location so the file works in
 # any checkout rather than one person's home directory. Set REPO_ROOT to
 # override, e.g. when submitting a copy staged outside the tree.
-cd "${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# Under SLURM this file executes as a spool copy, so BASH_SOURCE cannot locate
+# the checkout from inside a job; the directory it was submitted from is the
+# repo root when launched as documented, and REPO_ROOT overrides either.
+if [ -z "${REPO_ROOT:-}" ]; then
+    if [ -n "${SLURM_JOB_ID:-}" ]; then
+        REPO_ROOT="$SLURM_SUBMIT_DIR"
+    else
+        REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    fi
+fi
+cd "$REPO_ROOT"
 
 # Activate the project virtualenv, unless one is already active or VENV
 # points somewhere else. Skipped silently when neither exists, so the

@@ -514,10 +514,32 @@ set -euo pipefail
 # right file when it is launched from somewhere other than the repo root
 script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
-# Repo root, derived from this script's own location so the file works in
-# any checkout rather than one person's home directory. Set REPO_ROOT to
-# override, e.g. when submitting a copy staged outside the tree.
-cd "${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+# Repo root. The checkout is wherever THIS file lives, whenever this file is
+# the real one: on the submit side, and inside a job whose scheduler runs the
+# script in place. Under a spool copy (/var/spool/slurmd/<job>/slurm_script)
+# BASH_SOURCE points outside any checkout, and only then is the directory
+# `sbatch` was run from trusted. SLURM_SUBMIT_DIR is never consulted while a
+# real checkout is in reach: an `srun --pty` or `salloc` shell also carries
+# SLURM_JOB_ID, and taking its submit directory sent a run to a directory
+# that was not the repo (the `mkdir: cannot create directory 'results'`
+# failure). Set REPO_ROOT to override, e.g. for a copy staged outside the tree.
+if [ -z "${REPO_ROOT:-}" ]; then
+    checkout="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd || true)"
+    if [ -n "$checkout" ] && [ -f "$checkout/pipeline/run.py" ]; then
+        REPO_ROOT="$checkout"
+    elif [ -n "${SLURM_JOB_ID:-}" ] && [ -f "${SLURM_SUBMIT_DIR:-/nonexistent}/pipeline/run.py" ]; then
+        REPO_ROOT="$SLURM_SUBMIT_DIR"
+    else
+        echo "[repo] cannot locate the checkout: $script_path is not inside one and" \
+             "SLURM_SUBMIT_DIR=${SLURM_SUBMIT_DIR:-unset} has no pipeline/run.py; set REPO_ROOT" >&2
+        exit 1
+    fi
+fi
+export REPO_ROOT
+cd "$REPO_ROOT"
+[ -f pipeline/run.py ] || { echo "[repo] REPO_ROOT=$REPO_ROOT has no pipeline/run.py; set REPO_ROOT to the checkout" >&2; exit 1; }
+[ -w . ] || { echo "[repo] REPO_ROOT=$REPO_ROOT is not writable, and results/ and logs/ live here" >&2; exit 1; }
+echo "[repo] $REPO_ROOT"
 
 # Activate the project virtualenv, unless one is already active or VENV
 # points somewhere else. Skipped silently when neither exists, so the
