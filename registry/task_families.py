@@ -25,9 +25,9 @@ Two things this module is careful NOT to do:
   * classify on tensor shape alone. Two tasks can share a 6/2 layout and still be
     MECHANISM_ONLY because their T_exo differs (IM's `spent` seeding vs CND's
     `blocked` removal). Shape is necessary, not sufficient.
-  * confuse "the checkpoint loads" with "the task is runnable here". A task can
-    be classified EXACT_CHECKPOINT and still be unrunnable in this repository
-    because its head was never ported; `runnable` reports that separately.
+  * confuse "the checkpoint loads" with "the task is runnable here". The level
+    is a property of the pair; `Task.runnable` in `pipeline.tasks` says whether
+    the target can be run at all, and `transfer_matrix` only walks runnable ones.
 """
 
 from dataclasses import asdict, dataclass
@@ -44,10 +44,10 @@ single_cascade = "W1_single_cascade"
 competitive_cascade = "W2_competitive_cascade"
 compartmental = "W3_compartmental"
 
-#: family -> (input channels, output channels). The numbers are the layouts the
-#: 8-task branch implements; they are recorded here because the compatibility
-#: question is about them, and `world_model.wm_data` in this repository defines
-#: only the W1 pair (the other two heads have not been ported).
+#: family -> (input channels, output channels). `world_model.wm_data.channels_for`
+#: is the source of truth for all three; they are repeated here rather than
+#: imported because that module pulls torch and a registry import should stay
+#: cheap. `tests/test_task_families.py` holds the two in agreement.
 family_layout = {
     single_cascade: (6, 2),
     competitive_cascade: (8, 4),
@@ -253,22 +253,28 @@ def compatibility(source: Task, target: Task) -> Compatibility:
             **common,
         )
 
-    # Target does exercise interventions: the vocabularies must actually overlap.
-    if not shared_ops:
+    # Target does exercise interventions, so coverage is judged on what the
+    # source's DATA carried (`gen_action_ops`), not on the vocabulary its
+    # solutions may name: a diffusion-only source (source localization, cascade
+    # reconstruction) declares `add_node` and never saw one mid-cascade.
+    trained_ops = set(source.gen_action_ops)
+
+    if not trained_ops & set(target.action_ops):
         return Compatibility(
             level=mechanism_only,
             reason=(
-                f"same layout and semantics, but no shared action ops "
-                f"({list(source.action_ops)} vs {list(target.action_ops)}): the "
-                f"transferred model was never asked the target's questions."
+                f"same layout and semantics, but the source trained on "
+                f"{sorted(trained_ops)} and the target emits "
+                f"{list(target.action_ops)}: the transferred model was never "
+                f"asked the target's questions."
             ),
             reusable_components=("graph_backbone", "edge_propensity", "T_endo"),
             rebuilt_components=("action_encoder", "T_exo_semantics"),
             **common,
         )
 
-    if set(target.action_ops) - set(source.action_ops):
-        missing = sorted(set(target.action_ops) - set(source.action_ops))
+    if set(target.action_ops) - trained_ops:
+        missing = sorted(set(target.action_ops) - trained_ops)
 
         return Compatibility(
             level=mechanism_only,

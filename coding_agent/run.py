@@ -193,7 +193,7 @@ from data.wm_simulator import (
 )
 from pipeline.conditions import parse_arm
 from pipeline.layout import budget_label, checkpoint_suffix
-from pipeline.tasks import get_task, maximize
+from pipeline.tasks import get_task, maximize, task_names
 from world_model.wm_data import load_graph_store
 from world_model.wm_metrics import containment_metrics, epidemic_curve_metrics
 from world_model.wm_sl import valid_priors, vae_prior
@@ -562,12 +562,60 @@ def _epidemic_config(config: ExperimentConfig) -> EpidemicConfig:
     )
 
 
+def _check_checkpoint_graph(
+    config: ExperimentConfig, graph: GraphInfo, graph_id: str | None
+) -> None:
+    """
+    Refuse a checkpoint whose training store does not hold this run's graph.
+
+    Only checked when it is determinable: the results JSON names its data_dir,
+    that dir differs from the run's, its index still exists, and the run knows
+    its graph_id. A store that lacks the id, or holds it at different counts,
+    is a different dataset, and a GNN rolled out on a graph it never saw scores
+    something, silently.
+    """
+    trained_dir = json.loads(Path(config.wm_results_json).read_text())["config"].get(
+        "data_dir"
+    )
+    if not trained_dir or graph_id is None or config.data_dir is None:
+        return
+
+    trained_dir, run_dir = Path(trained_dir), Path(config.data_dir)
+    index_path = trained_dir / "graphs_index.json"
+    if trained_dir.resolve() == run_dir.resolve() or not index_path.exists():
+        return
+
+    entries = {
+        meta["graph_id"]: meta for meta in json.loads(index_path.read_text())
+    }
+    meta = entries.get(graph_id)
+    # Node count only: the index's n_edges counts undirected edges on an
+    # undirected graph and arcs on a directed one, so it is not comparable to
+    # edge_index without re-deriving the loader's convention
+    trained_nodes = None if meta is None else int(meta["n_nodes"])
+
+    if trained_nodes != graph.num_nodes:
+        raise ValueError(
+            f"checkpoint {config.wm_results_json} was trained on the graph store "
+            f"{trained_dir}, which "
+            + (
+                f"has no graph {graph_id!r}"
+                if meta is None
+                else f"holds {graph_id!r} at {trained_nodes} nodes"
+            )
+            + f"; this run's graph {graph_id!r} has {graph.num_nodes} nodes. Point "
+            f"--wm-results-json at a checkpoint trained on this dataset, or "
+            f"--data-dir at the checkpoint's."
+        )
+
+
 def _build_environment(
     config: ExperimentConfig,
     graph: GraphInfo,
     negative_seeds: tuple = (),
     competitive: bool = False,
     epidemic: bool = False,
+    graph_id: str | None = None,
 ) -> object:
     # --seed is the base seed for every rollout in this run. Shared across
     # candidates on purpose (common random numbers), and recorded per rollout in
@@ -598,6 +646,21 @@ def _build_environment(
             base_seed=config.seed,
             negative_seeds=negative_seeds,
         )
+
+        # The head is built for ONE dynamics (an LT threshold head has no per-edge
+        # transmission model, an IC head no threshold), so a checkpoint that
+        # disagrees with the run's dynamics would score a plan against a process
+        # that never produced the referee's numbers
+        if environment.diffusion_model != config.diffusion_model:
+            raise ValueError(
+                f"checkpoint {config.wm_results_json} was trained under "
+                f"{environment.diffusion_model} dynamics but this run is "
+                f"--diffusion-model {config.diffusion_model}; pass "
+                f"--diffusion-model {environment.diffusion_model} or use a "
+                f"checkpoint trained for {config.diffusion_model}"
+            )
+
+        _check_checkpoint_graph(config, graph, graph_id)
 
         # ...and a non-compartmental checkpoint cannot be rolled out against an
         # epidemic task: its head is monotone by construction, so `I` could never
@@ -750,6 +813,7 @@ def run_experiment(
         negative_seeds=outbreak,
         competitive=registry.competitive,
         epidemic=registry.epidemic,
+        graph_id=graph_id,
     )
 
     if config.campaigns > 1:
@@ -1801,6 +1865,9 @@ class Baseline(Strategy):
             graph,
             trajectory.actions,
             trajectory.prevalence_curve,
+            # The same burn-in the referee's curve is scored with, or the arm's
+            # own endemic prevalence and the ground-truth column disagree
+            burn_in=config.epi_burn_in,
         )
         spectral = result.get("spectral") or {}
         print(
@@ -1879,7 +1946,9 @@ class Baseline(Strategy):
         result["routing_reply"] = routing_reply
 
     # When the credit flag is enabled, ablate the executed action sequence against the same environment and measure the reward
-    if config.credit:
+    # An inverse or forecast task emits no actions: there is nothing to ablate,
+    # and the base rollout would report a spread number beside an F1 or an MSLE
+    if config.credit and not (task.recovers or task.forecasts):
         print("[run] per-action counterfactual credit (one rollout per action)...")
         # Credit of the executed action sequence; for state-dependent strategies (per_step/windowed) the recorded bags are replayed as a fixed plan
         base_reward, entries = counterfactual_credit(
@@ -2249,6 +2318,7 @@ if __name__ == "__main__":
             + list(adaptive_algorithms)
             + blocking_names
             + dismantling_names
+            + immunization_names
             + localization_names
             + prediction_names
             + reconstruction_names
@@ -2256,8 +2326,8 @@ if __name__ == "__main__":
         metavar="NAME",
         help="evaluate this classical library algorithm instead of an LLM strategy: "
         "a static IM algorithm, a per-round adaptive policy, an influence blocker, a "
-        "network dismantler, a source localizer, a trajectory decoder, or a "
-        "popularity predictor (default: None).",
+        "network dismantler, an immunizer, a source localizer, a trajectory "
+        "decoder, or a popularity predictor (default: None).",
     )
     parser.add_argument(
         "--routing",
@@ -2295,7 +2365,10 @@ if __name__ == "__main__":
         "--task",
         type=str,
         default="influence_maximization",
-        help="task name shown to the agent in its prompt (default: influence_maximization).",
+        choices=task_names(),
+        help="key of pipeline.tasks.tasks: sets the objective sign, what a unit of "
+        "budget buys, the outbreak, the simulator family and the contract the "
+        "agent writes against (default: influence_maximization).",
     )
     parser.add_argument(
         "--rounds",
@@ -2814,7 +2887,11 @@ if __name__ == "__main__":
     elif args.routing:
         arm_spec = "routing"
     else:
-        arm_spec = f"{args.method}_{args.strategy_mode}@{args.evaluator}"
+        # A native run has already been told --evaluator monte_carlo; the arm
+        # name is what the results JSON stamps as the condition, so it has to say
+        # native or the row lands in condition 4
+        arm_evaluator = "native" if args.native_arm else args.evaluator
+        arm_spec = f"{args.method}_{args.strategy_mode}@{arm_evaluator}"
 
     if args.out_json is None and args.data_dir:
         arm = parse_arm(arm_spec, default_evaluator=args.evaluator)

@@ -15,9 +15,11 @@ comparison available.
 Each entry declares how to fetch the repo, how to hand it our graph, how to run
 it, and how to read its seeds back. `status` records whether it can actually run:
 
-    ready        - installed and runnable
-    needs_setup  - registered, fetched by setup_baselines.py, not yet installed
+    needs_setup  - registered; setup_baselines.py fetches and installs it
     blocked      - cannot run for a stated structural reason (see `blocker`)
+
+`status` is static. Whether a repo is on disk is `installed()`, and whether an
+adapter exists to drive it is `wired`; `available_baselines()` combines them.
 """
 
 import csv
@@ -109,8 +111,8 @@ class ExternalBaseline:
     paper: str
     entry: str  # what setup/run drives, for the README table
     # Which graph task this baseline solves; a key of pipeline.tasks.tasks.
-    # Every entry today is influence_maximization, which is exactly why the
-    # field exists: a blocking or CND baseline must not join an IM sweep.
+    # Eight tasks have entries, and the field is what keeps a blocking or CND
+    # baseline out of an IM sweep (`--baselines all` expands per task).
     task: str = "influence_maximization"
     # True when the repo selects seeds in BATCHES and returns them in selection
     # order. run_baseline then hands it the round schedule and the pipeline
@@ -748,6 +750,16 @@ def _pad_removals(order: list, work_dir: Path, budget: int) -> list:
         if 0 <= int(node) < num_nodes and int(node) not in picked:
             picked.add(int(node))
             chosen.append(int(node))
+
+    # The top-up is OUR degree tie-break, not the method's answer, so it must
+    # never pass silently: run_baseline's under-spend warning cannot see it.
+    own = len({int(node) for node in order if 0 <= int(node) < num_nodes})
+    if own < budget:
+        print(
+            f"[baseline] WARNING: removal order held {own} nodes for budget "
+            f"{budget}; the remaining {budget - own} were topped up by degree "
+            f"(see _pad_removals), so this row is partly the degree heuristic"
+        )
 
     return chosen[:budget]
 

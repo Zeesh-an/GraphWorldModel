@@ -127,13 +127,33 @@ class NegativeCascade:
         Applied AFTER validation, for the same two reasons the containment wrapper
         is: a node deletion's incident `remove_edge` ops are the mechanics of one
         removal rather than a second intervention, and the delay is exogenous.
+
+        Anything the policy emits before the delay is DEFERRED to t = r, not
+        dropped: every library blocker and every `plan_horizon` program commits its
+        whole bag at t = 0, so dropping it scored every such arm at exactly the
+        unopposed spread under any r > 0. Re-querying the policy for 0..r at t = r
+        keeps the wrapper stateless, which the two evaluators' opposite loop orders
+        require (see `containment`).
         """
 
         def blocking(state: State, timestep: int) -> list[ActionOp]:
             if timestep < self.detection_delay:
                 return []
 
-            return expand_removals(list(action_fn(state, timestep)), self.graph)
+            steps = (
+                range(self.detection_delay + 1)
+                if timestep == self.detection_delay
+                else (timestep,)
+            )
+            bag, seen = [], set()
+            for step in steps:
+                for action in action_fn(state, step):
+                    key = (action.op, int(action.target), action.destination)
+                    if key not in seen:
+                        seen.add(key)
+                        bag.append(action)
+
+            return expand_removals(bag, self.graph)
 
         return blocking
 

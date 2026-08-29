@@ -57,6 +57,7 @@ from dataclasses import dataclass
 
 from coding_agent.containment import expand_removals
 from coding_agent.types import ActionFn, ActionOp, GraphInfo, State, TaskSpec
+from data.wm_epidemic import default_burn_in
 from world_model.wm_metrics import epidemic_curve_metrics, immunization_metrics
 
 # §2.5's table, as the (budget_op, allowed_ops) pair each row implies
@@ -324,6 +325,7 @@ def epidemic_metrics(
     graph: GraphInfo,
     actions: list[list[ActionOp]],
     prevalence: list[float] | None = None,
+    burn_in: float = default_burn_in,
 ) -> dict:
     """
     The block an immunization table reports (§8.3), in one place.
@@ -374,7 +376,7 @@ def epidemic_metrics(
     }
 
     if prevalence:
-        metrics |= epidemic_curve_metrics(prevalence, graph.num_nodes)
+        metrics |= epidemic_curve_metrics(prevalence, graph.num_nodes, burn_in)
 
     if lever_shape[lever] == "node" and spent:
         metrics["spectral"] = immunization_metrics(

@@ -400,7 +400,8 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
         metrics = result.get("metrics") or {}
         selection = result.get("selection_metrics") or {}
         gap = result.get("generalization_gap")
-        total = (metrics.get("n_scored") or 0) + (metrics.get("n_failed") or 0)
+        n_failed = metrics.get("n_failed") or 0
+        total = (metrics.get("n_scored") or 0) + n_failed
 
         lines.append(
             f"| `{result.get('arm')}` "
@@ -411,7 +412,7 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
             f"| {_format_number(metrics.get('pcc'), 4)} "
             f"| {_format_number(metrics.get('coverage'), 3)} "
             f"| {_format_number(metrics.get('ape_median'), 3)} "
-            f"| {metrics.get('n_failed', 0):.0f}/{total:.0f} "
+            f"| {n_failed:.0f}/{total:.0f} "
             f"| {_format_number(selection.get(result.get('prediction_metric', 'msle')), 4)} "
             f"| {_format_number(gap, 4) if gap is not None else '-'} "
             f"| {result.get('kernel_calls') or 0} |"
@@ -481,7 +482,9 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
     with `node F1` would look excellent and say nothing.
     """
     first = agent_results[0]
-    tree_weight = first.get("tree_weight", 0.6)
+    tree_weight = first.get("tree_weight")
+    if tree_weight is None:
+        tree_weight = 0.6
     trivial = next(
         (
             result["trivial_decoder_reward"]
@@ -1473,6 +1476,12 @@ def _wm_planning(wm_results: dict) -> list[str]:
 
 def _wm_in_loop_fidelity(agent_results: list[dict]) -> list[str]:
     """The world model as the outer loop saw it: its estimate against the ground-truth replay."""
+    # An inverse or forecast reward carries no evaluator noise and `mc_reward` IS
+    # the held-out score there, so a "bias" column would print +0.00 under a
+    # "spread" header over an F1 or an MSLE
+    if is_recover(agent_results) or is_forecast(agent_results):
+        return []
+
     paired = [
         result for result in agent_results
         if result.get("mc_reward") is not None and result.get("evaluator") in ("world_model", "oracle")

@@ -37,6 +37,7 @@ condition_colors = {
     5: "#55A868",
     6: "#4C72B0",
     7: "#9370DB",
+    8: "#E377C2",
 }
 
 
@@ -929,10 +930,13 @@ def plot_convergence(
         return None
 
     axes.set_xlabel("outer-loop iteration")
+    # The family names the quantity: a decoder's score, a forecaster's error and a
+    # localizer's F1 are all "best so far" on the selection split, and only a
+    # cascade is a node count
     axes.set_ylabel(
-        "best F1 so far (selection split)"
-        if is_recover(at_largest)
-        else "best spread so far (nodes)"
+        "best spread so far (nodes)"
+        if not (is_recover(at_largest) or is_forecast(at_largest))
+        else f"best {reward_name(at_largest)} so far (selection split)"
     )
     axes.set_title(f"{title_prefix}: outer-loop convergence at k={largest}")
     axes.grid(alpha=0.3)
@@ -1166,7 +1170,8 @@ def plot_wm_calibration(
         observed = np.array(block["mean_target"], dtype=np.float64)
         counts = np.array(block["count"], dtype=np.float64)
         keep = counts > 0
-        sizes = 20 + 180 * counts[keep] / counts.max()
+        # Every bin can be empty on a tiny split; a zero-size max raises
+        sizes = 20 + 180 * counts[keep] / max(float(counts.max(initial=0.0)), 1.0)
 
         axes.plot([0, 1], [0, 1], "k--", linewidth=1, label="perfect calibration")
         axes.scatter(predicted[keep], observed[keep], s=sizes, color=model_color, alpha=0.8, label="world model (size = bin count)")

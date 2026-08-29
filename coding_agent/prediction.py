@@ -587,6 +587,19 @@ def evaluate_predictor(
         np.array(predicted), np.array(actual), np.array(observed)
     )
     reward = prediction_reward(metrics, task.prediction_metric)
+    # Every reportable metric is a mean of per-cascade terms, so scoring each
+    # cascade alone yields its term; the SE of those is the SE the acceptance
+    # test in `methods.base` reads. The SE of the PREDICTIONS was there before,
+    # which put the whole search inside the noise band on any real corpus.
+    per_cascade = [
+        prediction_reward(
+            popularity_metrics(
+                np.array([value]), np.array([truth]), np.array([seen])
+            ),
+            task.prediction_metric,
+        )
+        for value, truth, seen in zip(predicted, actual, observed, strict=True)
+    ]
     elapsed = time.perf_counter() - start
 
     # A predictor that declined EVERY cascade is not a strong one that gave up, it
@@ -611,8 +624,8 @@ def evaluate_predictor(
         cost={
             "env": "cascade_prediction",
             "reward_se": (
-                float(np.std(predicted, ddof=1) / np.sqrt(len(predicted)))
-                if len(predicted) > 1
+                float(np.std(per_cascade, ddof=1) / np.sqrt(len(per_cascade)))
+                if len(per_cascade) > 1
                 else 0.0
             ),
             "rollout_seconds": elapsed,

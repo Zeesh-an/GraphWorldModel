@@ -345,12 +345,15 @@ def _build_action(
     rng: np.random.Generator,
     weight_range: tuple,
     remove_semantics: str = spent,
+    blocked_nodes: set[int] | None = None,
 ) -> list[ActionOp]:
     """One injected action of type op with a randomly chosen valid target."""
     # Under a competitive task a node the POSITIVE cascade already owns is committed
     # too, so it is no more seedable than a negatively-infected one. Empty for every
-    # single-cascade task, which leaves those pools exactly as they were.
-    infected = set(state.infected) | set(state.pos_infected)
+    # single-cascade task, which leaves those pools exactly as they were. A blocked
+    # node is out of the graph and is not in `state` at all, so it has to be
+    # excluded here or the injection records an add_node the simulator ignores.
+    infected = set(state.infected) | set(state.pos_infected) | set(blocked_nodes or ())
 
     if op == "add_node":
         # Build an action that randomly adds a susceptible node
@@ -416,6 +419,7 @@ def sample_injection(
     action_ops: list[str],
     weight_range: tuple[float, float],
     remove_semantics: str = spent,
+    blocked_nodes: set[int] | None = None,
 ) -> list[ActionOp]:
     """
     NULL (no action, just diffusion dynamics) with prob (1 - p_inject), else a
@@ -426,7 +430,9 @@ def sample_injection(
 
     # Pick one enabled op uniformly, then a random valid target from the live graph
     op = action_ops[int(rng.integers(len(action_ops)))]
-    return _build_action(op, state, graph, rng, weight_range, remove_semantics)
+    return _build_action(
+        op, state, graph, rng, weight_range, remove_semantics, blocked_nodes
+    )
 
 
 def counterfactual_actions(
@@ -437,6 +443,7 @@ def counterfactual_actions(
     rng: np.random.Generator,
     action_ops: list[str],
     remove_semantics: str = spent,
+    blocked_nodes: set[int] | None = None,
 ) -> list[list[ActionOp]]:
     """
     Up to `count` action bags distinct from main_bag and each other: NULL, a
@@ -451,7 +458,7 @@ def counterfactual_actions(
     exactly what `action_sensitivity` measures: it read 0.0.
     """
     num_nodes = graph.number_of_nodes()
-    infected = set(state.infected) | set(state.pos_infected)
+    infected = set(state.infected) | set(state.pos_infected) | set(blocked_nodes or ())
     susceptible = [node for node in range(num_nodes) if node not in infected]
     active = list(state.frontier) if state.frontier else list(state.infected)
 

@@ -80,14 +80,14 @@ All five appear in DeepIM's published tables, which are transcribed in [`../rese
 
 ### Per-task registration
 
-`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. Six tasks have entries today:
+`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. All eight tasks have entries today:
 
 | task | registered | wired |
 | --- | --- | --- |
-| `influence_maximization` | 15 | 7 |
-| `adaptive_online_im` | 5 (`adaptiveim`, `mrim`, `rl4im`, `oim_lt`, `timlinucb`) | 0 |
+| `influence_maximization` | 14 | 7 |
+| `adaptive_online_im` | 6 (`adaptiveim`, `rl4im`, `mrim`, `oim`, `oim_lt`, `timlinucb`) | 2 |
 | `critical_node_detection` | 12 (`finder`, `gdm`, `mind`, `spr`, `nirm`, `dcrs`, `gnd`, `decycler`, `collective_influence`, `explosive_immunization`, `dismantling_review`, `selinda`) | 11 |
-| `source_localization` | 12 (six `graphsl_*` arms, plus `graphsl`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`, `cosasi`) | 6 |
+| `source_localization` | 17 (six `graphsl_*` arms, four `cosasi_*` arms, plus `graphsl`, `cosasi`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`) | 10 |
 | `influence_blocking` | 4 (`sandimin`, `imin_joc`, `diffim`, `stratlearner`) | 3 |
 | `cascade_reconstruction` | 13 (three `ditto*` arms, plus `grin`, `spin`, `deep_demixing`, `reconstructing_cascade`, `cascade_tree_samples`, `cult`, `active_cascade_reconstruction`, `brits`, `dipt`, `netrate`) | 6 |
 | `cascade_prediction` | 20 (`casflow`, `ccgl`, `ctcp`, `castemp`, `deephawkes`, `deepcas`, `cascn`, `mucas`, `coupledgnn`, `seismic`, `featuredriven_hawkes`, `hip`, `topolstm`, `deepinf`, `forest`, `ms_hgat`, `casseqgcn`, `ccasgnn`, `casft`, `casdo`) | 5 |

@@ -1,11 +1,15 @@
 #!/bin/bash
 #SBATCH --job-name=cr_protocol
 #SBATCH --output=logs/%x_%j.out
+# (logs/ must exist before `sbatch`: Slurm opens the .out file before the job runs)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=72:00:00
+# The ladder trains f_theta inline in this allocation (pipeline.sbatch does
+# not resubmit from inside a job), so the sweep needs the GPU itself
+#SBATCH --gres=gpu:1
 
 # The four SETTINGS of research/cascade_reconstruction.md §2.7 and the observation
 # sweep of §8.3, on ONE graph, each into its own
@@ -38,7 +42,28 @@
 # complement, so the runs are labelled with the direction spelled out.
 
 set -euo pipefail
-cd /home/rrishab/GraphWorldModel/
+# Repo root: the checkout this file lives in, whenever this file is the real
+# one. Under a Slurm spool copy BASH_SOURCE points outside any checkout, and
+# only then is the submit directory trusted; an `srun --pty` / `salloc` shell
+# also carries SLURM_JOB_ID, so SLURM_SUBMIT_DIR is never taken first. Set
+# REPO_ROOT to override. Same rule as sbatch/pipeline.sbatch.
+if [ -z "${REPO_ROOT:-}" ]; then
+    checkout="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd || true)"
+    if [ -n "$checkout" ] && [ -f "$checkout/pipeline/run.py" ]; then
+        REPO_ROOT="$checkout"
+    elif [ -n "${SLURM_JOB_ID:-}" ] && [ -f "${SLURM_SUBMIT_DIR:-/nonexistent}/pipeline/run.py" ]; then
+        REPO_ROOT="$SLURM_SUBMIT_DIR"
+    else
+        echo "[repo] cannot locate the checkout: ${BASH_SOURCE[0]} is not inside one and" \
+             "SLURM_SUBMIT_DIR=${SLURM_SUBMIT_DIR:-unset} has no pipeline/run.py; set REPO_ROOT" >&2
+        exit 1
+    fi
+fi
+export REPO_ROOT
+cd "$REPO_ROOT"
+[ -f pipeline/run.py ] || { echo "[repo] REPO_ROOT=$REPO_ROOT has no pipeline/run.py; set REPO_ROOT to the checkout" >&2; exit 1; }
+[ -w . ] || { echo "[repo] REPO_ROOT=$REPO_ROOT is not writable, and results/ and logs/ live here" >&2; exit 1; }
+echo "[repo] $REPO_ROOT"
 source venv/bin/activate
 mkdir -p results logs
 
@@ -81,6 +106,10 @@ run_axis tree_weight_09 CR_SETTING=partial_times CR_TREE_WEIGHT=0.9 DIFFUSION_MO
 #    its path precision is structurally easier than IC's. The two are never
 #    compared (§2.6); this row exists so the difference is measured rather than
 #    assumed
-run_axis dynamics_lt CR_SETTING=partial_times DIFFUSION_MODEL=LT
+#    No @oracle arm under LT: the analytic oracle is IC-only (thresholds are drawn
+#    per episode and never stored), and the pipeline refuses the pairing up front,
+#    so the MC arm is the LT ceiling here
+run_axis dynamics_lt CR_SETTING=partial_times DIFFUSION_MODEL=LT \
+    ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@world_model decode_free@world_model"
 
 echo "[cr_protocol] done -> results/cascade_reconstruction/$DATASET/"

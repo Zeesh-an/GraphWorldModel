@@ -2,7 +2,8 @@
 #
 # The control (G1.1, train BA-100 / test held-out BA-100) is already measured and
 # is NOT strong evidence: 20 BA(100,3) graphs are near-exchangeable, so holding
-# graphs out costs the model almost nothing. See docs/comparison_split_protocol.md.
+# graphs out costs the model almost nothing. See
+# research_notes/docs/comparison_split_protocol.md (local notes, untracked).
 # This config is the first setting where "held out" means something.
 experiment_name: g1_2_graph_size
 

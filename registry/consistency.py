@@ -241,14 +241,27 @@ def _check_task_default_baselines(report: ConsistencyReport) -> None:
     This is the check §4 asks for by name: "no stale experiment config refers to
     missing algorithms". A task's `default_baselines` IS a stale-able config.
     """
+    from coding_agent.tools.blocking_algorithms import default_blocking_baselines
+    from coding_agent.tools.immunization_algorithms import (
+        default_immunization_baselines,
+    )
     from pipeline.conditions import default_baselines as fallback_baselines
 
     for name, task in TASK_REGISTRY.items():
-        pool = task.default_baselines or (
-            fallback_baselines if task.runnable else ()
-        )
+        # Same resolution as `pipeline.run.resolve_baselines`: a lever task's
+        # pool is per lever, and every lever's pool is a stale-able config.
+        if task.competitive:
+            pool = {a for pool in default_blocking_baselines.values() for a in pool}
+        elif task.epidemic:
+            pool = {
+                a for pool in default_immunization_baselines.values() for a in pool
+            }
+        else:
+            pool = task.default_baselines or (
+                fallback_baselines if task.runnable else ()
+            )
 
-        for algorithm in pool:
+        for algorithm in sorted(pool):
             entry = ALGORITHM_REGISTRY.get(algorithm)
 
             if entry is None:

@@ -2,7 +2,7 @@
 
 One markdown file per graph task, all in the same format. Each is self-contained: task definition, fit with our methodology, every baseline method with paper and code URLs, every dataset those baselines evaluate on with node/edge counts and source URLs, transcribed result tables, evaluation protocols, and an honest list of what the review could **not** establish.
 
-**6,344 lines · 8 tasks · ~330 methods · ~300 datasets · 697 unique URLs**, compiled 2026-07-28/29, narrowed to the shipped set 2026-08-06.
+**6,534 lines · 8 tasks · ~330 methods · ~300 datasets · 697 unique URLs**, compiled 2026-07-28/29, narrowed to the shipped set 2026-08-06.
 
 Five further tasks were screened and reviewed and are **not being pursued**: cascading failure, graph completion, influence estimation, network inference and temporal forecasting. Their files were deleted rather than left as dead weight; `git log` is the record if any of that analysis is ever wanted back. What each one concluded is summarized under "Screened out" below, because two of those conclusions changed how the shipped tasks are built.
 
@@ -21,13 +21,13 @@ A task earns a slot if it has **(a)** a node- or edge-level state that evolves, 
 | File                                                       | Fit                     | Lines | Comparable published table on a graph we load?                          |
 | ---------------------------------------------------------- | ----------------------- | ----- | ----------------------------------------------------------------------- |
 | [`influence_maximization.md`](influence_maximization.md)   | yes **implemented**      | 822   | (key) DeepIM Tables 2/3: Jazz, Cora-ML, Power Grid byte-identical         |
-| [`influence_blocking.md`](influence_blocking.md)           | yes **implemented**      | 776   | (key) SandIMIN PVLDB'24 Table 5: email-Eu-core, YouTube, our exact metric |
+| [`influence_blocking.md`](influence_blocking.md)           | yes **implemented**      | 784   | (key) SandIMIN PVLDB'24 Table 5: email-Eu-core, YouTube, our exact metric |
 | [`source_localization.md`](source_localization.md)         | yes **implemented**      | 977   | (key) SL-VAE KDD'22 Tables 1-4-5 of its 7 graphs are ours                |
-| [`critical_node_detection.md`](critical_node_detection.md) | yes **implemented**      | 1,014 | (key) CoreHD/BPD Table I: "Grid" is our `power_grid` byte-for-byte        |
+| [`critical_node_detection.md`](critical_node_detection.md) | yes **implemented**      | 1,018 | (key) CoreHD/BPD Table I: "Grid" is our `power_grid` byte-for-byte        |
 | [`cascade_reconstruction.md`](cascade_reconstruction.md)   | yes **implemented**      | 776   | (key) DITTO KDD'23 Tables 4-5: BA, ER, Oregon2 and rt-pol are all ours    |
-| [`epidemic_control.md`](epidemic_control.md)               | yes **implemented**      | 758   | (key) GreedyWalk SDM'15 Table 2: four published `λ₁` reproduce exactly    |
-| [`adaptive_online_im.md`](adaptive_online_im.md)           | yes **implemented**      | 640   | only DeepIM's re-run OIM row; the rest are figures                      |
-| [`cascade_prediction.md`](cascade_prediction.md)           | yes **implemented**      | 581   | (key) CasFT AAAI-25 Table 2 + CasTemp's leak-free re-run: context only, our preprocessing differs |
+| [`epidemic_control.md`](epidemic_control.md)               | yes **implemented**      | 760   | (key) GreedyWalk SDM'15 Table 2: four published `λ₁` reproduce exactly    |
+| [`adaptive_online_im.md`](adaptive_online_im.md)           | yes **implemented**      | 642   | only DeepIM's re-run OIM row; the rest are figures                      |
+| [`cascade_prediction.md`](cascade_prediction.md)           | yes **implemented**      | 582   | (key) CasFT AAAI-25 Table 2 + CasTemp's leak-free re-run: context only, our preprocessing differs |
 
 Every file above is an **implemented** task. The screening criteria are kept because they are what a
 ninth task would have to pass.

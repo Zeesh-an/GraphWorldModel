@@ -488,14 +488,18 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.list or (not args.only and not args.all):
-        print(f"{'name':<12} {'kind':<10} {'status':<12} {'installed':<10} title")
+        width = max(len(name) for name in external_baselines)
+        print(
+            f"{'name':<{width}} {'kind':<10} {'status':<12} {'wired':<6} "
+            f"{'installed':<10} title"
+        )
         for name, spec in sorted(external_baselines.items()):
             print(
-                f"{name:<12} {spec.kind:<10} {spec.status:<12} "
-                f"{str(spec.installed()):<10} {spec.title}"
+                f"{name:<{width}} {spec.kind:<10} {spec.status:<12} "
+                f"{str(spec.wired):<6} {str(spec.installed()):<10} {spec.title}"
             )
             if spec.blocker:
-                print(f"{'':<12} └─ blocked: {spec.blocker.splitlines()[0]}")
+                print(f"{'':<{width}} └─ blocked: {spec.blocker.splitlines()[0]}")
         raise SystemExit(0)
 
     # --all installs what can actually be RUN. A repo with no adapter would be

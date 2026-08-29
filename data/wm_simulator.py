@@ -450,6 +450,12 @@ class Simulator:
     def apply_actions(self, bag: list[ActionOp]) -> None:
         for action in bag:
             if action.op == "add_node":
+                # A blocked node left the graph; seeding it would let a bare
+                # remove_node's target transmit for one step before
+                # _enforce_blocked re-zeroes it. Same rule as the other two simulators.
+                if int(action.target) in self.blocked:
+                    continue
+
                 # Set status to 1 (the node becomes an active spreader, and next iteration it spreads)
                 self.model.status[int(action.target)] = 1
             elif action.op == "remove_node":

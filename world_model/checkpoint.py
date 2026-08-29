@@ -179,7 +179,13 @@ class ModelSpec:
         `world_model_env.from_results_json` already assumed. They are stated here
         once instead of in each caller.
         """
-        config = json.loads(Path(path).read_text())["config"]
+        return cls.from_config(json.loads(Path(path).read_text())["config"])
+
+    @classmethod
+    def from_config(cls, config: dict) -> "ModelSpec":
+        """A results-JSON `config` block (or any TrainConfig-shaped dict), with the
+        pre-flag defaults filled in. Shared by the path and dict entry points so
+        neither can drift."""
         blob = dict(config)
         blob.setdefault("backbone", config.get("model"))
         blob.setdefault("remove_semantics", spent)
@@ -365,10 +371,7 @@ def _coerce_spec(config) -> ModelSpec | None:
         return config
 
     if isinstance(config, dict):
-        blob = dict(config)
-        blob.setdefault("backbone", blob.get("model"))
-
-        return ModelSpec.from_dict(blob)
+        return ModelSpec.from_config(config)
 
     return ModelSpec.from_results_json(config)
 

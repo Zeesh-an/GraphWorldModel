@@ -52,7 +52,9 @@ Two conventions everything here obeys:
 import numpy as np
 
 from coding_agent.blocking import exposure_scores, proximity_ring
+from coding_agent.containment import neighbour_sets
 from coding_agent.tools import primitives
+from coding_agent.tools.dismantling_algorithms import _betweenness
 from coding_agent.types import GraphInfo
 
 # Live-edge samples the percolation-based members draw. Kimura's own bond-percolation
@@ -124,10 +126,13 @@ def _pad(chosen: list[int], graph: GraphInfo, budget: int, protected=()) -> list
     arborescences are all covered. A short set silently under-spends and reads as a
     weak method rather than as a small candidate pool.
     """
+    protected = {int(node) for node in protected}
+    chosen = [int(node) for node in chosen if int(node) not in protected]
+
     if len(chosen) >= budget:
         return chosen[:budget]
 
-    picked = set(chosen) | {int(node) for node in protected}
+    picked = set(chosen) | protected
     for node in primitives.get_top_degree_nodes(graph, graph.num_nodes):
         if len(chosen) >= budget:
             break
@@ -207,10 +212,13 @@ def dominator_tree(
         for node in sources
         if int(node) in position and int(node) not in removed
     }
-    # A virtual super-source, encoded as "the seeds have no predecessor and are
-    # their own immediate dominator", which is what makes the tree well defined for
-    # a seed SET rather than a single root
-    idom = {node: (node if node in roots else None) for node in order}
+    # A virtual super-source, encoded as -1 with the lowest rank: the seeds' only
+    # dominator, which is what makes the tree well defined for a seed SET rather
+    # than a single root. A node reached from two seeds directly is dominated by
+    # -1 alone, so walking up from a seed must land there rather than loop on the
+    # seed itself (which hung on any multi-source rumour whose seeds share a child).
+    idom = {node: (-1 if node in roots else None) for node in order}
+    position[-1] = -1
 
     def intersect(first: int, second: int) -> int:
         while first != second:
@@ -246,7 +254,7 @@ def dominator_tree(
     counts = {node: 1 for node in order}
     for node in reversed(order):
         parent = idom[node]
-        if parent is not None and parent != node:
+        if parent is not None and parent in counts:
             counts[parent] += counts[node]
 
     # A seed is not a blocker candidate, and its "dominated" count is the whole
@@ -363,8 +371,9 @@ def betweenness_blocking(
     negative_seeds=(),
     **kwargs: object,
 ) -> list[int]:
-    """Top eigenvector-centrality nodes in the reachable region (the cheap centrality floor)."""
-    scores = primitives.compute_centrality(graph, kind="eigenvector")
+    """Top betweenness nodes in the reachable region (the cheap centrality floor)."""
+    # Shared with the dismantling pool: Brandes, pivot-sampled past 3,000 nodes
+    scores = _betweenness(neighbour_sets(graph), set())
     pool = _candidate_pool(graph, negative_seeds, budget)
     ranked = sorted(pool, key=lambda node: scores[node], reverse=True)
 
@@ -1018,7 +1027,8 @@ def kimura_link_blocking(
         # The arc into v from its immediate dominator is the one whose removal
         # disconnects v's whole subtree on this realization
         for node, parent in idom.items():
-            if parent is None or parent == node:
+            # -1 is the super-source: no single arc disconnects such a node
+            if parent is None or parent == node or parent not in counts:
                 continue
 
             scores[(parent, node)] = scores.get((parent, node), 0.0) + counts[node]

@@ -21,7 +21,8 @@ __pycache__/
 # The tree stays local -- it is reproducible from the sbatch files.
 results/
 results_archive/
-logs/
+logs/*
+!logs/.gitkeep
 runs/
 wandb/
 
@@ -53,13 +54,3 @@ docs/
 Thumbs.db
 .vscode/
 .idea/
-
-# ---------------------------------------------------------------- docs/ policy
-# docs/ began as a scratch area and is ignored by default, but the reports in it
-# are deliverables. The negation must come AFTER the `docs/` rule and must also
-# re-include the directory itself -- git never descends into an excluded
-# directory, so `!docs/*.md` alone would never be consulted.
-!docs/
-docs/*
-!docs/*.md
-!docs/*.json

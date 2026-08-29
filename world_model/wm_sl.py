@@ -60,10 +60,9 @@ from world_model.wm_data import (
     ch_frontier,
     ch_infected,
     ch_remove,
-    in_channels,
     load_graph_store,
 )
-from world_model.checkpoint import load_checkpoint
+from world_model.eval_planning import load_trained_model
 from world_model.wm_metrics import localization_metrics, resimulation_error
 
 no_prior = "none"
@@ -98,15 +97,23 @@ probability_floor = 1e-6
 
 
 def build_graph_tensors(
-    graph: GraphInfo, diffusion_model: str, device: torch.device
+    graph: GraphInfo,
+    diffusion_model: str,
+    device: torch.device,
+    hide_edge_weights: bool = False,
 ) -> tuple:
-    """(GraphInput, degree channel) for one graph: everything the unroll reuses."""
+    """(GraphInput, degree channel) for one graph: everything the unroll reuses.
+
+    `hide_edge_weights` must follow the checkpoint: a w-hidden model handed the
+    true transmission probabilities is not the model that was trained.
+    """
     graph_input = build_graph_input(
         graph.edge_index,
         graph.ic_probs,
         graph.num_nodes,
         diffusion_model,
         device,
+        hide_edge_weights,
     )
 
     degrees = np.zeros(graph.num_nodes, dtype=np.float32)
@@ -146,7 +153,9 @@ def soft_rollout(
         # Columns assembled by stacking rather than in-place writes: autograd then
         # sees one graph-building op instead of an aliased view chain, and the
         # channel order is the same CH_* layout wm_data documents
-        columns = [None] * in_channels
+        # Width follows the checkpoint: the typed encoding adds three edge-op
+        # channels that stay zero on a diffusion-only unroll
+        columns = [zeros] * model.in_channels
         columns[ch_infected] = infected
         columns[ch_frontier] = frontier
         columns[ch_degree] = degree_channel
@@ -157,7 +166,7 @@ def soft_rollout(
         columns[ch_remove] = zeros
         columns[ch_edge] = zeros
 
-        features = torch.stack(columns, dim=1)  # shape: (N, 6)
+        features = torch.stack(columns, dim=1)  # shape: (N, in_channels)
         probabilities = torch.sigmoid(model(features, graph_input))  # shape: (N, 2)
         infected, frontier = probabilities[:, 0], probabilities[:, 1]
 
@@ -335,17 +344,9 @@ def invert(
 def load_world_model(results_json: str, device: str = "cpu") -> tuple[nn.Module, dict]:
     """Rebuild the trained WorldModel named by a train_wm.py results JSON, frozen."""
     config = json.loads(Path(results_json).read_text())["config"]
-    checkpoint = (
-        Path(config["ckpt_dir"]) / f"wm_{config['model']}_{config['diffusion_model']}.pt"
-    )
-    if not checkpoint.exists():
-        raise FileNotFoundError(f"world-model checkpoint not found: {checkpoint}")
-
-    # One reconstruction path for every consumer of a checkpoint: a v2 file
+    # One reconstruction path for every consumer of a results JSON: a v2 file
     # rebuilds from its own spec, a legacy bare state_dict from this config
-    model, _, _ = load_checkpoint(
-        checkpoint, config=config, device=device, strict_spec=False
-    )
+    model = load_trained_model(config, torch.device(device))
 
     # Frozen: §2.5's fifth row. The world model is never differentiated INTO here,
     # only through: the gradient flows to x~ and stops.
@@ -475,7 +476,10 @@ if __name__ == "__main__":
     model, config = load_world_model(args.wm_results_json, args.device)
     device = torch.device(args.device)
     graph_input, degree_channel = build_graph_tensors(
-        graph, args.diffusion_model, device
+        graph,
+        args.diffusion_model,
+        device,
+        bool(config.get("hide_edge_weights", False)),
     )
 
     prior = None

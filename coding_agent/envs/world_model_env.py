@@ -77,8 +77,8 @@ class WorldModelEnvironment:
         # CH_DEGREE depends only on the adjacency, so during a rollout with no
         # edge ops it is the same vector at every timestep for every ensemble
         # sample. Recomputing it was 11% of rollout time for a constant. Keyed by
-        # id() of the edge array and cleared per rollout, so a recycled id can
-        # never alias across rollouts.
+        # id() of the edge array, holding the array itself alongside so its id
+        # cannot be recycled while the entry lives, and cleared per rollout.
         self._degree_cache = {}
         # Seed every rollout uses unless one is named explicitly; shared across
         # candidates so the DIFFERENCE between two strategies is well resolved
@@ -472,12 +472,16 @@ class WorldModelEnvironment:
                     )
                 else:
                     edge_array = sample_arrays[sample][0]
-                    key = id(edge_array)
-                    degrees = self._degree_cache.get(key)
+                    cached = self._degree_cache.get(id(edge_array))
 
-                    if degrees is None:
-                        degrees = log_degree(edge_array, num_nodes)
-                        self._degree_cache[key] = degrees
+                    # Identity check, not id() alone: two edge ops on one sample
+                    # free the intermediate array, and a later array can land at
+                    # the same address with a different degree column
+                    if cached is None or cached[0] is not edge_array:
+                        cached = (edge_array, log_degree(edge_array, num_nodes))
+                        self._degree_cache[id(edge_array)] = cached
+
+                    degrees = cached[1]
 
                     X, _, _ = build_features(
                         record,

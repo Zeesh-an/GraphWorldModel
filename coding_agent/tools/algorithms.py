@@ -37,24 +37,42 @@ def weighted_degree(
 def degree_discount(
     graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
 ) -> list[int]:
-    """DegreeDiscount (Chen et al. 2009): discount a node's degree for already-chosen neighbors."""
-    discounted = primitives.compute_degree(graph)
+    """
+    DegreeDiscount (Chen, Wang, Yang, KDD 2009, Algorithm 4).
+
+    `dd_v = d_v - 2 t_v - (d_v - t_v) t_v p` with `t_v` the number of chosen
+    neighbours. The paper assumes one uniform `p`; ours varies per arc, so the
+    mean arc probability stands in for it. `d_v` counts DISTINCT neighbours, so a
+    symmetrized graph is not double-counted through its paired arcs.
+    """
+    neighbours = [
+        set(graph.out_neighbors(node)) | set(graph.in_neighbors(node))
+        for node in range(graph.num_nodes)
+    ]
+    degree = np.array([len(adjacent) for adjacent in neighbours], dtype=np.float64)
+    discounted = degree.copy()
+    chosen_neighbours = np.zeros(graph.num_nodes, dtype=np.float64)
+    probability = float(np.mean(graph.ic_probs)) if graph.ic_probs.size else 0.0
     chosen = []
 
-    for _ in range(budget):
+    for _ in range(min(budget, graph.num_nodes)):
+        masked = discounted.copy()
         # -inf mask so an already-chosen node can never win argmax, however far
         # the discounting pushes the remaining scores down.
-        node = int(
-            np.argmax(
-                [
-                    discounted[candidate] if candidate not in chosen else float("-inf")
-                    for candidate in range(graph.num_nodes)
-                ]
-            )
-        )
+        masked[chosen] = float("-inf")
+        node = int(np.argmax(masked))
         chosen.append(node)
-        for neighbor in graph.out_neighbors(node) + graph.in_neighbors(node):
-            discounted[neighbor] -= 1
+
+        for neighbour in neighbours[node]:
+            if neighbour in chosen:
+                continue
+            chosen_neighbours[neighbour] += 1.0
+            hits = chosen_neighbours[neighbour]
+            discounted[neighbour] = (
+                degree[neighbour]
+                - 2.0 * hits
+                - (degree[neighbour] - hits) * hits * probability
+            )
 
     return chosen
 
@@ -87,6 +105,9 @@ def vanilla_greedy(
             if gain > best_gain:
                 best_gain, best_node = gain, node
 
+        if best_node < 0:
+            break
+
         seeds.append(best_node)
 
     return seeds
@@ -109,7 +130,7 @@ def celf(
         )
         heapq.heappush(heap, (-gain, node, 0))
 
-    for round_index in range(1, budget + 1):
+    for round_index in range(1, min(budget, graph.num_nodes) + 1):
         while True:
             _, node, last_updated = heapq.heappop(heap)
             if last_updated == round_index:
@@ -264,7 +285,7 @@ def _greedy_discount_select(
     discounted = scores.astype(float).copy()
     chosen = []
 
-    for _ in range(budget):
+    for _ in range(min(budget, graph.num_nodes)):
         node = int(
             np.argmax(
                 [
@@ -299,7 +320,7 @@ def celf_pp(
         )
         heapq.heappush(heap, (-gain, node, 0))
 
-    for round_index in range(1, budget + 1):
+    for round_index in range(1, min(budget, graph.num_nodes) + 1):
         while True:
             _, node, last_updated = heapq.heappop(heap)
             if last_updated == round_index:
@@ -342,6 +363,9 @@ def adaptive_greedy(
             ),
             reverse=True,
         )
+
+        if not coarse:
+            break
 
         best_node, best_gain = coarse[0][1], float("-inf")
         for _, node in coarse[:refine_top]:
@@ -539,6 +563,9 @@ def static_greedy(
             if gain > best_gain:
                 best_gain, best_node = gain, node
 
+        if best_node < 0:
+            break
+
         seeds.append(best_node)
 
     return seeds
@@ -703,9 +730,10 @@ def genetic_algorithm(
     pool = primitives.get_top_degree_nodes(
         graph, min(graph.num_nodes, max(budget * 4, 10))
     )
+    budget = min(budget, len(pool))
 
     def fill(child: list[int]) -> list[int]:
-        child = list(dict.fromkeys(child))
+        child = list(dict.fromkeys(int(node) for node in child))
 
         while len(child) < budget:
             node = int(rng.choice(pool))
@@ -755,7 +783,7 @@ def genetic_algorithm(
             reverse=True,
         )
 
-    return list(scored[0][1])
+    return [int(node) for node in scored[0][1]]
 
 
 # Hybrids (additions)
@@ -892,7 +920,8 @@ def voterank(
             [
                 sum(voting_ability[neighbor] for neighbor in neighbors[node])
                 for node in range(graph.num_nodes)
-            ]
+            ],
+            dtype=np.float64,
         )
         votes[chosen] = float("-inf")
 

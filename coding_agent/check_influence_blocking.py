@@ -318,15 +318,55 @@ def check_weight_cap() -> None:
 
 
 def check_detection_delay() -> None:
-    """Budak's r drops everything the blocker emits before it, and only that."""
+    """
+    Budak's r holds everything the blocker emits before it until t = r.
+
+    DEFERRED rather than dropped: every library blocker commits its whole bag at
+    t = 0, so a wrapper that dropped it scored the entire condition-1 pool at
+    exactly the unopposed spread under any r > 0.
+    """
     graph = _graph(path, 4)
     task = _task(detection_delay=2)
     cascade = build_negative_cascade(graph, task)
 
     wrapped = cascade.wrap(lambda state, timestep: [ActionOp("add_node", 1)])
-    assert wrapped(State([], []), 0) == [], "an early action should be dropped"
+    assert wrapped(State([], []), 0) == [], "an early action must not fire early"
     assert wrapped(State([], []), 1) == []
+    # ...the same seed emitted at 0, 1 and 2 lands ONCE, at the delay
     assert [action.op for action in wrapped(State([], []), 2)] == ["add_node"]
+    assert [action.op for action in wrapped(State([], []), 3)] == ["add_node"]
+
+    # A t=0 plan is what every library member builds, and it has to act at t = r
+    delayed = cascade.wrap(
+        lambda state, timestep: [ActionOp("add_node", 1)] if timestep == 0 else []
+    )
+    assert delayed(State([], []), 0) == [] and delayed(State([], []), 1) == []
+    assert [action.target for action in delayed(State([], []), 2)] == [1]
+    assert delayed(State([], []), 3) == []
+
+    # ...end to end: on a 6-path a seed at 3 committed at t=0 must still save the
+    # tail when it fires at t=2, so the arm scores BELOW the unopposed spread
+    six = _graph([(0, 1), (1, 2), (2, 3), (3, 4), (4, 5)], 6)
+    six_task = _task(budget=1, horizon=6, detection_delay=2)
+    environment = MonteCarloEnvironment(
+        six,
+        "IC",
+        mc_runs=2,
+        base_seed=0,
+        remove_semantics=blocked,
+        negative_seeds=(0,),
+        competitive_config=CompetitiveConfig(tie_break=positive_dominance),
+    )
+    unopposed = unopposed_reference(environment, six_task, six_task.horizon, 1)
+    trajectory, _ = evaluate_strategy(
+        _Plan(blocking_plan([4], six, 1, counter_seed, 0)[0]),
+        environment,
+        six_task,
+        six,
+    )
+    assert unopposed == 6.0, unopposed
+    assert trajectory.reward < unopposed, (trajectory.reward, unopposed)
+    assert not trajectory.actions[0] and trajectory.actions[2], trajectory.actions
 
     # ...and the wrapper must NOT inject S_N: `add_node` seeds the POSITIVE cascade,
     # so a containment-style outbreak wrapper here would have every arm start the

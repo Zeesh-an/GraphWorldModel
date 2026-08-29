@@ -22,7 +22,7 @@ import torch.nn as nn
 from data.wm_simulator import spent
 from world_model.wm_data import basic_encoding, load_graph_store
 from world_model.wm_eval import planning_regret_multi
-from world_model.checkpoint import load_checkpoint
+from world_model.checkpoint import LegacyCheckpointError, load_checkpoint
 
 
 def load_trained_model(config: dict, device: torch.device) -> nn.Module:
@@ -46,8 +46,21 @@ def load_trained_model(config: dict, device: torch.device) -> nn.Module:
             f"ckpt_dir={config['ckpt_dir']})"
         )
 
-    model, _, _ = load_checkpoint(checkpoint_path, config=config, device=device,
-                                  strict_spec=False)
+    try:
+        model, spec, _ = load_checkpoint(checkpoint_path, device=device)
+    except LegacyCheckpointError:
+        model, spec, _ = load_checkpoint(checkpoint_path, config=config, device=device)
+
+    # Both re-eval CLIs build plain 6/9-channel features and call the
+    # single-cascade rollout/planning, so a competitive or compartmental
+    # checkpoint would fail at the first matmul with a shape error
+    if spec.competitive or spec.epidemic:
+        raise ValueError(
+            f"{checkpoint_path} is a {'competitive' if spec.competitive else 'compartmental'} "
+            f"checkpoint; eval_planning / eval_rollout_ensemble evaluate the "
+            f"single-cascade layout only. Re-run train_wm with --plan-demo for "
+            f"the two-cascade / compartmental evaluators."
+        )
 
     return model
 

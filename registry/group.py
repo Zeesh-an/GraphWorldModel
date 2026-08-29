@@ -204,13 +204,14 @@ def split_group_key(record: dict) -> str:
     A transition is identified by `graph_id` and the episode it came from. Two
     transitions from the SAME GRAPH share its structure, its edge probabilities
     and (for the main branch) its cascade, so putting one in train and another in
-    test leaks. `data.generate_wm_data._assign_split` currently draws a split per
-    EPISODE, which means the same graph routinely lands on both sides.
+    test leaks. `data.generate_wm_data` now splits by graph by default
+    (`--split-mode graph_disjoint`) and records `split_is_graph_disjoint` in
+    `metadata.json`; `episode_random` is the legacy per-episode draw, kept for
+    single real graphs that admit no graph-disjoint split.
 
-    This function states the correct bucket. It is not yet wired into the
-    generator — doing that changes what every existing checkpoint was trained on,
-    so it belongs in a phase with a retrain, not in a registry commit. The
-    corresponding audit finding is recorded in `research_notes/docs/audit_phase1.md` (local notes, untracked).
+    This function states the bucket the default mode honours, so a reader of a
+    dataset can check the label against the records. The original audit finding
+    is in `research_notes/docs/audit_phase1.md` (local notes, untracked).
     """
     return str(record.get("graph_id", "unknown"))
 

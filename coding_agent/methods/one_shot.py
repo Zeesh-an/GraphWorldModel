@@ -267,9 +267,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             report = None
 
             # Counterfactual credit ablates one ACTION at a time, and an inverse
-            # task emits no actions: there is nothing to ablate and nothing the
-            # rollout would answer
-            if self.credit and not task.recovers:
+            # or forecast task emits no actions: there is nothing to ablate and
+            # nothing the rollout would answer
+            if self.credit and not (task.recovers or task.forecasts):
                 # The bags that actually ran, not the plan object: identical for
                 # a static plan, and the only thing that exists for an adaptive
                 # policy. Replaying them as a fixed plan is the approximation

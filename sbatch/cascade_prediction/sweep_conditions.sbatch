@@ -1,6 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cp_conditions
 #SBATCH --output=logs/%x_%j.out
+# (logs/ must exist before `sbatch`: Slurm opens the .out file before the job runs)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
@@ -36,7 +37,28 @@
 # (9.2) and read the modelling column rather than the ranking.
 
 set -euo pipefail
-cd /home/rrishab/GraphWorldModel/
+# Repo root: the checkout this file lives in, whenever this file is the real
+# one. Under a Slurm spool copy BASH_SOURCE points outside any checkout, and
+# only then is the submit directory trusted; an `srun --pty` / `salloc` shell
+# also carries SLURM_JOB_ID, so SLURM_SUBMIT_DIR is never taken first. Set
+# REPO_ROOT to override. Same rule as sbatch/pipeline.sbatch.
+if [ -z "${REPO_ROOT:-}" ]; then
+    checkout="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd || true)"
+    if [ -n "$checkout" ] && [ -f "$checkout/pipeline/run.py" ]; then
+        REPO_ROOT="$checkout"
+    elif [ -n "${SLURM_JOB_ID:-}" ] && [ -f "${SLURM_SUBMIT_DIR:-/nonexistent}/pipeline/run.py" ]; then
+        REPO_ROOT="$SLURM_SUBMIT_DIR"
+    else
+        echo "[repo] cannot locate the checkout: ${BASH_SOURCE[0]} is not inside one and" \
+             "SLURM_SUBMIT_DIR=${SLURM_SUBMIT_DIR:-unset} has no pipeline/run.py; set REPO_ROOT" >&2
+        exit 1
+    fi
+fi
+export REPO_ROOT
+cd "$REPO_ROOT"
+[ -f pipeline/run.py ] || { echo "[repo] REPO_ROOT=$REPO_ROOT has no pipeline/run.py; set REPO_ROOT to the checkout" >&2; exit 1; }
+[ -w . ] || { echo "[repo] REPO_ROOT=$REPO_ROOT is not writable, and results/ and logs/ live here" >&2; exit 1; }
+echo "[repo] $REPO_ROOT"
 source venv/bin/activate
 mkdir -p results logs
 

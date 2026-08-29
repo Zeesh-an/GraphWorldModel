@@ -6,9 +6,9 @@ A learned, action-conditioned **simulator of graph diffusion dynamics**. Given a
 f_θ(G, s_t, a_t) → s_{t+1}
 ```
 
-It is trained on `(G, s_t, a_t, s_{t+1})` transitions harvested from a real diffusion simulator, and at inference replaces that expensive simulator with a fast, differentiable forward pass. The long-term goal (not yet built) is to use the world model as the **predictive environment inside a coding-agent loop** for graph-algorithm design: roll out candidate algorithms cheaply instead of executing them.
+It is trained on `(G, s_t, a_t, s_{t+1})` transitions harvested from a real diffusion simulator, and at inference replaces that expensive simulator with a fast, differentiable forward pass. It is also the **predictive environment inside a coding-agent loop** for graph-algorithm design (condition 6 below): roll out candidate algorithms cheaply instead of executing them.
 
-The current focus is **Influence Maximization (IM)** dynamics under two diffusion models (**Independent Cascade (IC)** and **Linear Threshold (LT)**) with node- and edge-level interventions.
+The core setting is **Influence Maximization (IM)** under two diffusion models (**Independent Cascade (IC)** and **Linear Threshold (LT)**) with node- and edge-level interventions; seven further tasks (see "Tasks" below) reuse the same pipeline, and `epidemic_control` adds SIR/SIS/SEIR.
 
 > **Two-layer docs.** This README is the overview. The deep technical references are [`data/README.md`](data/README.md) (data generation), [`world_model/README.md`](world_model/README.md) (features, models, training, evaluation), and [`coding_agent/README.md`](coding_agent/README.md) (the outer loop). Worked results are in [`world_model/checkpoints/RESULTS.md`](world_model/checkpoints/RESULTS.md).
 >
@@ -79,11 +79,12 @@ Five plug-and-play backbones (`--model`):
 | Graph Transformer | `gt`      | scaled dot-product attention + FFN, pre-norm                   | `edge_index` + `edge_weight` |
 | GCNII             | `gcnii`   | initial residual + identity mapping (deep)                     | `adj_norm`                   |
 
-Three heads (`--head`):
+Heads (`--head`, default `structured`):
 
 - **`linear`**: `Linear(hidden, 2)`; flexible but saturates the whole graph on a free-running rollout (no structural cap).
 - **`structured` (IC)**: `ICTransmissionHead`: predict a per-edge transmission `q(u→v)` and derive the IC infection form `p_new(v) = 1 − ∏(1 − q·frontier_u)`. Locality makes the cascade **self-terminating**, it structurally cannot saturate. Train with `--pos-weight off`.
 - **`structured` (LT)**: `LTThresholdHead`: predict activation as a learned monotone function of the active-neighbor fraction `f_v`, gated by `f_v > 0`.
+- **`structured_residual`** (IC only): `ICTransmissionHead(residual=True)`, `q = sigmoid(logit(w) + MLP([h_u, h_v, w]))`, a learned residual on the true transmission probability, so zero correction equals the oracle.
 
 The structured heads are the fix that turned a runaway rollout (final count ~99 of 100) into a faithful one (final count within ~1 node of truth). See [`world_model/README.md`](world_model/README.md) for the math.
 
@@ -109,13 +110,13 @@ Every action is `(op, target, [destination], [weight])`. `target` is the node (o
 | `remove_edge`     | `target=u, destination=v`           | remove arc `u→v`                    | remove edge structurally               |
 | `set_edge_weight` | `target=u, destination=v, weight=w` | set arc `u→v` transmission `w`      | no-op (LT ignores edge weights)        |
 
-Node ops set the `act_add` / `act_remove` input channels; edge ops set the `act_edge` channel **and** mutate the per-episode adjacency. The default everywhere (generator, pipeline, sbatch, task registry) is the two node ops, `add_node remove_node`. The three data settings are simply which ops you pass to `--action-ops` (the default = node; `--action-ops` with no values = diffusion-only; `add_edge remove_edge set_edge_weight` = edge, or all five for the full action space).
+Node ops set the `act_add` / `act_remove` input channels; edge ops set the `act_edge` channel **and** mutate the per-episode adjacency. The generator's default (`data.wm_simulator.default_action_ops`) is the two node ops, `add_node remove_node`, and that is what `influence_maximization`, `adaptive_online_im` and `critical_node_detection` generate; `influence_blocking` and `epidemic_control` add the edge ops their levers need, and `source_localization`, `cascade_reconstruction` and `cascade_prediction` generate diffusion-only episodes (`pipeline/tasks.py`, `default_gen_action_ops`). The three data settings are simply which ops you pass to `--action-ops` (`--gen-action-ops` in the pipeline): node; `--action-ops` with no values = diffusion-only; `add_edge remove_edge set_edge_weight` = edge, or all five for the full action space.
 
 ---
 
 ## Datasets
 
-**Synthetic** (`--dataset`): `er` (Erdős, Rényi), `ba` (Barabási, Albert), `ws` (Watts, Strogatz), `sbm` (stochastic block model, planted communities via `--sbm-blocks/--sbm-p-in/--sbm-p-out`), `karate`. Generated in bulk via `--num-graphs` with `log1p(degree)` node features.
+**Synthetic** (`--dataset`): `er` (Erdős, Rényi), `ba` (Barabási, Albert), `ws` (Watts, Strogatz), `sbm` (stochastic block model, planted communities via `--sbm-blocks/--sbm-p-in/--sbm-p-out`), `powerlaw_cluster` (`--plc-m/--plc-p`), `kronecker` (`--kron-variant`), `karate`. Generated in bulk via `--num-graphs` with `log1p(degree)` node features.
 
 **Real** (downloaded on first use via `data/datasets/`; Weibo needs a manual AMiner download: see `data/datasets/weibo.py`):
 
@@ -242,13 +243,14 @@ python -m pipeline.run --dataset ba --run new_agent_sweep \
 
 | flag | default | meaning |
 | ---- | ------- | ------- |
-| `--dataset` |   | synthetic family (`er ba ws sbm karate`) or real dataset name |
+| `--dataset` |   | synthetic family (`er ba ws sbm powerlaw_cluster kronecker karate`) or real dataset name |
 | `--task` | `influence_maximization` | graph task; first level of the results tree, and the name of its review in `research/` |
 | `--run` | `default` | run label under `results/<task>/<dataset>/`, for holding variants side by side |
 | `--start-stage` / `--end-stage` | `data` / `report` | inclusive stage range |
 | `--skip-stages` | none | stages to omit from that range |
 | `--wm-results-json` | none | reuse an already-trained world model (any run's `world_model/<model>_<dm>.json`); skips the train stage |
 | `--force` | off | recompute stages whose outputs already exist |
+| `--split-mode` | `graph_disjoint` for a synthetic family with at least 3 graphs, else `episode_random` | how train/val/test are assigned; `episode_random` leaks a graph across splits and is the only option on a single-graph real dataset |
 | `--baselines` | 6 classical | condition 1: which algorithms from the pool to run |
 | `--arms` | conditions 2-6 | `routing`, `<method>_<mode>[@<evaluator>]`, or extra `baseline:<algorithm>` |
 | `--evaluator` | `oracle` | fallback for arms that do not name one with `@` |
@@ -258,13 +260,13 @@ python -m pipeline.run --dataset ba --run new_agent_sweep \
 | `--strategy-timeout` | `300` | wall-clock cap (s) on one generated `plan_horizon()`/`act()` call; an overrun becomes a repair turn instead of hanging the sweep. `0` disables |
 | `--llm-price-in` / `--llm-price-out` | none | USD per 1M tokens, for the cost column. Tokens are always counted; cost stays `null` unless both are given (the gateway bills nothing per token) |
 | `--compare` | off | ground-truth referee replay: required for a valid cross-condition table |
-| `--llm-model` / `--outer-iters` | `gpt-5.6-terra` / `5` | coding-agent model and refinement budget |
+| `--llm-model` / `--outer-iters` | `gpt-5.6-terra` / `20` | coding-agent model and refinement budget |
 
 Generation, training, and agent hyperparameters are all exposed too (`--rollouts`, `--mc-marginals`, `--wm-model`, `--head`, `--epochs`, `--n-samples`, …): see `python -m pipeline.run --help`.
 
 ### On SLURM
 
-`sbatch/pipeline.sbatch` is the only job script. Run it directly and it queues **itself**, with every one of the 67 pipeline flags reachable as an environment variable:
+`sbatch/pipeline.sbatch` is the only job script. Run it directly and it queues **itself**, with the pipeline flags reachable as environment variables:
 
 ```bash
 DATASET=ba ./sbatch/pipeline.sbatch                    # everything
@@ -309,7 +311,7 @@ critical_node_detection, epidemic_control, influence_blocking,
 influence_maximization, source_localization)
 ```
 
-The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, the budget sweep, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it, it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates `remove_node` transitions under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
+The registry carries more than a status: the objective **sense**, what a unit of budget buys, which ops the generator injects and the planner may emit, the budget sweep, and the size of the exogenous outbreak (if any). `critical_node_detection` needs no extra flags for any of it, it **minimizes** the spread of an outbreak it did not start, spends its budget on `remove_node` deletions, and generates both node ops (`add_node remove_node`) under `--remove-semantics blocked`, all from one registry entry, so the data, the head and the prompt cannot disagree about what a removal means.
 
 The runnable **problem families** are further apart than a sign flip. A `maximize` task seeds a cascade, a `minimize` task fights one it did not start, a **`recover`** task emits no action at all and infers a hidden cause, and a **`forecast`** task emits no action either and predicts a scalar the process produces. Two of the four report something whose name is not its direction (a recover task's F1 maximizes, a forecast task's error minimizes) so `Task.sense` rather than `Task.objective` is what every "is this better" reads. `source_localization` is the recover case: `source_localization` hands the agent a graph and an observed diffusion state and asks which seed set produced it. That changes the CONTRACT, not just the objective, the generated program implements `localize(graph, observation, budget)` instead of `plan_horizon`, it is scored on F1 against the true sources, and the world model stops being the thing optimized against and becomes a subroutine the program calls through `self.predict_marginals(seeds)`. The four bindings of that one name ARE conditions 3-6. See [`research/source_localization.md`](research/source_localization.md) §2.3 for why the inversion and not the likelihood is the contribution, and `coding_agent/check_source_localization.py` for the runnable contract.
 
@@ -377,7 +379,7 @@ Raw dataset downloads live outside the results tree, in `data/raw/<dataset>/`, s
 
 ### Figures produced
 
-`budget_vs_spread` (the headline: spread vs k per arm, with MC error bars), `budget_vs_spread_pct` (normalized), `condition_comparison` (the baseline table as a grouped bar chart, coloured by condition), `sample_efficiency` (spread vs real-environment episodes burned, the axis the whole taxonomy hangs on), `evaluator_fidelity` (model estimate vs Monte Carlo parity), `runtime` (per-rollout cost by evaluator), `convergence` (best-so-far reward per outer iteration), `cascade` (infected count over time), and (when a world model was trained) `wm_training`, `wm_one_step`, `wm_rollout`. Each is skipped silently when its inputs are absent, so a partial run just yields fewer figures.
+`budget_vs_spread` (the headline: spread vs k per arm, with MC error bars), `budget_vs_spread_pct` (normalized), `condition_comparison` (the baseline table as a grouped bar chart, coloured by condition), `sample_efficiency` (spread vs real-environment episodes burned, the axis the whole taxonomy hangs on), `evaluator_fidelity` (model estimate vs Monte Carlo parity), `runtime` (per-rollout cost by evaluator), `convergence` (best-so-far reward per outer iteration), `cascade` (infected count over time), `ours_vs_baselines` / `ours_vs_baselines_pct` (our arms against the classical pool), the per-task figures named under "Tasks" above, and (when a world model was trained) seven `wm_*` diagnostics: `wm_training`, `wm_one_step`, `wm_calibration`, `wm_action_conditioning`, `wm_rollout`, `wm_ood_rollout`, `wm_planning`. Each is skipped silently when its inputs are absent, so a partial run just yields fewer figures.
 
 ---
 
@@ -415,13 +417,13 @@ python -m world_model.eval_structured_oracle \
 | --------------------------------- | ------------- | -------------------------------------------------------------------- |
 | `--data-dir`                      |               | generated dataset directory                                          |
 | `--diffusion-model`               | `IC`          | `IC` or `LT` (selects the structured head too)                       |
-| `--model`                         | `gcn`         | backbone: `gcn`, `sage`, `gt`, `gat`, `gcnii`                        |
-| `--head`                          | `linear`      | `linear` or `structured` (use `structured` for a faithful simulator) |
-| `--pos-weight`                    | `auto`        | class-imbalance up-weighting; use `off` with the structured head     |
+| `--model`                         | `sage`        | backbone: `gcn`, `sage`, `gt`, `gat`, `gcnii`                        |
+| `--head`                          | `structured`  | `linear`, `structured` or `structured_residual` (a structured head for a faithful simulator) |
+| `--pos-weight`                    | `off`         | class-imbalance up-weighting (`auto`); keep `off` with the structured heads |
 | `--hidden-dim` / `--n-layers`     | `64` / `3`    | encoder width / depth                                                |
 | `--n-heads` / `--ffn-dim`         | `4` / `128`   | attention backbones (GAT/GT)                                         |
 | `--gcnii-alpha` / `--gcnii-lamda` | `0.1` / `0.5` | GCNII initial-residual / decay                                       |
-| `--epochs` / `--patience`         | `200` / `30`  | training length / early-stop on val `delta_f1`                       |
+| `--epochs` / `--patience`         | `400` / `50`  | training length / early-stop on val `delta_f1`                       |
 | `--plan-demo` / `--plan-graphs`   | off / `5`     | single-step planning-regret eval (a sanity check, not a planner result) |
 | `--plan-budget-k`                 | `0`           | k-seed **full-horizon** planning regret vs greedy-MC — the IM problem as posed. `0` disables |
 | `--ood-policies`                  | none          | off-policy rollout fidelity, e.g. `degree_seed null`. The recorded sequence is on-policy by construction |
@@ -477,8 +479,7 @@ GraphWorldModel/
 │   ├── validate_wm_data.py     # post-hoc gate-check harness
 │   ├── datasets/               # per-dataset download/load helpers
 │   ├── raw/                    # raw downloads (gitignored, shared across runs)
-│   ├── README.md               # ← data-generation technical reference
-│   └── old/                    # legacy diffusion-only CND/IM/SL generators (archived)
+│   └── README.md               # ← data-generation technical reference
 ├── world_model/
 │   ├── train_wm.py             # teacher-forced one-step training + results JSON
 │   ├── wm_model.py             # WorldModel + backbone registry + structured heads
@@ -496,6 +497,10 @@ GraphWorldModel/
 │   ├── pipeline.sbatch         # the task-agnostic SLURM entry point (self-submitting)
 │   └── <task>/                 # per-dataset generation + training scripts
 ├── research/                   # ← one literature review per graph task (see its README)
+├── registry/                   # run registry: manifests, task families, consistency checks
+├── scripts/                    # standalone eval scripts (transfer matrix, ablations, ranking)
+├── configs/                    # yaml configs for scripts/
+├── tests/                      # pytest suite: uv run --with pytest python -m pytest
 ├── results/                    # ALL generated artifacts, <task>/<dataset>/<run>/
 ├── baselines/                  # published-baseline runners (registry + adapters);
 │                               # external repos fetched into baselines/external/

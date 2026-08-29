@@ -310,9 +310,11 @@ def _submatrix_eigenvector(
     if size == 0:
         return np.zeros(0, dtype=np.float64)
 
-    degrees = np.array(
-        [len(neighbours[node] & set(members)) for node in members], dtype=np.float64
-    )
+    # FULL degrees, not infected-subgraph degrees: L_I is the submatrix of the whole
+    # graph's Laplacian, so an infected node with many uninfected neighbours is
+    # penalized. With subgraph degrees L_I * 1 = 0 and the smallest eigenvector is
+    # the constant vector, which ranks every infected node equally.
+    degrees = np.array([len(neighbours[node]) for node in members], dtype=np.float64)
     pairs = [
         (index[node], index[other])
         for node in members

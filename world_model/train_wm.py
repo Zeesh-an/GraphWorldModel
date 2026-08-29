@@ -7,10 +7,13 @@ Checkpoints and the results JSON land next to the data by default:
 
 python -m world_model.train_wm \
     --data-dir results/ba40/data --diffusion-model IC \
-    --model sage --head structured_residual --hidden-dim 64 --n-layers 3 \
+    --model sage --head structured --hidden-dim 64 --n-layers 3 \
     --epochs 400 --lr 1e-3 --weight-decay 5e-4 --batch-size 32 \
     --pos-weight off --patience 50 --seed 42 \
     --device cuda --plan-demo
+
+The CLI defaults are the pipeline's (pipeline/run.py): sage / structured /
+400 epochs / batch 32 / pos_weight off / patience 50.
 """
 
 import argparse
@@ -75,8 +78,8 @@ class TrainConfig:
 
     data_dir: str
     diffusion_model: str = "IC"
-    model: str = "gcn"
-    head: str = "linear"
+    model: str = "sage"
+    head: str = "structured"
     # Must match the dataset's; cross-checked against metadata.json below
     remove_semantics: str = spent
     # Two-cascade (influence blocking) training: 8 input channels, 4 targets, and a
@@ -124,12 +127,12 @@ class TrainConfig:
     gcnii_alpha: float = 0.1
     gcnii_lamda: float = 0.5
     dropout: float = 0.1
-    epochs: int = 200
+    epochs: int = 400
     lr: float = 1e-3
     weight_decay: float = 5e-4
-    batch_size: int = 16
-    pos_weight: str = "auto"
-    patience: int = 30
+    batch_size: int = 32
+    pos_weight: str = "off"
+    patience: int = 50
     seed: int = 42
     device: str = "cpu"
     ckpt_dir: str | None = None
@@ -403,6 +406,30 @@ def train_world_model(config: TrainConfig) -> dict:
         config.data_dir, diffusion_model, "val", **layout
     )
     test_dataset = TransitionDataset(config.data_dir, diffusion_model, "test", **layout)
+
+    for split, dataset in (
+        ("train", train_dataset),
+        ("val", validation_dataset),
+        ("test", test_dataset),
+    ):
+        # An empty split does not fail loudly on its own: binary_f1 returns 1.0
+        # when there is nothing to predict, so an empty val split keeps the
+        # epoch-0 weights and an empty test split reports delta_f1 = 1.0
+        if len(dataset) == 0:
+            raise ValueError(
+                f"the {split} split of {config.data_dir} holds no "
+                f"{diffusion_model} transitions (split_mode="
+                f"{dataset_split_mode(config)!r}); a graph-disjoint split needs "
+                f"at least three graphs, and a single-graph dataset must be "
+                f"generated with --split-mode episode_random"
+            )
+
+    if config.pos_weight == "auto" and config.head != "linear":
+        print(
+            f"[warn] --pos-weight auto with --head {config.head}: the positive "
+            f"weight inflates the per-edge transmission q globally and collapses "
+            f"one-step accuracy on a structured head; use --pos-weight off"
+        )
 
     collate_fn = partial(
         collate_transitions,
@@ -782,16 +809,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="gcn",
+        default="sage",
         choices=list(backbones),
-        help="encoder backbone (default: gcn).",
+        help="encoder backbone (default: sage).",
     )
     parser.add_argument(
         "--head",
         type=str,
-        default="linear",
+        default="structured",
         choices=["linear", "structured", "structured_residual"],
-        help="output head type; structured_residual anchors IC transmission on the true edge prob and learns only a correction (default: linear).",
+        help="output head type; structured_residual anchors IC transmission on the true edge prob and learns only a correction (default: structured).",
     )
     parser.add_argument(
         "--remove-semantics",
@@ -901,8 +928,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--epochs",
         type=int,
-        default=200,
-        help="maximum training epochs (default: 200).",
+        default=400,
+        help="maximum training epochs (default: 400).",
     )
     parser.add_argument(
         "--lr", type=float, default=1e-3, help="Adam learning rate (default: 1e-3)."
@@ -916,21 +943,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=16,
-        help="transition batch size (default: 16).",
+        default=32,
+        help="transition batch size (default: 32).",
     )
     parser.add_argument(
         "--pos-weight",
         type=str,
-        default="auto",
+        default="off",
         choices=["auto", "off"],
-        help="positive-class weighting mode (default: auto).",
+        help="positive-class weighting mode; `auto` is for the linear head only, "
+        "it inflates a structured head's q globally (default: off).",
     )
     parser.add_argument(
         "--patience",
         type=int,
-        default=30,
-        help="early-stop patience in epochs (default: 30).",
+        default=50,
+        help="early-stop patience in epochs (default: 50).",
     )
     parser.add_argument(
         "--seed", type=int, default=42, help="random seed (default: 42)."

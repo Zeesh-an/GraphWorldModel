@@ -32,6 +32,7 @@ from registry.core import (
     implemented_tasks,
     planner_tool,
     real,
+    runnable_baselines,
     synthetic,
     wm_spine,
     wm_spine_aliases,
@@ -123,9 +124,7 @@ def counts() -> dict:
             entry.simulated for entry in DYNAMICS_REGISTRY.values()
         ),
         "baselines_total": len(BASELINE_REGISTRY),
-        "baselines_ready": sum(
-            entry.status == "ready" for entry in BASELINE_REGISTRY.values()
-        ),
+        "baselines_ready": len(runnable_baselines()),
         "action_ops": len(ACTION_REGISTRY),
     }
 

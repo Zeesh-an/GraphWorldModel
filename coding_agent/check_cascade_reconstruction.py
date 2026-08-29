@@ -43,6 +43,8 @@ import numpy as np
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.reconstruction import (
+    CascadeInstance,
+    Observation,
     evaluate_reconstructor,
     final_snapshot,
     hidden_nodes,
@@ -52,6 +54,7 @@ from coding_agent.reconstruction import (
     transition_logprob,
     trivial_decoder_reward,
     unavailable_step_marginals,
+    valid_settings,
     validate_reconstruction,
 )
 from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
@@ -347,24 +350,28 @@ def check_reward_hazards(
         f"{real.reward:.4f}",
     )
 
-    # The second corner: a decoder that names three edges and gets them right
+    # The second corner: a decoder that names three TRUE edges and nothing else
+    # posts a perfect path precision, and only recall / jaccard say how little
+    # of the tree that is
     instance = instances[0]
-    named = {
-        node: (time, parent)
-        for node, (time, parent) in real.cost["per_instance"][0]["decoded"].items()
-        if parent is None
-    }
+    named = {node: (0, None) for node in instance.sources}
+    for node, causes in instance.true_parents.items():
+        if causes and len(named) < len(instance.sources) + 3:
+            named[node] = (instance.true_times[node], causes[0])
     metrics = reconstruction_metrics(
-        {node: (time, parent) for node, (time, parent) in list(named.items())[:3]},
+        named,
         instance.true_times,
         instance.true_parents,
         instance.num_nodes,
         instance.horizon,
     )
     check(
-        "path RECALL and jaccard are reported, so under-prediction is visible",
-        "path_recall" in metrics and "jaccard" in metrics,
-        f"recall {metrics['path_recall']:.4f}, jaccard {metrics['jaccard']:.4f}",
+        "three correct edges score path_precision 1.0 and a LOW recall / jaccard",
+        metrics["path_precision"] == 1.0
+        and metrics["path_recall"] < 0.5
+        and metrics["jaccard"] < 0.5,
+        f"precision {metrics['path_precision']:.2f}, recall "
+        f"{metrics['path_recall']:.4f}, jaccard {metrics['jaccard']:.4f}",
     )
 
 
@@ -399,6 +406,39 @@ def check_contract(graph: GraphInfo, instance) -> None:
 
         check(f"the contract rejects {label}", rejected)
 
+    # ...a parent that is HIDDEN is rejected, since it is not in the graph at all
+    child = next(
+        candidate
+        for candidate in range(graph.num_nodes)
+        if graph.in_neighbors(candidate)
+    )
+    hidden_parent = graph.in_neighbors(child)[0]
+    masked = np.ones(graph.num_nodes, dtype=bool)
+    masked[hidden_parent] = False
+    hidden_instance = CascadeInstance(
+        episode_id="masked",
+        graph_id=instance.graph_id,
+        num_nodes=instance.num_nodes,
+        horizon=instance.horizon,
+        sources=list(instance.sources),
+        true_times=dict(instance.true_times),
+        true_parents=instance.true_parents,
+        observation=Observation(
+            reported={}, horizon=instance.horizon, num_nodes=instance.num_nodes,
+            setting=hidden_nodes, visible=masked,
+        ),
+        final_state=instance.final_state,
+        marginal=instance.marginal,
+    )
+    rejected = False
+    try:
+        validate_reconstruction(
+            {hidden_parent: (0, None), child: (1, hidden_parent)}, hidden_instance, graph
+        )
+    except StrategyError:
+        rejected = True
+    check("the contract rejects a HIDDEN node as parent", rejected)
+
     # ...and a coherent one is accepted
     parent = graph.in_neighbors(node)[0]
     accepted = validate_reconstruction(
@@ -410,34 +450,54 @@ def check_contract(graph: GraphInfo, instance) -> None:
     )
 
 
-def check_library(graph: GraphInfo, environment: object, task: TaskSpec, instances: list) -> None:
-    """Every member of the condition-1 pool has to return a valid trajectory."""
+def check_library(
+    data_dir: Path, graph_id: str, graph: GraphInfo, environment: object, task: TaskSpec
+) -> None:
+    """
+    Every member of the condition-1 pool has to return a valid trajectory, on
+    EVERY setting: the four masks are four contracts, and a decoder that names a
+    hidden node or reads times a setting withholds is a missing row, not a weak one.
+    """
     broken = []
 
-    for name, decoder in reconstruction_algorithms.items():
+    for setting in valid_settings:
+        instances = load_cascades(
+            str(data_dir),
+            "IC",
+            "train",
+            graph_id=graph_id,
+            setting=setting,
+            observation_rate=0.35,
+            limit=2,
+            seed=3,
+        )
 
-        class Anchor:
-            def reconstruct(self, graph, observation, horizon, _decoder=decoder):
-                return _decoder(
-                    graph,
-                    observation,
-                    horizon,
-                    diffusion_model="IC",
-                    predict=getattr(self, "step_marginals", None),
+        for name, decoder in reconstruction_algorithms.items():
+
+            class Anchor:
+                def reconstruct(self, graph, observation, horizon, _decoder=decoder):
+                    return _decoder(
+                        graph,
+                        observation,
+                        horizon,
+                        diffusion_model="IC",
+                        predict=getattr(self, "step_marginals", None),
+                    )
+
+            try:
+                evaluate_reconstructor(
+                    Anchor(), environment, task, graph, instances, task.tree_weight
+                )
+            except Exception as error:
+                broken.append(
+                    f"{name}@{setting} ({type(error).__name__}: {str(error)[:80]})"
                 )
 
-        try:
-            evaluate_reconstructor(
-                Anchor(), environment, task, graph, instances[:2], task.tree_weight
-            )
-        except Exception as error:
-            broken.append(f"{name} ({type(error).__name__}: {str(error)[:80]})")
-
     check(
-        "every library decoder returns a valid trajectory",
+        "every library decoder returns a valid trajectory on every setting",
         not broken,
-        f"{len(reconstruction_algorithms)} decoders, {len(broken)} broken"
-        + (f": {broken}" if broken else ""),
+        f"{len(reconstruction_algorithms)} decoders x {len(valid_settings)} "
+        f"settings, {len(broken)} broken" + (f": {broken}" if broken else ""),
     )
 
 
@@ -515,7 +575,7 @@ if __name__ == "__main__":
         check_contract(graph, instances[0])
         check_scored_harness(graph, instances[0])
         check_reward_hazards(data_dir, graph, environment, task, instances)
-        check_library(graph, environment, task, instances)
+        check_library(data_dir, graph_id, graph, environment, task)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
 

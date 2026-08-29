@@ -199,6 +199,9 @@ def evaluate_one_step(
         pred_frontier = (probs[:, 1] > threshold).astype(np.float32)
         pred_frontier_parts.append(pred_frontier)
         prob_frontier_parts.append(probs[:, 1])
+        # The set a removal must leave: the current wave under IC/LT, the
+        # INFECTIOUS compartment (column 3) under the compartmental layout
+        pred_wave = (probs[:, 3] > threshold) if epidemic else pred_frontier
 
         target_infected_parts.append(item["y_inf"].numpy())
         target_frontier_parts.append(item["y_fr"].numpy())
@@ -243,7 +246,7 @@ def evaluate_one_step(
                     add_hits += int(pred_infected[int(action_op["target"])] == 1)
             elif action_op["op"] == "remove_node":
                 remove_total += 1
-                remove_hits += int(pred_frontier[int(action_op["target"])] == 0)
+                remove_hits += int(pred_wave[int(action_op["target"])] == 0)
 
         # Group main and cf transitions by (graph, episode, t, state) for sensitivity
         state_key = (
@@ -591,6 +594,12 @@ def rollout_ensemble(
             action_sequence = [record["action"] for record in episode_records]
         else:
             action_sequence = action_policy(store[graph_id], episode_records, rng)
+            # The policy replaces the MID-CASCADE injections only. Every episode
+            # starts empty and is seeded by its recorded t=0 bag, so a policy that
+            # replaced that too simulated nothing on both sides: null and
+            # block_hubs scored count_bias 0.0 exactly, final counts 0.0
+            if episode_records and episode_records[0].get("t") == 0:
+                action_sequence[0] = list(episode_records[0]["action"])
 
         # True ensemble: n_samples simulator rollouts under that action sequence.
         true_infected = np.zeros((n_samples, num_steps, num_nodes), dtype=np.float32)
@@ -1318,6 +1327,16 @@ def rebuild_simulator(
     return simulator
 
 
+# Graph-selection modes for the planning evaluators.
+#
+#   test     score ONLY graphs whose transitions live in the test split. The
+#            correct default: `store` holds every graph the dataset was built
+#            from, so taking the first n of them scores the model on graphs it
+#            trained on, and the resulting regret is not a held-out number.
+#
+#   legacy   the historical `list(store)[:n]`, which mixes splits. Kept so a
+#            pre-2026-08-22 planning number can be reproduced, and named so it
+#            cannot be selected by accident.
 planning_split_test = "test"
 planning_split_legacy = "legacy"
 valid_planning_splits = (planning_split_test, planning_split_legacy)
@@ -2077,13 +2096,14 @@ def planning_regret_budget(
     np.add.at(degrees, edge_index[0], 1)
     np.add.at(degrees, edge_index[1], 1)
 
-    k = min(k, num_nodes)
     candidates = sorted(
         int(node)
         for node in rng.choice(
             num_nodes, size=min(n_candidates, num_nodes), replace=False
         )
     )
+    # Every arm draws its k seeds from the same pool, so k cannot exceed it
+    k = min(k, len(candidates))
 
     model.eval()
 
@@ -2167,21 +2187,6 @@ def planning_regret_budget(
     )
 
     return results
-
-
-# Graph-selection modes for the planning evaluators.
-#
-#   test     score ONLY graphs whose transitions live in the test split. The
-#            correct default: `store` holds every graph the dataset was built
-#            from, so taking the first n of them scores the model on graphs it
-#            trained on, and the resulting regret is not a held-out number.
-#
-#   legacy   the historical `list(store)[:n]`, which mixes splits. Kept so a
-#            pre-2026-08-22 planning number can be reproduced, and named so it
-#            cannot be selected by accident.
-planning_split_test = "test"
-planning_split_legacy = "legacy"
-valid_planning_splits = (planning_split_test, planning_split_legacy)
 
 
 @torch.inference_mode()

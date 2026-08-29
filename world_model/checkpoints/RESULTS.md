@@ -29,6 +29,8 @@ Both runs used: `model=sage`, `head=structured`, `hidden_dim=64`, `n_layers=3`, 
 
 The only difference between the runs is `diffusion_model` (IC vs LT), which also switches the structured head (`ICTransmissionHead` vs `LTThresholdHead`).
 
+Two things about these runs predate the current defaults. The dataset was split **per episode** (`split_mode=episode_random`, the only mode that existed), so the same 20 graphs appear in train, val and test and the one-step and rollout numbers are in-graph rather than held-out. And the `planning` blocks were computed with the historical `list(store)[:5]` selection, which `--planning-split legacy` now reproduces; the default `test` selection scores held-out graphs only and records `train_overlap`. Neither number is comparable to a `--split-mode graph_disjoint` run.
+
 ---
 
 ## IC results (`…_sage_IC.json`)
@@ -59,7 +61,7 @@ The only difference between the runs is `diffusion_model` (IC vs LT), which also
 | `ens_final_count_model` | **36.62**  | mean final infected count, model                                              | Essentially identical to truth ↓.                                                                                                                                                                                       |
 | `ens_final_count_true`  | **36.70**  | mean final infected count, true sim                                           | Model 36.62 vs true 36.70: a 0.08-node gap on the endpoint. The simulator is faithful end-to-end, not just one step.                                                                                                   |
 
-### `planning`: multi-graph one-step regret (5 graphs)
+### `planning`: multi-graph one-step regret (5 graphs, legacy graph selection)
 
 | metric               | value               | what it measures                                        | reading                                                                                                                             |
 | -------------------- | ------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -114,7 +116,7 @@ LT is deterministic given hidden per-node thresholds that are **re-drawn each ep
 | `ens_final_count_model` | **47.25**  | model final count                    | Close to truth ↓; the model slightly _over_-shoots at the endpoint even though the per-step average bias is negative: i.e. it lags early and catches up, ending ~1 node high. |
 | `ens_final_count_true`  | **46.18**  | true final count                     | Model 47.25 vs true 46.18: a ~1-node endpoint gap on a ~46-node cascade. Faithful, not saturating.                                                                            |
 
-### `planning`: multi-graph one-step regret (5 graphs)
+### `planning`: multi-graph one-step regret (5 graphs, legacy graph selection)
 
 | metric               | value               | what it measures                  | reading                                                                                |
 | -------------------- | ------------------- | --------------------------------- | -------------------------------------------------------------------------------------- |

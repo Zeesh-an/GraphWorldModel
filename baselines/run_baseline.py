@@ -124,10 +124,26 @@ def _stream(
 
 
 def _interpreter(spec) -> str:
-    """The baseline's own venv python, falling back to ours if it has no venv."""
+    """The baseline's own venv python, or ours when the repo has nothing to install."""
     venv_python = spec.venv_python
+    if venv_python.exists():
+        return str(venv_python)
 
-    return str(venv_python) if venv_python.exists() else sys.executable
+    # The same test setup_baselines.install makes before creating a venv: a repo
+    # that declares dependencies and has no venv was never set up, and running
+    # it under our interpreter surfaces as an import error deep inside the repo
+    requirements = spec.root / spec.requirements if spec.requirements else None
+    expects_venv = bool(spec.pip_packages) or (
+        requirements is not None and requirements.exists()
+    )
+    if expects_venv:
+        raise RuntimeError(
+            f"{spec.name}: no venv at {venv_python} although the repo declares "
+            f"Python dependencies; run `python -m baselines.setup_baselines "
+            f"--only {spec.name}` first"
+        )
+
+    return sys.executable
 
 
 schedule_filename = "round_schedule.json"

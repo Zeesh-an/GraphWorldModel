@@ -29,7 +29,6 @@ evaluation:
   task_utility: TASK_SPECIFIC
   transfer: [transfer_gap, oracle_gap, decision_retention]
 
+# Runnable: `--task cascade_prediction` is registered and ships its data path,
+# so this config is waiting on a run rather than on a port.
 status: NOT_RUN
-blocker: >
-  cascade_prediction has no runnable data/model path in this repository yet; its
-  head and task module live on the 8-task branch and have not been ported.

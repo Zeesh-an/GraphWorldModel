@@ -105,8 +105,8 @@ def _print_baselines() -> None:
 
     for task in sorted(by_task):
         entries = by_task[task]
-        ready = sum(e.status == "ready" for e in entries)
-        print(f"  {task}: {len(entries)} ({ready} ready)")
+        ready = sum(e.wired and e.status != "blocked" for e in entries)
+        print(f"  {task}: {len(entries)} ({ready} wired)")
         print(f"    {', '.join(sorted(e.name for e in entries))}")
 
 

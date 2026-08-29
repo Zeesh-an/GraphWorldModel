@@ -572,29 +572,31 @@ def build_strategy(
                 or hasattr(value, "act")
                 or hasattr(value, "localize")
                 or hasattr(value, "reconstruct")
+                or hasattr(value, "predict")
             )
         ]
 
         if not candidates:
             raise StrategyError(
                 "No Strategy subclass with plan_horizon()/act()/localize()/"
-                "reconstruct() found in the script."
+                "reconstruct()/predict() found in the script."
             )
 
     strategy_class = candidates[-1]
 
-    # All three harnesses are fixed in scored mode: plan_horizon for the
+    # All four harnesses are fixed in scored mode: plan_horizon for the
     # intervention tasks, localize for source localization, reconstruct for
-    # cascade reconstruction. Overriding one turns scored mode back into free
-    # mode, which is the one thing the condition exists to prevent.
-    for fixed in ("plan_horizon", "localize", "reconstruct"):
+    # cascade reconstruction, predict for cascade prediction. Overriding one
+    # turns scored mode back into free mode, which is the one thing the
+    # condition exists to prevent.
+    for fixed in ("plan_horizon", "localize", "reconstruct", "predict"):
         if strategy_mode == "scored" and getattr(strategy_class, fixed) is not getattr(
             ScoredStrategy, fixed
         ):
             raise StrategyError(
                 f"scored mode: {fixed} is the fixed harness and may not be "
-                f"overridden: override only score(), schedule(), source_score() "
-                f"or edge_cost()."
+                f"overridden: override only score(), schedule(), source_score(), "
+                f"edge_cost() or growth_factor()."
             )
     try:
         strategy = strategy_class()

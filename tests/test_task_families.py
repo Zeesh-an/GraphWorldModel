@@ -387,3 +387,24 @@ def test_a_disagreeing_spec_cannot_be_applied_silently(tmp_path):
 
     with _pytest.raises(ValueError, match="Refusing to guess"):
         load_checkpoint(path, config=blocked_spec)
+
+
+def test_state_layouts_match_wm_data():
+    # `family_layout` repeats these rather than importing them (torch); this is
+    # what keeps the two in agreement.
+    from world_model.wm_data import channels_for
+
+    assert state_layout(tasks["influence_maximization"]) == channels_for()
+    assert state_layout(tasks["influence_blocking"]) == channels_for(competitive=True)
+    assert state_layout(tasks["epidemic_control"]) == channels_for(epidemic=True)
+
+
+def test_diffusion_only_source_is_not_exact_checkpoint_for_an_action_task():
+    # Source localization and cascade reconstruction NAME add_node but generate
+    # no mid-cascade action, so their checkpoints never saw one.
+    for source in ("source_localization", "cascade_reconstruction"):
+        for target in ("influence_maximization", "adaptive_online_im"):
+            report = compatibility(tasks[source], tasks[target])
+
+            assert report.level == mechanism_only, (source, target, report.reason)
+            assert "action_encoder" in report.rebuilt_components

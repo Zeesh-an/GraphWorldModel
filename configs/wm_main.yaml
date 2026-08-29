@@ -14,7 +14,7 @@ experiment_name: wm_main
 tasks:
   - influence_maximization
 
-# Graph registry keys (`python -m scripts.inspect_registry` lists all 37).
+# Graph registry keys (`python -m scripts.inspect_registry` lists them all).
 # Synthetic families are generated at `--syn-nodes`; graph SIZE is a generation
 # parameter, not a group dimension, so a size sweep belongs in a generalization
 # config with explicit train/test graph specs rather than here.

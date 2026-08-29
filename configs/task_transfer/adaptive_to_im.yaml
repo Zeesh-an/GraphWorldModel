@@ -1,11 +1,11 @@
 # T1 / Stage D1 -- THE primary cross-task generalization experiment.
 #
-# A world model trained on influence maximization, frozen, used directly as the
-# evaluator for adaptive online IM. The two tasks are classified
-# EXACT_CHECKPOINT by registry.task_families, and that classification is derived:
-# same world family (W1, 6/2 channels), same dynamics (IC, LT), same
-# remove_semantics (spent), and adaptive IM's action vocabulary is covered by
-# IM's. Nothing is rebuilt.
+# The reverse of im_to_adaptive: a world model trained on adaptive online IM,
+# frozen, used directly as the evaluator for static influence maximization. The
+# two tasks are classified EXACT_CHECKPOINT by registry.task_families, and that
+# classification is derived: same world family (W1, 6/2 channels), same dynamics
+# (IC, LT), same remove_semantics (spent), and IM's action vocabulary is covered
+# by what adaptive IM's generator injects. Nothing is rebuilt.
 #
 # The falsifiable part: `required_semantic_overrides: 0`. If loading the
 # checkpoint for the target needs ANY spec override, this stops being clean

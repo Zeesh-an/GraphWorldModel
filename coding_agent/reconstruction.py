@@ -552,6 +552,13 @@ def validate_reconstruction(
                 f"from."
             )
 
+        if not instance.observation.is_visible(parent):
+            raise StrategyError(
+                f"reconstruct() named parent {parent} for node {node}, but {parent} "
+                f"is HIDDEN in this setting: it is absent from the graph, so it "
+                f"cannot have transmitted. `observation.visible` is the mask."
+            )
+
         result[node] = (time, parent)
 
     if not result:
@@ -584,6 +591,7 @@ metric_keys = (
     "n_predicted",
     "n_true",
     "n_tree_edges",
+    "n_true_edges",
 )
 
 
@@ -651,6 +659,11 @@ def evaluate_reconstructor(
             instance.horizon,
         )
         metrics["reward"] = reconstruction_reward(metrics, tree_weight)
+        # The tree the decoder is scored against: one edge per non-source node
+        # whose cause survived the mask. What `n_tree_edges` is read against.
+        metrics["n_true_edges"] = float(
+            sum(1 for causes in (instance.true_parents or {}).values() if causes)
+        )
         metrics["episode_id"] = instance.episode_id
         metrics["observed"] = instance.observed_count
         metrics["infected_count"] = instance.infected_count
@@ -890,7 +903,7 @@ def summarize_reconstruction(
     # exactly this and the diagnostic says so out loud, because a search will find
     # the under-prediction corner long before a human notices it.
     named = means.get("n_tree_edges", 0.0)
-    truth = max(means.get("n_true", 0.0) - means.get("source_recall", 0.0), 1.0)
+    truth = max(means.get("n_true_edges", means.get("n_true", 0.0)), 1.0)
     if np.isfinite(path_precision) and named < 0.5 * truth:
         lines.append(
             f"DIAGNOSIS: you named only {named:.0f} transmission edges against "

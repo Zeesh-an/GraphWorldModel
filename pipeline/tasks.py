@@ -76,10 +76,11 @@ class Task:
     # only static ones would leave its own literature off the table.
     default_baselines: tuple | None = None
     # Which ops a generated strategy may EMIT, and which the data generator
-    # injects. Both default to `action_ops`, which is right whenever the task's
-    # intervention vocabulary is the same at planning time and generation time.
-    # CND narrows the planner to `remove_node` (edge removals ride along inside
-    # the deletion bag, and are not the planner's to spend budget on).
+    # injects. `allowed_ops` defaults to `action_ops`; `gen_action_ops` defaults
+    # to the repo-wide `default_action_ops` (the two node ops), so a task opts
+    # into the edge ops or into none at all explicitly. CND narrows the planner
+    # to `remove_node` (edge removals ride along inside the deletion bag, and
+    # are not the planner's to spend budget on).
     default_allowed_ops: tuple | None = None
     default_gen_action_ops: tuple | None = None
     # The op one unit of budget buys. `add_node` for a seeding task, `remove_node`
@@ -662,12 +663,17 @@ tasks = {
 # A typo in an action op above would silently produce a task whose ops the
 # simulator rejects only at generation time
 for _task in tasks.values():
-    _unknown = set(_task.action_ops) - set(valid_action_ops)
-    if _unknown:
-        raise ValueError(
-            f"task {_task.name!r} declares unknown action ops {sorted(_unknown)}; "
-            f"valid ops are {sorted(valid_action_ops)}"
-        )
+    for _label, _ops in (
+        ("action_ops", _task.action_ops),
+        ("allowed_ops", _task.allowed_ops),
+        ("gen_action_ops", _task.gen_action_ops),
+    ):
+        _unknown = set(_ops) - set(valid_action_ops)
+        if _unknown:
+            raise ValueError(
+                f"task {_task.name!r} declares unknown {_label} {sorted(_unknown)}; "
+                f"valid ops are {sorted(valid_action_ops)}"
+            )
 
     if _task.remove_semantics not in valid_remove_semantics:
         raise ValueError(

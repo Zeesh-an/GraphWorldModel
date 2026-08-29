@@ -1,11 +1,15 @@
 #!/bin/bash
 #SBATCH --job-name=sl_protocol
 #SBATCH --output=logs/%x_%j.out
+# (logs/ must exist before `sbatch`: Slurm opens the .out file before the job runs)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=48G
 #SBATCH --time=72:00:00
+# The ladder trains f_theta inline in this allocation (pipeline.sbatch does
+# not resubmit from inside a job), so the sweep needs the GPU itself
+#SBATCH --gres=gpu:1
 
 # Every protocol axis research/source_localization.md §8.5.1 asks for, on ONE
 # graph, each into its own results/source_localization/<dataset>/<run>/.
@@ -41,7 +45,28 @@
 #       ./sbatch/pipeline.sbatch
 
 set -euo pipefail
-cd /home/rrishab/GraphWorldModel/
+# Repo root: the checkout this file lives in, whenever this file is the real
+# one. Under a Slurm spool copy BASH_SOURCE points outside any checkout, and
+# only then is the submit directory trusted; an `srun --pty` / `salloc` shell
+# also carries SLURM_JOB_ID, so SLURM_SUBMIT_DIR is never taken first. Set
+# REPO_ROOT to override. Same rule as sbatch/pipeline.sbatch.
+if [ -z "${REPO_ROOT:-}" ]; then
+    checkout="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd || true)"
+    if [ -n "$checkout" ] && [ -f "$checkout/pipeline/run.py" ]; then
+        REPO_ROOT="$checkout"
+    elif [ -n "${SLURM_JOB_ID:-}" ] && [ -f "${SLURM_SUBMIT_DIR:-/nonexistent}/pipeline/run.py" ]; then
+        REPO_ROOT="$SLURM_SUBMIT_DIR"
+    else
+        echo "[repo] cannot locate the checkout: ${BASH_SOURCE[0]} is not inside one and" \
+             "SLURM_SUBMIT_DIR=${SLURM_SUBMIT_DIR:-unset} has no pipeline/run.py; set REPO_ROOT" >&2
+        exit 1
+    fi
+fi
+export REPO_ROOT
+cd "$REPO_ROOT"
+[ -f pipeline/run.py ] || { echo "[repo] REPO_ROOT=$REPO_ROOT has no pipeline/run.py; set REPO_ROOT to the checkout" >&2; exit 1; }
+[ -w . ] || { echo "[repo] REPO_ROOT=$REPO_ROOT is not writable, and results/ and logs/ live here" >&2; exit 1; }
+echo "[repo] $REPO_ROOT"
 source venv/bin/activate
 mkdir -p results logs
 
@@ -68,7 +93,12 @@ run_axis source_fraction \
     SL_BUDGET_MODE=sweep BUDGET_PCTS="5 10 20" \
     SL_SOURCE_TOLERANCE=0.5 DIFFUSION_MODEL=IC
 
-# 4. Dynamics transfer. The data stage already generated both, so this reuses it
-run_axis dynamics_lt DIFFUSION_MODEL=LT
+# 4. Dynamics transfer. Each axis is its own run, so its data stage generates
+#    both dynamics again and only the LT file is read
+#    No @oracle arm under LT: the analytic oracle is IC-only (thresholds are drawn
+#    per episode and never stored), and the pipeline refuses the pairing up front,
+#    so the MC arm is the LT ceiling here
+run_axis dynamics_lt DIFFUSION_MODEL=LT \
+    ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@world_model gradient_free@world_model"
 
 echo "[sl_protocol] done -> results/source_localization/$DATASET/"

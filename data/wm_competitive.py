@@ -144,6 +144,14 @@ class CompetitiveSimulator:
                 f"unknown remove_semantics {config.remove_semantics!r}; "
                 f"choose one of {valid_remove_semantics}"
             )
+        # Only `blocked` is implemented here: a removed node leaves both cascades.
+        # Accepting `spent` would validate a value the stepper then ignores, and
+        # the dataset's metadata would claim a semantics its records never had
+        if config.remove_semantics != blocked:
+            raise ValueError(
+                f"the competitive simulator implements remove_semantics="
+                f"{blocked!r} only, got {config.remove_semantics!r}"
+            )
 
         self.graph = graph
         self.config = config

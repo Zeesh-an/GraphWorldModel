@@ -220,7 +220,11 @@ def adapt_epic(
     if not remaining:
         return adapt_degree(state, graph, batch, diffusion_model)
 
-    return primitives.ris_select(remaining, batch, graph.num_nodes)[:batch]
+    return [
+        node
+        for node in primitives.ris_select(remaining, batch, graph.num_nodes)
+        if node not in active
+    ][:batch]
 
 
 def static_split(

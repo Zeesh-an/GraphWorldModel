@@ -5,6 +5,7 @@ Edge probabilities reuse graph_utils.build_edge_index
 """
 
 import importlib
+import zlib
 from dataclasses import dataclass, field
 
 import networkx as nx
@@ -245,8 +246,10 @@ def bundle_from_nx(
         # ablation is supposed to ask whether the model NEEDS the true
         # transmission probability; under `weighted` it can only ever answer no.
         #
-        # Seeded off the graph so a dataset regenerates identically.
-        draw = np.random.default_rng(abs(hash(graph_id)) % (2**32))
+        # Seeded off the graph so a dataset regenerates identically. crc32 rather
+        # than hash(): str hashing is salted per process (PYTHONHASHSEED), so
+        # hash() gave every run a different edge table under the same --seed.
+        draw = np.random.default_rng(zlib.crc32(graph_id.encode()))
         ic_probs = draw.uniform(0.02, 0.4, size=ic_probs.shape).astype(np.float32)
         lt_weights = ic_probs.copy()
 

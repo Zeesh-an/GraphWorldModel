@@ -49,10 +49,10 @@
 # results/<task>/<dataset>/<run>/ that every rerun appends to, which is what
 # you want when you are deliberately resuming or chaining.
 #
-# TASK selects the graph task and is the first results level. Only
-# influence_maximization is runnable today; `python -c "from pipeline.tasks
-# import tasks; print(sorted(tasks))"` lists them, and research/<task>.md is
-# the literature review for each.
+# TASK selects the graph task and is the first results level. All eight
+# registry entries are runnable; `python -c "from pipeline.tasks import tasks;
+# print(sorted(tasks))"` lists them, and research/<task>.md is the literature
+# review for each.
 #
 # Rules for the env vars:
 #   * list-valued vars are space-separated inside quotes:  GEN_MODELS="IC LT"
@@ -432,6 +432,7 @@
 #   ROLLOUTS         episodes per (graph, dynamics, selector)
 #   INJECT_P         probability an intermediate step injects an action
 #   SPLIT_MODE       graph_disjoint | episode_random; unset resolves per dataset
+#   WM_RESULTS_JSON  path to a train_wm results JSON to reuse instead of training
 #                    (disjoint for synthetic families with >= 3 graphs)
 #   CF_PROB          probability a step spawns counterfactual forks: the
 #                    signal that forces action-conditioning
@@ -696,9 +697,9 @@ WS_P="${WS_P:-0.1}"
 SBM_BLOCKS="${SBM_BLOCKS:-4}"
 SBM_P_IN="${SBM_P_IN:-0.15}"
 SBM_P_OUT="${SBM_P_OUT:-0.01}"
-# Left EMPTY for a compartmental task so pipeline.run.resolve_dynamics defaults
-# both this and DIFFUSION_MODEL from the registry; IC/LT and SIR/SIS/SEIR produce
-# different state layouts and cannot share a dataset
+# A compartmental task defaults to SIR here and below, matching the registry's
+# first dynamics; IC/LT and SIR/SIS/SEIR produce different state layouts and
+# cannot share a dataset, and pipeline.run.resolve_dynamics raises on a mix
 if [ "$TASK" = "epidemic_control" ]; then
   GEN_MODELS="${GEN_MODELS:-SIR}"
 else
@@ -724,6 +725,9 @@ SPLIT="${SPLIT:-0.7 0.15 0.15}"
 # (which cannot be split disjointly at all; its test metrics are then
 # in-graph, not held-out-graph). Set explicitly to force either.
 SPLIT_MODE="${SPLIT_MODE:-}"
+# Reuse an already-trained checkpoint (its train_wm results JSON); the train
+# stage is skipped and the agent stage rolls @world_model arms out against it
+WM_RESULTS_JSON="${WM_RESULTS_JSON:-}"
 
 # Train stage
 WM_MODEL="${WM_MODEL:-sage}"
@@ -944,6 +948,7 @@ fi
 # shellcheck disable=SC2206
 [ -n "$OOD_POLICIES" ]      && flags+=(--ood-policies $OOD_POLICIES)
 [ -n "$SPLIT_MODE" ]        && flags+=(--split-mode "$SPLIT_MODE")
+[ -n "$WM_RESULTS_JSON" ]   && flags+=(--wm-results-json "$WM_RESULTS_JSON")
 
 # ---------------------------------------------------------------------------
 # SUBMIT: outside a job, queue ourselves with the allocation these flags need

@@ -177,9 +177,14 @@ class GradientInversion(OuterLoopMethod):
         self.effective_budget = task.budget
         start = time.perf_counter()
 
-        model, _ = load_world_model(self.wm_results_json, self.device)
+        model, wm_config = load_world_model(self.wm_results_json, self.device)
+        # A w-hidden checkpoint must be inverted against ones, not the true
+        # p(u->v): handed the true weights it is not the model that was trained
         graph_input, degree_channel = build_graph_tensors(
-            graph, task.diffusion_model, torch.device(self.device)
+            graph,
+            task.diffusion_model,
+            torch.device(self.device),
+            hide_edge_weights=bool(wm_config.get("hide_edge_weights", False)),
         )
 
         prior = None

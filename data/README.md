@@ -16,7 +16,7 @@ Backbone simulator: **NDlib** IC/LT driven one step at a time, with mid-rollout 
 
 > Generation is stage 1 of `python -m pipeline.run`, which also trains the world model, runs every agent arm, plots, and writes a report. Use the commands below when you want data generation on its own.
 
-**Where things go.** Generated datasets land in `results/<task>/<dataset>/<run>/data/` (`--out-dir`, defaulting to `results/<dataset>/data`). Raw downloads land in `data/raw/<dataset>/` and are shared across every run: both are gitignored.
+**Where things go.** Generated datasets land in `results/<task>/<dataset>/<run>/data/` (`--out-dir`, defaulting to `results/<task>/<dataset>/<run>/data` from `--task` and `--run`). Raw downloads land in `data/raw/<dataset>/` and are shared across every run: both are gitignored.
 
 ```bash
 source .venv/bin/activate
@@ -48,7 +48,7 @@ python -m data.generate_wm_data --dataset ba --num-graphs 20 \
 python -m data.generate_wm_data --dataset jazz
 
 # Tiny end-to-end check
-python -m data.generate_wm_data --smoke --out-dir /tmp/wm_smoke
+python -m data.generate_wm_data --smoke --out-dir /tmp/wm_smoke   # er-40, 3 graphs, all five ops
 
 # Validate a produced dataset (gate checks)
 python -m data.validate_wm_data --dir results/influence_maximization/ba/default/data
@@ -63,10 +63,10 @@ python -m data.validate_wm_data --dir results/influence_maximization/ba/default/
 ```
 for each graph G in the dataset:                 # _iter_bundles
     save G once to graphs/<graph_id>.npz         # GraphStore.save
+    split = the graph's split                    # --split-mode graph_disjoint (default): every episode of G lands in one split
     for model in {IC, LT}:                        # --models
         for algorithm in spine selectors:        # --algorithms
             for rollout in range(--rollouts):     # independent episodes
-                split = assign train/val/test     # --split, RNG draw
                 k = resolve seed budget           # _resolve_budget, per episode
                 run one episode -> write transitions   # _episode_transitions
 write graphs_index.json + metadata.json
@@ -86,11 +86,11 @@ write graphs_index.json + metadata.json
 | `node_labels` | `(N,)` int32     | class labels (real datasets) or zeros                        |
 | `ic_prob_map` | `dict[(u,v)→p]`  | edge→prob map the simulator configures NDlib with            |
 
-Edge probabilities come from `graph_utils.build_edge_index`: by default the **weighted cascade** model `p(u→v) = 1 / in_degree(v)` (high-in-degree nodes are harder to activate per-edge). `--prob-model uniform` replaces this with a constant `--uniform-p` on every edge. LT weights are a copy of the IC probs (they already satisfy the LT requirement that incoming weights sum to ≤ 1 per node).
+Edge probabilities come from `graph_utils.build_edge_index`: by default the **weighted cascade** model `p(u→v) = 1 / in_degree(v)` (high-in-degree nodes are harder to activate per-edge). `--prob-model uniform` replaces this with a constant `--uniform-p` on every edge, and `--prob-model random` with an i.i.d. `U(0.02, 0.4)` draw per edge seeded off the graph id (the only setting under which the hide-edge-weights ablation is not vacuous, since under `weighted` the probability is a function of a degree the model already reads). LT weights are a copy of the IC probs (they already satisfy the LT requirement that incoming weights sum to ≤ 1 per node).
 
 ### 2. Pick the t=0 seed set (`wm_actions.py::select_seeds`)
 
-Each episode commits a seed set chosen by one of the six **spine algorithms** (`SPINE_ALGORITHMS`). These span the cheap-but-weak to expensive-but-strong range so the dataset covers a spectrum of seed qualities:
+Each episode commits a seed set chosen by one of the six **spine algorithms** (`spine_algorithms`). These span the cheap-but-weak to expensive-but-strong range so the dataset covers a spectrum of seed qualities:
 
 | Algorithm      | How it picks k seeds                                                                |
 | -------------- | ----------------------------------------------------------------------------------- |
@@ -129,14 +129,14 @@ The result is the **true one-step marginal** `P(node infected at t+1)` and `P(no
 
 ---
 
-## Output (`output/<dataset>/`)
+## Output (`results/<task>/<dataset>/<run>/data/`)
 
 | File                                            | Contents                                                               |
 | ----------------------------------------------- | ---------------------------------------------------------------------- |
 | `graphs/<graph_id>.npz`                         | one graph: `edge_index, ic_probs, lt_weights, node_feats, node_labels` |
 | `graphs_index.json`                             | `graph_id` → metadata (type, directed, n_nodes, n_edges, …)            |
 | `transitions_<IC\|LT>_<train\|val\|test>.jsonl` | one transition record per line                                         |
-| `metadata.json`                                 | full generation config + episode count                                 |
+| `metadata.json`                                 | full generation config (`config`, including `action_ops`, `prob_model`, `remove_semantics`, `trace_parents`, `weight_lo/hi`), episode count, `split_mode` and per-graph split provenance, and the `competitive` / `epidemic` / `observed` blocks where they apply |
 
 Each transition row (JSONL):
 
@@ -310,12 +310,12 @@ This determinism difference is why IC averages over `--mc-marginals` draws while
 | Flag                              | Default         | What it controls                                                                                           |
 | --------------------------------- | --------------- | ---------------------------------------------------------------------------------------------------------- |
 | `--dataset`                       | `cora_ml`       | real (`jazz, email_eu_core, netscience, cora_ml, facebook, power_grid, ca_grqc, wiki_vote, lastfm_asia, nethept, netphy, epinions, twitter, digg, youtube, orkut, livejournal, weibo`) or synthetic (`er, ba, ws, sbm, powerlaw_cluster, kronecker, karate`); the choices list is derived from `wm_graphs.real_directed`, so adding a loader adds a choice. `weibo` needs a manual AMiner download (see `data/datasets/weibo.py`). Full catalogue: `research/influence_maximization.md` §6 |
-| `--plc-m` / `--plc-p`             | `2` / `0.05`    | `powerlaw_cluster`: edges per new node and the triangle-closing probability. RL4IM quotes average degree 3, which this generator (avg ≈ `2m`) cannot hit exactly at integer `m`; see `research/adaptive_online_im.md` §6.3 |
+| `--plc-m` / `--plc-p`             | `3` / `0.05`    | `powerlaw_cluster`: edges per new node and the triangle-closing probability. RL4IM's own config uses `m=3` (avg degree ~5.9); its paper says avg degree 3, which no integer `m` produces, so the code wins; see `research/adaptive_online_im.md` §6.3 |
 | `--kron-variant`                  | `core_periphery`| `kronecker` seed matrix: `core_periphery`, `random`, or `hierarchical` (ConTinEst's three). Generated at the next power of two and induced down to `--syn-nodes`; `O(N²)` sampling, guarded at 20K |
 | `--num-graphs`                    | `1`             | number of synthetic graph instances (folded into the seed)                                                 |
 | `--syn-nodes`                     | `100`           | nodes per synthetic graph                                                                                  |
 | `--models`                        | `IC LT`         | which dynamics to generate transitions for                                                                 |
-| `--prob-model {weighted,uniform}` | `weighted`      | IC prob: `weighted` = 1/in_degree(v); `uniform` = constant `--uniform-p`                                   |
+| `--prob-model {weighted,uniform,random}` | `weighted` | IC prob: `weighted` = 1/in_degree(v); `uniform` = constant `--uniform-p`; `random` = i.i.d. `U(0.02, 0.4)` per edge |
 | `--uniform-p`                     | `0.1`           | the constant IC prob (and LT weight) when `--prob-model uniform`                                           |
 | `--budget-pct-range LO HI`        | `1 20`          | **default**: draw k ~ U(LO%, HI% of N) per episode, so one WM covers a whole budget sweep                  |
 | `--no-budget-range`               | `False`         | disable the range and use the two flags below instead                                                      |
@@ -328,7 +328,10 @@ This determinism difference is why IC averages over `--mc-marginals` draws while
 | `--cf-prob`                       | `0.2`           | P(spawn counterfactual forks at a step)                                                                    |
 | `--cf-branches`                   | `2`             | # alternate-action branches per fork                                                                       |
 | `--mc-marginals`                  | `30`            | MC draws per step to estimate soft next-step marginal targets (1 = single-draw binary target)              |
-| `--split`                         | `0.7 0.15 0.15` | train / val / test episode split probabilities                                                             |
+| `--split`                         | `0.7 0.15 0.15` | train / val / test proportions                                                                             |
+| `--split-mode`                    | `graph_disjoint` | how the proportions are applied: `graph_disjoint` cuts a shuffled graph list at the ratios so no graph straddles a split (needs >= 3 graphs); `eval_only` sends every graph to `test`; `episode_random` draws per episode and is legacy, it leaks a graph across splits |
+| `--remove-semantics`              | `spent`         | what `remove_node` means (`spent` / `blocked`), see above                                                  |
+| `--trace-parents`                 | `False`         | record who infected whom on every record (`--task cascade_reconstruction` sets it)                          |
 | `--er-p`                          | `0.05`          | ER edge probability G(n, p): structural                                                                   |
 | `--ba-m`                          | `3`             | BA attachment count (not a prob)                                                                           |
 | `--ws-k` / `--ws-p`               | `6` / `0.1`     | WS ring degree / rewire probability (structural)                                                           |

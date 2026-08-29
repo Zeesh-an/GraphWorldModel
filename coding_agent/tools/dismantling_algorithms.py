@@ -872,7 +872,11 @@ def _fiedler_split(
     normalized = sp.identity(size) - inverse_root @ adjacency @ inverse_root
 
     try:
-        _, vectors = spla.eigsh(normalized, k=2, sigma=0.0, which="LM")
+        # Fixed start vector: ARPACK's default is random, which made every GND
+        # variant non-reproducible across calls
+        _, vectors = spla.eigsh(
+            normalized, k=2, sigma=0.0, which="LM", v0=np.linspace(0.1, 1.0, size)
+        )
         fiedler = vectors[:, 1]
     except Exception:
         # ARPACK fails on tiny or numerically awkward blocks; an arbitrary split

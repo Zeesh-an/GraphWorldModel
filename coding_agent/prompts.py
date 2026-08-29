@@ -1772,14 +1772,14 @@ METHOD: WINDOWED ONLINE ALGORITHM.
 Implement `act(self, state, graph, timestep) -> list[ActionOp]`.
 You are called once per time WINDOW with the current state and the window index.
 Treat each call as solving a fresh IM sub-problem on the current state; you may reuse a
-classical algorithm (e.g. `algorithms.celf`) within each window.
+classical algorithm (e.g. `algorithms.degree_discount`) within each window.
 Note: for this windowed method the budget applies PER window call (you are invoked once per window).
 
 REPLY SHAPE (adapt the logic, keep the structure; budget/horizon are in the task):
 ```python
 class MyStrategy(Strategy):
     def act(self, state, graph, timestep):
-        seeds = algorithms.celf(graph, 5, "IC")  # 5 = per-window budget
+        seeds = algorithms.degree_discount(graph, 5, "IC")  # 5 = per-window budget
         return [ActionOp("add_node", node) for node in seeds]
 ```
 """,
@@ -1998,7 +1998,7 @@ def build_outbreak_block(task: TaskSpec) -> str:
     )
     delay = (
         f"You are DETECTED LATE: anything you emit before t={task.detection_delay} "
-        f"is dropped by the harness.\n"
+        f"is held by the harness and applied at t={task.detection_delay}.\n"
         if task.blocks and task.detection_delay
         else ""
     )
@@ -2957,7 +2957,33 @@ Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
 no explanation."""
 
 
+prediction_routing_system = """\
+You are an algorithm-selection router for Cascade Popularity Prediction.
+You will be given a task, a graph description, a summary of the REAL logged
+cascades to forecast, and a menu of classical popularity predictors. Each takes a
+cascade's observed prefix and returns the popularity it will reach by the horizon.
+Pick the single one most likely to MINIMIZE the prediction error on these
+cascades: LOWER is better here.
+
+Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
+no explanation."""
+
+
+epidemic_routing_system = """\
+You are an algorithm-selection router for Epidemic Control.
+You will be given a task, a graph description, the outbreak's index cases, and a
+menu of classical immunization algorithms. Each returns the intervention this
+task's lever buys: nodes to dose or isolate, or arcs to cut or reduce. Pick the
+single one most likely to MINIMIZE the attack rate on this graph.
+
+Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
+no explanation."""
+
+
 def build_routing_system(task: TaskSpec | None = None) -> str:
+    if task is not None and task.forecasts:
+        return prediction_routing_system
+
     if task is not None and task.decodes:
         return reconstruction_routing_system
 
@@ -2967,6 +2993,9 @@ def build_routing_system(task: TaskSpec | None = None) -> str:
     if task is not None and task.blocks:
         return blocking_routing_system
 
+    if task is not None and task.immunizes:
+        return epidemic_routing_system
+
     return (
         containment_routing_system
         if task is not None and task.contains
@@ -2975,7 +3004,16 @@ def build_routing_system(task: TaskSpec | None = None) -> str:
 
 
 def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
-    if task.decodes:
+    if task.forecasts:
+        # The menu MUST be the predictor pool: run.py parses the reply against
+        # prediction_names, so an IM menu here is a guaranteed parse failure
+        budget_unit = "UNUSED: a predictor spends no budget"
+        objective_line = (
+            f"MINIMIZE {task.prediction_metric.upper()} against the logged "
+            f"popularity (LOWER is better)"
+        )
+        menu = build_prediction_menu()
+    elif task.decodes:
         budget_unit = "UNUSED: a decoder spends no budget"
         objective_line = (
             f"MAXIMIZE {task.tree_weight:.2f} * PathPrecision + "
@@ -3012,7 +3050,7 @@ TASK: {task.task}, {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
-{build_outbreak_block(task)}{build_observation_block(task)}{build_mask_block(task)}
+{build_outbreak_block(task)}{build_observation_block(task)}{build_mask_block(task)}{build_cascade_block(task)}
 {build_graph_profile(graph)}
 
 ALGORITHM MENU:

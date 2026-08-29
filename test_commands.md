@@ -363,6 +363,10 @@ Six things changed under the loop since the smoke test, and each one moves these
 # now: the residual head anchors q on the true w and starts at the oracle, while structured
 # has to learn q from scratch, which is the claim these two arms test. GEN_ACTION_OPS is
 # the repo default and is stated so the data recipe is visible: the two node ops, no edge ops.
+# The LT job names evolve_free@monte_carlo instead of the oracle: the analytic oracle is
+# IC-only (LT thresholds are drawn per episode and never stored, so there is no true LT
+# transition function), and MC_RUNS=200 real simulations per candidate is the LT ceiling.
+# That arm pays for every candidate it scores, which is the cost column the ladder reads.
 TASK=influence_maximization \
 DATASET=netscience \
 RUN=testrun_ic \
@@ -389,13 +393,37 @@ DIFFUSION_MODEL=LT \
 BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
 external:opim external:ssa external:subsim \
 external:touplegdd external:deepim external:moeim external:glie" \
-ARMS="evolve_free@oracle evolve_free@world_model" \
+ARMS="evolve_free@monte_carlo evolve_free@world_model" \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
-EVALUATOR=oracle \
+EVALUATOR=monte_carlo \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 COMPARE=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=48:00:00 \
+./sbatch/pipeline.sbatch
+
+# The LT job submitted with evolve_free@oracle on 2026-08-29 ran data (6 min), train
+# (20 min) and all thirteen baselines (3 h) and then failed on the oracle arm; the
+# pipeline now refuses that pairing before any stage runs. Everything it wrote is
+# reusable: resume the same RUN from the agent stage, no FORCE, and only the two
+# arms run (finished baseline rows are skipped).
+TASK=influence_maximization \
+DATASET=netscience \
+RUN=testrun_lt \
+RUN_JOBID=0 \
+DIFFUSION_MODEL=LT \
+START_STAGE=agent \
+BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
+external:opim external:ssa external:subsim \
+external:touplegdd external:deepim external:moeim external:glie" \
+ARMS="evolve_free@monte_carlo evolve_free@world_model" \
+WM_MODEL=sage HEAD=structured \
+GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=monte_carlo \
+BUDGET_PCTS="1 5 10 20" \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+COMPARE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 

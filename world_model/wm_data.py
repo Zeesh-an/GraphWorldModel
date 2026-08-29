@@ -14,6 +14,13 @@ from torch.utils.data import Dataset
 
 from data.wm_simulator import weighted_dynamics
 
+# Explicit opt-out of torch's sparse invariant checks: left implicit, torch prints
+# a UserWarning at the first sparse_coo_tensor call of every process (the per-call
+# check_invariants kwarg does not count as explicit on torch 2.12). The (row, col)
+# index built in build_graph_input is in-range by construction, so the check buys
+# nothing here.
+torch.sparse.check_sparse_tensor_invariants.disable()
+
 # Per-node input channels
 in_channels = 6
 ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge = range(6)
@@ -601,6 +608,41 @@ def edges_to_arrays(
     return edge_index, weights
 
 
+
+def _diffusion_only_groups(groups: dict, path: Path) -> dict:
+    """
+    Keep only the episodes whose main branch injects nothing after t=0.
+
+    The two inverse tasks read an episode's terminal state as the observation its
+    t=0 seed set produced, and a mid-cascade injection breaks that: the observation
+    was caused by the seeds AND the injection, so the (x, y) pair is a lie. The
+    generator injects the default node ops unless a task says otherwise, so this
+    is the guard rather than an assumption about how the dataset was made
+    (measured: at --inject-p 0.4 only 3 of 12 episodes stayed pure).
+    """
+    pure = {
+        key: records
+        for key, records in groups.items()
+        if all(not record["action"] for record in records if record["t"] > 0)
+    }
+    skipped = len(groups) - len(pure)
+
+    if skipped and not pure:
+        raise ValueError(
+            f"every episode in {path} carries a mid-cascade injection, so none can "
+            f"serve as a labelled (seed set, observation) pair; regenerate this "
+            f"dataset with `--action-ops` and no values (diffusion-only), which is "
+            f"what the task registry does for the inverse tasks"
+        )
+    if skipped:
+        print(
+            f"[episodes] skipped {skipped} of {len(groups)} episodes in {path.name}: "
+            f"their main branch injects an action after t=0, so their observation "
+            f"was not produced by their seed set"
+        )
+
+    return pure
+
 def load_episode_endpoints(
     out_dir: Path, diffusion_model: str, split: str
 ) -> list[dict]:
@@ -648,6 +690,7 @@ def load_episode_endpoints(
 
     episodes = []
 
+    groups = _diffusion_only_groups(groups, path)
     for (graph_id, episode_id), records in groups.items():
         records.sort(key=lambda record: record["t"])
         num_nodes = store[graph_id]["num_nodes"]
@@ -747,6 +790,7 @@ def load_episode_trajectories(
 
     episodes = []
 
+    groups = _diffusion_only_groups(groups, path)
     for (graph_id, episode_id), records in groups.items():
         records.sort(key=lambda record: record["t"])
         num_nodes = store[graph_id]["num_nodes"]

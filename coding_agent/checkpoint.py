@@ -49,13 +49,65 @@ def fingerprint(config: object, method: str, graph: object) -> dict:
         "sl_observation": getattr(config, "sl_observation", None),
         "sl_budget_mode": getattr(config, "sl_budget_mode", None),
         "sl_source_tolerance": getattr(config, "sl_source_tolerance", None),
+        # Everything else that changes what the reward MEASURES: the task and
+        # its outbreak, the lever, the compartmental rates, the round schedule,
+        # the stream, the union, the decoder and forecast pools, and which
+        # checkpoint the evaluator is. None of these are in the results path.
+        **{
+            key: getattr(config, key, None)
+            for key in (
+                "task",
+                "remove_semantics",
+                "outbreak_pct",
+                "outbreak_selector",
+                "blocking_lever",
+                "tie_break",
+                "positive_prob",
+                "detection_delay",
+                "epi_lever",
+                "epi_beta",
+                "epi_gamma",
+                "epi_alpha",
+                "contact_reduction",
+                "rounds",
+                "per_round_budget",
+                "round_gap",
+                "feedback_model",
+                "edit_rate",
+                "campaigns",
+                "cr_setting",
+                "cr_observation_rate",
+                "cr_hidden_rate",
+                "cr_instances",
+                "cr_select_split",
+                "cr_tree_weight",
+                "cp_select_split",
+                "cp_instances",
+                "cp_observation_steps",
+                "cp_metric",
+                "cp_target",
+                "cp_forecast_samples",
+                "wm_results_json",
+            )
+        },
     }
+
+
+# The State fields that survive a checkpoint; `sample` is never serialized
+state_fields = (
+    "infected",
+    "frontier",
+    "pos_infected",
+    "pos_frontier",
+    "exposed",
+    "recovered",
+)
 
 
 def trajectory_to_dict(trajectory: Trajectory) -> dict:
     return {
         "states": [
-            {"infected": list(state.infected), "frontier": list(state.frontier)}
+            {key: list(getattr(state, key)) for key in state_fields}
             for state in trajectory.states
         ],
         "actions": [
@@ -65,13 +117,17 @@ def trajectory_to_dict(trajectory: Trajectory) -> dict:
         "infected_counts": trajectory.infected_counts,
         "cost": trajectory.cost,
         "final_marginals": trajectory.final_marginals,
+        "spread_curve": trajectory.spread_curve,
+        "prevalence_curve": trajectory.prevalence_curve,
     }
 
 
 def trajectory_from_dict(record: dict) -> Trajectory:
+    # `.get` on the newer keys so a checkpoint written before they existed still
+    # resumes, with those fields simply absent as they were then
     return Trajectory(
         states=[
-            State(infected=state["infected"], frontier=state["frontier"])
+            State(**{key: state.get(key, []) for key in state_fields})
             for state in record["states"]
         ],
         actions=[
@@ -81,6 +137,8 @@ def trajectory_from_dict(record: dict) -> Trajectory:
         infected_counts=record["infected_counts"],
         cost=record["cost"],
         final_marginals=record["final_marginals"],
+        spread_curve=record.get("spread_curve"),
+        prevalence_curve=record.get("prevalence_curve"),
     )
 
 

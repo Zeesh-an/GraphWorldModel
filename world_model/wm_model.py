@@ -671,7 +671,7 @@ class CompartmentTransitionHead(nn.Module):
                 f"{epidemic_dynamics}"
             )
 
-        if oracle and gamma is None:
+        if oracle and (gamma is None or (dynamics == "SEIR" and alpha is None)):
             raise ValueError(
                 "structured_oracle needs the TRUE rates to pin its matrix to; pass "
                 "gamma (and alpha under SEIR) from the dataset's own metadata"
@@ -909,6 +909,7 @@ class WorldModel(nn.Module):
             )
 
         self.head_type = head_type
+        self.in_channels = in_channels
         self.remove_semantics = remove_semantics
         self.competitive = competitive
         self.epidemic = epidemic

@@ -41,7 +41,7 @@ Train: `train_wm.py`. Model + heads: `wm_model.py`. Data/feature plumbing: `wm_d
 
 ## The model input `X`: shape `(N, 6)`
 
-Every transition is turned into a per-node feature matrix `X` with one row per node and **6 channels** (`wm_data.py::build_features`, `IN_CHANNELS = 6`). All channels describe the situation at time `t`, _before_ diffusion:
+Every transition is turned into a per-node feature matrix `X` with one row per node and **6 channels** (`wm_data.py::build_features`, `in_channels = 6`). All channels describe the situation at time `t`, _before_ diffusion:
 
 | col | name (`CH_*`) | represents                                                                 | type             | set from                          |
 | --- | ------------- | -------------------------------------------------------------------------- | ---------------- | --------------------------------- |
@@ -53,6 +53,8 @@ Every transition is turned into a per-node feature matrix `X` with one row per n
 | 5   | `CH_EDGE`     | node is an endpoint of an edge op (`add/remove/set_edge_weight`) this step | binary 0/1       | both `target` and `destination`   |
 
 Channels 0-1 are the **state** `s_t`. Channel 2 is **structure**. Channels 3-5 are the **action** `a_t` projected onto nodes: this is what makes the model _action-conditioned_. Edge ops additionally change the graph itself (next section), so channel 5 flags the touched nodes while the adjacency carries the actual structural change.
+
+`--action-encoding typed` appends three channels (6-8) that split `CH_EDGE` by op (`add_edge`, `remove_edge`, `set_edge_weight`), so `X` is `(N, 9)` and the first six columns are unchanged. It exists because under `basic` an `add_edge` and a `remove_edge` at the same endpoints produce identical `X`. The width is part of the checkpoint (`ModelSpec.action_encoding`), so a `typed` checkpoint does not load into a `basic` model.
 
 ### Targets: `y_inf`, `y_fr`, each shape `(N,)`
 
@@ -89,7 +91,7 @@ This guarantees the model is always shown the adjacency that actually produced t
 
 ## The backbones (encoders): `X (N,6) → h (N, H)`
 
-All five live in `world_model/model/` and share the encoder interface `forward(X, graph) → (N, hidden_dim)`. Each is a stack of pre-norm residual blocks ending in a `LayerNorm`. (Each file also contains a legacy `*ForwardModel` class from the old seed→outcome pipeline; the world model uses only the `*Encoder` classes.) The encoder is selected by `--model` via the `BACKBONES` registry in `wm_model.py`.
+All five live in `world_model/model/` and share the encoder interface `forward(X, graph) → (N, hidden_dim)`. Each is a stack of pre-norm residual blocks ending in a `LayerNorm`. (Each file also contains a legacy `*ForwardModel` class from the old seed→outcome pipeline; the world model uses only the `*Encoder` classes.) The encoder is selected by `--model` via the `backbones` registry in `wm_model.py`.
 
 | backbone                                       | `--model` | what it does                                                                                                                                                                                                      | graph view used             |
 | ---------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
@@ -105,7 +107,7 @@ Shared knobs: `--hidden-dim` (`H`), `--n-layers`, `--dropout`; attention models 
 
 ## The output heads: `h (N,H) → logits (N,2)`
 
-`wm_model.py` defines three heads, selected by `--head` (and the dynamics). All return **logits** `(N, 2)` = `[next_infected_logit, next_frontier_logit]`, so training (`BCEWithLogits`) and eval (`sigmoid`) are head-agnostic.
+`wm_model.py` defines the single-cascade heads below, selected by `--head` (and the dynamics), plus the two-cascade and compartmental heads described at the end of this file. All return **logits** `(N, 2)` = `[next_infected_logit, next_frontier_logit]`, so training (`BCEWithLogits`) and eval (`sigmoid`) are head-agnostic.
 
 ### `linear` (free head)
 
@@ -162,10 +164,13 @@ loss   = BCEWithLogits(logits[:,0], y_inf)                # next-infected
        + BCEWithLogits(logits[:,1], y_fr)                 # next-frontier
 ```
 
-- **Class imbalance.** Diffusion changes are sparse (few new infections per step), so `--pos-weight auto` up-weights the positive class (ratio clamped to `[1, 50]`) to stop a collapse to all-zeros. Use `--pos-weight off` for the structured heads (see above).
+- **Class imbalance.** Diffusion changes are sparse (few new infections per step), so `--pos-weight auto` up-weights the positive class (ratio clamped to `[1, 50]`) to stop the `linear` head collapsing to all-zeros. The default is `off`, which is what the structured heads need (see above); `auto` with a structured head prints a warning.
+- **Defaults.** The CLI defaults match `pipeline/run.py`: `--model sage --head structured --epochs 400 --batch-size 32 --pos-weight off --patience 50`.
+- **Split regime.** A dataset generated with `--split-mode episode_random` (or one from before the flag existed) puts the same graphs on both sides of the split; training on it prints a warning and records `split_mode` in the results JSON and the checkpoint. An empty train/val/test split is refused rather than scored, because an empty split scores `delta_f1 = 1.0` by construction.
 - **Optimizer.** Adam, `--lr` (1e-3), `--weight-decay` (5e-4), `--batch-size`.
 - **Model selection.** Validate every epoch with `evaluate_one_step`; checkpoint the best **val `delta_f1`**; early-stop after `--patience` epochs without improvement.
-- **Final report.** Reload the best checkpoint and write a results JSON with four blocks: `history` (per-epoch train loss + val `delta_f1`), `test` (one-step), `rollout` (stochastic ensemble), and (with `--plan-demo`) `planning` (multi-graph regret). Checkpoint saved to `wm_<model>_<diffusion>.pt`.
+- **Final report.** Reload the best checkpoint and write a results JSON with `history` (per-epoch train loss + val `delta_f1`), `test` (one-step), `rollout` (stochastic ensemble), `action_conditioning`, and, when enabled, `rollout_ood` (`--ood-policies`), `planning` (`--plan-demo`) and `planning_budget` (`--plan-budget-k`), plus `split_mode` and `checkpoint_format` at the top level. The checkpoint `wm_<model>_<diffusion>.pt` is a self-describing `wm-ckpt-v2` file (`checkpoint.py`: `{format, spec, state_dict, train_meta}`), so it reloads without its results JSON; a pre-v2 bare `state_dict` still loads when the results JSON is supplied.
+- **Planning graphs.** `--planning-split test` (default) scores the planning evaluators on held-out graphs only and records `train_overlap` / `val_overlap`; `legacy` reproduces the old `list(store)[:n]` selection, which mixes splits.
 
 **Output paths.** `--ckpt-dir` defaults to a sibling of the data directory: `results/<task>/<dataset>/<run>/data` puts the checkpoint and results JSON in `results/<task>/<dataset>/<run>/world_model/`. `--results` defaults to `<ckpt-dir>/<model>_<diffusion>.json`. Pass either explicitly to override.
 
@@ -310,7 +315,7 @@ The report section adds what a figure cannot carry: provenance (layout, split mo
 
 ### Standalone re-eval CLIs (no retraining)
 
-These rebuild a model from a results JSON's `config`, reload its `.pt` checkpoint, recompute one block, and write it back, for when only the metric changed, not the weights:
+These reload a `.pt` checkpoint named by a results JSON (from the checkpoint's own spec; the JSON `config` is consulted only for a pre-v2 bare `state_dict`), recompute one block, and write it back, for when only the metric changed, not the weights. `eval_planning` and `eval_rollout_ensemble` evaluate the single-cascade layout only and refuse a competitive or compartmental checkpoint:
 
 | script                      | recomputes                                                                 |
 | --------------------------- | -------------------------------------------------------------------------- |

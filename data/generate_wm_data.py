@@ -503,6 +503,7 @@ def _episode_transitions(
                 action_ops=config.action_ops,
                 weight_range=(config.weight_lo, config.weight_hi),
                 remove_semantics=config.remove_semantics,
+                blocked_nodes=simulator.blocked,
             )
         )
 
@@ -517,6 +518,7 @@ def _episode_transitions(
                 rng=injection_rng,
                 action_ops=config.action_ops,
                 remove_semantics=config.remove_semantics,
+                blocked_nodes=simulator.blocked,
             )
             for branch_index, cf_bag in enumerate(cf_bags):
                 simulator.restore(snapshot)
@@ -656,6 +658,7 @@ def _competitive_episode_transitions(
                 action_ops=config.action_ops,
                 weight_range=(config.weight_lo, config.weight_hi),
                 remove_semantics=config.remove_semantics,
+                blocked_nodes=simulator.blocked,
             )
         )
 
@@ -669,6 +672,7 @@ def _competitive_episode_transitions(
                 rng=injection_rng,
                 action_ops=config.action_ops,
                 remove_semantics=config.remove_semantics,
+                blocked_nodes=simulator.blocked,
             )
             for branch_index, cf_bag in enumerate(cf_bags):
                 simulator.restore(snapshot)
@@ -817,6 +821,7 @@ def _epidemic_episode_transitions(
                 action_ops=config.action_ops,
                 weight_range=(config.weight_lo, config.weight_hi),
                 remove_semantics=config.remove_semantics,
+                blocked_nodes=simulator.blocked,
             )
         )
 
@@ -830,6 +835,7 @@ def _epidemic_episode_transitions(
                 rng=injection_rng,
                 action_ops=config.action_ops,
                 remove_semantics=config.remove_semantics,
+                blocked_nodes=simulator.blocked,
             )
             for branch_index, cf_bag in enumerate(cf_bags):
                 simulator.restore(snapshot)
@@ -1027,7 +1033,7 @@ def run_generation(config: GenConfig) -> dict[str, object]:
 
     graphs_meta = []
     n_episodes = 0
-    split_by_graph: dict[str, str] = {}
+    split_by_graph = {}
     progress_bar = tqdm(total=total_episodes, desc="episodes")
 
     with TransitionWriter(out_dir) as writer:
@@ -1563,7 +1569,7 @@ def parse_args() -> GenConfig:
     parser.add_argument(
         "--smoke",
         action="store_true",
-        help="tiny end-to-end run (er-40, 1 graph, 2 rollouts, horizon 4) (default: False).",
+        help="tiny end-to-end run (er-40, 3 graphs, 2 rollouts, horizon 4) (default: False).",
     )
 
     args = parser.parse_args()
@@ -1577,7 +1583,8 @@ def parse_args() -> GenConfig:
         )
 
     if args.smoke:
-        args.dataset, args.num_graphs, args.syn_nodes, args.er_p = "er", 1, 40, 0.1
+        # Three graphs: the fewest the default graph_disjoint split accepts
+        args.dataset, args.num_graphs, args.syn_nodes, args.er_p = "er", 3, 40, 0.1
         args.rollouts, args.horizon = 2, 4
         args.algorithms = ["random", "degree"]
         args.action_ops = list(valid_action_ops)

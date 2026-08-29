@@ -1227,7 +1227,11 @@ def mcmc_decode(
 
     rng = np.random.default_rng(seed)
     times = {node: time for node, (time, _) in decoded.items()}
-    movable = [node for node in times if node not in observation.times]
+    # Roots stay at t = 0: the proposal below never moves a node back to 0, so a
+    # moved root could never return
+    movable = [
+        node for node in times if node not in observation.times and times[node] > 0
+    ]
 
     if not movable:
         return decoded
@@ -1242,13 +1246,18 @@ def mcmc_decode(
 
         for step in range(1, horizon + 1):
             frontier = waves.get(step - 1, [])
-            if not frontier:
-                break
-
-            total += transition_logprob(
-                predict(infected, frontier), infected, waves.get(step, [])
+            wave = waves.get(step, [])
+            # An empty frontier transmits nothing: score the wave against zero
+            # marginals rather than truncating, which rewarded any gap in the
+            # history with a likelihood of exactly 0
+            marginal = (
+                predict(infected, frontier)
+                if frontier
+                else np.zeros(graph.num_nodes)
             )
-            infected = infected + waves.get(step, [])
+
+            total += transition_logprob(marginal, infected, wave)
+            infected = infected + wave
 
         return total
 

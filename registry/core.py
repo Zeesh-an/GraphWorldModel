@@ -98,7 +98,7 @@ def _coding_agent_pools() -> dict[str, tuple[dict, tuple[str, ...]]]:
     """
     from coding_agent.tools.adaptive_algorithms import adaptive_algorithms
     from coding_agent.tools.algorithms import algorithms
-    from coding_agent.tools.blocking_algorithms import blocking_algorithms
+    from coding_agent.tools.blocking_algorithms import all_blocking_algorithms
     from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
     from coding_agent.tools.immunization_algorithms import immunization_algorithms
     from coding_agent.tools.localization_algorithms import localization_algorithms
@@ -119,7 +119,7 @@ def _coding_agent_pools() -> dict[str, tuple[dict, tuple[str, ...]]]:
             ("adaptive_online_im",),
         ),
         "coding_agent.tools.blocking_algorithms": (
-            blocking_algorithms,
+            all_blocking_algorithms,
             ("influence_blocking",),
         ),
         "coding_agent.tools.localization_algorithms": (
@@ -277,10 +277,9 @@ def graphs_of_kind(kind: str) -> list[str]:
 @dataclass(frozen=True)
 class DynamicsEntry:
     name: str
-    #: True when `data.wm_simulator.Simulator` can actually step it today. The
-    #: registry lists planned dynamics too (SIR/SEIR, motter_lai, ...) because
-    #: `pipeline.tasks` already declares them, and silently dropping them would
-    #: make a planned task look like it had no dynamics at all.
+    #: True when one of our simulators can actually step it today. A dynamics a
+    #: task declares but nothing steps is still listed, so a task blocked on its
+    #: simulator does not look like it had no dynamics at all.
     simulated: bool
     tasks: tuple[str, ...]
     summary: str = ""
@@ -335,9 +334,12 @@ class BaselineEntry:
     name: str
     kind: str  # classical | learned
     task: str
-    status: str  # ready | needs_setup | blocked
+    status: str  # needs_setup | blocked; `installed()` is dynamic and lives on the spec
     venue: str = ""
     blocker: str | None = None
+    #: An adapter (export/command/parse) exists to drive it. `status` alone
+    #: cannot say so: a registered repo with no adapter is documentation.
+    wired: bool = False
 
 
 def _build_baseline_registry() -> dict[str, BaselineEntry]:
@@ -349,8 +351,9 @@ def _build_baseline_registry() -> dict[str, BaselineEntry]:
             kind=baseline.kind,
             task=baseline.task,
             status=baseline.status,
-            venue=getattr(baseline, "venue", ""),
-            blocker=getattr(baseline, "blocker", None),
+            venue=baseline.venue,
+            blocker=baseline.blocker,
+            wired=baseline.wired,
         )
         for name, baseline in sorted(external_baselines.items())
     }
@@ -366,8 +369,11 @@ def baselines_for_task(task: str) -> list[str]:
 
 
 def runnable_baselines() -> list[str]:
+    """Not blocked and wired: what `setup_baselines --all` would install and run."""
     return sorted(
-        name for name, entry in BASELINE_REGISTRY.items() if entry.status == "ready"
+        name
+        for name, entry in BASELINE_REGISTRY.items()
+        if entry.wired and entry.status != "blocked"
     )
 
 
