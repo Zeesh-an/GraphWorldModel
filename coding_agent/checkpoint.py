@@ -88,6 +88,7 @@ def fingerprint(config: object, method: str, graph: object) -> dict:
                 "cp_target",
                 "cp_forecast_samples",
                 "wm_results_json",
+                "credit",
             )
         },
     }

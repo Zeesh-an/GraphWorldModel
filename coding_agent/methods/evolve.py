@@ -10,6 +10,7 @@ from tqdm import tqdm
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.executor import StrategyError, build_strategy
+from coding_agent.credit import credit_feedback
 from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
@@ -49,8 +50,11 @@ class EvolveSearch(OuterLoopMethod):
         use_anchor: bool = True,
         checkpoint_path: Path | None = None,
         checkpoint_fingerprint: dict | None = None,
+        credit: bool = False,
     ) -> None:
         self.outer_iters = outer_iters
+        # Per-action counterfactual credit in every generation's feedback
+        self.credit = credit
         self.strategy_mode = strategy_mode
         # "evolve" or "adaptive": picks the system prompt (plan_horizon vs act per
         # round) and labels the logs. The search itself is the same either way.
@@ -236,6 +240,13 @@ class EvolveSearch(OuterLoopMethod):
             diff = reference_diff(
                 trajectory, anchor_trajectory, graph, anchor_name, task.sense
             )
+            # Batched on the world-model env (a handful of calls for the whole
+            # plan); sequential seed-paired rollouts on any other evaluator
+            credit_report = (
+                credit_feedback(environment, trajectory, task, graph)
+                if self.credit
+                else None
+            )
             last_delta = (
                 paired_delta(
                     trajectory,
@@ -253,7 +264,8 @@ class EvolveSearch(OuterLoopMethod):
                     "reward": trajectory.reward,
                     "summary": summarize(trajectory, graph, task)
                     + (f"\n{last_delta}" if last_delta else "")
-                    + (f"\n{diff}" if diff else ""),
+                    + (f"\n{diff}" if diff else "")
+                    + (f"\n{credit_report}" if credit_report else ""),
                 }
             )
 

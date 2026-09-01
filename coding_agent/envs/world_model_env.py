@@ -80,6 +80,13 @@ class WorldModelEnvironment:
         # id() of the edge array, holding the array itself alongside so its id
         # cannot be recycled while the entry lives, and cleared per rollout.
         self._degree_cache = {}
+        # Filled by every rollout: final infected count per sample block, and the
+        # per-step count curve per sample block. The curves are what lets a
+        # batched caller (credit's solo rollouts) read stagnation timing without
+        # a rollout per policy; equal length across blocks because a dead sample
+        # keeps appending its frozen count until the whole call terminates.
+        self.last_sample_counts = []
+        self.last_sample_curves = []
         # Seed every rollout uses unless one is named explicitly; shared across
         # candidates so the DIFFERENCE between two strategies is well resolved
         self.base_seed = base_seed
@@ -617,6 +624,7 @@ class WorldModelEnvironment:
                 sample_prevalence[sample].append(float(len(frontier[sample])))
 
             self.last_sample_counts = [float(len(block)) for block in infected]
+            self.last_sample_curves = [list(curve) for curve in sample_curves]
 
             if record_representative:
                 representative_actions.append(bags[0])

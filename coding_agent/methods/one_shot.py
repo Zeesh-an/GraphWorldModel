@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
-from coding_agent.credit import counterfactual_credit, format_credit_report
+from coding_agent.credit import credit_feedback
 from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.methods.base import (
     OuterLoopMethod,
@@ -269,15 +269,13 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             # Counterfactual credit ablates one ACTION at a time, and an inverse
             # or forecast task emits no actions: there is nothing to ablate and
             # nothing the rollout would answer
-            if self.credit and not (task.recovers or task.forecasts):
+            if self.credit:
                 # The bags that actually ran, not the plan object: identical for
                 # a static plan, and the only thing that exists for an adaptive
                 # policy. Replaying them as a fixed plan is the approximation
-                # credit.py already documents for state-dependent strategies
-                base_reward, entries = counterfactual_credit(
-                    environment, trajectory.actions, task.horizon, task.budget
-                )
-                report = format_credit_report(base_reward, entries)
+                # credit.py already documents for state-dependent strategies.
+                # credit_feedback guards the inverse/forecast families itself
+                report = credit_feedback(environment, trajectory, task, graph)
 
             # Next turn: this iteration's reward and diagnostics, and the BEST
             # script so far as the edit target: editing the latest attempt

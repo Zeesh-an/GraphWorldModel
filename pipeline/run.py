@@ -378,7 +378,7 @@ class PipelineConfig:
     llm_price_in: float | None = None
     llm_price_out: float | None = None
     compare: bool = False
-    credit: bool = False
+    credit: bool = True
     graph_id: str | None = None
     # driver
     seed: int = 42
@@ -2826,8 +2826,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--credit",
-        action="store_true",
-        help="per-action counterfactual credit for each arm (default: False).",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="per-action counterfactual credit for each arm; skipped with a notice on @monte_carlo arms, where it would cost (k+1) real rollouts per action. --no-credit turns it off (default: True).",
     )
     parser.add_argument(
         "--graph-id",

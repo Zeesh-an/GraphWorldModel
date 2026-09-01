@@ -338,7 +338,9 @@
 #                   Keep this at 1. Without it the table is not comparable
 #                   across conditions, because each arm's own reward comes
 #                   from its own evaluator.
-#   CREDIT          1 = per-action counterfactual credit in the feedback.
+#   CREDIT          1 = per-action counterfactual credit in the feedback
+#                   (the default; batched on world-model and oracle arms,
+#                   auto-skipped on @monte_carlo arms; 0 passes --no-credit).
 #                   Costs one extra rollout per action.
 #   ALLOW_MC_ALGOS  1 = let generated scripts call the per-candidate-simulation
 #                   algorithms (celf, vanilla_greedy, ...). Default 0: they
@@ -791,7 +793,7 @@ N_SAMPLES="${N_SAMPLES:-50}"
 # Unset = the task registry decides; see GEN_ACTION_OPS above
 ALLOWED_OPS="${ALLOWED_OPS:-}"
 COMPARE="${COMPARE:-1}"
-CREDIT="${CREDIT:-0}"
+CREDIT="${CREDIT:-1}"
 ALLOW_MC_ALGOS="${ALLOW_MC_ALGOS:-0}"
 STRATEGY_TIMEOUT="${STRATEGY_TIMEOUT:-}"
 LLM_PRICE_IN="${LLM_PRICE_IN:-}"
@@ -870,6 +872,7 @@ fi
 [ -n "$GRAPH_ID" ]        && flags+=(--graph-id "$GRAPH_ID")
 [ "$COMPARE" = "1" ]      && flags+=(--compare)
 [ "$CREDIT" = "1" ]       && flags+=(--credit)
+[ "$CREDIT" = "0" ]       && flags+=(--no-credit)
 [ "$ALLOW_MC_ALGOS" = "1" ] && flags+=(--allow-mc-algorithms)
 [ -n "$STRATEGY_TIMEOUT" ] && flags+=(--strategy-timeout "$STRATEGY_TIMEOUT")
 [ -n "$LLM_PRICE_IN" ]  && flags+=(--llm-price-in "$LLM_PRICE_IN")

@@ -229,7 +229,9 @@ def parse_seed_integers(text: str, budget: int) -> list[int]:
 
     seeds = [int(value) for value in re.findall(r"\d+", matches[-1])]
 
-    return seeds[:budget]
+    # Order-preserving dedup: a repo that repeats a node (MOEIM did, at LT pct20)
+    # would otherwise hand the executor a duplicate add_node, which it rejects
+    return list(dict.fromkeys(seeds))[:budget]
 
 
 # MOEIM ----------------------------------------------------------------------
@@ -314,7 +316,11 @@ def _moeim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
     for path in sorted(work_dir.rglob("*_default.csv")):
         with open(path, newline="") as handle:
             for row in csv.DictReader(handle):
-                seeds = [int(token) for token in re.findall(r"\d+", row.get("nodes", ""))]
+                seeds = list(
+                    dict.fromkeys(
+                        int(token) for token in re.findall(r"\d+", row.get("nodes", ""))
+                    )
+                )
                 influence = float(row.get("influence") or 0.0)
 
                 if seeds and len(seeds) <= budget and influence > best_influence:
@@ -576,7 +582,9 @@ def _glie_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> di
         "        Q.sort(key=lambda x: x[1], reverse=True)\n"
         "    else:\n"
         "        infl += u[1]; S.append(u[0]); Q = Q[1:]\n"
-        "print('SEEDS ' + ' '.join(str(v) for v in S))\n",
+        # Bracketed, because parse_seed_integers only recognizes [1, 2, 3] and a
+        # bare space-separated run failed the parse on every budget (2026-08-31)
+        "print('SEEDS', [int(v) for v in S])\n",
     )
 
     return {"runner": str(runner.resolve())}

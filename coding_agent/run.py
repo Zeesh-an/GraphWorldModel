@@ -78,7 +78,7 @@ from coding_agent.containment import (
     ring_size,
     select_outbreak,
 )
-from coding_agent.credit import counterfactual_credit, planned_action
+from coding_agent.credit import augment_solo, counterfactual_credit, planned_action
 from coding_agent.epidemic import (
     default_contact_reduction,
     epidemic_metrics,
@@ -358,7 +358,7 @@ class ExperimentConfig:
     graph_id: str | None = None  # which graph in the store (default: first)
     wm_results_json: str | None = None  # train_wm.py results JSON (for the WM env)
     compare: bool = False  # also evaluate the winning strategy on the MC baseline
-    credit: bool = False  # per-action counterfactual credit (feedback + results)
+    credit: bool = True  # per-action counterfactual credit (feedback + results)
     baseline: str | None = None  # library algorithm name; evaluates it with no LLM
     routing: bool = False  # GA routing: one LLM call picks a library algorithm
     allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
@@ -481,7 +481,9 @@ def build_method(
     if config.method == "one_shot":
         return OneShotSuperAlgorithm(
             outer_iters=config.outer_iters,
-            credit=config.credit,
+            # A canned script never reads its feedback, and under @monte_carlo
+            # every ablation is a sequential batch of real episodes
+            credit=config.credit and not canned and config.evaluator != monte_carlo,
             strategy_mode=strategy_mode,
             # A canned script ignores its prompt, so the anchor rollouts would only
             # burn real episodes and wall clock without informing anything
@@ -518,6 +520,7 @@ def build_method(
             use_anchor=use_anchor,
             checkpoint_path=checkpoint_path,
             checkpoint_fingerprint=checkpoint_fingerprint,
+            credit=config.credit and config.evaluator != monte_carlo,
         )
 
     raise ValueError(
@@ -1948,12 +1951,34 @@ class Baseline(Strategy):
     # When the credit flag is enabled, ablate the executed action sequence against the same environment and measure the reward
     # An inverse or forecast task emits no actions: there is nothing to ablate,
     # and the base rollout would report a spread number beside an F1 or an MSLE
-    if config.credit and not (task.recovers or task.forecasts):
+    if config.credit and config.evaluator == monte_carlo and not (
+        task.recovers or task.forecasts
+    ):
+        print(
+            "[run] credit skipped under @monte_carlo: one sequential rollout per "
+            "action means (k+1) x mc_runs real episodes per report; run the arm "
+            "under @world_model or @oracle for batched credit"
+        )
+
+    if (
+        config.credit
+        and config.evaluator != monte_carlo
+        and not (task.recovers or task.forecasts)
+    ):
         print("[run] per-action counterfactual credit (one rollout per action)...")
         # Credit of the executed action sequence; for state-dependent strategies (per_step/windowed) the recorded bags are replayed as a fixed plan
         base_reward, entries = counterfactual_credit(
             environment,
             trajectory.actions,
+            config.horizon,
+            config.budget,
+            creditable_ops=tuple(config.allowed_ops),
+        )
+        # Solo cascades and stagnation timing ride along on batched evaluators
+        augment_solo(
+            environment,
+            trajectory.actions,
+            entries,
             config.horizon,
             config.budget,
             creditable_ops=tuple(config.allowed_ops),
@@ -2867,8 +2892,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--credit",
-        action="store_true",
-        help="per-action counterfactual credit: ablate each action, report its delta-spread in refinement feedback and the results JSON; costs one extra rollout per action (default: False).",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="per-action counterfactual credit in every refinement iteration and the results JSON: leave-one-out delta per action, each action's solo cascade and when it stops growing, and the learned kernel's bottleneck nodes. Batched on the world-model and oracle evaluators; skipped with a notice under @monte_carlo, where one sequential rollout per action would add hours per arm. --no-credit turns it off (default: True).",
     )
     parser.add_argument(
         "--out-json",
