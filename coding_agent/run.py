@@ -484,6 +484,7 @@ def build_method(
             # A canned script never reads its feedback, and under @monte_carlo
             # every ablation is a sequential batch of real episodes
             credit=config.credit and not canned and config.evaluator != monte_carlo,
+            probes=not config.native_arm and not canned,
             strategy_mode=strategy_mode,
             # A canned script ignores its prompt, so the anchor rollouts would only
             # burn real episodes and wall clock without informing anything
@@ -521,6 +522,7 @@ def build_method(
             checkpoint_path=checkpoint_path,
             checkpoint_fingerprint=checkpoint_fingerprint,
             credit=config.credit and config.evaluator != monte_carlo,
+            probes=not config.native_arm,
         )
 
     raise ValueError(
@@ -1602,6 +1604,15 @@ class Baseline(Strategy):
         "seed": config.seed,
         # Per-outer-iteration rewards (empty for baseline/routing arms)
         "history": getattr(method, "history", []),
+        # Every answered probe, plus the totals the cost story is read on
+        "probes": getattr(method, "probe_log", []),
+        "probe_calls": sum(
+            entry.get("rollouts", 0) for entry in getattr(method, "probe_log", [])
+        ),
+        "probe_seconds": round(
+            sum(entry.get("seconds", 0.0) for entry in getattr(method, "probe_log", [])),
+            3,
+        ),
         # Per-node P(infected at end) across the ensemble. Costs n_samples
         # rollouts to produce, so it is serialized rather than recomputed: it
         # is what any post-hoc spatial analysis (coverage, per-community reach)

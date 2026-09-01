@@ -1,5 +1,6 @@
 import numpy as np
 
+from coding_agent.probes import max_probes_per_generation
 from coding_agent.rounds import round_batches, round_schedule
 from coding_agent.types import GraphInfo, TaskSpec, myopic
 from data.wm_simulator import blocked, spent
@@ -2863,6 +2864,23 @@ evolve_operator_instructions = {
         "re-tune the parent."
     ),
 }
+
+
+# Appended to the evolve/adaptive opening turn on arms whose evaluator can
+# answer probes; the native arm never sees it and refuses a hallucinated block
+probe_contract = (
+    "\n\nPROBES. Beside your ```python block you may add ONE fenced block\n"
+    "```probes\n{\"probes\": [...]}\n```\n"
+    "asking the evaluator what-if questions about the plan your script produces "
+    "this iteration; the answers arrive with the NEXT iteration's feedback, and "
+    "every probe is metered evaluator work like any rollout. At most "
+    f"{max_probes_per_generation} per iteration. Ops: "
+    '{"op": "drop", "node": N} = plan reward with node N\'s actions removed '
+    "(N's marginal contribution); "
+    '{"op": "swap", "a": N, "b": M} = reward if M replaces N in the plan; '
+    '{"op": "region", "nodes": [...]} = expected probability mass the plan '
+    "captures inside that node set."
+)
 
 
 def build_evolve_prompt(

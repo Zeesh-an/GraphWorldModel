@@ -62,8 +62,8 @@ def counterfactual_credit(
                 entry["destination"] = int(action.destination)
             entries.append(entry)
 
-    if _batched(environment):
-        rewards, _ = _batched_plan_rewards(
+    if batched_environment(environment):
+        rewards, _ = batched_plan_rewards(
             environment, [plan] + ablated_plans, horizon, budget, seed
         )
         base_reward = rewards[0]
@@ -96,7 +96,7 @@ reached_p = 0.50
 unreached_p = 0.10
 
 
-def _batched(environment: object) -> bool:
+def batched_environment(environment: object) -> bool:
     # The one-policy-per-sample rollout contract: the world-model env (and its
     # oracle variant), which also exposes per-sample count curves
     return hasattr(environment, "last_sample_curves") and bool(
@@ -104,7 +104,7 @@ def _batched(environment: object) -> bool:
     )
 
 
-def _batched_plan_rewards(
+def batched_plan_rewards(
     environment: object,
     plans: list,
     horizon: int,
@@ -164,7 +164,7 @@ def augment_solo(
     per-seed stagnation time). Batched environments only; elsewhere a no-op,
     since k more sequential rollouts is exactly the cost credit is escaping.
     """
-    if not entries or not _batched(environment):
+    if not entries or not batched_environment(environment):
         return
 
     # Recover each entry's action object by replaying counterfactual_credit's
@@ -198,7 +198,7 @@ def augment_solo(
             ]
         solo_plans.append([solo])
 
-    rewards, curves = _batched_plan_rewards(
+    rewards, curves = batched_plan_rewards(
         environment, solo_plans, horizon, budget, seed
     )
     for entry, reward, curve in zip(entries, rewards, curves, strict=True):

@@ -6,6 +6,7 @@ from tqdm import tqdm
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.credit import credit_feedback
+from coding_agent.probes import answer_probes, parse_probe_request
 from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.methods.base import (
     OuterLoopMethod,
@@ -18,6 +19,7 @@ from coding_agent.methods.base import (
 )
 from coding_agent.prompts import (
     build_feedback_prompt,
+    probe_contract,
     build_system_prompt,
     build_user_prompt,
 )
@@ -41,9 +43,14 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         max_repairs: int = default_max_repairs,
         checkpoint_path: Path | None = None,
         checkpoint_fingerprint: dict | None = None,
+        probes: bool = True,
     ) -> None:
         self.outer_iters = outer_iters
         self.credit = credit
+        # False on the native arm (no forward model to ask) and on canned arms
+        self.probes = probes
+        # Every answered probe, read back into the results JSON by run.py
+        self.probe_log = []
         self.strategy_mode = strategy_mode
         self.allow_mc_algorithms = allow_mc_algorithms
         self.max_repairs = max_repairs
@@ -103,6 +110,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
 
         # One thread for the whole refinement, so the base prompt is sent once and
         # every later turn is an edit against the script the model can still see
+        if self.probes:
+            base_user += probe_contract
+
         conversation = Conversation(agent, system)
         # Read back by run.py for the closing plain-English write-up
         self.conversation = conversation
@@ -113,6 +123,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         evaluations = 0
         repairs = 0
         iteration = 0
+        probe_request, probe_note = [], None
 
         if resumed is not None:
             conversation.restore(resumed["messages"], resumed["transcript"])
@@ -122,6 +133,8 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             last_error = resumed["last_error"]
             evaluations = resumed["evaluations"]
             repairs = resumed["repairs"]
+            # .get: checkpoints from before probes existed still resume
+            self.probe_log = resumed.get("probe_log", [])
             iteration = resumed["iteration"]
 
             if resumed["best"] is not None:
@@ -155,8 +168,14 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 )
 
                 # Build the strategy object from the LLM generated code, and call it
+                script = conversation.send(pending)
+                # The probes fence rides the prose send() discards; the raw
+                # reply is the transcript's last generate turn
+                probe_request, probe_note = parse_probe_request(
+                    conversation.transcript[-1]["reply"]
+                )
                 strategy = build_strategy(
-                    conversation.send(pending),
+                    script,
                     self.strategy_mode,
                     self.allow_mc_algorithms,
                 )
@@ -210,6 +229,19 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     incumbent_reward=best[1].reward if best else None,
                     objective=objective_label,
                 )
+
+                probe_feedback = answer_probes(
+                    environment,
+                    probe_request,
+                    probe_note,
+                    best[1].actions if best is not None else None,
+                    task,
+                    self.probes,
+                    self.probe_log,
+                    "one_shot",
+                )
+                if probe_feedback:
+                    pending = f"{pending}\n\n{probe_feedback}"
 
                 # After `pending` is built, so a resume re-sends the repair turn
                 # rather than the prompt that already failed
@@ -310,6 +342,19 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 objective=objective_label,
             )
 
+            probe_feedback = answer_probes(
+                environment,
+                probe_request,
+                probe_note,
+                trajectory.actions,
+                task,
+                self.probes,
+                self.probe_log,
+                "one_shot",
+            )
+            if probe_feedback:
+                pending = f"{pending}\n\n{probe_feedback}"
+
             self._checkpoint(
                 iteration,
                 conversation,
@@ -368,6 +413,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 "last_script": last_script,
                 "last_error": last_error,
                 "history": self.history,
+                "probe_log": self.probe_log,
                 "messages": conversation.messages,
                 "transcript": conversation.transcript,
                 # Replayed on resume instead of re-running the baselines

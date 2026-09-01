@@ -11,6 +11,7 @@ from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.credit import credit_feedback
+from coding_agent.probes import answer_probes, parse_probe_request
 from coding_agent.methods.base import (
     OuterLoopMethod,
     baseline_anchor,
@@ -24,6 +25,7 @@ from coding_agent.prompts import (
     build_evolve_prompt,
     build_system_prompt,
     build_user_prompt,
+    probe_contract,
 )
 from coding_agent.types import (
     GraphInfo,
@@ -51,10 +53,15 @@ class EvolveSearch(OuterLoopMethod):
         checkpoint_path: Path | None = None,
         checkpoint_fingerprint: dict | None = None,
         credit: bool = False,
+        probes: bool = True,
     ) -> None:
         self.outer_iters = outer_iters
         # Per-action counterfactual credit in every generation's feedback
         self.credit = credit
+        # False on the native arm: its whole definition is no forward model to ask
+        self.probes = probes
+        # Every answered probe, read back into the results JSON by run.py
+        self.probe_log = []
         self.strategy_mode = strategy_mode
         # "evolve" or "adaptive": picks the system prompt (plan_horizon vs act per
         # round) and labels the logs. The search itself is the same either way.
@@ -99,6 +106,8 @@ class EvolveSearch(OuterLoopMethod):
         base_user = build_user_prompt(
             self.label, task, graph, self.strategy_mode, self.allow_mc_algorithms
         ) + (f"\n\n{anchor}" if anchor else "")
+        if self.probes:
+            base_user += probe_contract
 
         # The thread lets the model see the generations it already produced;
         # build_evolve_prompt still names the PARENT explicitly because the
@@ -111,6 +120,7 @@ class EvolveSearch(OuterLoopMethod):
         stagnation = 0
         last_error = None
         last_delta = None
+        probe_feedback = None
         start_iteration = 0
 
         if resumed is not None:
@@ -119,6 +129,9 @@ class EvolveSearch(OuterLoopMethod):
             stagnation = resumed["stagnation"]
             last_delta = resumed["last_delta"]
             self.history = resumed["history"]
+            # .get: checkpoints from before probes existed still resume
+            self.probe_log = resumed.get("probe_log", [])
+            probe_feedback = resumed.get("probe_feedback")
             start_iteration = resumed["iteration"]
 
             if resumed["best"] is not None:
@@ -183,14 +196,26 @@ class EvolveSearch(OuterLoopMethod):
                     last_result=last_delta,
                 )
 
+            if probe_feedback:
+                user = f"{user}\n\n{probe_feedback}"
+                probe_feedback = None
+
             tqdm.write(
                 f"[{self.label}] iter {iteration + 1}/{self.outer_iters}: "
                 f"operator={operator}, population={len(population)}"
             )
 
+            probe_request, probe_note = [], None
+
             try:
+                script = conversation.send(user)
+                # The probes fence rides the prose send() discards; the raw reply
+                # is the transcript's last generate turn
+                probe_request, probe_note = parse_probe_request(
+                    conversation.transcript[-1]["reply"]
+                )
                 strategy = build_strategy(
-                    conversation.send(user),
+                    script,
                     self.strategy_mode,
                     self.allow_mc_algorithms,
                 )
@@ -220,6 +245,19 @@ class EvolveSearch(OuterLoopMethod):
                     f"[{self.label}] iter {iteration + 1}: script failed: "
                     f"{last_error.splitlines()[0]}"
                 )
+                # A failed script can still have asked questions; answer them
+                # against the incumbent so the next attempt gets both the error
+                # and the information it wanted
+                probe_feedback = answer_probes(
+                    environment,
+                    probe_request,
+                    probe_note,
+                    best[1].actions if best is not None else None,
+                    task,
+                    self.probes,
+                    self.probe_log,
+                    self.label,
+                )
                 self._checkpoint(
                     iteration + 1,
                     conversation,
@@ -230,6 +268,7 @@ class EvolveSearch(OuterLoopMethod):
                     anchor,
                     anchor_name,
                     anchor_trajectory,
+                    probe_feedback,
                 )
 
                 continue
@@ -302,6 +341,16 @@ class EvolveSearch(OuterLoopMethod):
             progress_bar.set_postfix(
                 reward=f"{trajectory.reward:.2f}", best=f"{best[1].reward:.2f}"
             )
+            probe_feedback = answer_probes(
+                environment,
+                probe_request,
+                probe_note,
+                trajectory.actions,
+                task,
+                self.probes,
+                self.probe_log,
+                self.label,
+            )
             self._checkpoint(
                 iteration + 1,
                 conversation,
@@ -312,6 +361,7 @@ class EvolveSearch(OuterLoopMethod):
                 anchor,
                 anchor_name,
                 anchor_trajectory,
+                probe_feedback,
             )
 
         progress_bar.close()
@@ -334,6 +384,7 @@ class EvolveSearch(OuterLoopMethod):
         anchor: str,
         anchor_name: str,
         anchor_trajectory: Trajectory | None,
+        probe_feedback: str | None = None,
     ) -> None:
         """Everything needed to continue this search, written after every generation."""
         checkpoint.save(
@@ -353,6 +404,8 @@ class EvolveSearch(OuterLoopMethod):
                 "stagnation": stagnation,
                 "last_delta": last_delta,
                 "history": self.history,
+                "probe_log": self.probe_log,
+                "probe_feedback": probe_feedback,
                 "messages": conversation.messages,
                 "transcript": conversation.transcript,
                 # Replayed on resume instead of re-running the baselines
