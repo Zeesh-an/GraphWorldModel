@@ -213,12 +213,13 @@ class WorldModelEnvironment:
                 epidemic=True,
             )
 
-        if diffusion_model != "IC":
+        if diffusion_model not in ("IC", "LT"):
             raise ValueError(
-                "oracle dynamics are IC-only: LT thresholds are drawn per episode "
-                "and never stored, so no true LT transition function exists: use "
-                "the monte_carlo evaluator with a large --mc-runs as the LT proxy"
+                f"no oracle for diffusion_model {diffusion_model!r}: IC pins "
+                f"q = w and LT pins the closed-form threshold hazard; the "
+                f"compartmental dynamics take the epidemic branch above"
             )
+
 
         model = WorldModel(
             "gcn",

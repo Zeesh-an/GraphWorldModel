@@ -351,7 +351,7 @@ class ExperimentConfig:
     # Runs for the --compare ground-truth replay; None -> mc_runs. Kept separate
     # so a native arm (mc_runs=1 inner loop) is still judged on a clean average
     referee_mc_runs: int | None = None
-    n_samples: int = 20
+    n_samples: int = 200
     seed: int = 42
     device: str = "cpu"
     data_dir: str | None = None  # world_model.wm_data graph store dir
@@ -2863,8 +2863,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n-samples",
         type=int,
-        default=20,
-        help="world-model rollout samples (default: 20).",
+        default=200,
+        help="world-model rollout samples (default: 200).",
     )
     parser.add_argument(
         "--seed",

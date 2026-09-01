@@ -63,7 +63,7 @@ acronyms = {
     "se": "SE", "gcc": "GCC", "anc": "ANC", "mae": "MAE",
     # dynamics and evaluators
     "ic": "IC", "lt": "LT", "sir": "SIR", "sis": "SIS", "seir": "SEIR",
-    "mc": "MC", "wm": "WM", "gwm": "GWM", "ga": "GA", "llm": "LLM", "rr": "RR", "ris": "RIS",
+    "mc": "MC", "wm": "WM", "gwm": "GWM", "gpt": "GPT", "ga": "GA", "llm": "LLM", "rr": "RR", "ris": "RIS",
     # influence maximization
     "imm": "IMM", "celf": "CELF", "opim": "OPIM", "ssa": "SSA", "subsim": "SubSIM",
     "tim": "TIM", "glie": "GLIE", "moeim": "MOEIM", "deepim": "DeepIM",

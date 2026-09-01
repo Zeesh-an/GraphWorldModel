@@ -403,28 +403,27 @@ class CompetitiveSimulator:
         if num_mc < 1:
             raise ValueError(f"num_mc must be >= 1, got {num_mc}")
 
+        # What each campaign's thresholds were last survived AGAINST, captured
+        # before the action mutates the sets: the conditioning of the closed-form
+        # CLT hazard targets below
+        previous_negative = set(self.neg_infected) - set(self.neg_frontier)
+        previous_positive = set(self.pos_infected) - set(self.pos_frontier)
+
         self.apply_actions(bag)
         post_action = self.snapshot()
 
-        # CLT is deterministic given its (hidden) thresholds, but they are redrawn
-        # per draw here so the target is the THRESHOLD marginal, which is the only
-        # thing a state-only model can represent, and what the LT head is fit against
-        draws = num_mc
+        # CLT is deterministic given its per-episode thresholds, so ONE realized
+        # draw continues the trajectory and the targets are computed in closed
+        # form below. (Until 2026-09-01 this redrew BOTH threshold tables per
+        # draw and left the last redraw in place, so recorded CLT trajectories
+        # were a memoryless process rather than the threshold-persistent CLT
+        # that advance() and the referee run.)
+        draws = num_mc if self.model_name == "IC" else 1
         counts = [{}, {}, {}, {}]
         last_state = None
 
         for _ in range(draws):
             self.restore(post_action)
-
-            if self.model_name == "LT":
-                self.neg_threshold = {
-                    node: float(self.rng.uniform(0.0, 1.0))
-                    for node in range(self.num_nodes)
-                }
-                self.pos_threshold = {
-                    node: float(self.rng.uniform(0.0, 1.0))
-                    for node in range(self.num_nodes)
-                }
 
             negative, positive = (
                 self._ic_arrivals() if self.model_name == "IC" else self._lt_arrivals()
@@ -448,10 +447,19 @@ class CompetitiveSimulator:
                 pos_frontier=sorted(groups[3]),
             )
 
-        marginals = [
-            {int(node): count / draws for node, count in table.items()}
-            for table in counts
-        ]
+        if self.model_name == "IC":
+            marginals = [
+                {int(node): count / draws for node, count in table.items()}
+                for table in counts
+            ]
+        else:
+            # The exact conditional law under the two persistent U(0,1)
+            # thresholds, composed through the tie-break; a `spent` reading does
+            # not exist here (the constructor refuses it), so there is no
+            # re-entry approximation to make
+            marginals = self._clt_hazard_marginals(
+                previous_negative, previous_positive
+            )
 
         # The simulator's own state advances to the LAST draw, matching
         # Simulator.advance_marginal: the episode continues down one realized path
@@ -462,6 +470,84 @@ class CompetitiveSimulator:
         self.pos_frontier = set(last_state.pos_frontier)
 
         return (last_state, *marginals)
+
+    def _clt_hazard_marginals(
+        self, previous_negative: set, previous_positive: set
+    ) -> list[dict]:
+        """Closed-form one-step CLT marginals for the four targets, post-action."""
+        neg_infected_marginal, neg_frontier_marginal = {}, {}
+        pos_infected_marginal, pos_frontier_marginal = {}, {}
+
+        for node in range(self.num_nodes):
+            if node in self.blocked:
+                continue
+
+            if node in self.neg_infected:
+                neg_infected_marginal[node] = 1.0
+                continue
+
+            if node in self.pos_infected:
+                pos_infected_marginal[node] = 1.0
+                continue
+
+            neg_now = pos_now = neg_prev = pos_prev = total = 0.0
+            for source, probability in self.in_edges[node]:
+                if source in self.blocked:
+                    continue
+                total += probability
+                if source in self.neg_infected:
+                    neg_now += probability
+                elif source in self.pos_infected:
+                    pos_now += probability
+                if source in previous_negative:
+                    neg_prev += probability
+                elif source in previous_positive:
+                    pos_prev += probability
+
+            if total <= 0.0:
+                continue
+
+            def conditional(now: float, previous: float) -> float:
+                if now <= 0.0:
+                    return 0.0
+                f_now, f_prev = now / total, previous / total
+                return max(0.0, f_now - f_prev) / max(1e-9, 1.0 - f_prev)
+
+            hit_negative = conditional(neg_now, neg_prev)
+            hit_positive = conditional(pos_now, pos_prev)
+
+            # Independent thresholds, so the joint factorizes and the tie-break
+            # composes the two hazards exactly as _resolve composes the arrivals
+            if self.tie_break == negative_dominance:
+                new_negative = hit_negative
+                new_positive = hit_positive * (1.0 - hit_negative)
+            elif self.tie_break == positive_dominance:
+                new_positive = hit_positive
+                new_negative = hit_negative * (1.0 - hit_positive)
+            else:
+                both = hit_negative * hit_positive
+                negative_wins = 1.0 if self.priority[node] < 0.5 else 0.0
+                new_negative = (
+                    hit_negative * (1.0 - hit_positive) + negative_wins * both
+                )
+                new_positive = (
+                    hit_positive * (1.0 - hit_negative)
+                    + (1.0 - negative_wins) * both
+                )
+
+            if new_negative > 0.0:
+                neg_infected_marginal[node] = new_negative
+                neg_frontier_marginal[node] = new_negative
+            if new_positive > 0.0:
+                pos_infected_marginal[node] = new_positive
+                pos_frontier_marginal[node] = new_positive
+
+        return [
+            neg_infected_marginal,
+            neg_frontier_marginal,
+            pos_infected_marginal,
+            pos_frontier_marginal,
+        ]
 
     # Fork support
     def snapshot(self) -> tuple:

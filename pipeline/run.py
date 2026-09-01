@@ -149,6 +149,7 @@ from data.wm_simulator import (
     valid_remove_semantics,
 )
 from pipeline.conditions import (
+    expand_llm_models,
     Arm,
     condition_names,
     ground_truth_reward,
@@ -282,13 +283,16 @@ class PipelineConfig:
     evaluator: str = "oracle"
     native_mc_runs: int = native_mc_runs_default
     llm_model: str = "gpt-5.6-terra"
+    # Fan every LLM-driven arm out across these models, one result row each;
+    # None = the single llm_model above
+    llm_models: tuple | None = None
     temperature: float | None = None
     diffusion_model: str = "IC"
     horizon: int = 10
     outer_iters: int = 20
     windows: int = 3
     mc_runs: int = 200
-    n_samples: int = 50
+    n_samples: int = 200
     allowed_ops: tuple | None = None
     # Adaptive IM; read only by `adaptive` arms, so one sweep can hold adaptive
     # and non-adaptive arms side by side and divide one by the other
@@ -534,32 +538,10 @@ def build_arms(config: PipelineConfig) -> list[Arm]:
             f"{sorted(duplicates)}"
         )
 
+    if config.llm_models:
+        arms = expand_llm_models(arms, tuple(config.llm_models))
+
     return arms
-
-
-def check_arms_against_dynamics(config: PipelineConfig, arms: list[Arm]) -> None:
-    """
-    Refuse an `@oracle` arm the dynamics cannot provide, before any stage runs.
-
-    The analytic oracle is `ICTransmissionHead(oracle=True)` with `q = w`, and
-    the compartmental heads pin the simulator's own rates, so IC and SIR/SIS/SEIR
-    have a true transition function to pin. LT does not: its thresholds are drawn
-    per episode and never stored. `WorldModelEnvironment.oracle` raises for it,
-    but only when the agent stage reaches that arm, which on netscience was three
-    hours of baselines after data generation and training had already finished.
-    """
-    oracle_arms = [arm.spec for arm in arms if arm.evaluator == "oracle"]
-    if not oracle_arms or get_task(config.task).epidemic:
-        return
-
-    if config.diffusion_model != "IC":
-        raise ValueError(
-            f"arms {oracle_arms} name the oracle evaluator but --diffusion-model "
-            f"{config.diffusion_model} has no analytic oracle: LT thresholds are "
-            f"drawn per episode and never stored, so no true LT transition "
-            f"function exists. Use evolve_free@monte_carlo with a large --mc-runs "
-            f"as the LT ceiling, or run the oracle arm under IC"
-        )
 
 
 def resolve_budget_pcts(config: PipelineConfig) -> tuple:
@@ -900,7 +882,9 @@ def _clear_skip(layout: Layout, label: str, arm) -> None:
     _skip_path(layout, label, arm).unlink(missing_ok=True)
 
 
-def _record_skip(layout: Layout, label: str, arm, reason: str) -> None:
+def _record_skip(
+    layout: Layout, label: str, arm, reason: str, seconds: float | None = None
+) -> None:
     """
     Persist WHY an arm was skipped.
 
@@ -918,6 +902,9 @@ def _record_skip(layout: Layout, label: str, arm, reason: str) -> None:
                 "condition": arm.condition,
                 "budget_label": label,
                 "skipped": True,
+                # What the failed attempt cost, so the report's timing split can
+                # count it instead of leaving it as unexplained stage overhead
+                "seconds": seconds,
                 "reason": reason,
             },
             indent=2,
@@ -1245,6 +1232,8 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     else None
                 )
 
+                attempt_start = time.perf_counter()
+
                 try:
                     external_seeds = run_external_baseline(
                         arm.external,
@@ -1259,7 +1248,13 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     )
                 except BaselineError as error:
                     tqdm.write(f"[agent] {label}/{arm.name}: SKIPPED, {error}")
-                    _record_skip(layout, label, arm, str(error))
+                    _record_skip(
+                        layout,
+                        label,
+                        arm,
+                        str(error),
+                        seconds=time.perf_counter() - attempt_start,
+                    )
                     failed += 1
                     progress_bar.update(1)
                     continue
@@ -1269,7 +1264,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 method=arm.method,
                 strategy_mode=arm.strategy_mode,
                 evaluator=evaluator,
-                model=config.llm_model,
+                model=arm.llm_model or config.llm_model,
                 temperature=config.temperature,
                 diffusion_model=config.diffusion_model,
                 remove_semantics=config.remove_semantics,
@@ -1543,6 +1538,13 @@ def load_wm_results(config: PipelineConfig, layout: Layout) -> dict | None:
 
 def _write_manifest(layout: Layout, config: PipelineConfig) -> None:
     """Config + per-stage status, rewritten whenever anything changes."""
+    # A resumed run only carries the stages IT ran; merging the previous
+    # manifest's entries underneath keeps the earlier stages' recorded seconds,
+    # which is what the report's total is summed from
+    if layout.manifest_path.exists():
+        previous = json.loads(layout.manifest_path.read_text()).get("stages") or {}
+        config.stage_status = {**previous, **config.stage_status}
+
     layout.manifest_path.write_text(
         json.dumps(
             {
@@ -1622,7 +1624,6 @@ def run_pipeline(config: PipelineConfig) -> dict:
 
     selected = active_stages(config)
     arms = build_arms(config)
-    check_arms_against_dynamics(config, arms)
     print(f"[pipeline] {layout.label} -> {layout.root}")
     print(f"[pipeline] stages: {' -> '.join(selected)}")
     print(f"[pipeline] {len(arms)} arms x {len(budget_points(config))} budgets:")
@@ -2739,6 +2740,15 @@ if __name__ == "__main__":
         help="gateway model name for the coding agent (default: gpt-5.6-terra).",
     )
     parser.add_argument(
+        "--llm-models",
+        type=str,
+        nargs="+",
+        default=None,
+        help="fan every LLM-driven arm (conditions 2-6) out across these models, "
+        "one result row per (arm, model), named <arm>+<model>; baselines and the "
+        "gradient/decode arms run once regardless (default: None).",
+    )
+    parser.add_argument(
         "--temperature",
         type=float,
         default=None,
@@ -2777,8 +2787,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n-samples",
         type=int,
-        default=50,
-        help="world-model/oracle rollout samples (default: 50).",
+        default=200,
+        help="world-model/oracle rollout samples (default: 200).",
     )
     parser.add_argument(
         "--allowed-ops",
@@ -2919,6 +2929,7 @@ if __name__ == "__main__":
         evaluator=args.evaluator,
         native_mc_runs=args.native_mc_runs,
         llm_model=args.llm_model,
+        llm_models=(None if args.llm_models is None else tuple(args.llm_models)),
         temperature=args.temperature,
         diffusion_model=args.diffusion_model,
         horizon=args.horizon,

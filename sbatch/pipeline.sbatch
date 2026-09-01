@@ -779,6 +779,9 @@ BUDGET_PCTS="${BUDGET_PCTS:-}"
 BUDGETS="${BUDGETS:-}"
 EVALUATOR="${EVALUATOR:-oracle}"
 LLM_MODEL="${LLM_MODEL:-gpt-5.6-terra}"
+# Space-separated list: every LLM-driven arm runs once per model, e.g.
+# LLM_MODELS="gpt-5.6-luna gpt-5.6-terra gpt-5.6-sol"
+LLM_MODELS="${LLM_MODELS:-}"
 TEMPERATURE="${TEMPERATURE:-}"
 if [ "$TASK" = "epidemic_control" ]; then
   DIFFUSION_MODEL="${DIFFUSION_MODEL:-SIR}"
@@ -789,7 +792,7 @@ HORIZON="${HORIZON:-10}"
 OUTER_ITERS="${OUTER_ITERS:-20}"
 WINDOWS="${WINDOWS:-3}"
 MC_RUNS="${MC_RUNS:-200}"
-N_SAMPLES="${N_SAMPLES:-50}"
+N_SAMPLES="${N_SAMPLES:-200}"
 # Unset = the task registry decides; see GEN_ACTION_OPS above
 ALLOWED_OPS="${ALLOWED_OPS:-}"
 COMPARE="${COMPARE:-1}"
@@ -951,6 +954,7 @@ fi
 # shellcheck disable=SC2206
 [ -n "$OOD_POLICIES" ]      && flags+=(--ood-policies $OOD_POLICIES)
 [ -n "$SPLIT_MODE" ]        && flags+=(--split-mode "$SPLIT_MODE")
+[ -n "$LLM_MODELS" ]        && flags+=(--llm-models $LLM_MODELS)
 [ -n "$WM_RESULTS_JSON" ]   && flags+=(--wm-results-json "$WM_RESULTS_JSON")
 
 # ---------------------------------------------------------------------------

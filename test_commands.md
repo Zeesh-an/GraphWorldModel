@@ -91,7 +91,7 @@ external:touplegdd external:deepim external:moeim external:glie" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -112,7 +112,7 @@ ARMS="adaptive_free@oracle evolve_free@oracle" \
 EVALUATOR=oracle \
 ROUNDS=3 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -141,7 +141,7 @@ external:explosive_immunization external:dismantling_review" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -168,7 +168,7 @@ external:cosasi_jordan external:cosasi_netsleuth external:cosasi_lisn \
 external:cosasi_rumor_centrality" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -188,7 +188,7 @@ external:sandimin external:imin_joc external:diffim" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGETS="10 20 30 40 50" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -209,7 +209,7 @@ external:ditto external:ditto_dhrec external:ditto_cri \
 external:grin external:spin external:deep_demixing" \
 ARMS="decode_free@oracle evolve_free@oracle" \
 EVALUATOR=oracle \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -363,10 +363,10 @@ Six things changed under the loop since the smoke test, and each one moves these
 # now: the residual head anchors q on the true w and starts at the oracle, while structured
 # has to learn q from scratch, which is the claim these two arms test. GEN_ACTION_OPS is
 # the repo default and is stated so the data recipe is visible: the two node ops, no edge ops.
-# The LT job names evolve_free@monte_carlo instead of the oracle: the analytic oracle is
-# IC-only (LT thresholds are drawn per episode and never stored, so there is no true LT
-# transition function), and MC_RUNS=200 real simulations per candidate is the LT ceiling.
-# That arm pays for every candidate it scores, which is the cost column the ladder reads.
+# LT now has an @oracle ceiling like IC's: not a trajectory oracle (thresholds are drawn
+# per episode and never stored, so the realized outcome stays unrecoverable) but an exact
+# DISTRIBUTION oracle, the closed-form threshold hazard (f_t - f_prev)+ / (1 - f_prev),
+# verified to match NDlib LT in distribution. Same arms, same evaluator preference as IC.
 TASK=influence_maximization \
 DATASET=netscience \
 RUN=testrun_ic \
@@ -380,7 +380,7 @@ WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
@@ -393,21 +393,19 @@ DIFFUSION_MODEL=LT \
 BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
 external:opim external:ssa external:subsim \
 external:touplegdd external:deepim external:moeim external:glie" \
-ARMS="evolve_free@monte_carlo evolve_free@world_model" \
+ARMS="evolve_free@oracle evolve_free@world_model" \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
-EVALUATOR=monte_carlo \
+EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
-# The LT job submitted with evolve_free@oracle on 2026-08-29 ran data (6 min), train
-# (20 min) and all thirteen baselines (3 h) and then failed on the oracle arm; the
-# pipeline now refuses that pairing before any stage runs. Everything it wrote is
-# reusable: resume the same RUN from the agent stage, no FORCE, and only the two
-# arms run (finished baseline rows are skipped).
+# Resume for an LT run whose agent stage failed or was interrupted: same RUN, start at
+# the agent stage, no FORCE, so data, checkpoint and finished baseline rows are reused
+# and only the named arms run. The LT hazard oracle makes @oracle the ceiling here too.
 TASK=influence_maximization \
 DATASET=netscience \
 RUN=testrun_lt \
@@ -417,12 +415,12 @@ START_STAGE=agent \
 BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
 external:opim external:ssa external:subsim \
 external:touplegdd external:deepim external:moeim external:glie" \
-ARMS="evolve_free@monte_carlo evolve_free@world_model" \
+ARMS="evolve_free@oracle evolve_free@world_model" \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
-EVALUATOR=monte_carlo \
+EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
-HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch

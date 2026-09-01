@@ -126,10 +126,11 @@ Locality + the `frontier_u` gate make this **structurally unable to saturate**: 
 
 ### `structured` LT: `LTThresholdHead`
 
-LT thresholds are hidden and re-drawn per episode, so the head predicts the activation _probability_ as a learned monotone function of the active-neighbor fraction:
+LT thresholds are hidden and re-drawn per episode, but they PERSIST within one, so the head predicts the conditional activation _hazard_, not the marginal: a node that failed to activate at fraction `f` has `θ > f` and cannot activate until `f` rises. Re-flipping a marginal each rollout step over-activates geometrically (measured: a perfect marginal re-flipped per step ends a BA-200 cascade at 199.5 of 200 nodes against the reference 34.3; the hazard ends at 34.5); re-flipping the hazard is exactly right, so this one form fixes one-step calibration and rollout fidelity together:
 
-- `f_v = (active in-neighbor weight) / (total in-neighbor weight)`,
-- `p_new(v) = [f_v > 0]·sigmoid(τ·(f_v − θ̂_v))`, with per-node `θ̂_v = sigmoid(Linear(h_v))` and learned sharpness `τ = softplus(param)`,
+- `f_v = (active in-neighbor weight) / (total in-neighbor weight)`, and `f_prev_v` the same over `infected − frontier` (the set the node last survived a check against),
+- `F̂(x) = sigmoid(τ·(x − θ̂_v))`, the learned threshold CDF, with per-node `θ̂_v = sigmoid(Linear(h_v))` and learned sharpness `τ = softplus(param)`,
+- `p_new(v) = [f_v > 0]·(F̂(f_v) − F̂(f_prev_v))⁺ / (1 − F̂(f_prev_v))`,
 - `T_exo`: `add_node → active`, `remove_node → susceptible`. One expression covers both remove semantics: under `spent` the node resets to status 0 and may re-activate through its intact edges; under `blocked` those edges are gone from `edge_index`, so `f_v = 0` and the gate holds it down. Unlike the IC head, this one needs no `remove_semantics` branch.
 
 The `f_v > 0` gate gives the same self-terminating bound as IC. One-step metrics are looser than IC by design (the best a state-only model can do is the threshold marginal `P(activate | f_v)`), but the rollout is faithful.
@@ -148,7 +149,7 @@ Two reasons it exists, and they are the same reason from two directions. It is t
 
 ### `structured_oracle` (validation only)
 
-`ICTransmissionHead(oracle=True)`: skips the MLP and sets `q = edge_weight` (the true IC transmission prob). No learning, it validates that the IC structural form itself is correct (expected `count_bias ≈ 0`) before trusting a learned head. IC-only (LT thresholds aren't stored). Exposed via `eval_structured_oracle.py`, not `train_wm.py`.
+IC: `ICTransmissionHead(oracle=True)` skips the MLP and sets `q = edge_weight` (the true IC transmission prob). LT: `LTThresholdHead(oracle=True)` pins the threshold CDF to the identity, giving the closed-form conditional hazard `(f_t - f_prev)+ / (1 - f_prev)`, which is exact in DISTRIBUTION under the U(0,1) thresholds (the realized LT trajectory stays unrecoverable, since thresholds are never stored). No learning in either; both validate the structural form (expected `count_bias ≈ 0`) before a learned head is trusted, and the LT one is what backs the `@oracle` evaluator under LT. Exposed via `eval_structured_oracle.py`, not `train_wm.py`.
 
 `WorldModel.forward` runs `h = encoder(X, graph)`, then `head(h)` for `linear` or `head(h, X, graph)` for the structured heads.
 
@@ -321,7 +322,7 @@ These reload a `.pt` checkpoint named by a results JSON (from the checkpoint's o
 | --------------------------- | -------------------------------------------------------------------------- |
 | `eval_planning.py`          | multi-graph planning regret                                                |
 | `eval_rollout_ensemble.py`  | stochastic ensemble rollout                                                |
-| `eval_structured_oracle.py` | the IC oracle rollout (q = true edge prob): validates the structural form |
+| `eval_structured_oracle.py` | the oracle rollout (IC: q = true edge prob; LT: closed-form hazard): validates the structural form |
 | `wm_sl.py`                  | invert the model instead of scoring it: relaxed-source gradient descent, PR / RE / F1 / AUC per episode |
 
 ---

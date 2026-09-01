@@ -188,11 +188,24 @@ class LTThresholdHead(nn.Module):
     probability as a learned monotone function of the active-neighbor fraction f_v:
 
     f_v       = (active in-neighbor weight) / (total in-neighbor weight)
-    p_new(v)  = [f_v > 0] * sigmoid(tau * (f_v - theta_hat_v))
+    F_hat(x)  = sigmoid(tau * (x - theta_hat_v))   (learned threshold CDF)
+    p_new(v)  = [f_v > 0] * (F_hat(f_v) - F_hat(f_prev_v))+ / (1 - F_hat(f_prev_v))
     theta_hat = sigmoid(Linear(h_v))        (per-node threshold proxy)
     tau       = softplus(scalar)            (learned sharpness)
     y_inf(v)  = active_v + (1 - active_v) * p_new(v)
     y_fr(v)   = (1 - active_v) * p_new(v)   (newly activated)
+
+    The CONDITIONAL HAZARD, not the marginal. A threshold persists within an
+    episode, so a node that failed to activate at fraction f has theta > f and
+    cannot activate until f rises; f_prev is the fraction over the PREVIOUS
+    active set A_{t-1} = infected - frontier, which the state already carries.
+    A hazard is also what makes per-step ensemble sampling correct: re-flipping
+    a hazard each step reproduces the threshold process exactly in distribution,
+    while re-flipping a marginal over-activates geometrically (measured: BA-200,
+    a perfect marginal re-flipped per step ends at 199.5 of 200 nodes against
+    the reference 34.3; the hazard ends at 34.5). `oracle=True` pins F_hat to
+    the identity, which under U(0,1) thresholds is the exact conditional law of
+    the next state: LT's distribution oracle.
 
     The f_v > 0 gate gives the same self-terminating bound as the IC head (no active
     neighbors -> no activation), so the rollout cannot saturate. Returns LOGITS (N, 2).
@@ -203,8 +216,9 @@ class LTThresholdHead(nn.Module):
     thresholds) is a fair comparison.
     """
 
-    def __init__(self, hidden_dim: int) -> None:
+    def __init__(self, hidden_dim: int, oracle: bool = False) -> None:
         super().__init__()
+        self.oracle = oracle
         self.theta = nn.Linear(hidden_dim, 1)  # per-node threshold proxy
         self.log_tau = nn.Parameter(torch.zeros(1))  # softplus -> sharpness > 0
 
@@ -248,31 +262,53 @@ class LTThresholdHead(nn.Module):
             1.0 - X[:, ch_remove]
         )  # shape: (N,), post-action
 
+        # The active set the node SURVIVED: its last threshold check was against
+        # A_{t-1} = infected - frontier, before this step's action. clamp guards
+        # a frontier bit without its infected bit, which no generator emits
+        previous_active = torch.clamp(
+            active_pre - X[:, ch_frontier], min=0.0
+        )  # shape: (N,)
+
         edge_index, edge_weight = graph.edge_index, graph.edge_weight
 
         if edge_index.numel() == 0:
             active_fraction = torch.zeros(num_nodes, device=hidden.device)
+            previous_fraction = torch.zeros(num_nodes, device=hidden.device)
         else:
             sources, destinations = edge_index[0], edge_index[1]
-            # Active in-neighbor weight, shape: (N,)
-            active_weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
-                0, destinations, active[sources] * edge_weight
-            )
             # Total in-weight, shape: (N,)
             total_weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
                 0, destinations, edge_weight
             )
-            # Active-neighbor fraction, shape: (N,)
-            active_fraction = active_weight / total_weight.clamp(min=prob_epsilon)
 
-        theta_hat = torch.sigmoid(
-            self.theta(hidden).squeeze(dim=-1)
-        )  # shape: (N,) in [0, 1]
-        tau = F.softplus(self.log_tau)  # scalar > 0
+            def fraction(mask: torch.Tensor) -> torch.Tensor:
+                weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+                    0, destinations, mask[sources] * edge_weight
+                )
+                # Weighted active-neighbor fraction, shape: (N,)
+                return weight / total_weight.clamp(min=prob_epsilon)
+
+            active_fraction = fraction(active)
+            previous_fraction = fraction(previous_active)
+
+        if self.oracle:
+            # U(0,1) thresholds: the CDF is the identity and the hazard is exact
+            cdf_now = active_fraction.clamp(0.0, 1.0)
+            cdf_prev = previous_fraction.clamp(0.0, 1.0)
+        else:
+            theta_hat = torch.sigmoid(
+                self.theta(hidden).squeeze(dim=-1)
+            )  # shape: (N,) in [0, 1]
+            tau = F.softplus(self.log_tau)  # scalar > 0
+            cdf_now = torch.sigmoid(tau * (active_fraction - theta_hat))
+            cdf_prev = torch.sigmoid(tau * (previous_fraction - theta_hat))
 
         # Structural self-termination: no active neighbor -> no activation
         gate = (active_fraction > 0).to(active_fraction.dtype)
-        p_new = gate * torch.sigmoid(tau * (active_fraction - theta_hat))  # shape: (N,)
+        hazard = (cdf_now - cdf_prev).clamp(min=0.0) / (1.0 - cdf_prev).clamp(
+            min=prob_epsilon
+        )  # shape: (N,)
+        p_new = gate * hazard.clamp(max=1.0)  # shape: (N,)
 
         p_newly = (1.0 - active) * p_new  # post-action susceptibles only
         y_inf = active + p_newly
@@ -512,15 +548,22 @@ class CompetitiveLTHead(nn.Module):
     Structured CLT head: the LT threshold form per cascade, then the same tie-break.
 
     He et al.'s competitive linear threshold gives every node TWO hidden thresholds
-    (SDM'12 §3), so this head pays the single-cascade LT partial-observability tax
-    twice, which is exactly why research/influence_blocking.md §2.2 predicts IC
-    carries this task and LT is the weaker demonstration. It is implemented anyway
-    because the registry declares both dynamics and a `--diffusion-model LT` run
-    otherwise has no head at all.
+    (SDM'12 §3). Both persist within an episode, so like the single-cascade LT head
+    this predicts each campaign's conditional HAZARD, not its marginal: per
+    campaign, survival means theta > f(previous active set), and the previous set
+    is `infected - frontier` in that campaign's own channels. The two thresholds
+    are independent, so the per-campaign hazards compose through the tie-break
+    exactly as the IC probabilities do.
 
-        f^N_v, f^P_v = each cascade's active in-neighbour weight fraction
-        p^N_new(v)  = [f^N_v > 0] * sigmoid(tau * (f^N_v - theta^N_v))
-        p^P_new(v)  = [f^P_v > 0] * sigmoid(tau * (f^P_v - theta^P_v))
+        f^C_v, f^C_prev_v = campaign C's active in-neighbour weight fraction,
+                            now and over its previous active set
+        F^C(x)            = sigmoid(tau * (x - theta^C_v)), or identity (oracle)
+        h^C(v)            = [f^C_v > 0] * (F^C(f^C_v) - F^C(f^C_prev_v))+
+                            / (1 - F^C(f^C_prev_v))
+
+    `oracle=True` pins both CDFs to the identity: exact in DISTRIBUTION under the
+    U(0,1) thresholds. Under FIXED dominance the oracle uses gamma = 0.5, the
+    marginal over the hidden per-node priority coin.
     """
 
     def __init__(
@@ -528,10 +571,12 @@ class CompetitiveLTHead(nn.Module):
         hidden_dim: int,
         tie_break: str = negative_dominance,
         remove_semantics: str = blocked,
+        oracle: bool = False,
     ) -> None:
         super().__init__()
         self.tie_break = tie_break
         self.remove_semantics = remove_semantics
+        self.oracle = oracle
         self.theta_negative = nn.Linear(hidden_dim, 1)
         self.theta_positive = nn.Linear(hidden_dim, 1)
         self.log_tau = nn.Parameter(torch.zeros(1))
@@ -556,39 +601,73 @@ class CompetitiveLTHead(nn.Module):
         )
         susceptible = (1.0 - negative_infected) * (1.0 - positive_infected)
 
+        # What each campaign's thresholds were last survived AGAINST: the raw
+        # pre-action channels minus that campaign's frontier. A blocked node's
+        # historical contribution to its neighbours' fractions stays, which is
+        # the conditioning truth
+        previous_negative = torch.clamp(
+            X[:, ch_neg_infected] - X[:, ch_neg_frontier], min=0.0
+        )
+        previous_positive = torch.clamp(
+            X[:, ch_pos_infected] - X[:, ch_pos_frontier], min=0.0
+        )
+
         edge_index, edge_weight = graph.edge_index, graph.edge_weight
 
         if edge_index.numel() == 0:
             zeros = torch.zeros(num_nodes, device=hidden.device)
             negative_fraction = positive_fraction = zeros
+            previous_negative_fraction = previous_positive_fraction = zeros
         else:
             sources, destinations = edge_index[0], edge_index[1]
             total = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
                 0, destinations, edge_weight
             )
-            negative_weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
-                0, destinations, negative_infected[sources] * edge_weight
-            )
-            positive_weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
-                0, destinations, positive_infected[sources] * edge_weight
-            )
             safe_total = total.clamp(min=prob_epsilon)
-            negative_fraction = negative_weight / safe_total
-            positive_fraction = positive_weight / safe_total
+
+            def fraction(mask: torch.Tensor) -> torch.Tensor:
+                weight = torch.zeros(num_nodes, device=hidden.device).scatter_add_(
+                    0, destinations, mask[sources] * edge_weight
+                )
+                return weight / safe_total
+
+            negative_fraction = fraction(negative_infected)
+            positive_fraction = fraction(positive_infected)
+            previous_negative_fraction = fraction(previous_negative)
+            previous_positive_fraction = fraction(previous_positive)
 
         tau = F.softplus(self.log_tau)
-        p_negative = (negative_fraction > 0).to(negative_fraction.dtype) * torch.sigmoid(
-            tau * (negative_fraction - torch.sigmoid(self.theta_negative(hidden).squeeze(dim=-1)))
+
+        def hazard(
+            now: torch.Tensor, previous: torch.Tensor, theta: nn.Linear
+        ) -> torch.Tensor:
+            if self.oracle:
+                cdf_now, cdf_prev = now.clamp(0.0, 1.0), previous.clamp(0.0, 1.0)
+            else:
+                theta_hat = torch.sigmoid(theta(hidden).squeeze(dim=-1))
+                cdf_now = torch.sigmoid(tau * (now - theta_hat))
+                cdf_prev = torch.sigmoid(tau * (previous - theta_hat))
+
+            gate = (now > 0).to(now.dtype)
+            return gate * (
+                (cdf_now - cdf_prev).clamp(min=0.0)
+                / (1.0 - cdf_prev).clamp(min=prob_epsilon)
+            ).clamp(max=1.0)
+
+        p_negative = hazard(
+            negative_fraction, previous_negative_fraction, self.theta_negative
         )
-        p_positive = (positive_fraction > 0).to(positive_fraction.dtype) * torch.sigmoid(
-            tau * (positive_fraction - torch.sigmoid(self.theta_positive(hidden).squeeze(dim=-1)))
+        p_positive = hazard(
+            positive_fraction, previous_positive_fraction, self.theta_positive
         )
 
-        priority = (
-            torch.sigmoid(self.gamma(hidden).squeeze(dim=-1))
-            if self.gamma is not None
-            else None
-        )
+        if self.gamma is None:
+            priority = None
+        elif self.oracle:
+            # The hidden per-node priority coin is U(0,1); its marginal is 0.5
+            priority = torch.full_like(p_negative, 0.5)
+        else:
+            priority = torch.sigmoid(self.gamma(hidden).squeeze(dim=-1))
         p_new_negative, p_new_positive = _resolve_tie(
             p_negative, p_positive, self.tie_break, priority
         )
@@ -976,17 +1055,19 @@ class WorldModel(nn.Module):
                 )
 
             if diffusion_model == "LT":
-                if head_type != "structured":
+                if head_type not in ("structured", "structured_oracle"):
                     raise ValueError(
                         f"--head {head_type} is IC-only; CLT carries no per-edge "
                         f"transmission probability to anchor on. Use "
-                        f"--head structured with --diffusion-model LT."
+                        f"--head structured (or structured_oracle) with "
+                        f"--diffusion-model LT."
                     )
 
                 self.head = CompetitiveLTHead(
                     hidden_dim,
                     tie_break=self.tie_break,
                     remove_semantics=remove_semantics,
+                    oracle=head_type == "structured_oracle",
                 )
             else:
                 self.head = CompetitiveICHead(
@@ -1016,9 +1097,15 @@ class WorldModel(nn.Module):
                 hidden_dim, residual=True, remove_semantics=remove_semantics
             )
         elif head_type == "structured_oracle":
-            # Oracle is IC-only (LT thresholds are not stored, so no oracle there)
-            self.head = ICTransmissionHead(
-                hidden_dim, oracle=True, remove_semantics=remove_semantics
+            # Both are exact DISTRIBUTION oracles: IC pins q = w, LT pins the
+            # closed-form threshold hazard (the realized LT trajectory stays
+            # unrecoverable, since its thresholds are never stored)
+            self.head = (
+                LTThresholdHead(hidden_dim, oracle=True)
+                if diffusion_model == "LT"
+                else ICTransmissionHead(
+                    hidden_dim, oracle=True, remove_semantics=remove_semantics
+                )
             )
         elif head_type == "linear":
             # Free head: each node embedding -> 2 logits [next_infected, next_frontier]

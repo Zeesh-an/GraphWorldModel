@@ -1542,6 +1542,87 @@ def _world_model_section(
     return lines
 
 
+def _stage_timings(layout: Layout, agent_results: list[dict]) -> list[str]:
+    """Per-stage wall time from pipeline.json, and the total the run cost so far.
+
+    The agent stage is split from the per-arm `elapsed_seconds`: baseline rows
+    (conditions 1 and 7) against our method arms (conditions 2-6 and 8), with
+    whatever the stage spent outside any arm shown as overhead.
+    """
+    if not layout.manifest_path.exists():
+        return []
+
+    stages = json.loads(layout.manifest_path.read_text()).get("stages") or {}
+    if not stages:
+        return []
+
+    lines = [
+        "## Stage Timings",
+        "",
+        "| Stage | Status | Time |",
+        "| --- | --- | --- |",
+    ]
+    total = 0.0
+    for stage, entry in stages.items():
+        seconds = entry.get("seconds")
+        if seconds is not None:
+            total += float(seconds)
+        rendered = "" if seconds is None else f"{float(seconds):,.1f} s"
+        lines.append(f"| {stage} | {entry.get('status')} | {rendered} |")
+
+        if stage == "agent" and seconds is not None and agent_results:
+            # A published repo's own selection (DeepIM trains for hours) is
+            # recorded beside our referee-side elapsed, not inside it
+            baseline_seconds = sum(
+                float(result.get("elapsed_seconds") or 0.0)
+                + float((result.get("external") or {}).get("selection_seconds") or 0.0)
+                for result in agent_results
+                if result.get("condition") in (1, 7)
+            )
+            method_seconds = sum(
+                float(result.get("elapsed_seconds") or 0.0)
+                for result in agent_results
+                if result.get("condition") not in (1, 7)
+            )
+            skipped_seconds = 0.0
+            for marker in layout.baselines_dir.glob("*/*.skipped.json"):
+                skipped_seconds += float(
+                    json.loads(marker.read_text()).get("seconds") or 0.0
+                )
+            overhead = (
+                float(seconds) - baseline_seconds - method_seconds - skipped_seconds
+            )
+            lines.append(
+                f"| &nbsp;&nbsp;baselines (conditions 1, 7, incl. external "
+                f"selection) | | {baseline_seconds:,.1f} s |"
+            )
+            lines.append(
+                f"| &nbsp;&nbsp;our arms (conditions 2-6, 8) | | "
+                f"{method_seconds:,.1f} s |"
+            )
+            if skipped_seconds > 1.0:
+                lines.append(
+                    f"| &nbsp;&nbsp;failed baseline attempts | | "
+                    f"{skipped_seconds:,.1f} s |"
+                )
+            if overhead > 1.0:
+                lines.append(
+                    f"| &nbsp;&nbsp;stage overhead | | {overhead:,.1f} s |"
+                )
+
+    hours = total / 3600.0
+    lines += [
+        "",
+        f"**Total recorded: {total:,.1f} s ({hours:.2f} h).** The report stage is "
+        "still running when this file is written, so its own time is excluded; a "
+        "resumed run's total sums every stage recorded in `pipeline.json` across "
+        "submissions, not wall-clock between them.",
+        "",
+    ]
+
+    return lines
+
+
 def _figures_section(plots_dir: Path, report_parent: Path) -> list[str]:
     figures = sorted(plots_dir.glob("*.png"))
     if not figures:
@@ -1596,6 +1677,7 @@ def write_report(
     lines += _structural_section(agent_results)
     lines += _winner_section(agent_results)
     lines += _world_model_section(wm_results, metadata, agent_results)
+    lines += _stage_timings(layout, agent_results)
     lines += _figures_section(layout.plots_dir, layout.root)
 
     layout.report_path.write_text("\n".join(lines))

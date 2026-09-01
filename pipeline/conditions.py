@@ -179,6 +179,9 @@ class Arm:
     baseline: str | None = None
     routing: bool = False
     external: str | None = None  # registered name in baselines/registry.py
+    # Set when --llm-models fans one arm out across several models; None = the
+    # run's single --llm-model. Part of `name`, so each model keeps its own row
+    llm_model: str | None = None
 
     @property
     def condition_name(self) -> str:
@@ -525,3 +528,32 @@ def adaptivity_gaps(results: list[dict]) -> list[dict]:
         )
 
     return sorted(paired, key=lambda entry: (entry["budget"] or 0, entry["evaluator"]))
+
+
+def expand_llm_models(arms: list[Arm], models: tuple) -> list[Arm]:
+    """
+    One row per (LLM-driven arm, model): the multi-model comparison axis.
+
+    Only arms whose loop actually calls an LLM fan out: the synthesis conditions
+    (3-6) and the routing condition (2). Baselines, external repos, and the two
+    fixed numerical procedures (`gradient`, `decode`) run once regardless, since
+    a model name changes nothing about them.
+    """
+    from dataclasses import replace
+
+    expanded = []
+    for arm in arms:
+        if arm.is_agent or arm.routing:
+            expanded += [
+                replace(
+                    arm,
+                    name=f"{arm.name}+{model}",
+                    spec=f"{arm.spec}+{model}",
+                    llm_model=model,
+                )
+                for model in models
+            ]
+        else:
+            expanded.append(arm)
+
+    return expanded

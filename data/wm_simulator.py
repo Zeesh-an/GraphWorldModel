@@ -346,6 +346,10 @@ class Simulator:
 
         self.graph = graph
         self.ic_prob_map = ic_prob_map
+        # The last step's realized frontier: A_{t-1} = active - last_frontier is
+        # what an LT node last survived a threshold check against, the
+        # conditioning of the closed-form hazard targets below
+        self.last_frontier = set()
         self.rng = np.random.default_rng(seed)
         self.seed = seed
         self.remove_semantics = remove_semantics
@@ -363,6 +367,8 @@ class Simulator:
     def reset(
         self, model_name: str, lt_thresholds: dict[int, float] | None = None
     ) -> None:
+        # A fresh episode draws fresh thresholds: nothing has been survived yet
+        self.last_frontier = set()
         self.model_name = model_name
         self.blocked = set()
         self.last_parents = {}
@@ -555,6 +561,8 @@ class Simulator:
             # LT frontier = active - previous_active (the nodes that newly flipped this step)
             frontier = active - previous_active
 
+        self.last_frontier = set(frontier)
+
         return State(infected=sorted(active), frontier=sorted(frontier))
 
     def advance_marginal(
@@ -566,7 +574,11 @@ class Simulator:
 
         # T_exo (action) is deterministic, so it is applied once
         previous_active = self.active_nodes()
+        # Captured BEFORE this step overwrites it: A_{t-1} = previous_active minus
+        # this, the set LT nodes last survived a threshold check against
+        prior_frontier = set(self.last_frontier)
         self.apply_actions(bag)  # edge/graph mutations persist across draws
+        post_active = self.active_nodes()  # after T_exo, what propagates this step
         post_action = self.snapshot()  # status after the action, before diffusion
 
         # IC is stochastic, while LT is deterministic, so only 1 run is needed for LT
@@ -605,15 +617,67 @@ class Simulator:
             # recorded here are the parents of the state actually written
             self._record_parents(bag)
 
-        # Averaging across Monte Carlo runs turns the target into the true probability
-        infected_marginal = {
-            int(node): count / draws for node, count in infected_counts.items()
-        }
-        frontier_marginal = {
-            int(node): count / draws for node, count in frontier_counts.items()
-        }
+        if self.model_name == "IC":
+            # Averaging across Monte Carlo runs turns the target into the true probability
+            infected_marginal = {
+                int(node): count / draws for node, count in infected_counts.items()
+            }
+            frontier_marginal = {
+                int(node): count / draws for node, count in frontier_counts.items()
+            }
+        else:
+            # LT's exact conditional law, no sampling: an inactive node survived
+            # theta > f(A_{t-1}), so P(activate now) = (f_t - f_prev)+ / (1 - f_prev).
+            # The realized draw above stays the trajectory; these are the targets.
+            # A `spent`-removed node re-enters with a two-sided theta posterior this
+            # formula does not carry; it is treated as a fresh survivor, the one
+            # approximation here
+            infected_marginal, frontier_marginal = self._lt_hazard_marginals(
+                previous_active - prior_frontier, post_active
+            )
+
+        self.last_frontier = set(last_state.frontier)
 
         return last_state, infected_marginal, frontier_marginal
+
+    def _lt_hazard_marginals(
+        self, survived_against: set, post_active: set
+    ) -> tuple[dict, dict]:
+        """Closed-form one-step LT marginals: hazard for susceptibles, 1 for active."""
+        infected_marginal, frontier_marginal = {}, {}
+        directed = self.graph.is_directed()
+
+        for node in self.model.graph.graph.nodes():
+            node = int(node)
+            if node in self.blocked:
+                continue
+
+            if node in post_active:
+                infected_marginal[node] = 1.0
+                # Newly active relative to the PRE-ACTION state is what the
+                # frontier label counts, so an action-seeded node is frontier
+                if node not in survived_against and node not in self.last_frontier:
+                    frontier_marginal[node] = 1.0
+                continue
+
+            neighbors = (
+                list(self.model.graph.graph.predecessors(node))
+                if directed
+                else list(self.model.graph.graph.neighbors(node))
+            )
+            if not neighbors:
+                continue
+
+            degree = float(len(neighbors))
+            f_now = sum(1 for u in neighbors if int(u) in post_active) / degree
+            f_prev = sum(1 for u in neighbors if int(u) in survived_against) / degree
+            hazard = max(0.0, f_now - f_prev) / max(1e-9, 1.0 - f_prev)
+
+            if hazard > 0.0:
+                infected_marginal[node] = hazard
+                frontier_marginal[node] = hazard
+
+        return infected_marginal, frontier_marginal
 
     def revert_edges(self, bag: list[ActionOp]) -> None:
         """
@@ -680,6 +744,7 @@ class Simulator:
             else:
                 self.model.status[node] = 0
 
+        self.last_frontier = wave
         self._enforce_blocked()
 
     def snapshot(self) -> tuple[dict, int, set]:
@@ -689,10 +754,12 @@ class Simulator:
             dict(self.model.status),
             int(self.model.actual_iteration),
             set(self.blocked),
+            set(self.last_frontier),
         )
 
-    def restore(self, snapshot: tuple[dict, int, set]) -> None:
-        status, actual_iteration, blocked_nodes = snapshot
+    def restore(self, snapshot: tuple) -> None:
+        status, actual_iteration, blocked_nodes, last_frontier = snapshot
         self.model.status = dict(status)
         self.model.actual_iteration = actual_iteration
         self.blocked = set(blocked_nodes)
+        self.last_frontier = set(last_frontier)

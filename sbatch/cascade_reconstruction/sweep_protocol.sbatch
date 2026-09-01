@@ -106,10 +106,6 @@ run_axis tree_weight_09 CR_SETTING=partial_times CR_TREE_WEIGHT=0.9 DIFFUSION_MO
 #    its path precision is structurally easier than IC's. The two are never
 #    compared (§2.6); this row exists so the difference is measured rather than
 #    assumed
-#    No @oracle arm under LT: the analytic oracle is IC-only (thresholds are drawn
-#    per episode and never stored), and the pipeline refuses the pairing up front,
-#    so the MC arm is the LT ceiling here
-run_axis dynamics_lt CR_SETTING=partial_times DIFFUSION_MODEL=LT \
-    ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@world_model decode_free@world_model"
+run_axis dynamics_lt CR_SETTING=partial_times DIFFUSION_MODEL=LT
 
 echo "[cr_protocol] done -> results/cascade_reconstruction/$DATASET/"

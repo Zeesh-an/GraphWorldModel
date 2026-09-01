@@ -89,12 +89,6 @@ if __name__ == "__main__":
             / f"oracle_{args.diffusion_model}.json"
         )
 
-    if args.diffusion_model != "IC":
-        raise ValueError(
-            "the oracle is IC-only: LT thresholds are not stored, so there is no true-parameter "
-            "oracle for LT. Validate the LT structured head via the ensemble rollout instead."
-        )
-
     device = torch.device(args.device)
 
     model = WorldModel(
@@ -103,6 +97,7 @@ if __name__ == "__main__":
         hidden_dim=args.hidden_dim,
         n_layers=args.n_layers,
         head_type="structured_oracle",
+        diffusion_model=args.diffusion_model,
         remove_semantics=args.remove_semantics,
     ).to(device)
 

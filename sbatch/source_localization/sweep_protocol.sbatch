@@ -95,10 +95,6 @@ run_axis source_fraction \
 
 # 4. Dynamics transfer. Each axis is its own run, so its data stage generates
 #    both dynamics again and only the LT file is read
-#    No @oracle arm under LT: the analytic oracle is IC-only (thresholds are drawn
-#    per episode and never stored), and the pipeline refuses the pairing up front,
-#    so the MC arm is the LT ceiling here
-run_axis dynamics_lt DIFFUSION_MODEL=LT \
-    ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@world_model gradient_free@world_model"
+run_axis dynamics_lt DIFFUSION_MODEL=LT
 
 echo "[sl_protocol] done -> results/source_localization/$DATASET/"
