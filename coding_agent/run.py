@@ -1651,6 +1651,11 @@ class Baseline(Strategy):
         ),
     }
 
+    # The selection-split number, kept beside the held-out one the three inverse
+    # families overwrite `reward` with below: condition 9's fitness scorer
+    # (baselines/score_program.py) reads this and never the held-out split
+    result["selection_reward"] = trajectory.reward
+
     # Sense first, because everything downstream that picks a winner needs it and
     # the per-arm JSON is read standalone by plots/report/summary
     result["objective"] = task.sense

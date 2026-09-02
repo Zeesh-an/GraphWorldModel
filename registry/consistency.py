@@ -286,7 +286,14 @@ def _check_task_default_baselines(report: ConsistencyReport) -> None:
 
 def _check_external_baseline_tasks(report: ConsistencyReport) -> None:
     """An external baseline must name a registered, runnable task."""
+    from baselines.discovery import any_task
+
     for name, baseline in BASELINE_REGISTRY.items():
+        # A condition-9 discovery system serves every task by construction: its
+        # problem is written per run from the task's own contract
+        if baseline.task == any_task:
+            continue
+
         task = TASK_REGISTRY.get(baseline.task)
 
         if task is None:

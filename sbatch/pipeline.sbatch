@@ -127,6 +127,8 @@
 #
 #   DATASET=netscience ARMS=none BASELINES=all-classical ./sbatch/pipeline.sbatch
 #   DATASET=netscience ARMS=none BASELINES=all-external  ./sbatch/pipeline.sbatch
+#   Condition 9, the published LLM algorithm-discovery systems (hours each):
+#   DATASET=netscience ARMS=none BASELINES=all-discovery ./sbatch/pipeline.sbatch
 #
 # Install the external repos first (once per machine):
 #   python -m baselines.setup_baselines --all

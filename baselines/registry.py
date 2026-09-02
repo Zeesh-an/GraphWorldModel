@@ -37,6 +37,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 import networkx as nx
 
+from baselines.discovery import adapters as discovery_adapters
+from baselines.discovery import any_task, discovery, launch_command
+
 # ABSOLUTE, anchored on this file. Every external baseline is launched with
 # cwd set to its own repo directory, and POSIX resolves a relative argv[0] or
 # interpreter path against that cwd, so a relative root silently becomes
@@ -150,6 +153,14 @@ class ExternalBaseline:
     command: object = None
     # (work_dir, stdout, budget) -> list[int]
     parse_seeds: object = None
+    # (work_dir, stdout) -> (program source, info dict): the condition-9 contract,
+    # where the artefact crossing the boundary is a PROGRAM rather than a set
+    # (baselines/discovery.py). Set instead of parse_seeds, never beside it.
+    parse_program: object = None
+    # Floor on the subprocess timeout. A discovery loop at its published defaults
+    # runs for hours, and --baseline-timeout's 3600 s default would kill it mid-run
+    # in a way that looks like a weak method rather than a short clock.
+    timeout: int | None = None
     # Extra packages to pip-install into the venv, for a library published on
     # PyPI rather than driven from its clone (GraphSL, cosasi). Installed after
     # `requirements`, so a repo can use both.
@@ -184,6 +195,10 @@ class ExternalBaseline:
 
     def installed(self) -> bool:
         return self.root.exists() and any(self.root.iterdir())
+
+    def serves(self, task: str) -> bool:
+        """Whether this entry belongs in `task`'s sweep; `any_task` entries serve all eight."""
+        return self.task == any_task or self.task == task
 
     @property
     def wired(self) -> bool:
@@ -6298,7 +6313,7 @@ def available_baselines(
         if spec.status != "blocked"
         and spec.wired
         and (kind is None or spec.kind == kind)
-        and (task is None or spec.task == task)
+        and (task is None or spec.serves(task))
     )
 
 
@@ -6314,7 +6329,7 @@ def runnable_baselines(task: str | None = None) -> list[str]:
 def baselines_for_task(task: str) -> list[str]:
     """Every registered baseline for one task, blocked ones included."""
     return sorted(
-        name for name, spec in external_baselines.items() if spec.task == task
+        name for name, spec in external_baselines.items() if spec.serves(task)
     )
 
 
@@ -6325,3 +6340,264 @@ def unwired_baselines() -> list[str]:
         for name, spec in external_baselines.items()
         if spec.status != "blocked" and not spec.wired
     )
+
+
+# Condition 9: published LLM algorithm-discovery systems ------------------------------
+#
+# Each of these runs its OWN search loop, prompts and defaults against a problem
+# we hand it (task statement, initial program, fitness subprocess); see
+# baselines/discovery.py. They serve every task, so `task` is `any_task` and the
+# per-task filter goes through `serves()`.
+
+discovery_default_timeout = 6 * 3600
+
+
+def _discovery_entry(
+    name: str,
+    title: str,
+    venue: str,
+    repo: str,
+    paper: str,
+    entry: str,
+    python: str = "3.11",
+    requirements: str | None = None,
+    pip_packages: tuple = (),
+    patches: list | None = None,
+    install_name: str | None = None,
+    timeout: int = discovery_default_timeout,
+    status: str = "needs_setup",
+    blocker: str | None = None,
+    notes: str = "",
+) -> ExternalBaseline:
+    export, parse = discovery_adapters.get(name, (None, None))
+
+    return ExternalBaseline(
+        name=name,
+        kind=discovery,
+        title=title,
+        venue=venue,
+        repo=repo,
+        paper=paper,
+        entry=entry,
+        task=any_task,
+        status=status,
+        blocker=blocker,
+        python=python,
+        requirements=requirements,
+        pip_packages=pip_packages,
+        patches=patches,
+        install_name=install_name,
+        export=export,
+        command=launch_command if export is not None else None,
+        parse_program=parse,
+        timeout=timeout,
+        notes=notes,
+    )
+
+
+external_baselines |= {
+    "openevolve": _discovery_entry(
+        "openevolve",
+        "OpenEvolve: an open-source evolutionary coding agent (AlphaEvolve reimplementation)",
+        "GitHub 2025, software citation (Sharma), Apache-2.0",
+        "https://github.com/algorithmicsuperintelligence/openevolve",
+        "https://github.com/algorithmicsuperintelligence/openevolve",
+        "openevolve-run.py",
+        pip_packages=("-e", str(external_root / "openevolve"), "pyyaml"),
+        notes=(
+            "Whole-file SEARCH/REPLACE evolution over a MAP-Elites island archive at "
+            "its shipped defaults (100 iterations). The EVOLVE-BLOCK markers are a "
+            "prompt convention only, so the evaluator guards the contract function "
+            "itself. Model names starting gpt-5 are sniffed as reasoning models and "
+            "lose temperature, which is the framework's own rule."
+        ),
+    ),
+    "codeevolve": _discovery_entry(
+        "codeevolve",
+        "CodeEvolve: an open source evolutionary coding agent for algorithmic discovery and optimization",
+        "EMNLP 2026 Findings (arXiv 2510.14150), Apache-2.0",
+        "https://github.com/inter-co/science-codeevolve",
+        "https://arxiv.org/abs/2510.14150",
+        "codeevolve CLI",
+        python="3.13",
+        pip_packages=("-e", str(external_root / "codeevolve"), "pyyaml"),
+        notes=(
+            "One process per island, strict EVOLVE-BLOCK diffs, meta-prompting and "
+            "CVT-MAP-Elites at the shipped template's defaults (50 epochs, 3 "
+            "islands). Its evaluation cap is wall-clock AND CPU time summed over the "
+            "process tree, so the launcher pins BLAS to one thread."
+        ),
+    ),
+    "llamea": _discovery_entry(
+        "llamea",
+        "LLaMEA: A Large Language Model Evolutionary Algorithm for Automatically Generating Metaheuristics",
+        "IEEE TEVC 2025 (arXiv 2405.20132), MIT",
+        "https://github.com/XAI-liacs/LLaMEA",
+        "https://arxiv.org/abs/2405.20132",
+        "llamea.LLaMEA",
+        pip_packages=("-e", str(external_root / "llamea"),),
+        notes=(
+            "(mu+lambda) evolution strategy over whole programs at the constructor "
+            "defaults (5+5, 100 evaluations). It executes nothing itself: our "
+            "evaluation callable scores the program through the shared subprocess."
+        ),
+    ),
+    "eoh": _discovery_entry(
+        "eoh",
+        "Evolution of Heuristics: Towards Efficient Automatic Algorithm Design Using Large Language Model",
+        "ICML 2024 oral (arXiv 2401.02051), MIT",
+        "https://github.com/FeiLiu36/EoH",
+        "https://arxiv.org/abs/2401.02051",
+        "eoh.EoH (the v0.2 EoH/LLMConfig/BaseProblem API)",
+        pip_packages=("-e", str(external_root / "eoh" / "eoh"), "networkx"),
+        notes=(
+            "Five prompt operators over one function at the library defaults "
+            "(pop_size 5, n_pop 20). Its HTTP client speaks only to "
+            "https://<host>/v1/chat/completions, which is the gateway's exact shape. "
+            "networkx is installed because it execs the template's imports in its "
+            "own subprocess before handing the code to our scorer."
+        ),
+    ),
+    "reevo": _discovery_entry(
+        "reevo",
+        "ReEvo: Large Language Models as Hyper-Heuristics with Reflective Evolution",
+        "NeurIPS 2024 (arXiv 2402.01145), MIT",
+        "https://github.com/ai4co/reevo",
+        "https://arxiv.org/abs/2402.01145",
+        "main.py (hydra)",
+        python="3.12",
+        pip_packages=("-e", str(external_root / "reevo"),),
+        patches=[
+            # The initial population is requested as ONE call with n=init_pop_size
+            # whenever the model name contains "gpt". The gateway returns a single
+            # choice for n > 1 with no error (measured), so the population would
+            # collapse to one individual and selection would raise. The other
+            # branch already replicates the request n times; take it always.
+            (
+                "utils/llm_client/base.py",
+                'if "gpt" not in self.model:',
+                "if True:  # patched by baselines/registry.py: the gateway ignores n > 1",
+            ),
+        ],
+        notes=(
+            "Reflective evolution over one function inside a fixed eval.py harness "
+            "at cfg/config.yaml defaults (max_fe 100, pop_size 10, init_pop_size "
+            "30). The problem is written INTO the checkout under a run-unique name "
+            "because the loop rewrites problems/<name>/gpt.py per candidate."
+        ),
+    ),
+    "mcts_ahd": _discovery_entry(
+        "mcts_ahd",
+        "Monte Carlo Tree Search for Comprehensive Exploration in LLM-Based Automatic Heuristic Design",
+        "ICML 2025 (arXiv 2501.08603), MIT",
+        "https://github.com/zz1358m/MCTS-AHD-master",
+        "https://arxiv.org/abs/2501.08603",
+        "main.py (hydra)",
+        pip_packages=(
+            "hydra-core",
+            "omegaconf",
+            "openai",
+            "numpy",
+            "scipy",
+            "joblib",
+            "tqdm",
+        ),
+        timeout=12 * 3600,
+        notes=(
+            "UCT tree with progressive widening and thought alignment over EoH's "
+            "operators at cfg/config.yaml defaults (max_fe 1000). Its pinned "
+            "requirements.txt pulls torch and botorch for one shipped problem; the "
+            "loop itself needs only the packages listed here. Its extractor keeps "
+            "`import ... return` and appends ` result`, so the task text asks for a "
+            "program that opens with an import and ends with `return result`."
+        ),
+    ),
+    "llm4ad_funsearch": _discovery_entry(
+        "llm4ad_funsearch",
+        "FunSearch (DeepMind's ProgramsDatabase), as ported by the LLM4AD platform",
+        "Nature 2024; port in LLM4AD (arXiv 2412.17287), BSD",
+        "https://github.com/Optima-CityU/llm4ad",
+        "https://arxiv.org/abs/2412.17287",
+        "llm4ad.method.funsearch.FunSearch",
+        pip_packages=("numpy<2", "scipy", "openai", "pytz", "tqdm", "requests", "networkx"),
+        install_name="llm4ad",
+        notes=(
+            "The only runnable FunSearch: DeepMind released the database and no "
+            "sampler, so the sampler and sandbox are LLM4AD's. Constructor defaults "
+            "(max_sample_nums 20, 4 samplers, 4 evaluators, 4 samples per prompt). "
+            "LLM4AD's own ports of EoH, ReEvo and MCTS-AHD are NOT used: those run "
+            "from their authors' repos."
+        ),
+    ),
+    "llm4ad_hillclimb": _discovery_entry(
+        "llm4ad_hillclimb",
+        "HillClimb: the (1+1)-EPS reference implementation in LLM4AD",
+        "PPSN 2024; LLM4AD platform (arXiv 2412.17287), BSD",
+        "https://github.com/Optima-CityU/llm4ad",
+        "https://arxiv.org/abs/2412.17287",
+        "llm4ad.method.hillclimb.HillClimb",
+        pip_packages=("numpy<2", "scipy", "openai", "pytz", "tqdm", "requests", "networkx"),
+        install_name="llm4ad",
+        notes="Shares the llm4ad clone and venv. Constructor defaults (max_sample_nums 20).",
+    ),
+    "deepevolve": _discovery_entry(
+        "deepevolve",
+        "DeepEvolve: Scientific Algorithm Discovery by Augmenting AlphaEvolve with Deep Research",
+        "arXiv preprint 2510.06056 (Oct 2025), NO LICENSE FILE",
+        "https://github.com/liugangcode/deepevolve",
+        "https://arxiv.org/abs/2510.06056",
+        "deepevolve.py (hydra)",
+        requirements="requirements-mini.txt",
+        pip_packages=("networkx",),
+        timeout=12 * 3600,
+        notes=(
+            "OpenEvolve's database behind an OpenAI-Agents research loop with HOSTED "
+            "web search, so its rows carry retrieval the other frameworks do not "
+            "have. The gateway serves the Responses API, executes web_search and "
+            "honours strict JSON schema (measured 2026-09-01), so it runs at full "
+            "fidelity with every agent role on the run's model. Its requirements.txt "
+            "pins `agents==1.4.0`, which is TensorFlow's RL library, so "
+            "requirements-mini.txt is installed instead. Repo has no license."
+        ),
+    ),
+    "llm4ad_next": _discovery_entry(
+        "llm4ad_next",
+        "LLM4AD_Next (OpenLoopX)",
+        "GitHub 2026, no paper, BSD-3",
+        "https://github.com/Optima-CityU/LLM4AD_Next",
+        "https://github.com/Optima-CityU/LLM4AD_Next",
+        "llm4ad run",
+        python="3.12",
+        status="blocked",
+        blocker=(
+            "not the original implementation of any method it names: its EoH, "
+            "ReEvo and MCTS-AHD were migrated with rewritten prompts (a repository-"
+            "context prefix and a JSON contract), a second coder LLM call that "
+            "re-derives the code from the operator's description and discards the "
+            "operator's code, ReEvo reflections over descriptions and scores "
+            "instead of code pairs, and MCTS-AHD without progressive widening or "
+            "thought alignment. FunSearch, HillClimb and LLaMEA are still pending "
+            "there. Verified by reading src/llm4ad/planner and src/llm4ad/"
+            "orchestrator on 2026-09-01."
+        ),
+    ),
+    "gs4co": _discovery_entry(
+        "gs4co",
+        "GS4CO: Towards General Algorithm Discovery for Combinatorial Optimization: Learning Symbolic Branching Policy from Bipartite Graph",
+        "ICML 2024 (PMLR 235), no license",
+        "https://github.com/MIRALab-USTC/L2O-GS4CO",
+        "https://proceedings.mlr.press/v235/kuang24a.html",
+        "03_train_gs4co.py",
+        python="3.9",
+        status="blocked",
+        blocker=(
+            "not an LLM algorithm-discovery method: PPO-trained symbolic regression "
+            "of a branching score over solver-state features inside a patched SCIP "
+            "6.0.1, rewarded by imitation of strong branching on four MILP "
+            "families. Its output is a closed-form expression, not a program; none "
+            "of our simulator-scored objectives is a MILP objective; and it needs "
+            "from-source builds of the authors' SCIP and PySCIPOpt forks plus "
+            "torch==2.3.0 with torch-scatter. Related work, not a baseline."
+        ),
+    ),
+}

@@ -86,6 +86,7 @@ routing_condition = 2
 evaluator_conditions = {native: 3, monte_carlo: 4, oracle: 5, world_model: 6}
 external_condition = 7
 ablation_condition = 8
+discovery_condition = 9
 
 condition_names = {
     1: "Pure GA",
@@ -101,6 +102,12 @@ condition_names = {
     # (SL-VAE's own procedure); cascade reconstruction's is Metropolis-Hastings
     # over histories (DITTO's). The name is generic because the cell is.
     8: "Ablation: per-instance inversion of a frozen GWM",
+    # Published LLM algorithm-discovery systems (OpenEvolve, EoH, ReEvo, ...) run
+    # at their own defaults with our simulator as the only fitness: the same
+    # "their code, our referee" rule as condition 7, for a PROGRAM instead of a
+    # set. Its own cell rather than 7 so the table reads seed-set methods and
+    # search loops apart.
+    9: "Published LLM algorithm discovery (external repo)",
 }
 
 # Conditions 1 and 2 have no refinement loop, so their evaluator only decides how
@@ -212,6 +219,23 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
     if separator and explicit not in valid_evaluators:
         raise ValueError(
             f"arm {spec!r} names evaluator {explicit!r}; choose one of {valid_evaluators}"
+        )
+
+    # A published algorithm-DISCOVERY system hands back a program; the pipeline
+    # wraps it as a canned Strategy and scores it exactly like a seed set
+    if body.startswith("discovery:"):
+        name = body.split(":", 1)[1]
+        if not name:
+            raise ValueError(f"arm {spec!r} is missing a name after 'discovery:'")
+
+        return Arm(
+            spec=spec,
+            name=f"discovery_{name}",
+            method="one_shot",
+            strategy_mode="free",
+            evaluator=explicit or selection_evaluator,
+            condition=discovery_condition,
+            external=name,
         )
 
     # An external published method is scored on ground truth like the other
@@ -535,15 +559,15 @@ def expand_llm_models(arms: list[Arm], models: tuple) -> list[Arm]:
     One row per (LLM-driven arm, model): the multi-model comparison axis.
 
     Only arms whose loop actually calls an LLM fan out: the synthesis conditions
-    (3-6) and the routing condition (2). Baselines, external repos, and the two
-    fixed numerical procedures (`gradient`, `decode`) run once regardless, since
-    a model name changes nothing about them.
+    (3-6), the routing condition (2) and the discovery systems (9). Baselines,
+    seed-set external repos, and the two fixed numerical procedures (`gradient`,
+    `decode`) run once regardless, since a model name changes nothing about them.
     """
     from dataclasses import replace
 
     expanded = []
     for arm in arms:
-        if arm.is_agent or arm.routing:
+        if arm.is_agent or arm.routing or arm.condition == discovery_condition:
             expanded += [
                 replace(
                     arm,

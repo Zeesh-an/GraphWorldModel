@@ -42,6 +42,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from baselines.discovery import discovery, write_context
 from baselines.registry import external_baselines, negative_seeds_filename
 from coding_agent.types import GraphInfo
 from world_model.wm_data import load_graph_store
@@ -159,9 +160,15 @@ def run_external_baseline(
     batches: list[int] | None = None,
     instances: list | None = None,
     negative_seeds: tuple | None = None,
+    context: dict | None = None,
 ) -> dict:
     """
     Run one external repo and return the seed set it produced.
+
+    `context` is the condition-9 hand-off (baselines/discovery.py): the arm's own
+    ExperimentConfig plus the paths its fitness subprocess needs, written into
+    work_dir before export() runs so the framework's glue can find it. A
+    discovery entry returns the best PROGRAM under `"program"` instead of seeds.
 
     `instances` switches this to the INVERSE contract: the repo is handed a batch
     of observed diffusion states and returns one source set per observation,
@@ -229,6 +236,16 @@ def run_external_baseline(
             json.dumps([int(node) for node in negative_seeds])
         )
 
+    if context is not None:
+        write_context(work_dir, context)
+
+    if spec.timeout is not None and spec.timeout > timeout:
+        print(
+            f"[baseline:{name}] raising the timeout from {timeout}s to the entry's "
+            f"own floor of {spec.timeout}s: its published defaults run for hours"
+        )
+        timeout = spec.timeout
+
     start = time.perf_counter()
 
     # Everything below is third-party code and third-party file formats. ANY
@@ -278,6 +295,28 @@ def run_external_baseline(
             f"baseline {name!r} exited {completed.returncode}. Logs in {work_dir}. "
             f"output tail:\n{completed.stdout[-1500:]}"
         )
+
+    if spec.kind == discovery:
+        try:
+            program, info = spec.parse_program(work_dir, completed.stdout)
+        except Exception as error:
+            raise BaselineError(
+                f"baseline {name!r} ran but its best program could not be read "
+                f"({type(error).__name__}: {error}). Logs in {work_dir}."
+            ) from error
+
+        print(
+            f"[baseline:{name}] best program: {len(program.splitlines())} lines "
+            f"after {elapsed:.1f}s"
+        )
+
+        return {
+            "name": name,
+            "program": program,
+            "info": info,
+            "seconds": round(elapsed, 2),
+            "work_dir": str(work_dir),
+        }
 
     if instances is not None:
         # Three instance shapes now cross this boundary and all three carry an

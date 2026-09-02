@@ -119,6 +119,7 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
         6: "does the *learned* model recover the true dynamics?",
         7: "the original authors' code, seeds scored by our referee",
         8: "what program *search* buys over per-instance inversion of the same model",
+        9: "published LLM algorithm-discovery loops at their own defaults, our simulator as the only fitness",
     }
 
     lines = [
@@ -1546,7 +1547,7 @@ def _stage_timings(layout: Layout, agent_results: list[dict]) -> list[str]:
     """Per-stage wall time from pipeline.json, and the total the run cost so far.
 
     The agent stage is split from the per-arm `elapsed_seconds`: baseline rows
-    (conditions 1 and 7) against our method arms (conditions 2-6 and 8), with
+    (conditions 1, 7 and 9) against our method arms (conditions 2-6 and 8), with
     whatever the stage spent outside any arm shown as overhead.
     """
     if not layout.manifest_path.exists():
@@ -1577,12 +1578,12 @@ def _stage_timings(layout: Layout, agent_results: list[dict]) -> list[str]:
                 float(result.get("elapsed_seconds") or 0.0)
                 + float((result.get("external") or {}).get("selection_seconds") or 0.0)
                 for result in agent_results
-                if result.get("condition") in (1, 7)
+                if result.get("condition") in (1, 7, 9)
             )
             method_seconds = sum(
                 float(result.get("elapsed_seconds") or 0.0)
                 for result in agent_results
-                if result.get("condition") not in (1, 7)
+                if result.get("condition") not in (1, 7, 9)
             )
             skipped_seconds = 0.0
             for marker in layout.baselines_dir.glob("*/*.skipped.json"):
@@ -1593,7 +1594,7 @@ def _stage_timings(layout: Layout, agent_results: list[dict]) -> list[str]:
                 float(seconds) - baseline_seconds - method_seconds - skipped_seconds
             )
             lines.append(
-                f"| &nbsp;&nbsp;baselines (conditions 1, 7, incl. external "
+                f"| &nbsp;&nbsp;baselines (conditions 1, 7, 9, incl. external "
                 f"selection) | | {baseline_seconds:,.1f} s |"
             )
             lines.append(

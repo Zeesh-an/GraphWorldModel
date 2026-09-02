@@ -94,7 +94,14 @@ def test_every_implemented_task_has_a_simulated_dynamics():
 
 
 def test_every_external_baseline_targets_a_registered_task():
+    from baselines.discovery import any_task
+
     for name, baseline in BASELINE_REGISTRY.items():
+        # A condition-9 discovery system serves every task ("*") by construction
+        if baseline.task == any_task:
+            assert baseline.kind == "discovery", f"{name} serves every task but is {baseline.kind}"
+            continue
+
         assert baseline.task in TASK_REGISTRY, f"{name} -> unknown task {baseline.task}"
 
 

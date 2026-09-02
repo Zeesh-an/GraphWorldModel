@@ -474,3 +474,28 @@ GRES=gpu:1 MEM=64G TIME=48:00:00 \
 | `cascade_prediction`      | `msle`, with `n_failed` beside it                                           | `szabo_huberman`; `mean_size` is the real floor                                                                        | any arm below `trivial_predictor_error`                                                                                                                                                                                      |
 
 Every arm also prints `evaluator_calls` / `evaluator_seconds` and `real_env_episodes`. At `@oracle` the last should be small; the comparison that matters later is against `@monte_carlo`.
+
+## 8. Condition 9: published algorithm-discovery systems
+
+Nine LLM search loops (OpenEvolve, CodeEvolve, LLaMEA, EoH, ReEvo, MCTS-AHD, LLM4AD FunSearch and HillClimb, DeepEvolve) run at their published defaults with our Monte Carlo simulator as the only fitness, never the world model; the best program each finds is replayed on the referee like any other arm. Setup once (separate venvs, uv fetches Python 3.11 to 3.13 as needed):
+
+```bash
+cd ~/GraphWorldModel
+uv run python -m baselines.setup_baselines --only openevolve codeevolve llamea eoh reevo mcts_ahd llm4ad_funsearch deepevolve
+uv run python -m baselines.check_discovery --live eoh
+```
+
+Then the same IC and LT submissions as section 6, baselines only, discovery arms only. Each system is a full search per budget (hours for MCTS-AHD at max_fe 1000 and for DeepEvolve), so give the job a day:
+
+```bash
+TASK=influence_maximization DATASET=netscience RUN=testrun_ic DIFFUSION_MODEL=IC \
+  ARMS=none BASELINES=all-discovery COMPARE=1 N_SAMPLES=200 \
+  SLURM_TIME=1-00:00:00 ./sbatch/pipeline.sbatch
+
+TASK=influence_maximization DATASET=netscience RUN=testrun_lt DIFFUSION_MODEL=LT \
+  ARMS=none BASELINES=all-discovery COMPARE=1 N_SAMPLES=200 \
+  SLURM_TIME=1-00:00:00 ./sbatch/pipeline.sbatch
+```
+
+Reusing `RUN=testrun_ic` / `testrun_lt` drops the nine rows into the same results tree as the world-model arms, so the report and plots carry all conditions in one table. A subset is `BASELINES="discovery:eoh discovery:reevo discovery:openevolve"`, and `LLM_MODELS="gpt-5.6-luna gpt-5.6-terra"` fans each one out per model. Every other task takes the same flags; the contract per task is in `baselines/README.md`.
+

@@ -332,8 +332,8 @@ DYNAMICS_REGISTRY: dict[str, DynamicsEntry] = _build_dynamics_registry()
 @dataclass(frozen=True)
 class BaselineEntry:
     name: str
-    kind: str  # classical | learned
-    task: str
+    kind: str  # classical | learned | discovery
+    task: str  # a task name, or "*" for a discovery system that serves every task
     status: str  # needs_setup | blocked; `installed()` is dynamic and lives on the spec
     venue: str = ""
     blocker: str | None = None
@@ -364,7 +364,9 @@ BASELINE_REGISTRY: dict[str, BaselineEntry] = _build_baseline_registry()
 
 def baselines_for_task(task: str) -> list[str]:
     return sorted(
-        name for name, entry in BASELINE_REGISTRY.items() if entry.task == task
+        name
+        for name, entry in BASELINE_REGISTRY.items()
+        if entry.task == task or entry.task == "*"
     )
 
 

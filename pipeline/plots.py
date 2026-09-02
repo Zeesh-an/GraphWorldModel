@@ -38,6 +38,7 @@ condition_colors = {
     6: "#4C72B0",
     7: "#9370DB",
     8: "#E377C2",
+    9: "#17BECF",
 }
 
 
@@ -574,6 +575,14 @@ def plot_ours_vs_baselines(
         elif condition == 7:
             style = {"linewidth": 2.0, "linestyle": "--", "zorder": 4, "alpha": 0.95}
             label = f"published: {arm.replace('external_', '')}"
+        elif condition == 9:
+            style = {
+                "linewidth": 2.0,
+                "linestyle": (0, (3, 1, 1, 1)),
+                "zorder": 4,
+                "alpha": 0.95,
+            }
+            label = f"discovery: {arm.replace('discovery_', '')}"
         elif condition == 1:
             style = {"linewidth": 1.2, "linestyle": ":", "zorder": 2, "alpha": 0.7}
             label = f"classical: {arm.replace('baseline_', '')}"

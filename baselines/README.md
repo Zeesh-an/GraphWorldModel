@@ -244,3 +244,43 @@ Add one `ExternalBaseline(...)` entry to `baselines/registry.py` with three call
 `work_dir` is **absolute** by the time it reaches `export` and `command` (`run_external_baseline` resolves it), and it has to be: the child runs with `cwd=spec.directory`, so a relative `results/...` path embedded in argv resolves inside the repo clone. That one slip took 26 rows (every driver-style adapter across four tasks) out of the first cluster sweep with `can't open file '<repo>/results/.../driver.py'`. Two upstream entry points have no CLI at all and are driven through a generated runner instead: `celf_glie.py` loops six hardcoded graphs at `seed_size = 100` and never prints its seeds, and DiffIM's notebooks draw their training seed sizes from a band that is empty on any graph under 1,100 nodes.
 
 Nothing else needs to change: the arm spec, results routing, plots, and report pick it up automatically.
+
+---
+
+## Condition 9: published LLM algorithm-discovery systems
+
+A third layer, and a different contract from the two above. These repos do not return a seed set: each one **searches the space of programs** with its own LLM loop, and what crosses the process boundary is the best PROGRAM it found. The rule is the same as condition 7's, applied one level up: their code, their prompts, their published defaults, our referee. None of them ever sees the world model. Everything is in `baselines/discovery.py`; the registry entries carry `kind="discovery"` and `task="*"` (they serve every task).
+
+What we hand each system, identically:
+
+1. **A task statement** (`discovery.problem_statement`): the objective, the instance facts (N, arcs, dynamics, k, horizon, the lever), the allowed imports, and the fitness definition.
+2. **An initial program**: the same degree heuristic for every system, one function per task: `select_seeds(graph, k)`, `select_removals(graph, k, outbreak)`, `select_blockers(graph, k, rumour, lever)`, `select_doses(graph, k, outbreak, lever)`, `localize(graph, observation, k)`, `reconstruct(graph, observation, horizon)`, `predict(graph, observation)`. Adaptive IM runs the static `select_seeds` contract, which is the non-adaptive side of its own gap table.
+3. **A fitness subprocess**: `python -m baselines.score_program --context <work_dir>/discovery_context.json --program candidate.py`, run under OUR interpreter from inside their venv. It wraps the candidate through `discovery.program_script` and scores it with `run_experiment` on the plain Monte Carlo simulator under the arm's own `ExperimentConfig` (same outbreak, lever, splits and seed count as the arms it is compared against). Fitness is non-negative and higher is better for every task (nodes saved for a minimizing spread task, `1/(1+MSLE)` for prediction); the raw quantity travels beside it under its own name. Their venvs never import this package.
+
+The best program comes back through the entry's `parse_program`, the pipeline wraps it with the same `program_script`, and it flows through the identical executor, validation, referee replay and results JSON as every other arm. `external.info` in the result carries the framework's own bookkeeping (its internal score, iteration or sample count).
+
+| Baseline | Paper | Status | What runs |
+| --- | --- | --- | --- |
+| `openevolve` | software (Sharma 2025), Apache-2.0 | setup | `openevolve-run.py` at `configs/default_config.yaml` defaults (100 iterations, MAP-Elites islands) |
+| `codeevolve` | EMNLP 2026 Findings, arXiv 2510.14150 | setup, Python 3.13 | `codeevolve` CLI at the shipped template's defaults (50 epochs, 3 islands, meta-prompting) |
+| `llamea` | IEEE TEVC 2025, arXiv 2405.20132 | setup | `llamea.LLaMEA` at constructor defaults (5+5, 100 evaluations) |
+| `eoh` | ICML 2024 oral, arXiv 2401.02051 | setup | `eoh.EoH` (v0.2 API) at library defaults (pop 5, 20 generations) |
+| `reevo` | NeurIPS 2024, arXiv 2402.01145 | setup, one transport patch | `main.py` at `cfg/config.yaml` defaults (max_fe 100, pop 10, init 30) |
+| `mcts_ahd` | ICML 2025, arXiv 2501.08603 | setup | `main.py` at `cfg/config.yaml` defaults (max_fe 1000) |
+| `llm4ad_funsearch` | Nature 2024, port in arXiv 2412.17287 | setup (shares `llm4ad`) | `llm4ad.method.funsearch.FunSearch` at constructor defaults (20 samples) |
+| `llm4ad_hillclimb` | PPSN 2024, in LLM4AD | setup (shares `llm4ad`) | `llm4ad.method.hillclimb.HillClimb` at constructor defaults (20 samples) |
+| `deepevolve` | arXiv 2510.06056, no license | setup | `deepevolve.py` at `configs/config.yaml` defaults (50 iterations, retrieval ON) |
+| `llm4ad_next` | none | blocked | rewritten prompts, a second coder call, no progressive widening: not any method's original |
+| `gs4co` | ICML 2024 | blocked | not LLM-based: PPO symbolic regression of a SCIP branching rule |
+
+Three things the table cannot show. **Sample budgets differ by design**: every system runs at its published defaults, so `external.info` and the wall time are as much the result as the score, and our own `evolve` arm spends about 21 programs per budget against MCTS-AHD's 1000. **DeepEvolve retrieves**: it runs an OpenAI-Agents research loop with hosted web search, which our gateway serves (measured 2026-09-01), so its rows carry literature the others never see; the repo also has no license file. **ReEvo is patched**: it requests its initial population as one `n=30` call whenever the model name contains "gpt", and the gateway returns one choice for `n > 1` with no error, so `utils/llm_client/base.py` is patched to replicate the request instead (transport only).
+
+```bash
+python -m baselines.setup_baselines --only openevolve codeevolve llamea eoh reevo mcts_ahd llm4ad_funsearch deepevolve
+python -m pipeline.run --task influence_maximization --dataset netscience --baselines all-discovery --compare
+python -m pipeline.run --task source_localization --dataset jazz --baselines discovery:eoh discovery:reevo --compare
+python -m baselines.check_discovery --live eoh      # smoke one adapter end to end
+```
+
+`all` and `all-external` never include these: each is a full LLM search that runs for hours, so they are opted into by name or with `all-discovery`. `--llm-models` fans them out per model like the synthesis arms. Every entry carries a timeout floor (6 h, 12 h for MCTS-AHD and DeepEvolve) that overrides a smaller `--baseline-timeout`. Work dirs are `results/<task>/<dataset>/<run>/baselines/_runs/<name>/<budget>/`: the context, the glue, every scored candidate under `candidates/`, and the framework's own output tree.
+

@@ -53,6 +53,8 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from tqdm import tqdm
 
+from baselines.discovery import build_context, program_script
+from baselines.discovery import discovery as discovery_kind
 from baselines.registry import (
     available_baselines,
     baselines_for_task,
@@ -404,9 +406,13 @@ def expand_baselines(
     Resolve --baselines into arm specs.
 
     Accepts library algorithm names (condition 1), `external:<name>` for a
-    published repo (condition 7), and the aliases `all`, `all-classical`,
-    `all-external`. `all` deliberately expands external baselines to only those
-    actually installed, so a fresh checkout does not fail on missing repos.
+    published repo (condition 7), `discovery:<name>` for a published LLM
+    algorithm-discovery system (condition 9), and the aliases `all`,
+    `all-classical`, `all-external`, `all-discovery`. `all` deliberately expands
+    external baselines to only those actually installed, so a fresh checkout does
+    not fail on missing repos, and it never includes the discovery systems: each
+    of those is a full LLM search at its published defaults, hours rather than
+    seconds, so they are opted into by name or through `all-discovery`.
 
     `all-classical` expands to the TASK's own pool, not the static IM classics: a
     dismantler and a source localizer are different KINDS of algorithm, and
@@ -433,18 +439,65 @@ def expand_baselines(
             specs += [
                 f"external:{baseline}"
                 for baseline in available_baselines(task=task)
+                if external_baselines[baseline].kind != discovery_kind
             ]
         elif name == "all":
             specs += [f"baseline:{algorithm}" for algorithm in classical]
-            installed = runnable_baselines(task=task)
+            installed = [
+                baseline
+                for baseline in runnable_baselines(task=task)
+                if external_baselines[baseline].kind != discovery_kind
+            ]
             specs += [f"external:{baseline}" for baseline in installed]
 
-            skipped = sorted(set(available_baselines(task=task)) - set(installed))
+            skipped = sorted(
+                baseline
+                for baseline in available_baselines(task=task)
+                if external_baselines[baseline].kind != discovery_kind
+                and baseline not in installed
+            )
             if skipped:
                 print(
                     f"[pipeline] --baselines all: skipping not-installed external "
                     f"baselines {skipped} (run: python -m baselines.setup_baselines --all)"
                 )
+        elif name == "all-discovery":
+            installed = [
+                baseline
+                for baseline in runnable_baselines(task=task)
+                if external_baselines[baseline].kind == discovery_kind
+            ]
+            specs += [f"discovery:{baseline}" for baseline in installed]
+
+            skipped = sorted(
+                baseline
+                for baseline in available_baselines(task=task)
+                if external_baselines[baseline].kind == discovery_kind
+                and baseline not in installed
+            )
+            if skipped:
+                print(
+                    f"[pipeline] --baselines all-discovery: skipping not-installed "
+                    f"discovery systems {skipped} (run: python -m "
+                    f"baselines.setup_baselines --only {' '.join(skipped)})"
+                )
+        elif name.startswith("discovery:"):
+            baseline = name.split(":", 1)[1]
+            spec = external_baselines.get(baseline)
+
+            if spec is None:
+                raise ValueError(
+                    f"unknown discovery baseline {baseline!r}; registered: "
+                    f"{sorted(n for n, s in external_baselines.items() if s.kind == discovery_kind)}"
+                )
+
+            if spec.kind != discovery_kind:
+                raise ValueError(
+                    f"{baseline!r} is a {spec.kind} baseline that returns a set, not "
+                    f"a program: run it as external:{baseline}"
+                )
+
+            specs.append(name)
         elif name.startswith("external:"):
             # The `all` aliases already filter on the task field; an explicit
             # name skipped it entirely, so `--baselines external:moeim` under
@@ -453,7 +506,13 @@ def expand_baselines(
             baseline = name.split(":", 1)[1]
             spec = external_baselines.get(baseline)
 
-            if spec is not None and spec.task != task:
+            if spec is not None and spec.kind == discovery_kind:
+                raise ValueError(
+                    f"{baseline!r} is an algorithm-discovery system that returns a "
+                    f"program, not a set: run it as discovery:{baseline} (condition 9)"
+                )
+
+            if spec is not None and not spec.serves(task):
                 raise ValueError(
                     f"external baseline {baseline!r} solves {spec.task!r}, not "
                     f"{task!r}. Running it here would put a {spec.task} method in "
@@ -922,6 +981,31 @@ def _load_pipeline_graph(layout: Layout, config: PipelineConfig) -> GraphInfo:
     return config._graph
 
 
+def _budget_op(config: PipelineConfig) -> str:
+    """What one unit of this run's budget buys, lever-aware."""
+    task = get_task(config.task)
+
+    return (
+        resolve_lever(config.blocking_lever)[0]
+        if task.competitive
+        else resolve_epidemic_lever(config.epi_lever)[0]
+        if task.epidemic
+        else task.budget_op
+    )
+
+
+def _lever(config: PipelineConfig) -> str | None:
+    task = get_task(config.task)
+
+    return (
+        config.blocking_lever
+        if task.competitive
+        else config.epi_lever
+        if task.epidemic
+        else None
+    )
+
+
 def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
     """
     Canned script for a published repo's seed set.
@@ -946,14 +1030,15 @@ def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
     if "sources" in external_seeds:
         return localize_script(external_seeds["sources"])
 
-    task = get_task(config.task)
-    budget_op = (
-        resolve_lever(config.blocking_lever)[0]
-        if task.competitive
-        else resolve_epidemic_lever(config.epi_lever)[0]
-        if task.epidemic
-        else task.budget_op
-    )
+    budget_op = _budget_op(config)
+
+    # A DISCOVERY system hands back a whole PROGRAM: wrap it so the contract
+    # function runs under the identical executor, validation and referee
+    if "program" in external_seeds:
+        return program_script(
+            external_seeds["program"], config.task, budget_op, _lever(config)
+        )
+
     batches = external_seeds.get("batches")
 
     # An EDGE repo hands back a flat list of arc endpoints (see
@@ -1188,77 +1273,6 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             )
             arm_start = time.perf_counter()
 
-            # An external repo only hands back a seed set; wrapping it as a
-            # canned Strategy routes it through the identical scoring path
-            external_seeds = None
-            if arm.external is not None:
-                graph = _load_pipeline_graph(layout, config)
-                resolved = budget or max(
-                    1, round(graph.num_nodes * budget_pct / 100)
-                )
-                # A rounds-aware repo selects in batches, so it needs the same
-                # schedule the adaptive arms run at, or it would be handed one
-                # batch of k and quietly become a static method
-                external_batches = (
-                    round_batches(resolved, config.rounds, config.per_round_budget)
-                    if external_baselines[arm.external].rounds_aware
-                    else None
-                )
-
-                # An inverse task's repo predicts per OBSERVATION, so it is handed
-                # both instance pools at once rather than a budget. A DECODER's
-                # pools carry whole masked histories rather than endpoints, which
-                # is the only difference.
-                if get_task(config.task).forecasts:
-                    external_instances = _external_forecasts(config, layout)
-                elif get_task(config.task).reconstructs:
-                    external_instances = _external_cascades(config, layout)
-                elif get_task(config.task).recovers:
-                    external_instances = _external_instances(config, layout, resolved)
-                else:
-                    external_instances = None
-
-                # A blocking repo has to be told which rumour it is answering: two of
-                # the three would otherwise draw their own from a fixed seed and
-                # answer a different one than every arm it is being compared against.
-                # An EPIDEMIC repo needs the same channel for a different reason,
-                # DAVA and NetShape are DEFINED on the observed infected set, so a
-                # run without it is answering a structural question rather than the
-                # data-aware one that is the whole point of those rows.
-                task_registry = get_task(config.task)
-                external_negative = (
-                    _negative_seeds(config, graph)
-                    if task_registry.competitive or task_registry.epidemic
-                    else None
-                )
-
-                attempt_start = time.perf_counter()
-
-                try:
-                    external_seeds = run_external_baseline(
-                        arm.external,
-                        graph,
-                        resolved,
-                        config.diffusion_model,
-                        work_dir=layout.baselines_dir / "_runs" / arm.external / label,
-                        timeout=config.baseline_timeout,
-                        batches=external_batches,
-                        instances=external_instances,
-                        negative_seeds=external_negative,
-                    )
-                except BaselineError as error:
-                    tqdm.write(f"[agent] {label}/{arm.name}: SKIPPED, {error}")
-                    _record_skip(
-                        layout,
-                        label,
-                        arm,
-                        str(error),
-                        seconds=time.perf_counter() - attempt_start,
-                    )
-                    failed += 1
-                    progress_bar.update(1)
-                    continue
-
             experiment = ExperimentConfig(
                 task=config.task,
                 method=arm.method,
@@ -1376,6 +1390,95 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 out_json=str(out_json),
             )
 
+            # An external repo only hands back a seed set; wrapping it as a
+            # canned Strategy routes it through the identical scoring path
+            external_seeds = None
+            if arm.external is not None:
+                graph = _load_pipeline_graph(layout, config)
+                resolved = budget or max(
+                    1, round(graph.num_nodes * budget_pct / 100)
+                )
+                # A rounds-aware repo selects in batches, so it needs the same
+                # schedule the adaptive arms run at, or it would be handed one
+                # batch of k and quietly become a static method
+                external_batches = (
+                    round_batches(resolved, config.rounds, config.per_round_budget)
+                    if external_baselines[arm.external].rounds_aware
+                    else None
+                )
+
+                # An inverse task's repo predicts per OBSERVATION, so it is handed
+                # both instance pools at once rather than a budget. A DECODER's
+                # pools carry whole masked histories rather than endpoints, which
+                # is the only difference.
+                if get_task(config.task).forecasts:
+                    external_instances = _external_forecasts(config, layout)
+                elif get_task(config.task).reconstructs:
+                    external_instances = _external_cascades(config, layout)
+                elif get_task(config.task).recovers:
+                    external_instances = _external_instances(config, layout, resolved)
+                else:
+                    external_instances = None
+
+                # A blocking repo has to be told which rumour it is answering: two of
+                # the three would otherwise draw their own from a fixed seed and
+                # answer a different one than every arm it is being compared against.
+                # An EPIDEMIC repo needs the same channel for a different reason,
+                # DAVA and NetShape are DEFINED on the observed infected set, so a
+                # run without it is answering a structural question rather than the
+                # data-aware one that is the whole point of those rows.
+                task_registry = get_task(config.task)
+                external_negative = (
+                    _negative_seeds(config, graph)
+                    if task_registry.competitive or task_registry.epidemic
+                    else None
+                )
+
+                # A discovery system scores its candidates under this arm's own
+                # ExperimentConfig, so the task settings (outbreak, lever, splits,
+                # seed count) match the arms it is compared against; a seed-set
+                # repo needs nothing of the kind
+                external_spec = external_baselines[arm.external]
+                external_context = (
+                    build_context(
+                        experiment,
+                        config.task,
+                        _budget_op(config),
+                        layout.baselines_dir / "_runs" / arm.external / label,
+                        graph,
+                    )
+                    if external_spec.kind == discovery_kind
+                    else None
+                )
+
+                attempt_start = time.perf_counter()
+
+                try:
+                    external_seeds = run_external_baseline(
+                        arm.external,
+                        graph,
+                        resolved,
+                        config.diffusion_model,
+                        work_dir=layout.baselines_dir / "_runs" / arm.external / label,
+                        timeout=config.baseline_timeout,
+                        batches=external_batches,
+                        instances=external_instances,
+                        negative_seeds=external_negative,
+                        context=external_context,
+                    )
+                except BaselineError as error:
+                    tqdm.write(f"[agent] {label}/{arm.name}: SKIPPED, {error}")
+                    _record_skip(
+                        layout,
+                        label,
+                        arm,
+                        str(error),
+                        seconds=time.perf_counter() - attempt_start,
+                    )
+                    failed += 1
+                    progress_bar.update(1)
+                    continue
+
             # An agent arm that never produces a runnable program is a RESULT
             # about that arm, not an infrastructure failure, so it is recorded
             # like a dead external repo rather than killing the sweep. Letting it
@@ -1435,8 +1538,16 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     # Time the external repo itself spent selecting; our scoring
                     # time is in elapsed_seconds as for every other arm
                     "selection_seconds": external_seeds["seconds"],
+                    # Condition 9: the artefact was a PROGRAM, and `info` is the
+                    # framework's own bookkeeping (its internal score, iteration)
+                    "program": external_seeds.get("program") is not None,
+                    "info": external_seeds.get("info"),
                 }
-                result["model"] = f"external:{arm.external}"
+                result["model"] = (
+                    f"discovery:{arm.external}"
+                    if spec.kind == discovery_kind
+                    else f"external:{arm.external}"
+                )
 
             out_json.write_text(json.dumps(result, indent=2, default=str))
             completed.append(result)
@@ -2339,17 +2450,29 @@ if __name__ == "__main__":
             + list(localization_algorithm_names)
             + list(reconstruction_algorithm_names)
             + list(prediction_algorithm_names)
-            + [f"external:{name}" for name in external_baselines]
-            + ["all", "all-classical", "all-external"]
+            + [
+                f"external:{name}"
+                for name, spec in external_baselines.items()
+                if spec.kind != discovery_kind
+            ]
+            + [
+                f"discovery:{name}"
+                for name, spec in external_baselines.items()
+                if spec.kind == discovery_kind
+            ]
+            + ["all", "all-classical", "all-external", "all-discovery"]
         ),
         metavar="NAME",
         help="baselines to run: a static IM algorithm, a per-round adaptive "
         "policy, an influence blocker, a network dismantler, an epidemic "
         "immunizer, a source localizer, a trajectory decoder, a popularity "
         "predictor "
-        "(all condition 1), 'external:<name>' for a published repo (condition 7), or "
-        "the aliases 'all' / 'all-classical' / 'all-external'. 'all' includes only "
-        "external baselines already installed. Unset = the task registry's own pool "
+        "(all condition 1), 'external:<name>' for a published repo (condition 7), "
+        "'discovery:<name>' for a published LLM algorithm-discovery system run at "
+        "its own defaults with our simulator as fitness (condition 9), or the "
+        "aliases 'all' / 'all-classical' / 'all-external' / 'all-discovery'. 'all' "
+        "includes only external baselines already installed and never the "
+        "discovery systems. Unset = the task registry's own pool "
         f"(default for influence_maximization: {' '.join(default_baselines)}).",
     )
     parser.add_argument(
