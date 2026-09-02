@@ -276,7 +276,7 @@ The same shape as your existing IM commands, for iterating on one arm without re
 ```bash
 # netscience, evolve/free, oracle
 python -m coding_agent.run \
-    --model gpt-5.6-terra \
+    --model gpt-5.6-sol \
     --task influence_maximization \
     --data-dir results/influence_maximization/netscience/testrun/data \
     --method evolve --strategy-mode free \
@@ -288,7 +288,7 @@ python -m coding_agent.run \
 
 # netscience, evolve/scored, oracle
 python -m coding_agent.run \
-    --model gpt-5.6-terra \
+    --model gpt-5.6-sol \
     --task influence_maximization \
     --data-dir results/influence_maximization/netscience/testrun/data \
     --method evolve --strategy-mode scored \
@@ -300,7 +300,7 @@ python -m coding_agent.run \
 
 # power_grid containment, evolve/free, oracle  (the budget buys remove_node)
 python -m coding_agent.run \
-    --model gpt-5.6-terra \
+    --model gpt-5.6-sol \
     --task critical_node_detection \
     --data-dir results/critical_node_detection/power_grid/testrun/data \
     --method evolve --strategy-mode free \
@@ -367,6 +367,15 @@ Six things changed under the loop since the smoke test, and each one moves these
 # per episode and never stored, so the realized outcome stays unrecoverable) but an exact
 # DISTRIBUTION oracle, the closed-form threshold hazard (f_t - f_prev)+ / (1 - f_prev),
 # verified to match NDlib LT in distribution. Same arms, same evaluator preference as IC.
+# `all-discovery` adds condition 9: the nine published LLM algorithm-discovery systems
+# (OpenEvolve, CodeEvolve, LLaMEA, EoH, ReEvo, MCTS-AHD, FunSearch, HillClimb, DeepEvolve)
+# at their published defaults, through the same gateway and the same LLM_MODEL as our arms
+# (gpt-5.6-sol is now the default everywhere; LLM_MODELS stays available for a multi-model
+# sweep), with the plain Monte Carlo simulator as their only fitness. They need the setup
+# command from section 8 once, and they dominate wall clock: one search per system per
+# budget, sequential, and MCTS-AHD alone runs 1000 evaluations per budget, so the timeout
+# floor is 12 h per run and the job asks for a week. Section 8 has the split alternative
+# (ladder first, discovery rows resumed into the same RUN afterwards).
 TASK=influence_maximization \
 DATASET=netscience \
 RUN=testrun_ic \
@@ -374,15 +383,17 @@ RUN_JOBID=0 \
 DIFFUSION_MODEL=IC \
 BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
 external:opim external:ssa external:subsim \
-external:touplegdd external:deepim external:moeim external:glie" \
+external:touplegdd external:deepim external:moeim external:glie \
+all-discovery" \
 ARMS="evolve_free@oracle evolve_free@world_model" \
+LLM_MODEL=gpt-5.6-sol \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 TASK=influence_maximization \
@@ -392,15 +403,17 @@ RUN_JOBID=0 \
 DIFFUSION_MODEL=LT \
 BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
 external:opim external:ssa external:subsim \
-external:touplegdd external:deepim external:moeim external:glie" \
+external:touplegdd external:deepim external:moeim external:glie \
+all-discovery" \
 ARMS="evolve_free@oracle evolve_free@world_model" \
+LLM_MODEL=gpt-5.6-sol \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # Resume for an LT run whose agent stage failed or was interrupted: same RUN, start at
@@ -414,15 +427,17 @@ DIFFUSION_MODEL=LT \
 START_STAGE=agent \
 BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
 external:opim external:ssa external:subsim \
-external:touplegdd external:deepim external:moeim external:glie" \
+external:touplegdd external:deepim external:moeim external:glie \
+all-discovery" \
 ARMS="evolve_free@oracle evolve_free@world_model" \
+LLM_MODEL=gpt-5.6-sol \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+COMPARE=1 CREDIT=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- IM, the cheapest and the one to run first
@@ -485,17 +500,19 @@ uv run python -m baselines.setup_baselines --only openevolve codeevolve llamea e
 uv run python -m baselines.check_discovery --live eoh
 ```
 
-Then the same IC and LT submissions as section 6, baselines only, discovery arms only. Each system is a full search per budget (hours for MCTS-AHD at max_fe 1000 and for DeepEvolve), so give the job a day:
+The section 6 submissions already include `all-discovery`. The split alternative below runs the discovery rows on their own, into the SAME `RUN` as the ladder, so the report and plots carry every condition in one table while the world-model ladder finishes first: submit it with `START_STAGE=agent` after the ladder job (no `FORCE`, so finished rows are reused and only the missing discovery rows run). Each system is a full search per budget at its published defaults (MCTS-AHD runs 1000 evaluations per budget; DeepEvolve retrieves and reflects), so give the job several days:
 
 ```bash
-TASK=influence_maximization DATASET=netscience RUN=testrun_ic DIFFUSION_MODEL=IC \
-  ARMS=none BASELINES=all-discovery COMPARE=1 N_SAMPLES=200 \
-  SLURM_TIME=1-00:00:00 ./sbatch/pipeline.sbatch
+TASK=influence_maximization DATASET=netscience RUN=testrun_ic RUN_JOBID=0 DIFFUSION_MODEL=IC \
+  START_STAGE=agent ARMS=none BASELINES=all-discovery LLM_MODEL=gpt-5.6-sol \
+  BUDGET_PCTS="1 5 10 20" HORIZON=10 MC_RUNS=200 N_SAMPLES=200 COMPARE=1 \
+  BASELINE_TIMEOUT=43200 MEM=64G TIME=7-00:00:00 ./sbatch/pipeline.sbatch
 
-TASK=influence_maximization DATASET=netscience RUN=testrun_lt DIFFUSION_MODEL=LT \
-  ARMS=none BASELINES=all-discovery COMPARE=1 N_SAMPLES=200 \
-  SLURM_TIME=1-00:00:00 ./sbatch/pipeline.sbatch
+TASK=influence_maximization DATASET=netscience RUN=testrun_lt RUN_JOBID=0 DIFFUSION_MODEL=LT \
+  START_STAGE=agent ARMS=none BASELINES=all-discovery LLM_MODEL=gpt-5.6-sol \
+  BUDGET_PCTS="1 5 10 20" HORIZON=10 MC_RUNS=200 N_SAMPLES=200 COMPARE=1 \
+  BASELINE_TIMEOUT=43200 MEM=64G TIME=7-00:00:00 ./sbatch/pipeline.sbatch
 ```
 
-Reusing `RUN=testrun_ic` / `testrun_lt` drops the nine rows into the same results tree as the world-model arms, so the report and plots carry all conditions in one table. A subset is `BASELINES="discovery:eoh discovery:reevo discovery:openevolve"`, and `LLM_MODELS="gpt-5.6-luna gpt-5.6-terra"` fans each one out per model. Every other task takes the same flags; the contract per task is in `baselines/README.md`.
+Reusing `RUN=testrun_ic` / `testrun_lt` drops the nine rows into the same results tree as the world-model arms, so the report and plots carry all conditions in one table. A subset is `BASELINES="discovery:eoh discovery:reevo discovery:openevolve"`, and `LLM_MODELS="gpt-5.6-luna gpt-5.6-terra"` fans each one out per model (the default is `gpt-5.6-sol`). Every other task takes the same flags; the contract per task is in `baselines/README.md`.
 

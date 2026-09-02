@@ -222,7 +222,7 @@
 #
 #   DATASET=sbm START_STAGE=agent END_STAGE=agent FORCE=1 \
 #   ARMS=evolve_scored@world_model \
-#   LLM_MODEL=gpt-5.6-terra TEMPERATURE=0.7 OUTER_ITERS=20 \
+#   LLM_MODEL=gpt-5.6-sol TEMPERATURE=0.7 OUTER_ITERS=20 \
 #   BUDGET_PCTS="1 5 10 20" HORIZON=10 N_SAMPLES=50 MC_RUNS=200 \
 #   ALLOWED_OPS="add_node remove_node" COMPARE=1 CREDIT=0 \
 #       ./sbatch/pipeline.sbatch
@@ -237,7 +237,7 @@
 #     routing              condition 2, one LLM call picks a library algorithm
 #     baseline:<algorithm> condition 1, no LLM
 #
-#   LLM_MODEL       gateway model name (gpt-5.6-terra, gpt-5.6-sol, ...)
+#   LLM_MODEL       gateway model name (default gpt-5.6-sol; gpt-5.6-terra, gpt-5.6-luna, ...)
 #   TEMPERATURE     sampling temperature; unset = provider default, 0.0 = greedy
 #   OUTER_ITERS     refinement iterations per agent arm (conditions 1-2 force 1)
 #   WINDOWS         window count, `windowed` method only
@@ -364,7 +364,7 @@
 #
 # Comparing two LLMs on the same data, as two jobs into two runs:
 #
-#   DATASET=sbm RUN=sonnet LLM_MODEL=gpt-5.6-terra ./sbatch/pipeline.sbatch
+#   DATASET=sbm RUN=terra LLM_MODEL=gpt-5.6-terra ./sbatch/pipeline.sbatch
 #   DATASET=sbm RUN=gpt    LLM_MODEL=gpt-5.6-sol     ./sbatch/pipeline.sbatch
 #
 #
@@ -780,7 +780,7 @@ NATIVE_MC_RUNS="${NATIVE_MC_RUNS:-1}"
 BUDGET_PCTS="${BUDGET_PCTS:-}"
 BUDGETS="${BUDGETS:-}"
 EVALUATOR="${EVALUATOR:-oracle}"
-LLM_MODEL="${LLM_MODEL:-gpt-5.6-terra}"
+LLM_MODEL="${LLM_MODEL:-gpt-5.6-sol}"
 # Space-separated list: every LLM-driven arm runs once per model, e.g.
 # LLM_MODELS="gpt-5.6-luna gpt-5.6-terra gpt-5.6-sol"
 LLM_MODELS="${LLM_MODELS:-}"

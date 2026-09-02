@@ -12,7 +12,7 @@ feedback, and land in one report table:
 
 python -m pipeline.run --dataset ba --num-graphs 40 --syn-nodes 100 \
     --budget-pcts 1 5 10 20 --compare \
-    --llm-model gpt-5.6-terra --outer-iters 5
+    --llm-model gpt-5.6-sol --outer-iters 5
 
 Just the classical pool and our method, at one budget:
 
@@ -284,7 +284,7 @@ class PipelineConfig:
     budgets: tuple | None = None
     evaluator: str = "oracle"
     native_mc_runs: int = native_mc_runs_default
-    llm_model: str = "gpt-5.6-terra"
+    llm_model: str = "gpt-5.6-sol"
     # Fan every LLM-driven arm out across these models, one result row each;
     # None = the single llm_model above
     llm_models: tuple | None = None
@@ -2859,8 +2859,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--llm-model",
         type=str,
-        default="gpt-5.6-terra",
-        help="gateway model name for the coding agent (default: gpt-5.6-terra).",
+        default="gpt-5.6-sol",
+        help="gateway model name for the coding agent (default: gpt-5.6-sol).",
     )
     parser.add_argument(
         "--llm-models",

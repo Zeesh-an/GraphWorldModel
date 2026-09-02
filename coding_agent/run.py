@@ -17,7 +17,7 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Graph algorithm routing (LLM picks from a list of graph algorithms, no synthesis) -
 
 python -m coding_agent.run --data-dir results/ba40/data \
-    --model gpt-5.6-terra \
+    --model gpt-5.6-sol \
     --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --strategy-mode free \
     --evaluator world_model --budget 5 --horizon 10 --compare \
@@ -28,7 +28,7 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Oracle -
 
 python -m coding_agent.run --data-dir results/ba40/data \
-    --model gpt-5.6-terra \
+    --model gpt-5.6-sol \
     --method one_shot --strategy-mode free \
     --evaluator oracle --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
@@ -39,7 +39,7 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Scored mode + evolve (agent edits algorithm internals, population search) -
 
 python -m coding_agent.run --data-dir results/sbm40/data \
-    --model gpt-5.6-terra \
+    --model gpt-5.6-sol \
     --wm-results-json results/sbm40/world_model/sage_IC.json \
     --method evolve --strategy-mode scored \
     --evaluator world_model --budget 5 --horizon 10 --compare \
@@ -220,7 +220,7 @@ class ExperimentConfig:
         "free"  # free (whole Strategy) | scored (score/schedule hooks only)
     )
     evaluator: str = "world_model"  # world_model | monte_carlo | oracle
-    model: str = "gpt-5.6-terra"  # gateway model name
+    model: str = "gpt-5.6-sol"  # gateway model name
     temperature: float | None = (
         None  # LLM sampling temperature; None -> provider default
     )
@@ -2295,8 +2295,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-5.6-terra",
-        help="gateway model name, e.g. gpt-5.6-sol (default: gpt-5.6-terra).",
+        default="gpt-5.6-sol",
+        help="gateway model name, e.g. gpt-5.6-sol (default: gpt-5.6-sol).",
     )
     parser.add_argument(
         "--temperature",

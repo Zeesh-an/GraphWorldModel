@@ -156,6 +156,8 @@ The table above is the IM core; `CLAUDE.md` lists every loader, including the tw
 
 ## Quick start: the whole experiment in one command
 
+Setting up a fresh cluster account from nothing (clone, environment, gateway credentials, datasets, every external baseline, checks, the real submissions): **[`setup_guide.md`](setup_guide.md)**.
+
 `pipeline/run.py` runs every stage end to end and writes a single `results/<task>/<dataset>/<run>/report.md` with the tables and figures. Swapping datasets is a one-flag change.
 
 ```bash
@@ -260,7 +262,7 @@ python -m pipeline.run --dataset ba --run new_agent_sweep \
 | `--strategy-timeout` | `300` | wall-clock cap (s) on one generated `plan_horizon()`/`act()` call; an overrun becomes a repair turn instead of hanging the sweep. `0` disables |
 | `--llm-price-in` / `--llm-price-out` | none | USD per 1M tokens, for the cost column. Tokens are always counted; cost stays `null` unless both are given (the gateway bills nothing per token) |
 | `--compare` | off | ground-truth referee replay: required for a valid cross-condition table |
-| `--llm-model` / `--outer-iters` | `gpt-5.6-terra` / `20` | coding-agent model and refinement budget |
+| `--llm-model` / `--outer-iters` | `gpt-5.6-sol` / `20` | coding-agent model and refinement budget |
 
 Generation, training, and agent hyperparameters are all exposed too (`--rollouts`, `--mc-marginals`, `--wm-model`, `--head`, `--epochs`, `--n-samples`, …): see `python -m pipeline.run --help`.
 

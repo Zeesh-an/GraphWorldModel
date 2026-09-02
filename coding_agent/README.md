@@ -594,7 +594,7 @@ python -m coding_agent.run --data-dir results/influence_maximization/ba/default/
     --wm-results-json results/influence_maximization/ba/default/world_model/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
     --allowed-ops add_node remove_node \
-    --model gpt-5.6-terra --outer-iters 3 --credit \
+    --model gpt-5.6-sol --outer-iters 3 --credit \
     --out-json results/influence_maximization/ba/default/agent/pct5/run.json
 
 # Classical baseline through the identical pipeline (no LLM, no .env needed)
@@ -606,14 +606,14 @@ python -m coding_agent.run --data-dir results/influence_maximization/ba/default/
 # GA routing: one LLM call picks a library algorithm (no code synthesis),
 # then it runs through the identical --baseline canned path
 python -m coding_agent.run --data-dir results/influence_maximization/ba/default/data \
-    --model gpt-5.6-terra \
+    --model gpt-5.6-sol \
     --wm-results-json results/influence_maximization/ba/default/world_model/sage_IC.json \
     --method one_shot --evaluator world_model --budget 5 --horizon 10 --compare \
     --routing --outer-iters 1 --out-json results/influence_maximization/ba/default/agent/pct5/routing.json
 
 # Oracle-dynamics ceiling: true IC transitions, no checkpoint / --wm-results-json
 python -m coding_agent.run --data-dir results/influence_maximization/ba/default/data \
-    --model gpt-5.6-terra \
+    --model gpt-5.6-sol \
     --method one_shot --evaluator oracle --budget 5 --horizon 10 --compare \
     --outer-iters 5 --out-json results/influence_maximization/ba/default/agent/pct5/oracle_run.json
 
@@ -624,7 +624,7 @@ python -m coding_agent.run --data-dir results/influence_maximization/ba/default/
 #   ... --temperature 0.0
 ```
 
-Key flags: `--method {one_shot,per_step,windowed,evolve,adaptive,gradient,decode}` · `--strategy-mode {free,scored}` (scored = agent fills `score()`/`schedule()` hooks in the fixed `ScoredStrategy` harness; no `algorithms.*`; one_shot/evolve only) · `--evaluator {world_model,monte_carlo,oracle}` (`oracle` = true IC dynamics via the `structured_oracle` head, no checkpoint, IC-only, the model-based ceiling; `monte_carlo --mc-runs 1` = the native-agent condition, one real execution per candidate) · `--model` (gateway name; default `gpt-5.6-terra`) · `--temperature` (omit = provider default; `0.0` = greedy) · `--allowed-ops` · `--baseline <algorithm>` (synthesizes the all-at-`t₀` special-case plan) · `--routing` (GA-routing baseline: the LLM selects one pool algorithm from a name+summary menu, adaptive _selection_ without synthesis; the pick is recorded as `model: routing:<algo>` and the raw reply as `routing_reply`) · `--budget` / `--budget-pct` (percent of `num_nodes`, overrides `--budget`, same resolution rule as data generation) / `--horizon` / `--windows` / `--outer-iters` · `--mc-runs` (MC ensemble / compare size; default 200) · `--n-samples` (WM ensemble; default 20) · `--graph-id` (default: first graph in the store) · `--compare` · `--credit` · `--out-json`.
+Key flags: `--method {one_shot,per_step,windowed,evolve,adaptive,gradient,decode}` · `--strategy-mode {free,scored}` (scored = agent fills `score()`/`schedule()` hooks in the fixed `ScoredStrategy` harness; no `algorithms.*`; one_shot/evolve only) · `--evaluator {world_model,monte_carlo,oracle}` (`oracle` = true IC dynamics via the `structured_oracle` head, no checkpoint, IC-only, the model-based ceiling; `monte_carlo --mc-runs 1` = the native-agent condition, one real execution per candidate) · `--model` (gateway name; default `gpt-5.6-sol`) · `--temperature` (omit = provider default; `0.0` = greedy) · `--allowed-ops` · `--baseline <algorithm>` (synthesizes the all-at-`t₀` special-case plan) · `--routing` (GA-routing baseline: the LLM selects one pool algorithm from a name+summary menu, adaptive _selection_ without synthesis; the pick is recorded as `model: routing:<algo>` and the raw reply as `routing_reply`) · `--budget` / `--budget-pct` (percent of `num_nodes`, overrides `--budget`, same resolution rule as data generation) / `--horizon` / `--windows` / `--outer-iters` · `--mc-runs` (MC ensemble / compare size; default 200) · `--n-samples` (WM ensemble; default 20) · `--graph-id` (default: first graph in the store) · `--compare` · `--credit` · `--out-json`.
 
 ### Results JSON schema
 

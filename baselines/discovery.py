@@ -526,6 +526,14 @@ def build_context(
     never land here: the glue reads them from the environment by NAME.
     """
     experiment_dict = asdict(experiment)
+    # The pipeline hands a percentage point over with a placeholder `budget` and
+    # lets run_experiment resolve k; the statement the framework reads has to
+    # carry the SAME k the scorer and the referee will use (same rule as
+    # run_experiment: pct of N overrides the absolute k)
+    if experiment_dict["budget_pct"] is not None:
+        experiment_dict["budget"] = max(
+            1, round(graph.num_nodes * experiment_dict["budget_pct"] / 100)
+        )
     lever = lever_for(task, experiment_dict)
     model = experiment_dict["model"]
 
