@@ -500,6 +500,8 @@ def check_library(
         for name, decoder in reconstruction_algorithms.items():
 
             class Anchor:
+                canned = True
+
                 def reconstruct(self, graph, observation, horizon, _decoder=decoder):
                     return _decoder(
                         graph,

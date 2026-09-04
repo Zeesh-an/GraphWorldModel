@@ -673,19 +673,6 @@ def needs_gpu(config: PipelineConfig) -> tuple[bool, str]:
     selected = active_stages(config)
     arms = build_arms(config)
 
-    # Preflight the gateway before the data stage: every LLM arm (ours, routing,
-    # and the discovery systems, which call the same gateway with the same model)
-    # would otherwise fail hours later, after generation and training
-    if "agent" in selected:
-        needing_llm = [
-            arm
-            for arm in arms
-            if arm.is_agent or arm.routing or arm.condition == discovery_condition
-        ]
-        for model in sorted({arm.llm_model or config.llm_model for arm in needing_llm}):
-            verify_gateway_model(model)
-            print(f"[pipeline] gateway serves {model}")
-
     if "train" in selected:
         return True, "the train stage fits f_theta"
 
@@ -1731,6 +1718,19 @@ def run_pipeline(config: PipelineConfig) -> dict:
 
     selected = active_stages(config)
     arms = build_arms(config)
+
+    # Preflight the gateway before the data stage: every LLM arm (ours, routing,
+    # and the discovery systems, which call the same gateway with the same model)
+    # would otherwise fail hours later, after generation and training
+    if "agent" in selected:
+        needing_llm = [
+            arm
+            for arm in arms
+            if arm.is_agent or arm.routing or arm.condition == discovery_condition
+        ]
+        for model in sorted({arm.llm_model or config.llm_model for arm in needing_llm}):
+            verify_gateway_model(model)
+            print(f"[pipeline] gateway serves {model}")
     print(f"[pipeline] {layout.label} -> {layout.root}")
     print(f"[pipeline] stages: {' -> '.join(selected)}")
     print(f"[pipeline] {len(arms)} arms x {len(budget_points(config))} budgets:")

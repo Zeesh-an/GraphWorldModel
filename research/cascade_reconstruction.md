@@ -165,6 +165,9 @@ The return is `node -> (activation timestep, inferred parent)`, with `parent = N
 
 #### 2.5.2 The primitives, and their four bindings
 
+
+> **Update 2026-09-04.** Generated programs are offline: the bindings described below are attached to canned library baselines only, and the four bindings now describe the HARNESS's oracle, which computes the reward and the feedback. The text below is the original design record.
+
 Source localization needed one primitive, $x \mapsto$ marginals. A decoder needs the raw kernel, evaluated on **arbitrary proposed states** rather than only on seed sets:
 
 ```python

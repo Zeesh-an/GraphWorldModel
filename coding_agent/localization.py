@@ -407,8 +407,11 @@ def evaluate_localizer(
         )
 
     # What the PROGRAM may call: the four bindings, a raiser under @native
-    oracle = bind_predict_marginals(environment, task)
-    strategy.predict_marginals = oracle
+    # Bound to canned baselines only: a generated localizer is offline
+    oracle = None
+    if getattr(strategy, "canned", False):
+        oracle = bind_predict_marginals(environment, task)
+        strategy.predict_marginals = oracle
     # What the HARNESS scores with: the same rollout, counted apart from the
     # program's own calls, and available under every condition. The native arm
     # is scored on one real episode exactly as an intervention task's native arm
@@ -692,9 +695,8 @@ def summarize_localization(
         f"{means.get('n_over', 0.0):.1f} nodes OVER-explained (your cascade reaches "
         f"them, the observation says clean), {means.get('n_under', 0.0):.1f} nodes "
         f"UNDER-explained (observed infected, your cascade misses them)",
-        f"forward-model calls by your program: {cost.get('forward_calls', 0)} total, "
-        f"{cost.get('forward_calls_per_instance', 0)} per instance (the harness's "
-        f"own scoring rollouts, {cost.get('scoring_calls', 0)}, are separate)",
+        f"harness scoring rollouts: {cost.get('scoring_calls', 0)} (your program is "
+        f"offline and makes none)",
     ]
 
     if not per_instance:

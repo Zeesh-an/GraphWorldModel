@@ -1,4 +1,6 @@
 import difflib
+import json
+import re
 
 import numpy as np
 
@@ -311,47 +313,21 @@ EVERYTHING is rejected: it has not answered the question.
 
 
 def _prediction_rules(task: TaskSpec) -> str:
-    """The forecasting preamble: no actions, one method, and the forward model."""
-    if task.forward_model:
-        oracle_block = """\
+    """The forecasting preamble: no actions, one method, and no forward model in the program."""
+    oracle_block = """\
 
-THE FORWARD MODEL: `self.forecast_marginals(adopters, frontier, steps)`:
-    Returns a numpy array of length num_nodes: P(node has adopted `steps`
-    timesteps after the end of the observation window), given that `adopters` is
-    everyone who has adopted so far and `frontier` is the wave that adopted most
-    recently. `self.expected_popularity(adopters, frontier, steps)` is the same
-    call summed into a single number, which is usually all you want.
-
-    Pass `observation.frontier` as the frontier and not the whole adopter set:
-    someone who adopted five steps ago has already had their chance to spread, and
-    seeding them again would over-predict badly.
-
-    This is the ONLY thing that differs between the experimental conditions here.
-    The action space of this task is empty, so what is being measured is whether a
-    forward model in the prediction loop is worth anything at all against a
-    feature-driven estimate. The published evidence is genuinely mixed.
-
-    It is not free. One call unrolls the kernel `steps` times across several
-    sampled realizations, and the calls are counted. Get an estimate from features
-    first, THEN spend calls refining it. A loop that calls it per node will not
-    finish.
-
-    IT IS ALSO NOT GROUND TRUTH. It is an Independent-Cascade-shaped model of a
-    process that is not Independent Cascade. Treat its output as one input among
-    several: blending it with a feature estimate, or using it only to rank rather
-    than to size, is a legitimate and often better use of it than trusting it."""
-    else:
-        oracle_block = """\
-
-NO FORWARD MODEL IN THIS CONDITION. `self.forecast_marginals` raises if you call
-it. This arm exists to measure what pure features and point-process fits achieve,
-and the literature suggests that may be a great deal: feature-driven regression is
-reported to beat deep models on some corpora. Work from the observed adoption
-history, the wave series and the graph structure alone."""
+YOUR PROGRAM IS OFFLINE. It reads the graph, the observed adoption history and
+the wave series, and returns a number. It has no forward model to call: the arm's
+forward model is used by the HARNESS to score your predictor and to write the
+feedback you get back, never inside your code. Feature-driven regression, point
+process fits and branching extrapolations are all fair game; a simulator is not
+available and re-implementing one is not the task."""
 
     return f"""\
 {prediction_brief}
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else,
+OUTPUT FORMAT: the first line inside your fenced block MUST be `# MECHANISM: <one
+sentence>` naming the idea of the algorithm. Reply with exactly ONE fenced ```python
+block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
 example usage, no test code.
@@ -405,43 +381,22 @@ WHAT YOU IMPLEMENT:
 
 
 def _reconstruction_rules(task: TaskSpec) -> str:
-    """The decoding preamble: no actions, one method, and the transition kernel."""
-    if task.forward_model:
-        oracle_block = """\
+    """The decoding preamble: no actions, one method, and no kernel in the program."""
+    oracle_block = """\
 
-THE TRANSITION KERNEL: `self.step_marginals(infected, frontier)`:
-    Returns a numpy array of length num_nodes: P(node activates on the NEXT step)
-    given that `infected` is the set active now and `frontier` is the wave that
-    just activated. This is the one-step dynamics the cascade you are inverting
-    actually ran under, and it is the thing a purely structural decoder does not
-    have.
-
-    Use it to SCORE a hypothesis. Given a proposed history you can unroll it:
-
-        p = self.step_marginals(infected_so_far, wave_at_t)
-        logp = self.transition_logprob(p, infected_so_far, wave_at_t_plus_1)
-
-    `transition_logprob(marginal, infected, next_frontier)` is already bound for
-    you and derives from the same call, so summing it over the steps of a proposed
-    trajectory gives that trajectory's log-likelihood: a score you can compute
-    WITHOUT any labels, and the natural objective for a local search.
-
-    It is not free. Every call is one evaluation of the kernel and the calls are
-    counted. Get a decode first with a cheap structural method, THEN spend calls
-    improving it: a search that calls the kernel inside a loop over all nodes
-    will not finish. You are also free to never call it at all; if structure alone
-    wins, that is a result."""
-    else:
-        oracle_block = """\
-
-NO TRANSITION KERNEL IN THIS CONDITION. `self.step_marginals` raises if you call
-it. This arm exists to measure what pure structure and timing achieve, so your
-decoder must work from the graph, the reports and their times alone: Steiner
-trees, BFS/shortest-path orderings, centralities on the observed subgraph."""
+YOUR PROGRAM IS OFFLINE. It decodes from the graph, the edge probabilities
+(`graph.ic_probs`), the reports and their times, and returns a history. It has
+no transition kernel to call: the arm's kernel is used by the HARNESS to score the
+history you return (its log-likelihood is the reward) and to write the feedback,
+never inside your code. An analytic one-step IC rule computed from
+`graph.ic_probs` is fine and is exactly what a likelihood-driven local search
+needs; a simulator call is not available."""
 
     return f"""\
 {reconstruction_brief}
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else,
+OUTPUT FORMAT: the first line inside your fenced block MUST be `# MECHANISM: <one
+sentence>` naming the idea of the algorithm. Reply with exactly ONE fenced ```python
+block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
 example usage, no test code.
@@ -488,36 +443,22 @@ WHAT YOU IMPLEMENT:
 
 
 def _localization_rules(task: TaskSpec) -> str:
-    """The inverse-task preamble: no actions, one method, and the forward oracle."""
-    if task.forward_model:
-        oracle_block = """\
+    """The inverse-task preamble: no actions, one method, and no oracle in the program."""
+    oracle_block = """\
 
-THE FORWARD ORACLE: `self.predict_marginals(seeds)`:
-    Returns a numpy array of length num_nodes: P(node infected at the end) if the
-    cascade had STARTED from `seeds`. This is the simulator the observation came
-    from, and it is the one thing a purely structural rule does not have.
-
-    Use it to TEST a hypothesis: re-simulate a candidate source set and compare
-    the prediction against what you observed.
-
-        predicted = self.predict_marginals(candidate)
-        error = float(((predicted - observation) ** 2).sum())
-
-    It is not free. Every call is a full rollout and the calls are counted, so a
-    scan over all nodes inside a per-pick loop will not finish. Narrow to a short
-    candidate list with a cheap structural rule FIRST, then spend calls ranking it.
-    You are also free to never call it at all: if structure alone wins, that is a
-    result."""
-    else:
-        oracle_block = """\
-
-NO FORWARD ORACLE IN THIS CONDITION. `self.predict_marginals` raises if you call
-it. This arm exists to measure what pure structure achieves, so your algorithm
-must be a structural inference rule over the graph and the observation alone."""
+YOUR PROGRAM IS OFFLINE. It infers the sources from the graph, the edge
+probabilities (`graph.ic_probs`) and the observation, and returns a node list.
+It has no forward oracle to call: the arm's evaluator re-simulates the set you
+return to compute the reward (consistency with the observation) and the
+feedback, never inside your code. An analytic re-simulation over
+`graph.ic_probs` (a mean-field independent-cascade pass) is fine; a simulator
+call is not available."""
 
     return f"""\
 {localization_brief}
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else,
+OUTPUT FORMAT: the first line inside your fenced block MUST be `# MECHANISM: <one
+sentence>` naming the idea of the algorithm. Reply with exactly ONE fenced ```python
+block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
 example usage, no test code.
@@ -889,7 +830,9 @@ def _common_rules(task: TaskSpec | None) -> str:
 
     return f"""\
 {brief}
-OUTPUT FORMAT: reply with exactly ONE fenced ```python block and nothing else,
+OUTPUT FORMAT: the first line inside your fenced block MUST be `# MECHANISM: <one
+sentence>` naming the idea of the algorithm. Reply with exactly ONE fenced ```python
+block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
 example usage, no test code.
@@ -1332,8 +1275,8 @@ is what makes the first-mover advantage measurable.
 localization_exemplars = """\
 EXAMPLES: two algorithms at the level you should START from, not finish at.
 
-Example 1, LPSI with a community separation constraint (pure structure, no
-forward model: this is roughly the classical bar):
+Example 1, LPSI with a community separation constraint (pure structure: this is
+roughly the classical bar):
 ```python
 import numpy as np
 
@@ -1386,19 +1329,31 @@ class FieldMaxima(Strategy):
         return [int(node) for node in ranked[:budget]]
 ```
 
-Example 2, propose-then-test: a cheap structural shortlist, then the forward
-oracle ranks it by how well re-simulating it reproduces the observation:
+Example 2, propose-then-test, OFFLINE: a cheap structural shortlist, then an
+analytic mean-field re-simulation over `graph.ic_probs` ranks candidates by how
+well they reproduce the observation (no simulator is called):
 ```python
 import numpy as np
 
-class ResimulationGreedy(Strategy):
+class MeanFieldResimulation(Strategy):
     def source_scores(self, graph, observation):
         return localization_scorers.lpsi(graph, observation)
+
+    def _resimulate(self, graph, seeds, steps=6):
+        # Mean-field IC: P(v infected) after each step, from the true arc probabilities
+        n = graph.num_nodes
+        src, dst = graph.edge_index[0], graph.edge_index[1]
+        p = np.zeros(n)
+        p[list(seeds)] = 1.0
+        for _ in range(steps):
+            survive = np.ones(n)
+            np.multiply.at(survive, dst, 1.0 - graph.ic_probs * p[src])
+            p = p + (1.0 - p) * (1.0 - survive)
+        return p
 
     def localize(self, graph, observation, budget):
         field = self.source_scores(graph, observation)
         field = np.where(observation >= 0.5, field, field.min() - 1.0)
-        # Shortlist FIRST: a forward call per node per pick does not finish
         shortlist = [int(node) for node in np.argsort(-field)[:25]]
 
         selected = []
@@ -1407,7 +1362,7 @@ class ResimulationGreedy(Strategy):
             for candidate in shortlist:
                 if candidate in selected:
                     continue
-                predicted = self.predict_marginals(selected + [candidate])
+                predicted = self._resimulate(graph, selected + [candidate])
                 error = float(((predicted - observation) ** 2).sum())
                 if error < best_error:
                     best, best_error = candidate, error
@@ -1417,8 +1372,7 @@ class ResimulationGreedy(Strategy):
 
         return selected
 ```
-Beat both. Combining their ideas, or replacing them, are both fair game, and if
-the forward oracle turns out not to help, say so with a program that does not use it.
+Beat both. Combining their ideas, or replacing them, are both fair game.
 """
 
 # The decoding counterpart. Neither the intervention exemplars nor the
@@ -1494,48 +1448,62 @@ class LikelihoodTree(Strategy):
         return decoded
 ```
 
-Example 2, refine a structural decode with the kernel: start from the library's
-`delayed_bfs`, then move activation times one step at a time and keep a move only
-when the trajectory's log-likelihood under the transition kernel goes up:
+Example 2, refine a structural decode against an ANALYTIC kernel, offline: start
+from the library's `delayed_bfs`, then move activation times one step at a time
+and keep a move only when the history's log-likelihood under the one-step IC rule
+computed from `graph.ic_probs` goes up (the harness scores the same quantity with
+the arm's own kernel):
 ```python
-class KernelRefined(Strategy):
+import math
+
+class LikelihoodRefined(Strategy):
+    def _arc_prob(self, graph):
+        src, dst = graph.edge_index[0], graph.edge_index[1]
+        return {(int(u), int(v)): float(p) for u, v, p in zip(src, dst, graph.ic_probs)}
+
+    def _loglik(self, graph, arc, times, horizon):
+        # Analytic IC: a node fires at t with prob 1 - prod(1 - p_uv) over the wave at t-1,
+        # and stays clean otherwise; summed over every step the history implies
+        waves = {}
+        for node, step in times.items():
+            waves.setdefault(step, set()).add(node)
+        infected = set(waves.get(0, ()))
+        total = 0.0
+        for step in range(1, horizon + 1):
+            wave = waves.get(step - 1, set())
+            if not wave:
+                break
+            exposed = {}
+            for u in wave:
+                for v in graph.out_neighbors(u):
+                    if v not in infected:
+                        exposed[v] = exposed.get(v, 1.0) * (1.0 - arc.get((u, v), 0.0))
+            fired = waves.get(step, set())
+            for v, survive in exposed.items():
+                total += math.log(max(1.0 - survive, 1e-9)) if v in fired else math.log(max(survive, 1e-9))
+            infected |= fired
+        return total
+
     def reconstruct(self, graph, observation, horizon):
         decoded = reconstruction_algorithms.delayed_bfs(graph, observation, horizon)
         times = {node: value[0] for node, value in decoded.items()}
-        # An OBSERVED time is ground truth; only the inferred ones may move
         movable = [n for n in times if n not in observation.times]
+        arc = self._arc_prob(graph)
 
-        def score(assignment):
-            waves = {}
-            for node, step in assignment.items():
-                waves.setdefault(step, []).append(node)
-            total = 0.0
-            infected = list(waves.get(0, []))
-            for step in range(1, horizon + 1):
-                wave = waves.get(step - 1, [])
-                if not wave:
-                    break
-                marginal = self.step_marginals(infected, wave)
-                total += self.transition_logprob(marginal, infected, waves.get(step, []))
-                infected = infected + waves.get(step, [])
-            return total
-
-        best = score(times)
-        for node in movable[:40]:            # bounded: every call costs a kernel evaluation
+        best = self._loglik(graph, arc, times, horizon)
+        for node in movable[:60]:
             for shift in (-1, 1):
                 proposed = max(1, min(times[node] + shift, horizon))
                 if proposed == times[node]:
                     continue
                 original = times[node]
                 times[node] = proposed
-                candidate = score(times)
+                candidate = self._loglik(graph, arc, times, horizon)
                 if candidate > best:
                     best = candidate
                 else:
                     times[node] = original
 
-        # Re-attach parents against the updated times: a node's parent must now be
-        # an in-neighbour that activated strictly earlier
         decoded = {}
         for node, step in times.items():
             if step == 0:
@@ -1549,9 +1517,8 @@ class KernelRefined(Strategy):
 
         return decoded
 ```
-Beat both. Note what example 2 does NOT do: it never calls the kernel inside a
-loop over all nodes, because that does not finish. Narrow to a short candidate
-list first, then spend calls on it.
+Beat both. Example 2 is bounded on purpose: a likelihood pass costs a walk over
+the wave's out-edges per step, so narrow the movable set before searching it.
 """
 
 # Only shown when the task actually allows edge ops. Under add_node-only IC the
@@ -1610,14 +1577,13 @@ class TemporalGrowth(Strategy):
 ```
 
 ```python
+import math
 import numpy
 
 class BlendedForecast(Strategy):
-    \"\"\"Blend a branching-process extrapolation with the learned forward model, in
-    LOG space because that is where the error is measured. The forward model is an
-    IC-shaped view of a process that is not IC, so it is used as one opinion rather
-    than as the answer, and the blend weight is fitted on the labelled examples
-    rather than guessed.\"\"\"
+    \"\"\"Blend a branching-process extrapolation with the Szabo-Huberman log-linear
+    fit, in LOG space because that is where the error is measured. Both estimates
+    are offline; neither needs a simulator.\"\"\"
 
     def _waves(self, observation):
         counts = numpy.zeros(observation.observed_steps + 1)
@@ -1636,7 +1602,7 @@ class BlendedForecast(Strategy):
         reproduction = float(numpy.mean(ratios[-3:]))
         if reproduction >= 1.0:
             # Supercritical: the geometric sum diverges, so this branch has no
-            # estimate. The blend below falls back on the model alone.
+            # estimate and the blend falls back on the fitted line alone.
             return None
 
         remaining = max(horizon - observation.observed_steps, 0)
@@ -1649,19 +1615,16 @@ class BlendedForecast(Strategy):
             return float(observation.popularity)
 
         classical = self._branching(observation, horizon)
-
-        # ONE call, on the frontier rather than the whole adopter set: an adopter
-        # from five steps ago has already had its chance to transmit
-        model = self.expected_popularity(
-            list(observation.adopters), list(observation.frontier), steps
+        fitted = prediction_algorithms.szabo_huberman(
+            graph, observation, horizon, fit_examples=list(getattr(self, "fit_examples", []))
         )
 
-        if classical is None:
-            estimate = model
+        if classical is None or fitted is None:
+            estimate = fitted if classical is None else classical
         else:
             # Geometric mean = arithmetic mean in log space, which is the space the
             # score is measured in
-            estimate = math.sqrt(max(classical, 1.0) * max(model, 1.0))
+            estimate = math.sqrt(max(classical, 1.0) * max(fitted, 1.0))
 
         return min(
             max(estimate, float(observation.popularity)), float(observation.num_nodes)
@@ -1856,8 +1819,8 @@ Two things about this task that no other one in this system has:
 1. THE ERROR RUNS DOWNWARD. Lower is better. A change that makes the number go up
    is a regression, whatever it looked like in the code.
 2. THE PROCESS IS REAL. These adoptions were logged, not simulated. No transition
-   rule you can write is the true one, and the forward model (where you have one)
-   is an approximation whose bias is systematic rather than random. Check the
+   rule you can write is the true one, and the harness's forward model, which
+   scores you, is an approximation whose bias is systematic rather than random. Check the
    DIRECTION of your residual in the feedback before changing the model: a
    constant multiplicative bias is one line to fix and is usually most of the gap.
 
@@ -1932,55 +1895,6 @@ def build_round_block(task: TaskSpec) -> str:
 
 
 max_listed_outbreak = 60
-
-
-def build_plan_oracle_block(task: TaskSpec) -> str:
-    """
-    `self.score_plan`, for the three tasks whose cascade is exogenous.
-
-    Advertised only where it is bound: a seeding task's oracle is
-    `predict_marginals`, and a task without a forward model gets the raiser text
-    so the condition is stated rather than discovered through a traceback.
-    """
-    if not task.contains:
-        return ""
-
-    if not task.forward_model:
-        return """\
-NO FORWARD MODEL IN THIS CONDITION. `self.score_plan` raises if you call it:
-this arm measures what structure and the outbreak's position achieve alone. Do
-not re-implement simulation with numpy either; that is the condition you are in.
-"""
-
-    unit = {
-        "remove_node": "removals",
-        "add_node": "counter-seeds",
-        "remove_edge": "edge cuts",
-        "set_edge_weight": "reweights",
-    }.get(task.budget_op, "actions")
-
-    return f"""\
-THE PLAN ORACLE: `self.score_plan(plan)` -> float.
-    Takes a FULL candidate plan (the same list-of-bags shape plan_horizon
-    returns), applies the fixed outbreak and every expansion the real evaluation
-    applies, rolls it out on THIS arm's evaluator, and returns the objective
-    (LOWER is better here). Use it to compare a few candidate plans of {unit}
-    before committing one:
-
-        candidate = [[ActionOp("{task.budget_op}", node) for node in picks]] + [
-            [] for _ in range(horizon)
-        ]
-        reward = self.score_plan(candidate)
-
-    It is not free: every call is a full metered rollout, so narrow to a SHORT
-    list of candidate plans with cheap structural reasoning first, then spend
-    calls ranking them. Do NOT hand-roll a Monte Carlo simulator with numpy
-    instead: it burns your wall-clock budget re-deriving dynamics this call
-    already has exactly, and an internal test against the wrong tie-break or
-    lever optimizes the wrong problem. An illegal plan (over budget, wrong op,
-    targeting a protected source) raises here with the same message the
-    evaluation would give.
-"""
 
 
 def build_outbreak_block(task: TaskSpec) -> str:
@@ -2468,7 +2382,7 @@ TASK: {task.task}, {objective_line}
 diffusion_model = {task.diffusion_model}
 budget = {task.budget}   ({100.0 * task.budget / graph.num_nodes:.1f}% of nodes, {budget_unit})
 horizon = {task.horizon} (timesteps)
-{ops_line}{build_outbreak_block(task)}{build_plan_oracle_block(task)}{build_round_block(task)}{build_observation_block(task)}{build_mask_block(task)}{build_cascade_block(task)}
+{ops_line}{build_outbreak_block(task)}{build_round_block(task)}{build_observation_block(task)}{build_mask_block(task)}{build_cascade_block(task)}
 {build_graph_profile(graph)}
 
 {reference}
@@ -2489,13 +2403,9 @@ def _scored_localization_system(task: TaskSpec) -> str:
     is directly comparable to the classical methods rather than a subset of them.
     """
     oracle_line = (
-        "- `self.predict_marginals(seeds)` -> np.ndarray of P(infected at the end) "
-        "if the\n  cascade had started from `seeds`. Every call is a full rollout "
-        "and calls are\n  counted, so use it sparingly inside score(): it runs "
-        "once per candidate per pick."
-        if task.forward_model
-        else "- `self.predict_marginals` RAISES in this condition: this arm has no "
-        "forward\n  model by design. Score from structure and the observation alone."
+        "- Your score() is OFFLINE: it sees the graph, `graph.ic_probs` and the "
+        "observation, and\n  nothing simulates for it. The arm's evaluator scores "
+        "the set you return."
     )
 
     return f"""\
@@ -2862,16 +2772,235 @@ def build_system_prompt(
 # Evolve method: each generation is an EDIT of a parent from the population
 evolve_operator_instructions = {
     "refine": (
-        "Make a SMALL, targeted improvement to the PARENT: tune a weight, add or "
-        "adjust one term, fix one weakness the diagnostics expose. Keep its "
-        "overall approach."
+        "REFINE: make a SMALL, targeted improvement to the PARENT: adjust one term, "
+        "fix one weakness the diagnostics expose, keep its overall approach."
     ),
-    "restructure": (
-        "REDESIGN the approach: keep the same contract but change the core idea, "
-        "different structural signals, different selection logic. Do not just "
-        "re-tune the parent."
+    "parameters": (
+        "PARAMETERS: change ONLY numeric constants of the PARENT (weights, "
+        "thresholds, sample counts, radii). No structural change: same functions, "
+        "same control flow, different numbers, chosen from what the diagnostics say."
+    ),
+    "simplify": (
+        "SIMPLIFY: remove components of the PARENT that the diagnostics do not "
+        "justify: a term, a stage, a special case, a parameter. The child must be "
+        "SHORTER and score within the noise band of the parent; that counts as a "
+        "success here, because an algorithm a reader can follow is the goal."
+    ),
+    "crossover": (
+        "CROSSOVER: combine the PARENT's mechanism with the PARTNER's into one "
+        "strategy that keeps the parent's contract. The child must contain an "
+        "identifiable part of each; it is not a re-tune of either."
+    ),
+    "synthesize": (
+        "SYNTHESIZE: read every strategy shown and write ONE new strategy that takes "
+        "the best-supported idea from each, according to their diagnostics. It must "
+        "differ from every strategy shown and from every library algorithm."
+    ),
+    "from_scratch": (
+        "FROM SCRATCH: do NOT edit any program shown. Implement the CHOSEN IDEA as a "
+        "new strategy under the same contract. It must not be a re-implementation "
+        "of a library algorithm or of a mechanism already in the population."
     ),
 }
+
+
+def mechanism_of(script: str) -> str:
+    """The `# MECHANISM:` line every generated script opens with, or an empty string."""
+    match = re.search(r"^\s*#\s*MECHANISM:\s*(.+?)\s*$", script or "", re.M)
+
+    return match.group(1) if match else ""
+
+
+max_table_rows = 24
+
+
+def build_attempts_table(history: list[dict], sense: str) -> str:
+    """
+    OpenEvolve's previous-attempts table with ReEvo's hints: one line per
+    generation, so the model sees the whole search instead of the last few turns.
+    """
+    if not history:
+        return "(no attempts yet)"
+
+    direction = "lower is better" if sense == "minimize" else "higher is better"
+    rows = history if len(history) <= max_table_rows else [history[0], *history[-(max_table_rows - 1):]]
+    lines = [f"iter | operator | reward ({direction}) | vs best | accepted | mechanism | hint"]
+    for record in rows:
+        if record.get("error"):
+            outcome = f"FAILED: {str(record['error']).splitlines()[0][:70]}"
+            lines.append(
+                f"{record['iteration']} | {record.get('operator', '?')} | {outcome} | | no | "
+                f"{record.get('mechanism', '')[:80]} |"
+            )
+            continue
+        delta = record.get("delta")
+        lines.append(
+            f"{record['iteration']} | {record.get('operator', '?')} | {record['reward']:.3f} | "
+            f"{'' if delta is None else f'{delta:+.3f}'} | "
+            f"{'yes' if record.get('accepted') else 'no'} | "
+            f"{record.get('mechanism', '')[:80]} | {record.get('hint', '')[:100]}"
+        )
+
+    return "\n".join(lines)
+
+
+def build_population_table(population: list[dict], sense: str) -> str:
+    """One line per population member: reward, compute, size, mechanism."""
+    if not population:
+        return "(empty)"
+
+    ordered = sorted(
+        population, key=lambda record: record["reward"], reverse=(sense != "minimize")
+    )
+    lines = ["id | reward | plan seconds | code lines | mechanism"]
+    for record in ordered:
+        lines.append(
+            f"{record.get('iteration', '?')} | {record['reward']:.3f} | "
+            f"{record.get('plan_seconds', 0.0):.1f} | "
+            f"{len(str(record.get('script', '')).splitlines())} | "
+            f"{record.get('mechanism', '')[:100]}"
+        )
+
+    return "\n".join(lines)
+
+
+def library_menu_for(task: TaskSpec) -> str:
+    """The library pool this task's programs may call, one line per algorithm."""
+    if task.forecasts:
+        return build_prediction_menu()
+    if task.decodes:
+        return build_reconstruction_menu()
+    if task.recovers:
+        return build_localization_menu()
+    if task.blocks:
+        return build_blocking_menu(task.budget_op)
+    if task.immunizes:
+        return build_immunization_menu(task.epi_lever)
+    if task.contains:
+        return build_dismantling_menu()
+
+    return build_algorithm_menu()
+
+
+reflection_system = (
+    "You are the reviewer of an evolutionary search over graph algorithms. You "
+    "answer with JSON only."
+)
+
+
+def build_reflection_prompt(
+    worse: dict, better: dict, memory: str, sense: str, unit: str
+) -> str:
+    """
+    ReEvo's two reflections in one call: a hint from a worse/better pair, and the
+    running memory updated with it.
+    """
+    direction = "lower is better" if sense == "minimize" else "higher is better"
+
+    return f"""\
+Two strategies for the same task were scored on the same realization ({direction},
+unit: {unit}). The second scored better.
+
+[Worse: reward {worse['reward']:.4f}, mechanism: {worse.get('mechanism', '')}]
+```python
+{worse['script']}
+```
+Its diagnostics:
+{worse.get('summary', '')[:1500]}
+
+[Better: reward {better['reward']:.4f}, mechanism: {better.get('mechanism', '')}]
+```python
+{better['script']}
+```
+Its diagnostics:
+{better.get('summary', '')[:1500]}
+
+Prior memory of this search (may be empty):
+{memory or '(empty)'}
+
+Reply with JSON only, no prose around it:
+{{"hint": "<at most 20 words: what made the better one better, as a design rule>",
+  "memory": "<at most 50 words: the prior memory revised with this hint; keep only rules the evidence still supports>"}}"""
+
+
+def parse_reflection(reply: str, fallback_memory: str) -> tuple[str, str]:
+    """The (hint, memory) pair from a reflection reply, tolerant of prose around the JSON."""
+    match = re.search(r"\{.*\}", reply or "", re.S)
+    if match:
+        try:
+            data = json.loads(match.group(0))
+            hint = " ".join(str(data.get("hint", "")).split())
+            memory = " ".join(str(data.get("memory", fallback_memory)).split())
+            return hint, memory or fallback_memory
+        except ValueError:
+            pass
+
+    return "", fallback_memory
+
+
+def build_ideas_prompt(
+    task: TaskSpec,
+    count: int,
+    population: list[dict],
+    library_menu: str,
+    memory: str,
+    attempts: str,
+) -> str:
+    """
+    Idea search before code search: several distinct mechanisms, judged for
+    novelty against the library and the population, one chosen.
+    """
+    tried = "\n".join(
+        f"- {record.get('mechanism', '') or '(no mechanism stated)'} (reward {record['reward']:.3f})"
+        for record in population
+    ) or "- (none yet)"
+
+    return f"""\
+Before writing code, propose {count} DISTINCT mechanisms for a new strategy on this
+task, then choose the one most different from everything below that you still
+expect to score well.
+
+LIBRARY ALGORITHMS (already available to everyone; re-implementing one is not new):
+{library_menu}
+
+MECHANISMS ALREADY IN THE POPULATION:
+{tried}
+
+SEARCH MEMORY:
+{memory or '(empty)'}
+
+ATTEMPTS SO FAR:
+{attempts}
+
+Reply with JSON only:
+{{"ideas": ["<one sentence each>", ...],
+  "novelty": [<0-10 per idea: 10 = shares no mechanism with the library or the population>],
+  "chosen": <index into ideas>,
+  "why": "<one sentence>"}}"""
+
+
+def parse_ideas(reply: str) -> tuple[list[str], str]:
+    """The idea list and the chosen idea from an ideas reply; empty on a parse failure."""
+    match = re.search(r"\{.*\}", reply or "", re.S)
+    if not match:
+        return [], ""
+    try:
+        data = json.loads(match.group(0))
+    except ValueError:
+        return [], ""
+
+    ideas = [" ".join(str(idea).split()) for idea in data.get("ideas", []) if str(idea).strip()]
+    if not ideas:
+        return [], ""
+    chosen = data.get("chosen", 0)
+    try:
+        chosen = int(chosen)
+    except (TypeError, ValueError):
+        chosen = 0
+    if not 0 <= chosen < len(ideas):
+        chosen = 0
+
+    return ideas, ideas[chosen]
 
 
 # Appended to the evolve/adaptive opening turn on arms whose evaluator can
@@ -2893,41 +3022,72 @@ probe_contract = (
 
 def build_evolve_prompt(
     operator: str,
-    parent: dict,
+    parent: dict | None,
     inspirations: list[dict],
     error: str | None = None,
     last_result: str | None = None,
+    attempts: str = "",
+    population: str = "",
+    memory: str = "",
+    idea: str = "",
+    partner: dict | None = None,
+    everyone: list[dict] | None = None,
 ) -> str:
     """
-    `last_result` is the previous generation's paired delta.
+    One generation's prompt: the operator, the search so far (attempts table,
+    population table, memory), and the programs the operator acts on.
 
-    The parent's own summary carries the delta it was created with, but a
-    candidate that did not become the parent never surfaces one, so without
-    this the model's most recent edit gets no verdict at all.
+    `last_result` is the previous generation's paired delta. The parent's own
+    summary carries the delta it was created with, but a candidate that did not
+    become the parent never surfaces one, so without this the model's most recent
+    edit gets no verdict at all.
     """
-    inspiration_text = "".join(
-        f"\nALTERNATIVE from the population (reward={record['reward']:.2f}):\n"
-        f"```python\n{record['script']}\n```\n"
-        for record in inspirations
-    )
-    error_text = (
-        f"\nYour previous attempt failed with:\n{error}\n" if error else ""
-    )
+    error_text = f"\nYour previous attempt failed with:\n{error}\n" if error else ""
     last_text = f"\nYOUR LAST EDIT: {last_result}\n" if last_result else ""
+    memory_text = f"SEARCH MEMORY (rules the evidence so far supports):\n{memory}\n\n" if memory else ""
+
+    if operator == "from_scratch":
+        programs = (
+            f"CHOSEN IDEA to implement (from the idea search):\n{idea}\n"
+            if idea
+            else "No idea was chosen; propose a mechanism unlike every one in the tables above.\n"
+        )
+    elif operator == "synthesize":
+        programs = "".join(
+            f"\nSTRATEGY {record.get('iteration', '?')} (reward={record['reward']:.2f}, "
+            f"mechanism: {record.get('mechanism', '')}):\n```python\n{record['script']}\n```\n"
+            f"Its diagnostics:\n{record.get('summary', '')}\n"
+            for record in (everyone or [])
+        ) + (f"\nIDEA to build it around (from the idea search):\n{idea}\n" if idea else "")
+    else:
+        programs = (
+            f"\nPARENT: the best in the population, which is NOT necessarily your last "
+            f"attempt (reward={parent['reward']:.2f}, mechanism: {parent.get('mechanism', '')}):\n"
+            f"```python\n{parent['script']}\n```\nParent rollout diagnostics:\n{parent['summary']}\n"
+        )
+        if operator == "crossover" and partner is not None:
+            programs += (
+                f"\nPARTNER (reward={partner['reward']:.2f}, mechanism: {partner.get('mechanism', '')}):\n"
+                f"```python\n{partner['script']}\n```\nPartner rollout diagnostics:\n{partner['summary']}\n"
+            )
+        elif operator == "refine":
+            programs += "".join(
+                f"\nALTERNATIVE from the population (reward={record['reward']:.2f}, "
+                f"mechanism: {record.get('mechanism', '')}):\n```python\n{record['script']}\n```\n"
+                for record in inspirations
+            )
 
     return f"""
-You are evolving a population of strategies. Produce a NEW candidate by modifying the PARENT.
-{last_text}
-PARENT: the best in the population, which is NOT necessarily your last attempt
-(reward={parent["reward"]:.2f}):
-```python
-{parent["script"]}
-```
-Parent rollout diagnostics:
-{parent["summary"]}
-{inspiration_text}{error_text}
-OPERATION: {operator.upper()}: {evolve_operator_instructions[operator]}
-Reply with one ```python block."""
+You are evolving a population of strategies.
+{memory_text}ATTEMPTS SO FAR (every generation of this search):
+{attempts or '(none)'}
+
+POPULATION (what survives):
+{population or '(empty)'}
+{last_text}{programs}{error_text}
+OPERATION: {evolve_operator_instructions[operator]}
+The first line inside your code block must be `# MECHANISM: <one sentence>` naming
+the idea of the strategy. Reply with one ```python block."""
 
 
 # GA-routing baseline: the LLM selects from the pool but never synthesizes code

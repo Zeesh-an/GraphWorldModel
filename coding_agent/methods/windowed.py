@@ -39,6 +39,7 @@ class WindowedOnline(OuterLoopMethod):
             build_strategy(
                 conversation.send(user),
                 allow_mc_algorithms=self.allow_mc_algorithms,
+                canned=getattr(agent.provider, "canned", False),
             ),
             task,
         )

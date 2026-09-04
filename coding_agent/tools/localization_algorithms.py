@@ -1073,7 +1073,7 @@ def resim_greedy(
     Greedy minimization of the re-simulation error ||y - f(x_hat)||^2.
 
     The forward-model-using classical baseline, and the shape §2.3.4 sketches. Its
-    `predict` argument is the one axis that matters: pass `self.predict_marginals`
+    `predict` argument is the one axis that matters: pass a forward oracle (a canned baseline receives one; a generated program is offline).
     from a generated program and the calls go through the arm's own METERED
     evaluator; leave it None and it falls back to a private NDlib estimator, which
     is the honest classical cost and is invisible to `real_env_episodes`. That
@@ -1161,7 +1161,7 @@ localization_scorers = {
 # Simulation-based, so one call costs budget x n_candidates x mc_runs real
 # episodes on its private simulator. Charged honestly to the arm like any other
 # baseline, and blocked from generated scripts by default: a generated program
-# has `self.predict_marginals`, which IS the metered evaluator.
+# is offline by construction.
 mc_localization_algorithms = ("resim_greedy",)
 
 localization_algorithm_names = list(localization_algorithms)

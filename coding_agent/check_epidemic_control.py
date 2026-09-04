@@ -45,7 +45,7 @@ from coding_agent.epidemic import (
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
 from coding_agent.executor import StrategyError, build_strategy, validate_actions
-from coding_agent.methods.base import attach_context, evaluate_strategy, validate_plan
+from coding_agent.methods.base import evaluate_strategy, validate_plan
 from coding_agent.tools.immunization_algorithms import (
     default_immunization_baselines,
     emittable,
@@ -820,67 +820,6 @@ def check_oracle_environment_rolls_out() -> None:
         f"({100.0 * (oracle_reward - mc_reward) / max(mc_reward, 1.0):+.1f}%)",
     )
 
-
-def check_plan_oracle_scores_doses() -> None:
-    """
-    `self.score_plan` under compartments: the same dose plan the evaluation would
-    score, through the same lever expansion, on the same evaluator, metered.
-    """
-    graph = build_graph(nodes=120, seed=5)
-    task = build_task(graph, budget=4)
-    environment = MonteCarloEnvironment(
-        graph,
-        "SIR",
-        mc_runs=20,
-        base_seed=1,
-        remove_semantics="blocked",
-        epidemic_config=EpidemicConfig(gamma=0.3),
-    )
-
-    picks = [int(node) for node in task.outbreak]
-    ring = sorted(
-        {int(v) for source in picks for v in graph.out_neighbors(source)} - set(picks)
-    )[: task.budget]
-    plan = [[ActionOp("remove_node", node) for node in ring]] + [
-        [] for _ in range(task.horizon)
-    ]
-    idle = [[] for _ in range(task.horizon + 1)]
-
-    class Probe:
-        source_script = ""
-
-        def plan_horizon(self, graph, budget, horizon):
-            return plan
-
-    probe = Probe()
-    before = getattr(environment, "rollout_calls", 0)
-    trajectory, _ = evaluate_strategy(probe, environment, task, graph)
-
-    check(
-        "plan_oracle_matches_the_evaluation",
-        probe.score_plan(plan) == trajectory.reward,
-        f"oracle {probe.score_plan(plan):.2f} vs evaluation {trajectory.reward:.2f}",
-    )
-    check(
-        "plan_oracle_ranks_doses_against_doing_nothing",
-        probe.score_plan(plan) <= probe.score_plan(idle),
-    )
-    check(
-        "plan_oracle_calls_are_metered",
-        environment.rollout_calls > before,
-    )
-
-    task_native = build_task(graph, budget=4)
-    task_native.forward_model = False
-    blind = attach_context(Probe(), task_native, environment)
-    raised = False
-    try:
-        blind.score_plan(plan)
-    except StrategyError as error:
-        raised = "@native" in str(error)
-    check("plan_oracle_raises_under_native", raised)
-
-
 if __name__ == "__main__":
     print("=" * 72)
     print("EPIDEMIC CONTROL: contract self-check")
@@ -902,7 +841,6 @@ if __name__ == "__main__":
         ("metrics", check_spectral_disagreement),
         ("end-to-end", check_prevented_infections_and_the_referee),
         ("end-to-end", check_oracle_environment_rolls_out),
-        ("end-to-end", check_plan_oracle_scores_doses),
     ):
         print(f"\n--- {section}: {runner.__name__}")
         runner()

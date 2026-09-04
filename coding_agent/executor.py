@@ -124,8 +124,8 @@ if _unknown_blocked:
 # Same rule on the source-localization side. `resim_greedy` falls back to a
 # PRIVATE NDlib estimator when it is not handed a forward oracle, so a generated
 # script calling it would bypass `real_env_episodes` exactly as `celf` does, and
-# a generated script has `self.predict_marginals`, which is the metered binding,
-# so nothing is lost by blocking it.
+# a generated script is offline by construction, so nothing is lost by
+# blocking it.
 mc_blocked_localization = localization_algorithms.mc_localization_algorithms
 
 _unknown_blocked = set(mc_blocked_localization) - set(
@@ -168,10 +168,8 @@ if _unknown_blocked:
 
 # ...and on the cascade-reconstruction side. `mcmc_decode` and `forward_backward`
 # evaluate the transition kernel `proposals x horizon` times per instance, and a
-# generated program already HAS the metered kernel (`self.step_marginals`), so
-# blocking them costs nothing and is the only way that cost lands in the arm's
-# own `kernel_calls`, which is the number research/cascade_reconstruction.md §11
-# says nobody has published.
+# generated program is offline by construction (the kernel is bound only to
+# canned baselines), so blocking them keeps a generated decoder honest at no cost.
 mc_blocked_reconstruction = reconstruction_algorithms.mc_reconstruction_algorithms
 
 _unknown_blocked = set(mc_blocked_reconstruction) - set(
@@ -186,10 +184,8 @@ if _unknown_blocked:
 
 # Kernel-heavy POPULARITY predictors, on the same terms as every other pool's:
 # `mc_forward` unrolls the forward model `steps * forecast_samples` times per
-# cascade, and a generated program already HAS the metered oracle
-# (`self.forecast_marginals`), so blocking it costs nothing and is the only way
-# that cost lands in the arm's own `kernel_calls`, which is the axis
-# research/cascade_prediction.md §2.4 says the whole comparison is read on.
+# cascade; a generated predictor is offline by construction (the forward model
+# is bound only to canned baselines), so blocking it costs nothing.
 mc_blocked_prediction = prediction_algorithms.mc_prediction_algorithms
 
 _unknown_blocked = set(mc_blocked_prediction) - set(
@@ -326,10 +322,10 @@ def _blocked_localizer(name: str, *_args, **_kwargs) -> None:
     raise StrategyError(
         f"localization_algorithms.{name} is not available: it re-simulates every "
         f"candidate on its own private simulator, which bypasses the metered "
-        f"evaluator. Blocked: {', '.join(mc_blocked_localization)}. You already "
-        f"have the metered version: call `self.predict_marginals(seeds)` and "
-        f"write the search around it yourself, which is also the only way its "
-        f"cost lands in this arm's forward-call count."
+        f"evaluator. Blocked: {', '.join(mc_blocked_localization)}. Your program is "
+        f"OFFLINE: infer the sources from the graph, the edge probabilities and "
+        f"the observation alone (an analytic re-simulation over `graph.ic_probs` "
+        f"is fine; a simulator call is not)."
     )
 
 
@@ -338,10 +334,9 @@ def _blocked_decoder(name: str, *_args, **_kwargs) -> None:
         f"reconstruction_algorithms.{name} is not available: it evaluates the "
         f"transition kernel proposals x horizon times per instance, which "
         f"dominates wall clock. Blocked: {', '.join(mc_blocked_reconstruction)}. "
-        f"You already have the metered kernel: call "
-        f"`self.step_marginals(infected, frontier)` and write the search around it "
-        f"yourself, which is also the only way its cost lands in this arm's "
-        f"kernel-call count."
+        f"Your program is OFFLINE: decode from the graph, the edge probabilities, "
+        f"the reports and their times alone (an analytic one-step IC kernel over "
+        f"`graph.ic_probs` is fine; a simulator call is not)."
     )
 
 
@@ -349,11 +344,9 @@ def _blocked_predictor(name: str, *_args, **_kwargs) -> None:
     raise StrategyError(
         f"prediction_algorithms.{name} is not available: it unrolls the forward "
         f"model steps x forecast_samples times per cascade, which dominates wall "
-        f"clock. Blocked: {', '.join(mc_blocked_prediction)}. You already have the "
-        f"metered oracle: call `self.forecast_marginals(adopters, frontier, steps)` "
-        f"or `self.expected_popularity(...)` and write the estimate around it "
-        f"yourself, which is also the only way its cost lands in this arm's "
-        f"kernel-call count."
+        f"clock. Blocked: {', '.join(mc_blocked_prediction)}. Your program is "
+        f"OFFLINE: predict from the observed adoption history, the wave series and "
+        f"the graph structure alone."
     )
 
 
@@ -529,7 +522,10 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
 
 
 def build_strategy(
-    script: str, strategy_mode: str = "free", allow_mc_algorithms: bool = False
+    script: str,
+    strategy_mode: str = "free",
+    allow_mc_algorithms: bool = False,
+    canned: bool = False,
 ) -> Strategy:
     # Converts a generated script string into a live object
     check_script_imports(script)
@@ -605,6 +601,12 @@ def build_strategy(
 
     # Retained so results JSONs archive the exact code that produced the reward
     strategy.source_script = script
+    # True only for a library, routed or external baseline built by the harness.
+    # The evaluator bindings (`predict_marginals`, `step_marginals`,
+    # `forecast_marginals`) exist for the kernel-using members of those pools and
+    # are attached to canned strategies only: a GENERATED program is offline by
+    # construction and never gets a handle on the arm's evaluator.
+    strategy.canned = canned
     return strategy
 
 

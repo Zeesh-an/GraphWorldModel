@@ -9,6 +9,7 @@ from coding_agent.credit import credit_feedback
 from coding_agent.probes import answer_probes, parse_probe_request
 from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.methods.base import (
+    accepts,
     OuterLoopMethod,
     baseline_anchor,
     evaluate_strategy,
@@ -23,7 +24,7 @@ from coding_agent.prompts import (
     build_system_prompt,
     build_user_prompt,
 )
-from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory, improves
+from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
 
 
 # A script that fails to build or run teaches the next turn something, but it is
@@ -144,6 +145,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                         resumed["best"]["script"],
                         self.strategy_mode,
                         self.allow_mc_algorithms,
+                        canned=getattr(agent.provider, "canned", False),
                     ),
                     checkpoint.trajectory_from_dict(resumed["best"]["trajectory"]),
                 )
@@ -183,6 +185,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     script,
                     self.strategy_mode,
                     self.allow_mc_algorithms,
+                    canned=getattr(agent.provider, "canned", False),
                 )
                 last_script = strategy.source_script
 
@@ -277,8 +280,13 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             previous_best = best
             parent_iteration = best_iteration
 
-            if best is None or improves(
-                trajectory.reward, best[1].reward, task.sense
+            if accepts(
+                trajectory,
+                None if best is None else best[1],
+                task.sense,
+                "refine",
+                strategy.source_script,
+                "" if best is None else best[0].source_script,
             ):
                 best = (strategy, trajectory)
                 best_iteration = iteration

@@ -313,7 +313,7 @@ def build_localization_reference(exclude: tuple = ()) -> str:
         + ", ".join(name for name in localization_names if name in exclude)
         + ": it re-simulates every candidate on a PRIVATE simulator, which\n"
         "  bypasses the metered evaluator. You already have the metered version:\n"
-        "  `self.predict_marginals(seeds)`."
+        "  an analytic mean-field pass over `graph.ic_probs` written in your program."
         if exclude
         else ""
     )
@@ -361,7 +361,7 @@ def build_reconstruction_reference(exclude: tuple = ()) -> str:
         + ", ".join(name for name in reconstruction_names if name in exclude)
         + ": each evaluates the transition kernel thousands of times per\n"
         "  instance. You already have the metered kernel:\n"
-        "  `self.step_marginals(infected, frontier)`."
+        "  an analytic one-step IC rule over `graph.ic_probs` written in your program."
         if any(name in exclude for name in reconstruction_names)
         else ""
     )
@@ -406,7 +406,7 @@ def build_prediction_reference(exclude: tuple = ()) -> str:
         + ", ".join(name for name in prediction_names if name in exclude)
         + ": it unrolls the forward model steps x samples times per\n"
         "  cascade. You already have the metered oracle:\n"
-        "  `self.forecast_marginals(adopters, frontier, steps)`."
+        "  a feature or point-process extrapolation written in your program."
         if any(name in exclude for name in prediction_names)
         else ""
     )

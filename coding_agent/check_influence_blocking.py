@@ -34,7 +34,6 @@ from coding_agent.blocking import (
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.executor import StrategyError, build_strategy, validate_actions
 from coding_agent.methods.base import (
-    attach_context,
     baseline_anchor,
     evaluate_strategy,
     validate_plan,
@@ -778,50 +777,6 @@ def check_mia_scores_do_not_collapse_onto_the_periphery() -> None:
         )
 
 
-def check_plan_oracle_races_the_rumour() -> None:
-    """
-    `self.score_plan` under two cascades: the rumour is committed, the candidate
-    counter-seeds race it, and the number returned is the number the evaluation
-    would return. This is the binding that replaces the 260-seconds-per-call
-    hand-rolled live-edge samplers the first sweep's programs built.
-    """
-    graph = _graph(path, 4)
-    task = _task(budget=1)
-    environment = MonteCarloEnvironment(
-        graph,
-        "IC",
-        mc_runs=8,
-        base_seed=0,
-        remove_semantics=blocked,
-        negative_seeds=(0,),
-        competitive_config=CompetitiveConfig(tie_break=positive_dominance),
-    )
-
-    early = [[ActionOp("add_node", 1)]] + [[] for _ in range(task.horizon)]
-    late = [[ActionOp("add_node", 3)]] + [[] for _ in range(task.horizon)]
-
-    class Probe:
-        source_script = ""
-
-        def plan_horizon(self, graph, budget, horizon):
-            return early
-
-    probe = Probe()
-    trajectory, _ = evaluate_strategy(probe, environment, task, graph)
-
-    assert probe.score_plan(early) == trajectory.reward
-    # Counter-seeding next to the source saves the downstream path; a leaf saves
-    # only itself, so the rumour's remaining size must rank them
-    assert probe.score_plan(early) < probe.score_plan(late)
-
-    blind = attach_context(Probe(), _task(budget=1, forward_model=False), environment)
-    try:
-        blind.score_plan(early)
-        raise AssertionError("@native score_plan must raise")
-    except StrategyError as error:
-        assert "@native" in str(error)
-
-
 checks = (
     check_registry,
     check_tie_break,
@@ -843,7 +798,6 @@ checks = (
     check_generated_script,
     check_helpers,
     check_mia_scores_do_not_collapse_onto_the_periphery,
-    check_plan_oracle_races_the_rumour,
 )
 
 

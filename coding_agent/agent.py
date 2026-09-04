@@ -251,7 +251,9 @@ class CodingAgent:
 # without bound. At the default 20 iterations the middle IS dropped, by design:
 # the population best and its diagnostics ride in every prompt, so an old
 # exchange carries nothing the search still needs.
-default_history_exchanges = 6
+# Raised from 6 once assistant turns became diffs rather than whole scripts:
+# the same window now holds most of a search
+default_history_exchanges = 10
 
 
 class Conversation:
@@ -310,6 +312,18 @@ class Conversation:
         self._record("ask", user_text, reply)
 
         return reply
+
+    def compact_last(self, content: str) -> None:
+        """
+        Replace the last assistant turn with a compact stand-in.
+
+        The full script is what the model needed to WRITE; what later turns need
+        to remember is what it changed and how it scored, which a diff against the
+        parent plus one line of verdict carries in a tenth of the tokens. The
+        transcript keeps the verbatim reply either way.
+        """
+        if self.messages and self.messages[-1]["role"] == "assistant":
+            self.messages[-1] = {"role": "assistant", "content": content}
 
     def reset(self) -> None:
         """Drop everything but the system turn: a fresh episode, same contract."""

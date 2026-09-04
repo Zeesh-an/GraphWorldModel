@@ -762,8 +762,8 @@ def mc_forward(
     difference between those two rows is §2.4's cost claim with nothing else varying.
 
     Blocked from generated scripts by default, for the same reason `celf` and
-    `mcmc_decode` are: a generated program already has `self.forecast_marginals`,
-    which IS the metered kernel, and writing the search around it is the only way
+    `mcmc_decode` are: a generated program is offline by construction and has no forward model,
+    so nothing is lost by blocking it.
     the cost lands in this arm's `forecast_calls`.
     """
     if predict is None:

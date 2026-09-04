@@ -825,8 +825,11 @@ def evaluate_reconstructor(
         )
 
     # What the PROGRAM may call: the four bindings, a raiser under @native
-    oracle = bind_step_marginals(environment, task)
-    strategy.step_marginals = oracle
+    # Bound to canned baselines only: a generated decoder is offline
+    oracle = None
+    if getattr(strategy, "canned", False):
+        oracle = bind_step_marginals(environment, task)
+        strategy.step_marginals = oracle
     strategy.transition_logprob = transition_logprob
     # What the HARNESS scores with: the same kernel, counted apart from the
     # program's own calls, available under every condition (the native arm's is
@@ -1157,9 +1160,8 @@ def summarize_reconstruction(
         f"{means.get('n_missing', 0.0):.1f} reported nodes DROPPED, "
         f"{means.get('n_mistimed', 0.0):.1f} reported times MOVED, "
         f"{means.get('n_outside', 0.0):.1f} nodes named that the snapshot says stayed clean",
-        f"kernel calls by your program: {cost.get('kernel_calls', 0)} total, "
-        f"{cost.get('kernel_calls_per_instance', 0)} per cascade (the harness's own "
-        f"scoring steps, {cost.get('scoring_kernel_calls', 0)}, are separate)",
+        f"harness scoring kernel steps: {cost.get('scoring_kernel_calls', 0)} (your "
+        f"program is offline and makes none)",
     ]
 
     if means.get("n_missing", 0.0) > 0 or means.get("n_mistimed", 0.0) > 0:

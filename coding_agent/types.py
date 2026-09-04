@@ -193,11 +193,12 @@ class TaskSpec:
     # published given-k convention) or `sweep` (the pipeline's k, for §8.5.1's
     # source-fraction axis)
     source_budget_mode: str = "episode"
-    # Whether `predict_marginals` is bound to a real evaluator for this arm. False
-    # is the `@native` condition of research/source_localization.md §2.4.3: the
-    # program has NO forward model and must be a pure structural heuristic, which
-    # is the arm that answers "is a forward model in the search loop worth
-    # anything at all". Ignored by every task that does not invert.
+    # Whether the arm's evaluator provides a forward model at all. False is the
+    # `@native` condition (research/source_localization.md §2.4.3): the harness
+    # scores with one real episode and the canned kernel-using baselines get a
+    # raiser instead of a kernel. A GENERATED program is offline under every
+    # condition and never sees the evaluator, so for it this flag only changes
+    # what the harness can measure.
     forward_model: bool = True
     # Cascade reconstruction: the recovered object is a whole TRAJECTORY rather
     # than a set, so the contract is `reconstruct()` and the reward is
@@ -470,10 +471,9 @@ class Strategy(Protocol):
 
     # Inverse tasks (source localization). Not an intervention: given the graph and
     # an observed diffusion state `observation` (P(infected) per node, in [0, 1]),
-    # return the `budget` node ids that STARTED the cascade. The harness binds
-    # `self.predict_marginals(seeds) -> np.ndarray` before calling this, which is
-    # the forward oracle the program may query; under the @native condition that
-    # attribute raises instead (research/source_localization.md §2.4).
+    # return the `budget` node ids that STARTED the cascade. The program is
+    # offline: it sees the graph, `graph.ic_probs` and the observation, and the
+    # harness re-simulates what it returns on the arm's evaluator to score it.
     def localize(
         self, graph: GraphInfo, observation: np.ndarray, budget: int
     ) -> list[int]: ...
@@ -482,10 +482,9 @@ class Strategy(Protocol):
     # partial `Observation` of a diffusion that already happened, return
     # `{node: (activation timestep, inferred parent)}` for every node believed
     # infected, with `parent = None` marking a source and uninfected nodes simply
-    # absent. The harness binds `self.step_marginals(infected, frontier)`: the
-    # transition kernel, evaluated at an ARBITRARY proposed state, before calling
-    # this; under @native that attribute raises instead
-    # (research/cascade_reconstruction.md §2.5).
+    # absent. The program is offline: the arm's transition kernel scores the
+    # history it returns (research/cascade_reconstruction.md §2.5), never runs
+    # inside it.
     def reconstruct(
         self, graph: GraphInfo, observation: object, horizon: int
     ) -> dict[int, tuple[int, int | None]]: ...
@@ -495,10 +494,8 @@ class Strategy(Protocol):
     # popularity it will have reached by `t_p`. Return None (or a non-finite value)
     # to DECLINE: a generative model that cannot score a supercritical cascade is
     # counted in `n_failed` rather than charged a wild guess, which is the column
-    # research/cascade_prediction.md §8.4 says almost nobody publishes. The harness
-    # binds `self.forecast_marginals(adopters, frontier, steps)`: the multi-step
-    # forward model, before calling this; under @native that attribute raises
-    # instead (§2.1).
+    # research/cascade_prediction.md §8.4 says almost nobody publishes. The
+    # program is offline: no forward model runs inside it (§2.1).
     def predict(
         self, graph: GraphInfo, observation: object, horizon: int
     ) -> float | None: ...
@@ -527,9 +524,10 @@ class ScoredStrategy:
     functions over the observed state.
     """
 
-    # All four are stamped by methods.base.attach_context before the harness runs.
-    # Defaulted here so the class is usable standalone (tests, a bare harness) and
-    # so a seeding task needs no context at all.
+    # `budget_op` and `outbreak` are stamped by methods.base.attach_context before
+    # the harness runs; the three oracle slots are filled for CANNED baselines
+    # only and stay None on a generated strategy, which is offline. Defaulted here
+    # so the class is usable standalone (tests, a bare harness).
     budget_op: str = "add_node"
     outbreak: tuple = ()
     predict_marginals: Callable | None = None

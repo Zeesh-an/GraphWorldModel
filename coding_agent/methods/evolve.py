@@ -1,10 +1,26 @@
 """
-Method 4: EvoX-lite population evolution, every generation is an EDIT of a
-parent from the population (refine or restructure), never a fresh program.
-Stagnation switches the operator from refine to restructure.
+Method 4: population evolution with a real operator set.
+
+Every generation applies ONE operator to the population: refine, parameters or
+simplify (exploit: an edit of the population best), or crossover, synthesize or
+from_scratch (explore: a new mechanism). The operator is drawn with weights that
+follow MCTS-AHD's schedule, an exploration term that scales with the REMAINING
+budget, so restructuring happens early and refinement late, with stagnation
+adding exploration back. A candidate replaces the incumbent only when its paired
+delta clears the standard error of the comparison (`methods.base.accepts`).
+
+The model sees the whole search every generation: an attempts table (operator,
+reward, delta, accepted, mechanism, hint) and a population table, plus a running
+memory of design rules that a short reflection call updates after every scored
+generation (ReEvo's short- and long-term reflections in one call). Explore
+operators run an idea search first: several candidate mechanisms, judged against
+the library and the population, one chosen for implementation.
 """
 
+import difflib
 from pathlib import Path
+
+import numpy as np
 from tqdm import tqdm
 
 from coding_agent import checkpoint
@@ -14,6 +30,7 @@ from coding_agent.credit import credit_feedback
 from coding_agent.probes import answer_probes, parse_probe_request
 from coding_agent.methods.base import (
     OuterLoopMethod,
+    accepts,
     baseline_anchor,
     evaluate_strategy,
     rescore,
@@ -22,22 +39,116 @@ from coding_agent.methods.base import (
     summarize,
 )
 from coding_agent.prompts import (
+    build_attempts_table,
     build_evolve_prompt,
+    build_ideas_prompt,
+    build_population_table,
+    build_reflection_prompt,
     build_system_prompt,
     build_user_prompt,
+    library_menu_for,
+    mechanism_of,
+    parse_ideas,
+    parse_reflection,
     probe_contract,
+    reflection_system,
 )
 from coding_agent.types import (
     GraphInfo,
     Strategy,
     TaskSpec,
     Trajectory,
-    best_by,
-    improves,
     rank_by,
 )
 
-reward_improvement_epsilon = 1e-9
+explore_operators = ("from_scratch", "crossover", "synthesize")
+exploit_operators = ("refine", "parameters", "simplify")
+# EoH's operator weights in spirit (its m1/m2 at 2, e1/e2/s1 at 1), with refine
+# as the workhorse: the schedule below decides the explore/exploit split, these
+# decide the mix inside each side
+operator_weights = {
+    "refine": 3.0,
+    "parameters": 1.0,
+    "simplify": 1.0,
+    "crossover": 2.0,
+    "from_scratch": 1.0,
+    "synthesize": 1.0,
+}
+# MCTS-AHD: the exploration constant is lambda_0 x (remaining budget). At the
+# first generation this is the probability mass on the explore operators; it
+# decays linearly to zero at the last generation, and each stalled generation
+# adds `stagnation_bonus` back
+exploration_initial = 0.8
+stagnation_bonus = 0.15
+# Distinct mechanisms proposed before a from_scratch or synthesize generation
+ideas_per_generation = 3
+# Diff lines kept when the thread's assistant turn is compacted
+max_compact_diff_lines = 200
+
+
+def exploration_weight(iteration: int, total: int, stagnation: int) -> float:
+    """Probability mass on the explore operators at this generation."""
+    remaining = max(total - iteration, 0) / max(total, 1)
+
+    return min(1.0, exploration_initial * remaining + stagnation_bonus * stagnation)
+
+
+def choose_operator(
+    rng: np.random.Generator,
+    iteration: int,
+    total: int,
+    stagnation: int,
+    population_size: int,
+    patience: int,
+) -> str:
+    """One operator for this generation, weighted by the schedule."""
+    explore = exploration_weight(iteration, total, stagnation)
+    # The old rule survives as a floor: a long stall forces an explore move
+    if patience > 0 and stagnation >= patience:
+        explore = 1.0
+
+    weights = {}
+    for operator, weight in operator_weights.items():
+        if operator in ("crossover", "synthesize") and population_size < 2:
+            continue
+        side = explore if operator in explore_operators else 1.0 - explore
+        weights[operator] = weight * side
+    if sum(weights.values()) <= 0.0:
+        weights = {"refine": 1.0}
+
+    names = list(weights)
+    probabilities = np.asarray([weights[name] for name in names], dtype=np.float64)
+    probabilities /= probabilities.sum()
+
+    return str(rng.choice(names, p=probabilities))
+
+
+def compact_turn(script: str, parent_script: str | None, verdict: str) -> str:
+    """
+    What the thread keeps of a generation: the mechanism line, one line of
+    verdict, and a unified diff against the parent (the whole script only when
+    there was no parent to diff against).
+    """
+    head = f"# {verdict}\n"
+    if parent_script is None or not parent_script.strip():
+        return f"{head}```python\n{script}\n```"
+
+    diff = list(
+        difflib.unified_diff(
+            parent_script.splitlines(),
+            script.splitlines(),
+            fromfile="parent",
+            tofile="this attempt",
+            lineterm="",
+            n=2,
+        )
+    )
+    if not diff:
+        return f"{head}(resubmitted the parent unchanged)"
+    if len(diff) > max_compact_diff_lines:
+        diff = diff[:max_compact_diff_lines] + [f"... {len(diff) - max_compact_diff_lines} more diff lines"]
+
+    return f"{head}# MECHANISM: {mechanism_of(script)}\n```diff\n" + "\n".join(diff) + "\n```"
 
 
 class EvolveSearch(OuterLoopMethod):
@@ -54,7 +165,10 @@ class EvolveSearch(OuterLoopMethod):
         checkpoint_fingerprint: dict | None = None,
         credit: bool = False,
         probes: bool = True,
+        reflect: bool = True,
     ) -> None:
+        # ReEvo-style reflection call after every scored generation
+        self.reflect = reflect
         self.outer_iters = outer_iters
         # Per-action counterfactual credit in every generation's feedback
         self.credit = credit
@@ -74,6 +188,9 @@ class EvolveSearch(OuterLoopMethod):
         self.checkpoint_fingerprint = checkpoint_fingerprint
         self.stagnation_patience = stagnation_patience
         self.inspiration_count = inspiration_count
+        # ReEvo's long-term reflection: design rules the evidence supports so far,
+        # rewritten after every scored generation and shown in every prompt
+        self.memory = ""
         # Per-generation rewards, read back by run.py for the convergence plot
         self.history = []
         # Seeds this method may commit per episode; read back into the results JSON
@@ -129,6 +246,7 @@ class EvolveSearch(OuterLoopMethod):
             stagnation = resumed["stagnation"]
             last_delta = resumed["last_delta"]
             self.history = resumed["history"]
+            self.memory = resumed.get("memory", "")
             # .get: checkpoints from before probes existed still resume
             self.probe_log = resumed.get("probe_log", [])
             probe_feedback = resumed.get("probe_feedback")
@@ -140,6 +258,7 @@ class EvolveSearch(OuterLoopMethod):
                         resumed["best"]["script"],
                         self.strategy_mode,
                         self.allow_mc_algorithms,
+                        canned=getattr(agent.provider, "canned", False),
                     ),
                     checkpoint.trajectory_from_dict(resumed["best"]["trajectory"]),
                 )
@@ -157,10 +276,15 @@ class EvolveSearch(OuterLoopMethod):
             total=self.outer_iters,
             desc=f"{self.label} search",
         )
+        library_menu = library_menu_for(task)
+        attempts = build_attempts_table(self.history, task.sense)
+
         for iteration in progress_bar:
+            rng = np.random.default_rng([task.seed, iteration])
+            parent, partner, everyone, idea = None, None, None, ""
+
             if not population:
                 operator = "seed"
-                parent = None
                 error_text = (
                     f"\n\nYour previous attempt failed with:\n{last_error}\n"
                     if last_error
@@ -171,22 +295,54 @@ class EvolveSearch(OuterLoopMethod):
                 user = base_user + error_text if iteration == 0 else error_text
                 user = user or base_user
             else:
-                operator = (
-                    "restructure"
-                    if stagnation >= self.stagnation_patience
-                    else "refine"
+                operator = choose_operator(
+                    rng,
+                    iteration,
+                    self.outer_iters,
+                    stagnation,
+                    len(population),
+                    self.stagnation_patience,
                 )
-
-                # Deterministic exploit/explore: parent is the population best;
-                # the operator (not parent sampling) supplies the variation
-                parent = best_by(
+                ranked = rank_by(
                     population, lambda record: record["reward"], task.sense
                 )
-                inspirations = rank_by(
-                    [record for record in population if record is not parent],
-                    lambda record: record["reward"],
-                    task.sense,
-                )[: self.inspiration_count]
+                parent = ranked[0]
+                others = ranked[1:]
+                inspirations = others[: self.inspiration_count]
+                if operator == "crossover":
+                    # Rank-weighted partner (EoH's selection): the best alternative
+                    # most often, but not always
+                    weights = np.asarray(
+                        [1.0 / (rank + 2) for rank in range(len(others))], dtype=np.float64
+                    )
+                    partner = others[int(rng.choice(len(others), p=weights / weights.sum()))]
+                if operator == "synthesize":
+                    everyone = ranked[:3]
+
+                # Idea search before code search, for the operators that need a
+                # new mechanism rather than an edit
+                if operator in ("from_scratch", "synthesize"):
+                    ideas_reply = agent.provider.complete(
+                        [
+                            {"role": "system", "content": reflection_system},
+                            {
+                                "role": "user",
+                                "content": build_ideas_prompt(
+                                    task,
+                                    ideas_per_generation,
+                                    population,
+                                    library_menu,
+                                    self.memory,
+                                    attempts,
+                                ),
+                            },
+                        ]
+                    )
+                    ideas, idea = parse_ideas(ideas_reply)
+                    tqdm.write(
+                        f"[{self.label}] iter {iteration + 1}: {len(ideas)} ideas, "
+                        f"chosen: {idea[:100] or '(none parsed)'}"
+                    )
 
                 # No base_user here: the task is already the thread's opening turn
                 user = build_evolve_prompt(
@@ -195,6 +351,12 @@ class EvolveSearch(OuterLoopMethod):
                     inspirations,
                     error=last_error,
                     last_result=last_delta,
+                    attempts=attempts,
+                    population=build_population_table(population, task.sense),
+                    memory=self.memory,
+                    idea=idea,
+                    partner=partner,
+                    everyone=everyone,
                 )
 
             if probe_feedback:
@@ -203,12 +365,14 @@ class EvolveSearch(OuterLoopMethod):
 
             tqdm.write(
                 f"[{self.label}] iter {iteration + 1}/{self.outer_iters}: "
-                f"operator={operator}, population={len(population)}"
+                f"operator={operator}, population={len(population)}, "
+                f"explore={exploration_weight(iteration, self.outer_iters, stagnation):.2f}"
             )
 
             probe_request, probe_note = [], None
             # Recorded on a failure that happens before the script exists
             script = None
+            parent_script = None if parent is None else parent["script"]
 
             try:
                 script = conversation.send(user)
@@ -221,6 +385,7 @@ class EvolveSearch(OuterLoopMethod):
                     script,
                     self.strategy_mode,
                     self.allow_mc_algorithms,
+                    canned=getattr(agent.provider, "canned", False),
                 )
 
                 entry_point = "act() per round" if task.adaptive else "plan_horizon()"
@@ -243,11 +408,21 @@ class EvolveSearch(OuterLoopMethod):
                         "operator": operator,
                         "error": last_error,
                         "script": script,
+                        "mechanism": mechanism_of(script or ""),
                         "parent_iteration": (
                             None if parent is None else parent.get("iteration")
                         ),
                     }
                 )
+                attempts = build_attempts_table(self.history, task.sense)
+                if script is not None:
+                    conversation.compact_last(
+                        compact_turn(
+                            script,
+                            parent_script,
+                            f"{operator}: FAILED, {last_error.splitlines()[0][:120]}",
+                        )
+                    )
                 tqdm.write(
                     f"[{self.label}] iter {iteration + 1}: script failed: "
                     f"{last_error.splitlines()[0]}"
@@ -304,28 +479,71 @@ class EvolveSearch(OuterLoopMethod):
                 if best is not None
                 else None
             )
-            population.append(
-                {
-                    "iteration": iteration + 1,
-                    "script": strategy.source_script,
-                    "reward": trajectory.reward,
-                    "summary": summarize(trajectory, graph, task)
-                    + (f"\n{last_delta}" if last_delta else "")
-                    + (f"\n{diff}" if diff else "")
-                    + (f"\n{credit_report}" if credit_report else ""),
-                }
+            record = {
+                "iteration": iteration + 1,
+                "script": strategy.source_script,
+                "mechanism": mechanism_of(strategy.source_script),
+                "reward": trajectory.reward,
+                "plan_seconds": round(plan_seconds, 3),
+                "summary": summarize(trajectory, graph, task)
+                + (f"\n{last_delta}" if last_delta else "")
+                + (f"\n{diff}" if diff else "")
+                + (f"\n{credit_report}" if credit_report else ""),
+            }
+            population.append(record)
+
+            # The signed delta and the noise band of THIS comparison, both on the
+            # same realization; the acceptance rule reads the band, not an epsilon
+            delta = None if best is None else trajectory.reward - best[1].reward
+            band = (
+                0.0
+                if best is None
+                else max(
+                    float(trajectory.cost.get("reward_se") or 0.0),
+                    float(best[1].cost.get("reward_se") or 0.0),
+                )
+            )
+            accepted = accepts(
+                trajectory,
+                None if best is None else best[1],
+                task.sense,
+                operator,
+                strategy.source_script,
+                "" if best is None else best[0].source_script,
             )
 
-            if best is None or improves(
-                trajectory.reward,
-                best[1].reward,
-                task.sense,
-                reward_improvement_epsilon,
-            ):
+            # ReEvo's reflection: one short call on the (worse, better) pair,
+            # returning a hint and the revised memory. Skipped for the seed.
+            hint = ""
+            if best is not None and self.reflect:
+                incumbent_record = next(
+                    (r for r in population if r["script"] == best[0].source_script),
+                    None,
+                )
+                if incumbent_record is not None:
+                    worse, better = (
+                        (incumbent_record, record) if accepted else (record, incumbent_record)
+                    )
+                    if worse is not better:
+                        reply = agent.provider.complete(
+                            [
+                                {"role": "system", "content": reflection_system},
+                                {
+                                    "role": "user",
+                                    "content": build_reflection_prompt(
+                                        worse, better, self.memory, task.sense, task.reward_unit
+                                    ),
+                                },
+                            ]
+                        )
+                        hint, self.memory = parse_reflection(reply, self.memory)
+
+            if accepted:
                 best = (strategy, trajectory)
                 stagnation = 0
-            elif operator == "restructure":
-                # A restructure opens a fresh refinement window even without improvement
+            elif operator in explore_operators:
+                # An explore move opens a fresh refinement window even without
+                # improvement, exactly as restructure used to
                 stagnation = 0
             else:
                 stagnation += 1
@@ -336,6 +554,11 @@ class EvolveSearch(OuterLoopMethod):
                     "reward": trajectory.reward,
                     "best": best[1].reward,
                     "operator": operator,
+                    "mechanism": record["mechanism"],
+                    "delta": None if delta is None else round(delta, 4),
+                    "band": round(band, 4),
+                    "accepted": accepted,
+                    "hint": hint,
                     # The script and what it edited: the closing write-up diffs
                     # them, since the thread is trimmed and cannot show old turns
                     "script": strategy.source_script,
@@ -348,9 +571,22 @@ class EvolveSearch(OuterLoopMethod):
                     ),
                 }
             )
+            attempts = build_attempts_table(self.history, task.sense)
+            conversation.compact_last(
+                compact_turn(
+                    strategy.source_script,
+                    parent_script,
+                    f"{operator}: reward={trajectory.reward:.3f}"
+                    + ("" if delta is None else f", delta={delta:+.3f} (band {band:.3f})")
+                    + f", {'ACCEPTED' if accepted else 'rejected'}"
+                    + (f"; hint: {hint}" if hint else ""),
+                )
+            )
             tqdm.write(
                 f"[{self.label}] iter {iteration + 1}: reward={trajectory.reward:.2f} "
-                f"(best={best[1].reward:.2f}, stagnation={stagnation})"
+                f"(best={best[1].reward:.2f}, {'accepted' if accepted else 'rejected'}, "
+                f"stagnation={stagnation})"
+                + (f" hint: {hint}" if hint else "")
             )
             progress_bar.set_postfix(
                 reward=f"{trajectory.reward:.2f}", best=f"{best[1].reward:.2f}"
@@ -418,6 +654,7 @@ class EvolveSearch(OuterLoopMethod):
                 "stagnation": stagnation,
                 "last_delta": last_delta,
                 "history": self.history,
+                "memory": self.memory,
                 "probe_log": self.probe_log,
                 "probe_feedback": probe_feedback,
                 "messages": conversation.messages,

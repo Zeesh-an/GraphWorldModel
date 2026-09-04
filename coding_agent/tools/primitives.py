@@ -357,7 +357,7 @@ def predict_marginals_mc(
 
     This is the raw classical estimator on its own private NDlib simulator, so it
     is invisible to `MonteCarloEnvironment.episodes_used`. A generated program gets
-    the METERED binding instead, as `self.predict_marginals`, which routes through
+    no evaluator binding at all: a generated program is offline, and the harness routes its scoring through
     whichever evaluator its arm was assigned.
     """
     marginals = np.zeros(graph.num_nodes, dtype=np.float64)

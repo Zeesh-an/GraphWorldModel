@@ -324,8 +324,9 @@ def the_four_oracle_bindings_differ_in_one_thing() -> None:
     """
     @native has no forward model; the others route through their own evaluator.
 
-    This is the ablation conditions 3-6 exist to be, so it is worth an assertion:
-    the program is identical, the binding is not.
+    The binding now exists for CANNED baselines only (a generated program is
+    offline), but the four bindings behind the harness's scoring are still what
+    conditions 3-6 vary, so it is worth an assertion.
     """
     graph = _graph(spider, 7)
     task = _task()
@@ -481,12 +482,17 @@ class FieldMaxima(Strategy):
         scores = self.source_scores(graph, observation)
         scores = np.where(observation >= 0.5, scores, scores.min() - 1.0)
         picked = [int(node) for node in np.argsort(-scores)[:budget]]
-        # Rank the survivors by how well re-simulating them reproduces y
+        # Rank the survivors by an OFFLINE one-hop re-simulation over graph.ic_probs
+        src, dst = graph.edge_index[0], graph.edge_index[1]
+        def resimulate(seed):
+            p = np.zeros(graph.num_nodes)
+            p[seed] = 1.0
+            survive = np.ones(graph.num_nodes)
+            np.multiply.at(survive, dst, 1.0 - graph.ic_probs * p[src])
+            return p + (1.0 - p) * (1.0 - survive)
         ranked = sorted(
             picked,
-            key=lambda node: float(
-                ((self.predict_marginals([node]) - observation) ** 2).sum()
-            ),
+            key=lambda node: float(((resimulate(node) - observation) ** 2).sum()),
         )
         return ranked
 """
@@ -513,7 +519,10 @@ class FieldMaxima(Strategy):
     assert trajectory.cost["auc_source"] == "source_scores"
     # ...the forward oracle was actually called and counted, apart from the
     # harness's own scoring rollouts
-    assert trajectory.cost["forward_calls"] > 0
+    # A generated program is offline: it never calls the arm's evaluator; the
+    # harness's own scoring rollouts are what the consistency reward costs
+    assert trajectory.cost["forward_calls"] == 0
+    assert trajectory.cost["scoring_calls"] > 0
     assert trajectory.cost["scoring_calls"] == len(instances)
     assert seconds > 0.0
 
@@ -562,11 +571,9 @@ def the_prompt_states_the_right_contract() -> None:
     system = build_system_prompt("evolve", "free", task)
     assert "localize(self, graph, observation, budget)" in system, system
     assert "plan_horizon" not in system, system
-    assert "predict_marginals" in system
-
-    # ...and the @native condition must say the oracle is gone, not advertise it
-    native = build_system_prompt("evolve", "free", _task(forward_model=False))
-    assert "NO FORWARD ORACLE" in native, native
+    # A generated program is offline: the prompt must never advertise an oracle
+    assert "predict_marginals" not in system
+    assert "YOUR PROGRAM IS OFFLINE" in system, system
 
     user = build_user_prompt("evolve", task, graph)
     assert "emits no actions" in user, user

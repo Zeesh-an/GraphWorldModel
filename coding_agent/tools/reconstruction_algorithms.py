@@ -1210,14 +1210,14 @@ def mcmc_decode(
     node's activation time by +/-1 and accept the move with probability
     `min(1, exp(Delta log p))`, where the trajectory log-likelihood is evaluated by
     unrolling `predict` over the proposed history. `predict` is
-    `self.step_marginals` when a generated program passes it and a structural
+    the arm's kernel when a canned baseline passes it and a structural
     surrogate otherwise.
 
     **Blocked from generated scripts by default**, exactly as `celf` and
     `resim_greedy` are, and for the same reason plus one more: it costs
     `proposals x horizon` kernel evaluations per instance, and a generated program
-    already HAS the metered kernel: writing the search around it itself is the
-    only way that cost lands in this arm's `kernel_calls`.
+    is offline by construction (the kernel is bound to canned baselines only), so
+    blocking it costs a generated decoder nothing.
     """
     from coding_agent.reconstruction import transition_logprob
 
@@ -1307,7 +1307,7 @@ def forward_backward(
 
     **Blocked from generated scripts by default**, on the same terms as
     `mcmc_decode`: it costs `horizon` kernel evaluations per particle and a
-    generated program has the metered kernel itself.
+    generated program is offline and has no kernel at all.
     """
     decoded = delayed_bfs(graph, observation, horizon)
     if predict is None or not decoded:
@@ -1396,7 +1396,7 @@ reconstruction_algorithms = {
 # Kernel-heavy, so one call costs proposals x horizon transition evaluations on
 # whatever oracle it was handed. Charged honestly to the arm like any other
 # baseline, and blocked from generated scripts by default: a generated program
-# has `self.step_marginals`, which IS the metered kernel, and writing the search
+# is offline by construction, so nothing is lost by blocking these.
 # around it is the only way the cost lands in this arm's `kernel_calls`.
 mc_reconstruction_algorithms = ("mcmc_decode", "forward_backward")
 

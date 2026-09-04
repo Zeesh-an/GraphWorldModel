@@ -522,45 +522,36 @@ def the_ring_is_the_budget_that_makes_the_task_trivial() -> None:
     assert leaky.reward > 1.0, leaky.reward
 
 
-def the_plan_oracle_scores_the_problem_the_evaluation_scores() -> None:
+def check_generated_programs_are_offline() -> None:
     """
-    `self.score_plan` must agree with the outer evaluation and rank interventions.
+    A GENERATED strategy never receives an evaluator binding, whatever the arm.
 
-    The binding exists so a generated program tests candidate removals against the
-    arm's own metered evaluator instead of hand-rolling simulation off-meter; that
-    is only sound if what it scores IS what the evaluation scores.
+    The rule since 2026-09-04: the coding agent's algorithms are offline. Only a
+    canned baseline (built by the harness for a library member that needs a
+    kernel) gets `predict_marginals` and friends; the plan oracle is gone for
+    everyone.
     """
-    graph = _graph(path, 4)
-    environment = MonteCarloEnvironment(graph, "IC", mc_runs=4, remove_semantics=blocked)
+    from baselines.run_baseline import seed_script
+
+    graph = _graph([(0, 1), (1, 2)], 3)
     task = _task()
+    environment = MonteCarloEnvironment(
+        graph, "IC", mc_runs=1, remove_semantics=blocked, negative_seeds=(0,)
+    )
 
-    plan = [[ActionOp("remove_node", 1)]] + [[] for _ in range(task.horizon)]
-    late = [[ActionOp("remove_node", 3)]] + [[] for _ in range(task.horizon)]
+    generated = attach_context(
+        build_strategy(seed_script([1], task.budget_op), "free"), task, environment
+    )
+    for name in ("score_plan", "predict_marginals", "step_marginals", "forecast_marginals"):
+        assert not hasattr(generated, name), f"generated strategy must not expose {name}"
 
-    class Probe:
-        source_script = ""
-
-        def plan_horizon(self, graph, budget, horizon):
-            return plan
-
-    probe = Probe()
-    before = environment.rollout_calls
-    trajectory, _ = evaluate_strategy(probe, environment, task, graph)
-
-    # Same problem: the oracle's number for the committed plan is the evaluation's
-    assert probe.score_plan(plan) == trajectory.reward == 1.0
-    assert probe.score_plan(late) == 3.0
-    # Metered: every oracle call is a real rollout the cost columns see
-    assert environment.rollout_calls - before == 3
-
-    # The @native binding raises with the condition named, never a traceback
-    blind = attach_context(Probe(), _task(forward_model=False), environment)
-    try:
-        blind.score_plan(plan)
-        raise AssertionError("@native score_plan must raise")
-    except StrategyError as error:
-        assert "@native" in str(error)
-
+    canned = attach_context(
+        build_strategy(seed_script([1], task.budget_op), "free", canned=True),
+        task,
+        environment,
+    )
+    assert hasattr(canned, "predict_marginals"), "a canned baseline keeps its bindings"
+    assert not hasattr(canned, "score_plan"), "the plan oracle no longer exists"
 
 if __name__ == "__main__":
     checks = [
@@ -584,7 +575,7 @@ if __name__ == "__main__":
         the_shared_names_resolve_to_the_dismantling_pool,
         outbreak_wrap_lets_a_removal_beat_a_source_seed,
         the_ring_is_the_budget_that_makes_the_task_trivial,
-        the_plan_oracle_scores_the_problem_the_evaluation_scores,
+        check_generated_programs_are_offline,
     ]
 
     for check in checks:

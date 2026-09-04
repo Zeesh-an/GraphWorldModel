@@ -532,15 +532,18 @@ def evaluate_predictor(
             "tasks' contracts and are not called here."
         )
 
-    oracle = bind_forecast_marginals(environment, task, seed=task.seed)
-    strategy.forecast_marginals = oracle
-    strategy.expected_popularity = (
-        (lambda adopters, frontier, steps: expected_popularity(
-            oracle, adopters, frontier, steps
-        ))
-        if task.forward_model
-        else unavailable_forecast_marginals
-    )
+    # Bound to canned baselines only: a generated predictor is offline
+    oracle = None
+    if getattr(strategy, "canned", False):
+        oracle = bind_forecast_marginals(environment, task, seed=task.seed)
+        strategy.forecast_marginals = oracle
+        strategy.expected_popularity = (
+            (lambda adopters, frontier, steps: expected_popularity(
+                oracle, adopters, frontier, steps
+            ))
+            if task.forward_model
+            else unavailable_forecast_marginals
+        )
     strategy.fit_examples = list(fit_examples or [])
 
     predicted, actual, observed = [], [], []

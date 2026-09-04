@@ -2,7 +2,7 @@
 
 import math
 import time
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from functools import partial
 from typing import Protocol
 
@@ -712,63 +712,6 @@ def paired_delta(
     )
 
 
-@dataclass
-class PlanOracle:
-    """
-    `self.score_plan(plan)`, bound to one arm's evaluator: the intervention analogue
-    of source localization's `predict_marginals`, and the same design (§2.4.3
-    there): four bindings of one name, so the generated program is byte-identical
-    across conditions 3-6 and only the oracle behind it changes.
-
-    It exists because the containment tasks' question ("the outbreak is already
-    running; how far does it get under MY intervention?") had no bound answer, so
-    generated programs rebuilt simulation inside `plan_horizon` from `graph.ic_probs`:
-    the winning influence-blocking program spent 260 of every iteration's 262
-    seconds on a hand-rolled live-edge sampler, off every cost meter and against
-    dynamics it had to re-derive. This call wraps the candidate in the SAME
-    exogenous machinery the real evaluation uses (outbreak seeding, rumour commit,
-    lever and deletion-bag expansion, the edit stream), rolls it out on the arm's
-    environment, and returns the reward the arm is optimizing (lower is better on
-    every task this is bound for). Every call goes through `environment.rollout`,
-    so it lands in `evaluator_calls` / `evaluator_seconds` / `real_env_episodes`
-    and the ladder's cost accounting stays honest.
-
-    Validated first with the same `validate_plan` as the outer evaluation: a plan
-    this refuses is a plan the evaluation would refuse, learned for the cost of a
-    message instead of an iteration.
-    """
-
-    environment: object
-    task: TaskSpec
-    graph: GraphInfo
-    stream: object = None
-    calls: int = field(default=0)
-
-    def __call__(self, plan: list) -> float:
-        plan = [list(bag) for bag in plan]
-        validate_plan(plan, self.task, self.graph)
-        action_fn = wrap_exogenous(
-            partial(planned_action, plan), self.task, self.graph, self.stream
-        )
-        trajectory = self.environment.rollout(
-            action_fn, self.task.horizon, self.task.budget
-        )
-        self.calls += 1
-
-        return float(trajectory.reward)
-
-
-def unavailable_plan_oracle(_plan) -> float:
-    """The @native binding: this arm has no forward model, by design."""
-    raise StrategyError(
-        "self.score_plan is not available in this condition (@native): this arm "
-        "has NO forward model, by design. It exists to measure whether a forward "
-        "model in the search loop is worth anything at all. Choose the intervention "
-        "from structure and the outbreak's position alone: distance-to-source "
-        "rings, boundary cuts, centralities on the residual graph."
-    )
-
-
 def validate_plan(plan: list, task: TaskSpec, graph: GraphInfo) -> None:
     """Validate every bag and the whole-plan budgeted total against the task budget."""
     total_units = 0
@@ -838,53 +781,22 @@ def attach_context(
     it made every scored-mode containment arm fail validation before it was ever
     scored.
 
-    `predict_marginals` is the one new primitive of source localization
-    (research/source_localization.md §2.4.3) and the reason `environment` is a
-    parameter at all: the four experimental conditions are four BINDINGS of this
-    single name, so the generated program is byte-identical across arms 3-6 and
-    only its oracle changes. Bound here rather than injected into the executor's
-    namespace so it lands on the same `self.` surface as `self.outbreak`, and so a
-    canned baseline gets it without the executor knowing which arm it is.
+    The evaluator bindings (`predict_marginals`, `step_marginals` with
+    `transition_logprob`, `forecast_marginals` with `expected_popularity`) are
+    attached to CANNED strategies only: the kernel-using members of the library
+    pools (`resim_greedy`, `mcmc_decode`, `mc_forward`, ...) read them, and they
+    are what makes a condition-1 baseline run on the arm's own evaluator. A
+    GENERATED program never gets them: it is offline by construction, and the
+    arm's evaluator reaches it only through the reward and the feedback the
+    harness computes. This is a deliberate rule (2026-09-04), not a gap.
     """
     strategy.outbreak = tuple(int(node) for node in task.outbreak)
     strategy.budget_op = task.budget_op
 
-    if environment is not None:
+    if environment is not None and getattr(strategy, "canned", False):
         strategy.predict_marginals = bind_predict_marginals(environment, task)
-        # ...and the INTERVENTION oracle, for the three tasks whose cascade is
-        # exogenous (containment, blocking, epidemic control): `predict_marginals`
-        # answers "what if the cascade had STARTED from these seeds", which is the
-        # wrong question when the outbreak is fixed and the plan is the variable.
-        # Same stream as evaluate_strategy builds (deterministic in the same
-        # arguments), so what this scores is what the evaluation will score.
-        if task.contains:
-            strategy.score_plan = (
-                PlanOracle(
-                    environment=environment,
-                    task=task,
-                    graph=environment.graph,
-                    stream=build_stream(
-                        environment.graph, task.horizon, task.edit_rate, task.seed
-                    ),
-                )
-                if task.forward_model
-                else unavailable_plan_oracle
-            )
-        # ...and the TRANSITION kernel, the one new primitive of cascade
-        # reconstruction (research/cascade_reconstruction.md §2.5.2). Same four
-        # bindings and the same reason: the generated decoder is byte-identical
-        # across arms 3-6 and only its oracle changes. `transition_logprob`
-        # derives from it rather than being a second oracle, so one kernel call is
-        # behind both and the cost accounting stays honest.
         strategy.step_marginals = bind_step_marginals(environment, task)
         strategy.transition_logprob = transition_logprob
-        # ...and the MULTI-STEP forward model, the one new primitive of cascade
-        # prediction (research/cascade_prediction.md §2.1). Same four bindings and
-        # the same reason, with one difference worth stating: on every other task
-        # conditions 3-6 vary what the search can SIMULATE while the action space
-        # stays the same, and here the action space is empty, so this binding is the
-        # ONLY thing that varies down that ladder. `expected_popularity` derives from
-        # it rather than being a second oracle, so one kernel budget covers both.
         forecast = bind_forecast_marginals(environment, task, seed=task.seed)
         strategy.forecast_marginals = forecast
         strategy.expected_popularity = (
@@ -1240,6 +1152,42 @@ class _AdaptiveAnchor:
                 total_budget=self.task.budget,
             )
         ]
+
+
+def accepts(
+    candidate: Trajectory,
+    incumbent: Trajectory | None,
+    sense: str,
+    operator: str = "refine",
+    candidate_script: str = "",
+    incumbent_script: str = "",
+) -> bool:
+    """
+    Whether a candidate replaces the incumbent: its paired delta has to clear the
+    larger of the two standard errors, not an epsilon.
+
+    Both were scored on the same realization (common random numbers), so the
+    band is the noise of that comparison, and a delta inside it is a coin flip
+    the search used to take as progress. A `simplify` child is the one exception
+    in the other direction: it may replace the incumbent when it is SHORTER and
+    not worse beyond the band, which is the parsimony pressure toward algorithms
+    a reader can follow.
+    """
+    if incumbent is None:
+        return True
+
+    band = max(
+        float(candidate.cost.get("reward_se") or 0.0),
+        float(incumbent.cost.get("reward_se") or 0.0),
+    )
+    if improves(candidate.reward, incumbent.reward, sense, band):
+        return True
+
+    return (
+        operator == "simplify"
+        and len(candidate_script) < len(incumbent_script)
+        and not improves(incumbent.reward, candidate.reward, sense, band)
+    )
 
 
 def baseline_anchor(

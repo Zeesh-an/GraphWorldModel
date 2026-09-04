@@ -228,6 +228,9 @@ with a fixed top-$k$ harness. This is the constrained arm to reach for if free-f
 
 #### 2.4.3 The one new primitive, and its four bindings
 
+
+> **Update 2026-09-04.** Generated programs are offline: the bindings described below are attached to canned library baselines only, and the four bindings now describe the HARNESS's oracle, which computes the reward and the feedback. The text below is the original design record.
+
 `coding_agent/tools/primitives.py` already exposes `mc_simulate_spread(graph, seeds, diffusion_model, mc_runs, horizon, seed) -> float` to generated code. That is already $x \mapsto \sigma(x)$. Source localization needs the same call returning the per-node vector rather than its sum:
 
 ```python

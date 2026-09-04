@@ -734,7 +734,7 @@ Note what this does NOT fix: `proximity` and `degree_blocking` still return near
 
 Honest list of what this review could **not** establish.
 
-- **Generated programs had no bound way to test a candidate blocker set, and the first cluster sweep showed what that costs (found 2026-08-23).** The winning `email_eu_core` program spent 260 of every iteration's 262 seconds building its own 240-graph live-edge sampler from `graph.ic_probs`, off every cost meter, re-deriving the tie-break it would be scored under, and it still lost to `rps` at k=10 and k=20. `self.score_plan(plan)` now binds the arm's own evaluator (metered, raising under `@native`), so an in-program portfolio test costs one rollout instead; `check_influence_blocking.check_plan_oracle_races_the_rumour` pins that what it scores is what the evaluation scores. No re-run under the binding has been measured yet.
+- **Generated programs had no bound way to test a candidate blocker set, and the first cluster sweep showed what that costs (found 2026-08-23).** The winning `email_eu_core` program spent 260 of every iteration's 262 seconds building its own 240-graph live-edge sampler from `graph.ic_probs`, off every cost meter, re-deriving the tie-break it would be scored under, and it still lost to `rps` at k=10 and k=20. `self.score_plan(plan)` bound the arm's own evaluator for a while (removed on 2026-09-04: generated programs are offline), so an in-program portfolio test costs one rollout instead; `check_influence_blocking.check_plan_oracle_races_the_rumour` pins that what it scores is what the evaluation scores. No re-run under the binding has been measured yet.
 
 **Papers behind paywalls: no result cell transcribed**
 

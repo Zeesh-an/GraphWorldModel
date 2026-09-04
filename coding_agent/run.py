@@ -393,6 +393,10 @@ class ExperimentConfig:
 class _CannedProvider:
     """Used when a canned script is supplied (tests / model-less runs)."""
 
+    # Read by the methods when they build the strategy: a canned baseline is the
+    # only kind of strategy that receives the evaluator bindings
+    canned = True
+
     def __init__(self, script: str) -> None:
         self.script = script
         # Present so usage accounting never special-cases the canned path
@@ -1610,6 +1614,8 @@ class Baseline(Strategy):
         "seed": config.seed,
         # Per-outer-iteration rewards (empty for baseline/routing arms)
         "history": getattr(method, "history", []),
+        # The running design-rule memory the evolve reflections built (empty elsewhere)
+        "memory": getattr(method, "memory", ""),
         # Every answered probe, plus the totals the cost story is read on
         "probes": getattr(method, "probe_log", []),
         "probe_calls": sum(
@@ -2460,9 +2466,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--native-arm",
         action="store_true",
-        help="mark this run as the @native condition: `predict_marginals` is "
-        "removed, so a source-localization program must be a pure structural "
-        "heuristic. Pair with --evaluator monte_carlo --mc-runs 1 (default: False).",
+        help="mark this run as the @native condition: the harness scores with one "
+        "real episode and no forward model exists for the canned kernel-using "
+        "baselines. Pair with --evaluator monte_carlo --mc-runs 1 (default: False).",
     )
     parser.add_argument(
         "--task",
