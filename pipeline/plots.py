@@ -83,7 +83,7 @@ acronyms = {
     # influence blocking
     "rps": "RPS", "cldag": "CLDAG", "cmia": "CMIA", "imin": "IMIN",
     "lhga": "LHGA", "lsbm": "LSBM", "joc": "JoC", "sandimin": "SandIMIN",
-    "diffim": "DiffIM", "stratlearner": "StratLearner",
+    "stratlearner": "StratLearner",
     # cascade reconstruction
     "dhrec": "DHREC", "cri": "CRI", "cult": "CulT", "wpct": "WPCT",
     "wbct": "WBCT", "ditto": "DITTO", "grin": "GRIN", "spin": "SPIN",
@@ -418,8 +418,8 @@ def _condition_of(results: list[dict], arm: str) -> int:
 
 def _reward_se(result: dict) -> float:
     """SE of the number _ground_truth_reward returns, so error bars match the series."""
-    if result.get("mc_reward") is not None:
-        return float(result.get("mc_reward_se", 0.0) or 0.0)
+    if result.get("referee_reward") is not None:
+        return float(result.get("referee_reward_se", 0.0) or 0.0)
 
     return float(result.get("cost", {}).get("reward_se", 0.0) or 0.0)
 
@@ -544,7 +544,7 @@ def plot_ours_vs_baselines(
 
     Ours (condition 6) is drawn heavy and solid; published external methods
     (condition 7) dashed; classical library algorithms (condition 1) thin and
-    faded. All series use the ground-truth MC replay so the curves are
+    faded. All series use the shared referee replay so the curves are
     commensurable.
     """
     if not results:
@@ -822,7 +822,7 @@ def plot_evaluator_fidelity(
     paired = [
         result
         for result in results
-        if result.get("mc_reward") is not None
+        if result.get("referee_reward") is not None
         and result.get("evaluator") in ("oracle", "world_model")
     ]
     if not paired:
@@ -833,7 +833,7 @@ def plot_evaluator_fidelity(
     for index, arm in enumerate(_sorted_arms(paired)):
         runs = [result for result in paired if result["arm"] == arm]
         axes.scatter(
-            [run["mc_reward"] for run in runs],
+            [run["referee_reward"] for run in runs],
             # The unbiased estimate when it exists: `reward` carries the winner's curse
             [run.get("wm_reeval_mean", run["reward"]) for run in runs],
             label=arm,
@@ -843,8 +843,8 @@ def plot_evaluator_fidelity(
         )
 
     limits = [
-        min(run["mc_reward"] for run in paired) * 0.95,
-        max(run["mc_reward"] for run in paired) * 1.05,
+        min(run["referee_reward"] for run in paired) * 0.95,
+        max(run["referee_reward"] for run in paired) * 1.05,
     ]
     axes.plot(limits, limits, "k--", linewidth=1, label="perfect fidelity")
 
@@ -870,14 +870,18 @@ def plot_runtime(results: list[dict], out_path: Path, title_prefix: str) -> Path
             result["cost"]["rollout_seconds"]
         )
 
-    # The referee replay is the same simulator every arm is judged on
-    referee_seconds = [
-        result["mc_rollout_seconds"]
-        for result in results
-        if result.get("mc_rollout_seconds")
-    ]
-    if referee_seconds:
-        by_evaluator.setdefault("monte_carlo (referee)", referee_seconds)
+    # The referee replay is the same simulator every arm is judged on, and the
+    # NDlib agreement replay, when it ran, is the slow reference the claim is
+    # measured against
+    for result in results:
+        if result.get("referee_rollout_seconds"):
+            by_evaluator.setdefault(
+                f"{result.get('referee', 'oracle')} (referee)", []
+            ).append(result["referee_rollout_seconds"])
+        if result.get("mc_rollout_seconds"):
+            by_evaluator.setdefault("monte_carlo (agreement)", []).append(
+                result["mc_rollout_seconds"]
+            )
 
     if len(by_evaluator) < 2:
         return None
@@ -1461,7 +1465,7 @@ def plot_prevented_influence(
     scored = [
         result
         for result in results
-        if result.get("blocking") and result.get("mc_prevented_influence") is not None
+        if result.get("blocking") and result.get("referee_prevented_influence") is not None
     ]
     if not scored:
         return None
@@ -1472,13 +1476,13 @@ def plot_prevented_influence(
         runs = sorted(_by_arm(scored, arm), key=lambda result: result["budget"])
         axes.plot(
             [result["budget"] for result in runs],
-            [result["mc_prevented_influence"] for result in runs],
+            [result["referee_prevented_influence"] for result in runs],
             color=condition_colors.get(_condition_of(scored, arm)),
             label=arm,
             **_arm_style(index),
         )
 
-    unopposed = max(result.get("mc_unopposed_spread", 0.0) for result in scored)
+    unopposed = max(result.get("referee_unopposed_spread", 0.0) for result in scored)
     if unopposed:
         axes.axhline(
             unopposed,
@@ -1517,7 +1521,7 @@ def plot_blocking_ratio(
         for result in results
         if result.get("blocking")
         and result.get("budget_ratio")
-        and result.get("mc_prevented_pct_of_unopposed") is not None
+        and result.get("referee_prevented_pct_of_unopposed") is not None
     ]
     if not scored:
         return None
@@ -1528,7 +1532,7 @@ def plot_blocking_ratio(
         runs = sorted(_by_arm(scored, arm), key=lambda result: result["budget_ratio"])
         axes.plot(
             [result["budget_ratio"] for result in runs],
-            [result["mc_prevented_pct_of_unopposed"] for result in runs],
+            [result["referee_prevented_pct_of_unopposed"] for result in runs],
             color=condition_colors.get(_condition_of(scored, arm)),
             label=arm,
             **_arm_style(index),
@@ -1567,7 +1571,7 @@ def plot_epidemic_curve(
         result
         for result in results
         if result.get("epidemic")
-        and (result.get("mc_prevalence_curve") or result.get("prevalence_curve"))
+        and (result.get("referee_prevalence_curve") or result.get("prevalence_curve"))
     ]
     if not scored:
         return None
@@ -1578,7 +1582,7 @@ def plot_epidemic_curve(
 
     for index, arm in enumerate(_sorted_arms(at_largest)):
         runs = _by_arm(at_largest, arm)
-        curve = runs[0].get("mc_prevalence_curve") or runs[0].get("prevalence_curve")
+        curve = runs[0].get("referee_prevalence_curve") or runs[0].get("prevalence_curve")
         axes.plot(
             range(len(curve)),
             curve,
@@ -1589,10 +1593,10 @@ def plot_epidemic_curve(
 
     reference = next(
         (
-            result.get("mc_unprotected_prevalence_curve")
+            result.get("referee_unprotected_prevalence_curve")
             or result.get("unprotected_prevalence_curve")
             for result in at_largest
-            if result.get("mc_unprotected_prevalence_curve")
+            if result.get("referee_unprotected_prevalence_curve")
             or result.get("unprotected_prevalence_curve")
         ),
         None,
@@ -1655,7 +1659,7 @@ def plot_eigendrop_vs_attack(
     for index, arm in enumerate(_sorted_arms(at_largest)):
         runs = _by_arm(at_largest, arm)
         result = runs[0]
-        prevented = result.get("mc_prevented_infections")
+        prevented = result.get("referee_prevented_infections")
 
         if prevented is None:
             continue
@@ -1894,7 +1898,7 @@ def plot_generalization_gap(
         run = _by_arm(paired, arm)[0]
         selection = float(run["selection_metrics"].get(key) or 0.0)
         heldout = float(
-            (run.get("mc_reward") if forecasts else run["metrics"].get(key))
+            (run.get("referee_reward") if forecasts else run["metrics"].get(key))
             or 0.0
         )
         points.append((selection, heldout))

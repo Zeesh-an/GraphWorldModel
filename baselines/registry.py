@@ -64,6 +64,24 @@ rl4im_m = 3
 rl4im_p = 0.05
 rl4im_propagate_p = 0.1
 
+# Our own checkout, so a generated runner can import baselines/gdm_support.py from
+# inside a baseline's venv (the package is a namespace package: nothing else loads)
+repo_root = baselines_root.parent
+
+# GDM's published four-feature model. Its own repository ships this checkpoint
+# only inside a 400 MB split tarball of every run, and selinda redistributes the
+# identical file (27,238 bytes, the 2019 PyG 1.x state dict) beside its GDM-slim
+# copy of the model class, so the gdm entry fetches it from there at build time.
+gdm_checkpoint_name = (
+    "Fchi_degree_clustering_coefficient_degree_kcore_CL20_20_20_20_H1_1_1_1_"
+    "FL40_30_20_1_CTrue_True_True_True_NS0.2_0.2_0.2_0.2_D0.3_0.3_0.3_0.3_"
+    "BTrue_True_True_True_S0_L0.003_WD1e-05_E50_SNone.h5"
+)
+gdm_checkpoint_url = (
+    "https://raw.githubusercontent.com/tsinghua-fib-lab/selinda/main/thirdparty/"
+    f"GDM-slim/{gdm_checkpoint_name}"
+)
+
 # Collective Influence's ball radius L. 2 is the value Morone & Makse use
 # throughout and the one their scaling results are quoted at.
 ci_radius = 2
@@ -1283,25 +1301,68 @@ def _gdm_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dic
     GDM scores every node in ONE pass (it is the static member of this family) and
     the removal order is that score, descending.
 
-    Warning: The clone ships no trained weights, so this needs `--weights` pointing at a
-    model produced by the repo's own training script before it can run at all.
+    The runner drives GDM's own model class (`models/GAT.py`, loaded by file path
+    with two stub modules in place of the imports that would pull in graph_tool,
+    which pip cannot install) with its own published four-feature checkpoint. The
+    features are GDM's `training_data_extractor.py` formulas reproduced with
+    networkx in `baselines/gdm_support.py`, and the checkpoint is a 2019 PyG 1.x
+    state dict, so the same module converts its `weight` / `att` tensors onto the
+    installed GATConv's names; that conversion is verified numerically against a
+    reimplementation of the 2019 layer (see the entry's notes).
     """
     network = _edgelist_export(graph, work_dir)
     directory = external_baselines["gdm"].directory
+    models_dir = directory / "network_dismantling" / "machine_learning" / "pytorch" / "models"
+    checkpoint = directory / "out" / "models" / gdm_checkpoint_name
 
     runner = _write_runner(
         work_dir,
-        "import sys, networkx as nx, numpy as np\n"
-        f"sys.path.insert(0, {str(directory.resolve())!r})\n"
-        "from network_dismantling.GDM.dataset_providers import prepare_graph\n"
-        "from network_dismantling.GDM.models import GAT_Model\n"
+        "import importlib.util, sys, types\n"
+        "import networkx as nx, numpy as np, torch\n"
+        f"sys.path.insert(0, {str(repo_root)!r})\n"
+        "from baselines.gdm_support import (convert_legacy_gat_state, gdm_conv_layers, "
+        "gdm_dropout, gdm_fc_layers, gdm_feature_names, gdm_heads, gdm_negative_slope, "
+        "gdm_node_features, undirected_edge_index)\n"
+        # GAT.py imports `dotdict` from a top-level `common` and `DefaultDict` from the
+        # package's own `common`, whose first line imports graph_tool. Both objects
+        # are trivial, so they are stubbed and the real modules never load.
+        "class dotdict(dict):\n"
+        "    __getattr__ = dict.get\n"
+        "class DefaultDict(dict):\n"
+        "    def __init__(self, default):\n"
+        "        super().__init__()\n"
+        "        self.default = default\n"
+        "    def __missing__(self, key):\n"
+        "        return self.default\n"
+        "common = types.ModuleType('common'); common.dotdict = dotdict\n"
+        "sys.modules['common'] = common\n"
+        "pyg_common = types.ModuleType('network_dismantling.machine_learning.pytorch.common')\n"
+        "pyg_common.DefaultDict = DefaultDict\n"
+        "sys.modules[pyg_common.__name__] = pyg_common\n"
+        f"models_dir = {str(models_dir.resolve())!r}\n"
+        "for name, file in (('network_dismantling.machine_learning.pytorch.models.base', 'base.py'), "
+        "('gdm_gat', 'GAT.py')):\n"
+        "    spec = importlib.util.spec_from_file_location(name, models_dir + '/' + file)\n"
+        "    module = importlib.util.module_from_spec(spec)\n"
+        "    sys.modules[name] = module\n"
+        "    spec.loader.exec_module(module)\n"
+        "args = types.SimpleNamespace(features=list(gdm_feature_names), "
+        "conv_layers=list(gdm_conv_layers), heads=list(gdm_heads), fc_layers=list(gdm_fc_layers), "
+        "concat=[True] * len(gdm_conv_layers), negative_slope=[gdm_negative_slope] * len(gdm_conv_layers), "
+        "dropout=[gdm_dropout] * len(gdm_conv_layers), bias=[True] * len(gdm_conv_layers), seed_train=0)\n"
+        "model = sys.modules['gdm_gat'].GAT_Model(args)\n"
+        f"state = torch.load({str(checkpoint.resolve())!r}, map_location='cpu')\n"
+        "model.load_state_dict(convert_legacy_gat_state(state, model.state_dict().keys()))\n"
+        "model.eval()\n"
         f"g = nx.read_edgelist({str(network.resolve())!r}, nodetype=int)\n"
-        "data = prepare_graph(g)\n"
-        "model = GAT_Model.load_from_checkpoint()\n"
-        "scores = model(data).detach().cpu().numpy().ravel()\n"
-        "order = list(np.argsort(-scores))\n"
+        f"n = {graph.num_nodes}\n"
+        "edge_index = np.asarray(list(g.edges()), dtype=np.int64).T if g.number_of_edges() else np.zeros((2, 0), dtype=np.int64)\n"
+        "x = torch.from_numpy(gdm_node_features(n, edge_index)).float()\n"
+        "with torch.no_grad():\n"
+        "    scores = model(x, undirected_edge_index(edge_index)).numpy().ravel()\n"
+        "order = np.argsort(-scores)\n"
         f"open({str((work_dir / 'removal_order.txt').resolve())!r}, 'w')"
-        ".write('\\n'.join(str(int(n)) for n in order))\n",
+        ".write('\\n'.join(str(int(v)) for v in order))\n",
     )
 
     _write_fallback(graph, work_dir)
@@ -1384,23 +1445,40 @@ def _selinda_export(graph, work_dir: Path, budget: int, diffusion_model: str) ->
 
     Warning: The repo is driven by shell scripts (`app_rl.sh`, `app_sr.sh`, ...) rather
     than a library entry point, and its published output is a fitted LAW, not a
-    dismantling set. This runner targets the bundled GDM-slim scorer, which is the
-    only part with a per-node output; confirm the module path before trusting it.
+    dismantling set. This runner is its `eval_utils.evaluate_gdm` path: the repo's
+    own `agent/gdm.py` feature function and GAT class on the bundled checkpoint,
+    ranked once, descending, without reinsertion. The checkpoint is the same 2019
+    PyG 1.x state dict GDM published (identical bytes to the file GDM's row loads),
+    so its keys are converted by `baselines/gdm_support.py` rather than by their
+    `PY_GDM.__init__`, whose strict load cannot succeed on the PyG their own
+    requirements pin. This row therefore reproduces the `gdm` row.
     """
     network = _edgelist_export(graph, work_dir)
     directory = external_baselines["selinda"].directory
 
     runner = _write_runner(
         work_dir,
-        "import sys, networkx as nx, numpy as np\n"
-        f"sys.path.insert(0, {str((directory / 'thirdparty' / 'GDM-slim').resolve())!r})\n"
-        "from network_dismantling.GDM.models import GAT_Model\n"
+        "import os, sys\n"
+        "import networkx as nx, numpy as np, torch\n"
+        # Their agent/gdm.py locates thirdparty/GDM-slim from os.getcwd()
+        f"os.chdir({str(directory.resolve())!r})\n"
+        f"sys.path.insert(0, {str(directory.resolve())!r})\n"
+        f"sys.path.insert(0, {str(repo_root)!r})\n"
+        "from baselines.gdm_support import convert_legacy_gat_state, undirected_edge_index\n"
+        "from attack_resilience_complex_networks.agent.gdm import GAT_Model, compute_gdm_features, gdm_model_path\n"
+        "model = GAT_Model()\n"
+        "state = torch.load(gdm_model_path, map_location='cpu')\n"
+        "model.load_state_dict(convert_legacy_gat_state(state, model.state_dict().keys()))\n"
+        "model.eval()\n"
         f"g = nx.read_edgelist({str(network.resolve())!r}, nodetype=int)\n"
-        "model = GAT_Model.load()\n"
-        "scores = model(g).detach().cpu().numpy().ravel()\n"
-        "order = list(np.argsort(-scores))\n"
+        f"n = {graph.num_nodes}\n"
+        "edge_index = np.asarray(list(g.edges()), dtype=np.int64).T if g.number_of_edges() else np.zeros((2, 0), dtype=np.int64)\n"
+        "x = torch.from_numpy(compute_gdm_features(np.arange(n), edge_index)).float()\n"
+        "with torch.no_grad():\n"
+        "    scores = model(x, undirected_edge_index(edge_index)).numpy().ravel()\n"
+        "order = np.argsort(-scores)\n"
         f"open({str((work_dir / 'removal_order.txt').resolve())!r}, 'w')"
-        ".write('\\n'.join(str(int(n)) for n in order))\n",
+        ".write('\\n'.join(str(int(v)) for v in order))\n",
     )
 
     _write_fallback(graph, work_dir)
@@ -2297,12 +2375,6 @@ sandimin_beta = 0.1
 # probabilities we simulate under rather than a different edge model.
 joc_weighted_cascade = 1
 
-# DiffIM's own defaults, read from its constants.ipynb
-diffim_latent_dim = [128, 128, 128, 128, 128, 128]
-diffim_train_samples = 200
-diffim_algorithm = "DiffIM+"
-
-
 def read_negative_seeds(work_dir: Path) -> list[int]:
     """S_N for this run, written beside the export by the pipeline."""
     path = Path(work_dir) / negative_seeds_filename
@@ -2463,180 +2535,6 @@ def _joc_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
 
     return [int(line) for line in path.read_text().split() if line.lstrip("-").isdigit()]
 
-
-def _diffim_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dict:
-    """
-    DiffIM's graph and instance files, plus a runner that drives its notebooks directly.
-
-    The repo ships ONLY notebooks (no `.py` anywhere) and its own cross-imports go
-    through `import_ipynb`, which needs the algorithms directory to behave like a
-    package it is not. The runner therefore execs the code cells of each notebook
-    into ONE shared namespace in dependency order, which is both simpler and more
-    deterministic than fighting the import machinery, and it runs THEIR code
-    unmodified.
-
-    Formats verified from `utils.ipynb::txt2adj` (`n m`, then `u v p` per arc) and
-    `algorithm_pipeline.ipynb` (a gzipped pickle of `(is_seed, prob)` pairs, and a
-    dataset name whose part before the first `-` is the graph file).
-    """
-    negative_seeds = read_negative_seeds(work_dir)
-    directory = external_baselines["diffim"].directory
-    os.makedirs(directory / "graphs", exist_ok=True)
-    os.makedirs(directory / "datasets", exist_ok=True)
-
-    name = f"gwm_k{budget}"
-    lines = [
-        f"{int(graph.edge_index[0, edge])} {int(graph.edge_index[1, edge])} "
-        f"{float(graph.ic_probs[edge])}"
-        for edge in range(graph.edge_index.shape[1])
-    ]
-    (directory / "graphs" / f"{name}.txt").write_text(
-        f"{graph.num_nodes} {len(lines)}\n" + "\n".join(lines) + "\n"
-    )
-
-    # ABSOLUTE, and passed in rather than built inside the runner: the runner
-    # chdir's into the repo before it does anything, so a relative path there lands
-    # in the clone instead of beside the run. Silent, because the algorithm still
-    # succeeds: the mask just is not where the parser looks.
-    mask = (work_dir / "gwm_mask.txt").resolve()
-    runner = _write_runner(
-        work_dir,
-        _diffim_runner_source(
-            directory,
-            name,
-            negative_seeds,
-            budget,
-            graph.num_nodes,
-            diffusion_model,
-            mask,
-        ),
-    )
-
-    return {"runner": str(runner.resolve()), "mask": str(mask)}
-
-
-def _diffim_runner_source(
-    directory: Path,
-    name: str,
-    negative_seeds: list,
-    budget: int,
-    num_nodes: int,
-    diffusion_model: str,
-    mask: Path,
-) -> str:
-    """The generated runner: exec their notebooks, train if needed, then select arcs."""
-    algorithm = os.environ.get("DIFFIM_ALG", diffim_algorithm)
-    model_name = os.environ.get("DIFFIM_MODEL", "")
-    samples = int(os.environ.get("DIFFIM_TRAIN_SAMPLES", diffim_train_samples))
-
-    return f"""\
-import json, os, sys
-os.chdir({str(directory.resolve())!r})
-sys.path.insert(0, {str(directory.resolve())!r})
-
-import numpy as np
-
-# Their notebooks cross-import through `import_ipynb`, which needs `algorithms/` to
-# be a package it is not. Exec the code cells into ONE namespace instead, in
-# dependency order, skipping only the import lines that namespace already satisfies.
-SKIP = ("import import_ipynb", "from constants import", "from utils import",
-        "from simulation import", "from gnn import", "from dataset import",
-        "from algorithms.", "get_ipython")
-namespace = {{"__name__": "diffim_runner"}}
-
-
-def run_notebook(path):
-    cells = json.load(open(path))["cells"]
-    for cell in cells:
-        if cell["cell_type"] != "code":
-            continue
-        body = "".join(cell["source"])
-        body = "\\n".join(
-            line for line in body.splitlines()
-            if not any(line.strip().startswith(prefix) for prefix in SKIP)
-        )
-        exec(compile(body, path, "exec"), namespace)
-
-
-for notebook in ("constants.ipynb", "gnn.ipynb", "simulation.ipynb", "utils.ipynb",
-                 "dataset.ipynb", "train.ipynb",
-                 "algorithms/centrality.ipynb", "algorithms/greedy.ipynb",
-                 "algorithms/BPM.ipynb", "algorithms/KED.ipynb",
-                 "algorithms/MDS.ipynb", "algorithms/RIS.ipynb",
-                 "algorithms/random.ipynb", "algorithms/DiffIM.ipynb"):
-    run_notebook(notebook)
-
-graph_name = {name!r}
-n, m, adj_list = namespace["txt2adj"](graph_name)
-seed_idx = np.array({list(negative_seeds)!r})
-prob = namespace["simul"]({diffusion_model!r} if {diffusion_model!r} in ("IC", "LT") else "IC",
-                          adj_list, seed_idx)
-
-model_name = {model_name!r}
-algorithm = {algorithm!r}
-
-# DiffIM's own methods need a trained surrogate. The shipped checkpoints were fit on
-# THEIR graphs, so unless one is named explicitly we train on ours with their own
-# generate_dataset + train, which is the faithful thing to run.
-if algorithm.startswith("DiffIM") and not model_name:
-    # Their seed-size band is `randint(min(10, n), max(10, int(n * SEED_SIZE)))`
-    # with SEED_SIZE = 0.01, so on any graph under 1,100 nodes both bounds are 10
-    # and numpy raises `low >= high` (email_eu_core at 1,005 did, first sweep).
-    # DiffIM's own graphs are all larger. Widen the band to at least one size
-    # above the floor, which is what the formula does on their graphs.
-    namespace["SEED_SIZE"] = max(namespace["SEED_SIZE"], (min(10, n) + 1) / n)
-    namespace["generate_dataset"](graph_name + ".txt", {samples}, saving_tag="-train")
-    namespace["generate_dataset"](graph_name + ".txt", max(10, {samples} // 10), saving_tag="-test")
-    model_name = graph_name + ".pt"
-    namespace["train"](graph_name + "-train.pkl.gz", graph_name + "-test.pkl.gz",
-                       saving_name=model_name,
-                       hyper_params={{"gnn_latent_dim": {diffim_latent_dim!r}}},
-                       gpu_num="cpu")
-
-kwargs = dict(model_name=model_name, gnn_latent_dim={diffim_latent_dim!r}, gpu_num="cpu")
-if algorithm in ("DiffIM+",):
-    kwargs.update(namespace["default_hyper_params"])
-
-selector = {{"DiffIM": namespace["DiffIM"], "DiffIM+": namespace["DiffIMp"],
-             "DiffIM++": namespace["DiffIMpp"], "BPM": namespace["BPM"],
-             "RIS": namespace["RIS"], "MDS": namespace["MDS"],
-             "KED": namespace["KED"], "greedy": namespace["greedy_orig"]}}[algorithm]
-
-if algorithm in ("BPM", "KED"):
-    mask, _ = selector(adj_list, seed_idx, {budget})
-else:
-    mask, _ = selector(adj_list, seed_idx, prob, {budget}, **kwargs)
-
-with open({str(mask)!r}, "w") as handle:
-    for entry in mask:
-        handle.write(f"{{int(entry[0])}} {{int(entry[1])}}\\n")
-"""
-
-
-def _diffim_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
-    """
-    DiffIM returns ARCS, and the pipeline's seed path only understands node ids.
-
-    Both endpoints are returned as a flat list so `run_external_baseline`'s range
-    check still applies; `_external_script` re-pairs them for the edge lever. Kept
-    here rather than widening the shared parser signature, which seven wired IM
-    adapters would otherwise have to grow a field for.
-    """
-    path = Path(work_dir) / "gwm_mask.txt"
-
-    if not path.exists():
-        raise FileNotFoundError(
-            f"no gwm_mask.txt in {work_dir}; the runner did not reach its write "
-            f"step. Tail of stdout:\n{stdout[-1500:]}"
-        )
-
-    arcs = [
-        (int(parts[0]), int(parts[1]))
-        for parts in (line.split() for line in path.read_text().splitlines())
-        if len(parts) >= 2
-    ]
-
-    return [node for arc in arcs[:budget] for node in arc]
 
 
 def _ditto_entry(
@@ -3862,57 +3760,6 @@ external_baselines: dict[str, ExternalBaseline] = {
             "methods, so run them with `--blocking-lever node_block`."
         ),
     ),
-    "diffim": ExternalBaseline(
-        name="diffim",
-        kind=learned,
-        title="DiffIM: differentiable influence minimization with surrogate modeling",
-        venue="AAAI 2025",
-        repo="https://github.com/junghunl/DiffIM",
-        paper="https://arxiv.org/abs/2502.01031",
-        entry="Jupyter notebooks (PyTorch Geometric)",
-        task="influence_blocking",
-        status="needs_setup",
-        # The repo's own requirements.txt pins torch-scatter==2.1.0+pt112cu113 and
-        # torch-sparse==0.6.16+pt112cu113: CUDA 11.3 wheels that exist only on the
-        # PyG wheel index, so installing it verbatim fails on any CPU machine.
-        # Verified 2026-08-04. The trimmed set below is what its code actually
-        # imports; modern PyG needs neither scatter nor sparse for GCNConv.
-        requirements=None,
-        # Every third-party name its notebooks import, extracted from the cells
-        # rather than guessed: `optuna` is only used by `train.ipynb`'s
-        # `hparam_tuning`, which we never call, but the runner execs that
-        # notebook's cells to reach `train`, so its top-level import still has to
-        # resolve. Verified by running: without it the runner dies on
-        # ModuleNotFoundError before reaching a single algorithm.
-        pip_packages=(
-            "torch",
-            "torch-geometric",
-            "numpy",
-            "networkx",
-            "scipy",
-            "optuna",
-        ),
-        returns_edges=True,
-        export=_diffim_export,
-        command=_runner_command,
-        parse_seeds=_diffim_parse,
-        notes=(
-            "The closest published analogue to what this project builds: a GNN "
-            "surrogate for influence plus a CONTINUOUS RELAXATION of the edge "
-            "decisions, p~(u,v) = p(u,v) * r~(u,v) with r~ in [0,1], optimized by "
-            "gradient descent, which is literally our `set_edge_weight` op. It is "
-            "the existence proof that differentiable blocking works, and it is NOT "
-            "action-conditioned or rolled forward in time, which is exactly the gap "
-            "we target. An EDGE method: run it with `--blocking-lever edge_block` or "
-            "`weight_block`. `DIFFIM_ALG` selects the member (DiffIM, DiffIM+, "
-            "DiffIM++, and its own BPM / RIS / MDS / KED / greedy baselines); "
-            "`DIFFIM_MODEL` names a shipped checkpoint instead of training on our "
-            "graph, and `DIFFIM_TRAIN_SAMPLES` sizes that training. Warning: the repo "
-            "ships ONLY notebooks and no .py, and its cross-imports need "
-            "`algorithms/` to be a package it is not: the adapter execs the code "
-            "cells into one namespace rather than fighting `import_ipynb`."
-        ),
-    ),
     "stratlearner": ExternalBaseline(
         name="stratlearner",
         kind=learned,
@@ -3987,9 +3834,19 @@ external_baselines: dict[str, ExternalBaseline] = {
         venue="Nature Communications 12, 2021",
         repo="https://github.com/NetworkScienceLab/GDM",
         paper="https://arxiv.org/abs/2101.02453",
-        entry="PyTorch Geometric",
+        entry="models/GAT.py driven by a generated runner (PyTorch Geometric)",
         task="critical_node_detection",
         status="needs_setup",
+        # No requirements.txt upstream, only a 2019 conda environment (python 3.7,
+        # torch 1.0.1, torch-geometric 1.1.2, graph-tool). The model class needs
+        # torch and PyG alone; the features are recomputed in networkx.
+        pip_packages=("torch", "torch-geometric", "networkx", "numpy"),
+        build=[
+            "sh",
+            "-c",
+            f"mkdir -p out/models && curl -fsSL -o 'out/models/{gdm_checkpoint_name}' "
+            f"'{gdm_checkpoint_url}'",
+        ],
         export=_gdm_export,
         command=_runner_command,
         parse_seeds=_order_parse,
@@ -3997,12 +3854,31 @@ external_baselines: dict[str, ExternalBaseline] = {
             "Supervised (not RL) on brute-force-optimal dismantling of small "
             "graphs, and STATIC: one scoring pass with no recomputation, which "
             "makes it the cheapest learned entry to run. `GDM+R` adds reinsertion "
-            "and is a different method with different numbers (§8.2 trap 2). TO "
-            "WIRE: clone, install PyG, read its graph format and which pretrained "
-            "checkpoint corresponds to the ND objective. Relevant to us beyond its "
-            "score: MIND measured GDM's dismantling order at Spearman 0.762 against "
-            "a PCA of its own input features (§9.5), which is the correlation our "
-            "report's `degree_rank_spearman` column measures for our arms."
+            "and is a different method with different numbers (§8.2 trap 2). "
+            "Relevant to us beyond its score: MIND measured GDM's dismantling order "
+            "at Spearman 0.762 against a PCA of its own input features (§9.5), which "
+            "is the correlation our report's `degree_rank_spearman` column measures "
+            "for our arms; the converted checkpoint reproduces that at 0.72 against "
+            "degree on a BA-120 [measured 2026-09-04].\n\n"
+            "REWIRED 2026-09-04 after the August sweep died at "
+            "`ModuleNotFoundError: network_dismantling.GDM`: that package never "
+            "existed, the models live under "
+            "`network_dismantling/machine_learning/pytorch/models/`. Three facts "
+            "shape the adapter. (1) The repo's own feature pipeline "
+            "(`training_data_extractor.py`) and every module under `pytorch/` import "
+            "graph_tool, which pip cannot install, so the runner loads `models/GAT.py` "
+            "by file path with two stubs (`common.dotdict`, `DefaultDict`) and "
+            "recomputes the four features with networkx from the extractor's own "
+            "formulas (degree over max, chi-square of that against its mean, local "
+            "clustering, core number over max). (2) The published checkpoint is a PyG "
+            "1.1.2 state dict (`weight`, `att`, `bias` per GATConv), which no PyG "
+            "that installs today can load; `baselines/gdm_support.py` transposes the "
+            "projection and splits `att` into `att_dst`/`att_src`, and that mapping "
+            "was verified to 1e-5 against a reimplementation of the 2019 layer and "
+            "to 1e-7 on a full forward of this checkpoint. (3) The checkpoint is "
+            "fetched from selinda's `thirdparty/GDM-slim` at build time rather than "
+            "unpacked from GDM's 400 MB `out.tar.gz.*`; it is the same file, named by "
+            "GDM's own `train_wrapper` scheme."
         ),
     ),
     "mind": ExternalBaseline(
@@ -4375,6 +4251,7 @@ external_baselines: dict[str, ExternalBaseline] = {
             "coding-agent framing: its output IS a formula, which is what our "
             "generated `score()` is. Its numbers are not directly comparable: it "
             "reports a fitted law's accuracy, not a dismantling set size."
+            "\n\nREWIRED 2026-09-04 after the August sweep died at `ModuleNotFoundError: network_dismantling`: `thirdparty/GDM-slim` is a flat directory (`GAT.py`, one `.h5`, an empty `__init__.py`), not a package. The runner now follows the repo's own `eval_utils.evaluate_gdm` path through `agent/gdm.py` (its `compute_gdm_features` and GAT class), with the checkpoint keys converted by `baselines/gdm_support.py` because the file is GDM's 2019 PyG 1.x state dict and the repo's own strict `load_state_dict` cannot succeed on the PyG its requirements pin. Verified locally end to end: it returns the same order as the `gdm` row, byte for byte, because it is the same model on the same checkpoint. Keep it as a cross-check on the gdm adapter, not as coverage."
         ),
     ),
     # SOURCE LOCALIZATION (research/source_localization.md §4, §10).

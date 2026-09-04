@@ -13,6 +13,80 @@ from openai import OpenAI, OpenAIError
 
 gateway_retries = 3
 
+# The model every experiment runs on unless a flag says otherwise. GPT-6 Astra:
+# chat completions and responses endpoints, 1.05M context, $10 in / $50 out per
+# 1M tokens (developers.openai.com/api/docs/models/gpt-6-astra).
+default_model = "gpt-6-astra"
+
+# Reasoning effort for the OpenAI reasoning family (low, medium, high, xhigh, max;
+# GPT-6 Astra rejects `none`). Sent on chat completions as `reasoning_effort`;
+# accepted by the gateway for gpt-5.6-sol [measured 2026-09-04]. Claude models
+# behind the same OpenAI-compatible gateway do not take it, so they never get it.
+default_reasoning_effort = "high"
+reasoning_efforts = ("low", "medium", "high", "xhigh", "max")
+
+
+def request_kwargs(
+    model: str, temperature: float | None, reasoning_effort: str | None
+) -> dict:
+    """The sampling arguments one chat-completions call carries for `model`."""
+    kwargs = {}
+
+    # GPT-6 Astra does not support custom temperature or top_p at all (its
+    # changelog entry), so a requested temperature is dropped rather than sent
+    # and rejected on every call
+    if temperature is not None:
+        if model.startswith("gpt-6"):
+            print(
+                f"warning: {model} does not accept a temperature; ignoring "
+                f"--temperature {temperature}"
+            )
+        else:
+            kwargs["temperature"] = temperature
+
+    if reasoning_effort is not None and not model.startswith("claude"):
+        kwargs["reasoning_effort"] = reasoning_effort
+
+    return kwargs
+
+
+def gateway_models(model: str) -> list[str]:
+    """
+    The model ids the gateway serves the token that `model` will be sent with.
+
+    Each account family has its own token and its own list, so the token is
+    picked the way GatewayProvider picks it: by the model-name family.
+    """
+    token_env = "CLAUDE_GATEWAY_TOKEN" if model.startswith("claude") else "CHATGPT_GATEWAY_TOKEN"
+    client = OpenAI(
+        base_url=os.environ["GATEWAY_BASE_URL"],
+        api_key=os.environ[token_env],
+        max_retries=0,
+        timeout=60,
+    )
+
+    return sorted(model.id for model in client.models.list())
+
+
+def verify_gateway_model(model: str, available: list[str] | None = None) -> None:
+    """
+    Fail before any expensive stage if the gateway will not serve `model`.
+
+    A pipeline run spends hours on data generation and training before its
+    first LLM call, and a gateway that rejects the model (as it did gpt-6-astra
+    on 2026-09-04, when it served only the gpt-5.x family) would only be heard
+    from then. `available` is injected by the test; the gateway is asked otherwise.
+    """
+    served = gateway_models(model) if available is None else list(available)
+
+    if model not in served:
+        raise RuntimeError(
+            f"the gateway at {os.environ.get('GATEWAY_BASE_URL', '<unset>')} does not "
+            f"serve model {model!r} for this token. Served: {served or 'nothing listed'}. "
+            f"Ask the gateway admin to enable it, or pass --llm-model / LLM_MODEL with "
+            f"one of the served names."
+        )
+
 
 def empty_usage() -> dict:
     return {
@@ -63,7 +137,12 @@ def fold_system(messages: list[dict]) -> list[dict]:
 class GatewayProvider:
     """OpenAI-compatible gateway over ChatGPT/Claude Pro subscriptions."""
 
-    def __init__(self, model: str, temperature: float | None = None) -> None:
+    def __init__(
+        self,
+        model: str,
+        temperature: float | None = None,
+        reasoning_effort: str | None = default_reasoning_effort,
+    ) -> None:
         # Each subscription account has its own bearer token, so the token is picked from the model-name family (claude-* vs gpt-*)
         token_env = (
             "CLAUDE_GATEWAY_TOKEN"
@@ -80,6 +159,7 @@ class GatewayProvider:
         self.model = model
         # None -> provider default sampling; 0.0 -> greedy decoding
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         # Cumulative across every call this provider makes, read back into the
         # results JSON. Retried attempts that never returned a completion are not
         # billed by the gateway and are not counted here either.
@@ -88,8 +168,8 @@ class GatewayProvider:
     def complete(self, messages: list[dict]) -> str:
         messages = fold_system(messages)
 
-        sampling_kwargs = (
-            {} if self.temperature is None else {"temperature": self.temperature}
+        sampling_kwargs = request_kwargs(
+            self.model, self.temperature, self.reasoning_effort
         )
 
         for attempt in range(1, gateway_retries + 1):

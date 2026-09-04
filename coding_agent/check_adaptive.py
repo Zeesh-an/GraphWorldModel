@@ -257,7 +257,7 @@ def the_gap_pairs_matched_arms_only() -> None:
             "budget": budget,
             "arm": f"{method}_free@{evaluator}",
             "reward": spread,
-            "mc_reward": spread,
+            "referee_reward": spread,
             "rounds": 4 if method == "adaptive" else None,
         }
 
@@ -383,7 +383,7 @@ def the_gap_divides_by_the_best_static_arm() -> None:
             "evaluator": "oracle",
             "budget": 10,
             "reward": spread,
-            "mc_reward": spread,
+            "referee_reward": spread,
         }
 
     results = [

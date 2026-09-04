@@ -47,10 +47,11 @@ if __name__ == "__main__":
     experiment = dict(context["experiment"])
     experiment["allowed_ops"] = tuple(experiment["allowed_ops"])
     # One canned pass on the selection split, nothing else: no credit rollouts,
-    # no referee replay, no checkpoint, no results file of its own
+    # no agreement replay, no checkpoint, no results file of its own (the referee
+    # replay is the canned evaluation itself, reused, so it costs nothing extra)
     experiment.update(
         outer_iters=1,
-        compare=False,
+        mc_agreement=False,
         credit=False,
         out_json=None,
         resume=False,

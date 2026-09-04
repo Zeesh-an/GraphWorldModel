@@ -73,7 +73,7 @@ run_axis () {
     local label="$1"; shift
     echo "=== $label ==="
     env TASK=cascade_reconstruction DATASET="$DATASET" RUN="$label" RUN_JOBID=0 \
-        COMPARE=1 GEN_MODELS="IC LT" "$@" \
+        GEN_MODELS="IC LT" "$@" \
         ./sbatch/pipeline.sbatch || echo "[cr_protocol] $label FAILED, continuing"
 }
 

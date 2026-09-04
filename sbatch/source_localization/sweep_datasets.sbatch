@@ -88,7 +88,7 @@ for dataset in $DATASETS; do
     DATASET="$dataset" \
     RUN="${RUN:-default}" \
     RUN_JOBID=0 \
-    COMPARE=1 \
+    \
     NUM_GRAPHS="$graphs" \
     GEN_MODELS=IC \
     GEN_ALGORITHMS="$selectors" \

@@ -90,7 +90,7 @@ for axis in $AXES; do
       for rule in negative positive fixed; do
         echo "=== tie_break=$rule ==="
         TASK=influence_blocking DATASET="$DATASET" RUN="tie_$rule" RUN_JOBID=0 \
-        COMPARE=1 GEN_MODELS=IC TIE_BREAK="$rule" BUDGETS="10 20 30 40 50" \
+        GEN_MODELS=IC TIE_BREAK="$rule" BUDGETS="10 20 30 40 50" \
             ./sbatch/pipeline.sbatch || echo "[ib_protocol] tie_$rule FAILED"
       done ;;
     attacker)
@@ -98,7 +98,7 @@ for axis in $AXES; do
         echo "=== attacker=$selector ==="
         link_run "attacker_$selector"
         TASK=influence_blocking DATASET="$DATASET" RUN="attacker_$selector" RUN_JOBID=0 \
-        COMPARE=1 GEN_MODELS=IC OUTBREAK_SELECTOR="$selector" \
+        GEN_MODELS=IC OUTBREAK_SELECTOR="$selector" \
         BUDGETS="10 20 30 40 50" START_STAGE=agent \
             ./sbatch/pipeline.sbatch || echo "[ib_protocol] attacker_$selector FAILED"
       done ;;
@@ -107,7 +107,7 @@ for axis in $AXES; do
         echo "=== detection_delay=$r ==="
         link_run "delay_$r"
         TASK=influence_blocking DATASET="$DATASET" RUN="delay_$r" RUN_JOBID=0 \
-        COMPARE=1 GEN_MODELS=IC DETECTION_DELAY="$r" \
+        GEN_MODELS=IC DETECTION_DELAY="$r" \
         BUDGETS="10 20 30 40 50" START_STAGE=agent \
             ./sbatch/pipeline.sbatch || echo "[ib_protocol] delay_$r FAILED"
       done ;;

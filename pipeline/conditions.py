@@ -83,9 +83,10 @@ condition_names = {
     9: "Published LLM algorithm discovery (external repo)",
 }
 
-# Conditions 1 and 2 have no refinement loop, so their evaluator only decides how
-# the single result is scored: ground truth is the honest choice
-selection_evaluator = monte_carlo
+# Conditions 1, 2, 7 and 9 have no refinement loop, so their evaluator only decides
+# how the single result is scored: the exact oracle simulator, which is also the
+# referee, so that one evaluation is the row's final number
+selection_evaluator = oracle
 
 # The classical pool run as condition 1: one representative per major IM family
 # (heuristic, discount, centrality, greedy/CELF, RIS/sketch) plus the random floor
@@ -314,12 +315,12 @@ def ground_truth_reward(result: dict) -> float:
 
     Each condition's `reward` is measured by its own evaluator: a native arm's is
     one noisy episode, ours is a world-model estimate, so they cannot be plotted
-    against each other. `mc_reward` is the shared ground-truth referee written by
-    --compare; fall back to `reward` only when that replay was not run.
+    against each other. `referee_reward` is the shared referee replay every arm
+    gets; fall back to `reward` only when a result predates it.
     """
-    mc_reward = result.get("mc_reward")
+    referee_reward = result.get("referee_reward")
 
-    return float(mc_reward if mc_reward is not None else result["reward"])
+    return float(referee_reward if referee_reward is not None else result["reward"])
 
 
 def result_sense(results: list[dict]) -> str:
@@ -425,7 +426,7 @@ def reward_name(results: list[dict]) -> str:
 
 def is_ground_truth(results: list[dict]) -> bool:
     return bool(results) and all(
-        result.get("mc_reward") is not None for result in results
+        result.get("referee_reward") is not None for result in results
     )
 
 
@@ -435,7 +436,7 @@ def adaptivity_gaps(results: list[dict]) -> list[dict]:
 
     gap = sigma(adaptive policy) / sigma(best static seed set) at the SAME budget
     and the SAME evaluator (research/adaptive_online_im.md §8.1). Both sides are
-    read on the ground-truth MC replay, because each arm's own reward is measured
+    read on the shared referee replay, because each arm's own reward is measured
     by its own evaluator and a ratio of two different rulers means nothing.
 
     Calibration, so a small number is not misread as a failure: theory caps the

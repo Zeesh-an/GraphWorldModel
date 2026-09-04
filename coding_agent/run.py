@@ -9,7 +9,7 @@ Baselines -
 python -m coding_agent.run --data-dir results/ba40/data \
     --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --strategy-mode free \
-    --evaluator world_model --budget 5 --horizon 10 --compare \
+    --evaluator world_model --budget 5 --horizon 10 \
     --baseline degree_discount --outer-iters 1 \
     --out-json results/ba40/agent/pct5.0/baseline_degree_discount.json
 
@@ -17,10 +17,10 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Graph algorithm routing (LLM picks from a list of graph algorithms, no synthesis) -
 
 python -m coding_agent.run --data-dir results/ba40/data \
-    --model gpt-5.6-sol \
+    --model gpt-6-astra \
     --wm-results-json results/ba40/world_model/sage_IC.json \
     --method one_shot --strategy-mode free \
-    --evaluator world_model --budget 5 --horizon 10 --compare \
+    --evaluator world_model --budget 5 --horizon 10 \
     --routing --outer-iters 1 \
     --out-json results/ba40/agent/pct5.0/routing.json
 
@@ -28,9 +28,9 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Oracle -
 
 python -m coding_agent.run --data-dir results/ba40/data \
-    --model gpt-5.6-sol \
+    --model gpt-6-astra \
     --method one_shot --strategy-mode free \
-    --evaluator oracle --budget 5 --horizon 10 --compare \
+    --evaluator oracle --budget 5 --horizon 10 \
     --allowed-ops add_node remove_node \
     --mc-runs 200 --n-samples 50 \
     --outer-iters 5 --out-json results/ba40/agent/pct5.0/one_shot_free.json
@@ -39,10 +39,10 @@ python -m coding_agent.run --data-dir results/ba40/data \
 Scored mode + evolve (agent edits algorithm internals, population search) -
 
 python -m coding_agent.run --data-dir results/sbm40/data \
-    --model gpt-5.6-sol \
+    --model gpt-6-astra \
     --wm-results-json results/sbm40/world_model/sage_IC.json \
     --method evolve --strategy-mode scored \
-    --evaluator world_model --budget 5 --horizon 10 --compare \
+    --evaluator world_model --budget 5 --horizon 10 \
     --allowed-ops add_node remove_node \
     --outer-iters 10 --n-samples 50 \
     --out-json results/sbm40/agent/pct5.0/evolve_scored.json
@@ -53,7 +53,7 @@ import json
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 from pathlib import Path
 from dotenv import load_dotenv
@@ -62,8 +62,12 @@ from coding_agent import checkpoint, executor
 from coding_agent.agent import (
     CodingAgent,
     GatewayProvider,
+    default_model,
+    default_reasoning_effort,
     empty_usage,
     merge_usage,
+    reasoning_efforts,
+    verify_gateway_model,
 )
 from coding_agent.blocking import (
     blocking_metrics,
@@ -204,7 +208,11 @@ world_model = "world_model"
 monte_carlo = "monte_carlo"
 oracle = "oracle"
 
-# Fresh-seed WM re-evaluations of the winning strategy during --compare
+# Referee samples per replay: the oracle is batched, so this is cheap, and 200
+# left a standard error above the gaps the small-graph smokes were comparing
+referee_samples_default = 1000
+
+# Fresh-seed WM re-evaluations of the winning strategy after the referee replay
 wm_reeval_seeds = 3
 
 # Above this node count the per-node marginal vector is dropped from the results
@@ -222,10 +230,12 @@ class ExperimentConfig:
         "free"  # free (whole Strategy) | scored (score/schedule hooks only)
     )
     evaluator: str = "world_model"  # world_model | monte_carlo | oracle
-    model: str = "gpt-5.6-sol"  # gateway model name
+    model: str = default_model  # gateway model name
     temperature: float | None = (
         None  # LLM sampling temperature; None -> provider default
     )
+    # Reasoning effort for the OpenAI family; None sends nothing
+    reasoning_effort: str | None = default_reasoning_effort
     diffusion_model: str = "IC"  # IC | LT
     # What remove_node does. Must match the checkpoint's for the world_model
     # evaluator, which reads it back from the results JSON.
@@ -339,16 +349,21 @@ class ExperimentConfig:
     native_arm: bool = False
     outer_iters: int = 20
     mc_runs: int = 200
-    # Runs for the --compare ground-truth replay; None -> mc_runs. Kept separate
-    # so a native arm (mc_runs=1 inner loop) is still judged on a clean average
-    referee_mc_runs: int | None = None
+    # The shared referee every arm's winner is replayed on: the exact oracle
+    # simulator (batched, one sampled state per step) by default, NDlib as the
+    # slow alternative. Its sample count is separate from the search's.
+    referee: str = oracle
+    referee_samples: int = referee_samples_default
+    # NDlib on the same winner: the independent reference the oracle is measured
+    # against, and the timing row. Off by default; None runs -> mc_runs.
+    mc_agreement: bool = False
+    mc_agreement_runs: int | None = None
     n_samples: int = 200
     seed: int = 42
     device: str = "cpu"
     data_dir: str | None = None  # world_model.wm_data graph store dir
     graph_id: str | None = None  # which graph in the store (default: first)
     wm_results_json: str | None = None  # train_wm.py results JSON (for the WM env)
-    compare: bool = False  # also evaluate the winning strategy on the MC baseline
     credit: bool = True  # per-action counterfactual credit (feedback + results)
     baseline: str | None = None  # library algorithm name; evaluates it with no LLM
     routing: bool = False  # GA routing: one LLM call picks a library algorithm
@@ -561,6 +576,40 @@ def _check_checkpoint_graph(
         )
 
 
+def _build_referee(config: ExperimentConfig, graph: GraphInfo, task: TaskSpec, outbreak: tuple) -> object:
+    """The shared referee: the arm's environment builder pointed at the referee's evaluator and sample count."""
+    referee_config = replace(
+        config,
+        evaluator=config.referee,
+        n_samples=config.referee_samples,
+        mc_runs=config.referee_samples,
+    )
+    referee = _build_environment(
+        referee_config,
+        graph,
+        negative_seeds=outbreak,
+        competitive=task.blocks,
+        epidemic=task.immunizes,
+    )
+
+    # The referee has to score the SAME quantity the arm was scored on: a
+    # 3-campaign union against a 1-campaign spread in one column reads as noise
+    if config.campaigns > 1:
+        referee = MultiRoundEnvironment(
+            referee, campaigns=config.campaigns, base_seed=config.seed
+        )
+
+    return referee
+
+
+def _agreement_keys(measured: dict) -> dict:
+    """The inverse-task referee helpers' keys, re-prefixed as the NDlib agreement check."""
+    return {
+        (f"mc_{key[len('referee_'):]}" if key.startswith("referee_") else f"mc_{key}"): value
+        for key, value in measured.items()
+    }
+
+
 def _build_environment(
     config: ExperimentConfig,
     graph: GraphInfo,
@@ -640,7 +689,7 @@ def _build_environment(
                 f"--wm-results-json at a competitive checkpoint."
             )
 
-        # Everything else in the run (the prompt, the --compare referee) follows
+        # Everything else in the run (the prompt, the referee) follows
         # config.remove_semantics, so a disagreement would have the arm plan under
         # one reading and be scored under the other
         if environment.remove_semantics != config.remove_semantics:
@@ -1026,7 +1075,12 @@ def run_experiment(
         if config.baseline is not None:
             raise ValueError("--routing and --baseline are mutually exclusive")
 
-        router = GatewayProvider(config.model, temperature=config.temperature)
+        verify_gateway_model(config.model)
+        router = GatewayProvider(
+            config.model,
+            temperature=config.temperature,
+            reasoning_effort=config.reasoning_effort,
+        )
         providers.append(router)
         routing_reply = router.complete(
             [
@@ -1347,10 +1401,19 @@ class Baseline(Strategy):
             "use --method one_shot or evolve"
         )
 
+    # Preflight: a model the gateway will not serve should fail here, in
+    # seconds, not after the anchor rollouts and the first generation
+    if not canned_script:
+        verify_gateway_model(config.model)
+
     provider = (
         _CannedProvider(canned_script)
         if canned_script
-        else GatewayProvider(config.model, temperature=config.temperature)
+        else GatewayProvider(
+            config.model,
+            temperature=config.temperature,
+            reasoning_effort=config.reasoning_effort,
+        )
     )
     providers.append(provider)
     agent = CodingAgent(provider)
@@ -1567,7 +1630,7 @@ class Baseline(Strategy):
             else None
         ),
         # Inner-loop cost, and the reason this block sits ABOVE the --credit and
-        # --compare sections rather than below them: both call rollout() again on
+        # referee sections rather than below them: both call rollout() again on
         # this same environment for post-hoc analysis, and counting those would
         # charge the search for work it did not do. The referee replay is excluded
         # for the same reason, and separately by using its own environment.
@@ -1606,7 +1669,7 @@ class Baseline(Strategy):
     if task.forecasts:
         # Same reasoning as both inverse blocks: the error is measured against a
         # popularity we read off a log, so it carries no evaluator noise and is
-        # already comparable across conditions. `mc_reward` is filled from the
+        # already comparable across conditions. `referee_reward` is filled from the
         # held-out error so every reader that asks for "the number comparable across
         # arms" gets the right one unchanged.
         selection = trajectory.cost.get("metrics", {})
@@ -1655,9 +1718,9 @@ class Baseline(Strategy):
             if heldout is not None
             else None
         )
-        result["mc_reward"] = reported.reward
+        result["referee_reward"] = reported.reward
         result["reward"] = reported.reward
-        result["mc_reward_se"] = reported.cost.get("reward_se")
+        result["referee_reward_se"] = reported.cost.get("reward_se")
         result["spread_pct"] = None
         result["per_instance"] = reported.cost.get("per_instance")
         result["summary"] = summarize(reported, graph, task)
@@ -1676,7 +1739,7 @@ class Baseline(Strategy):
         # history). Only NOW, with the search over and the write-up requested, is
         # the stored history read: path precision, event F1 and the tree-weighted
         # score are computed on the winner for both splits and reported beside
-        # the reward, never fed to it. `mc_reward` is the --compare referee's
+        # the reward, never fed to it. `referee_reward` is the referee's
         # re-measurement under the ground-truth kernel, exactly as a spread's is.
         reconstruction_label_metrics(trajectory, select_instances, config.cr_tree_weight)
         if heldout is not None:
@@ -1718,7 +1781,7 @@ class Baseline(Strategy):
             if heldout is not None and "tree_score" in metrics
             else None
         )
-        result["mc_reward"] = None
+        result["referee_reward"] = None
         result["reward"] = reported.reward
         result["reward_se"] = reported.cost.get("reward_se")
         result["spread_pct"] = None
@@ -1741,7 +1804,7 @@ class Baseline(Strategy):
         # observation on this arm's evaluator). Only NOW, with the search over and
         # the write-up requested, are the stored sources read: F1, precision,
         # recall and AUC are computed on the winner for both splits and reported
-        # beside the reward, never fed to it. `mc_reward` is the --compare
+        # beside the reward, never fed to it. `referee_reward` is the
         # referee's re-measurement on NDlib, exactly as a spread's is.
         localization_label_metrics(strategy, trajectory, select_instances, graph)
         if heldout is not None:
@@ -1779,7 +1842,7 @@ class Baseline(Strategy):
             if heldout is not None and "f1" in metrics
             else None
         )
-        result["mc_reward"] = None
+        result["referee_reward"] = None
         result["reward"] = reported.reward
         result["reward_se"] = reported.cost.get("reward_se")
         result["spread_pct"] = None
@@ -1791,7 +1854,7 @@ class Baseline(Strategy):
         # PREVENTED influence is that subtracted from the unopposed reference, which
         # is the quantity all five published names refer to. The reference is
         # measured on THIS arm's evaluator, on purpose: a ratio of two different
-        # rulers means nothing, and --compare re-measures both on the shared referee.
+        # rulers means nothing, and the referee re-measures both on the shared kernel.
         print("[run] unopposed reference sigma(S_N, empty) on this evaluator...")
         unopposed = unopposed_reference(
             environment, task, config.horizon, config.budget
@@ -1816,7 +1879,7 @@ class Baseline(Strategy):
         # INFECTIONS is that subtracted from the unprotected reference, which is
         # what an immunization table reports. The reference is measured on THIS
         # arm's evaluator, on purpose: a difference of two different rulers is not a
-        # quantity, and --compare re-measures both on the shared referee.
+        # quantity, and the referee re-measures both on the shared kernel.
         print("[run] unprotected reference |R(inf)| on this evaluator...")
         unprotected, unprotected_curve = unprotected_reference(
             environment, task, graph, config.horizon, config.budget
@@ -1877,7 +1940,7 @@ class Baseline(Strategy):
         # §8.3: the connectivity functionals reported ALONGSIDE the diffusion
         # number, computed exactly, as context: never as the learned target.
         # Read off the executed bags rather than re-planning, for the same reason
-        # --compare replays them: a randomized strategy returns a different set on
+        # the referee replays them: a randomized strategy returns a different set on
         # a second call, and this has to describe the set that earned the reward.
         result["structural"] = containment_metrics(
             graph.edge_index, graph.num_nodes, removal_set(trajectory.actions)
@@ -1962,12 +2025,13 @@ class Baseline(Strategy):
         result["credit_base_reward"] = base_reward
         result["credit"] = entries
 
-    # When the compare flag is enabled, build a Monte Carlo environment and rollout with Monte Carlo simulation to compare against the world model
-    # Every evaluator gets this replay, not just the model-based ones: it is the
-    # single ground-truth referee that makes rewards comparable ACROSS conditions.
-    # A native arm's own reward is one noisy episode; a monte_carlo arm's carries
-    # the winner's curse from being the max over outer iterations.
-    if config.compare and task.forecasts:
+    # Every arm's winner is replayed on the SHARED referee, the exact oracle
+    # simulator by default: the one number comparable across conditions. A native
+    # arm's own reward is one noisy episode, a monte_carlo arm's carries the
+    # winner's curse from being the max over outer iterations, a world-model arm's
+    # is a model estimate. `--mc-agreement` adds NDlib on the same winner, which is
+    # the independent reference the oracle is measured against and the timing row.
+    if task.forecasts:
         # THE number §9.1 is actually about, and the one no other task in this repo
         # can produce. The reward already measures how good a PROGRAM is; this
         # measures how good the MODEL is: roll the arm's own forward model forward
@@ -1986,8 +2050,13 @@ class Baseline(Strategy):
         # so the number would be identical across every classical row and computing
         # it once per row is pure waste: on a 30K-node graph under @monte_carlo it
         # is `instances x samples x steps x mc_runs` real episodes, which is millions.
-        if task.forward_model and canned_script is None and config.baseline is None:
-            print("[run] modelling-error referee (the arm's own forward model, no program)...")
+        if (
+            config.mc_agreement
+            and task.forward_model
+            and canned_script is None
+            and config.baseline is None
+        ):
+            print("[run] modelling-error check (the arm's own forward model, no program)...")
             result |= referee_modelling_error(
                 environment,
                 task,
@@ -2006,107 +2075,70 @@ class Baseline(Strategy):
                     f"top of the kernel; the LEVEL is how far an IC-shaped kernel is "
                     f"from a real adoption process"
                 )
-        elif not task.forward_model:
+        elif config.mc_agreement and not task.forward_model:
             print(
                 "[run] @native has no forward model, so there is no modelling error "
                 "to measure: that is the condition, not a gap"
             )
-    elif config.compare and task.decodes:
-        # The reward re-measured under the GROUND-TRUTH kernel: every held-out
-        # decode is re-scored with NDlib's own step marginals in place of the arm's
-        # evaluator, which is to `reward` what the MC replay is to a world-model
-        # spread. The recovered ROOTS' re-simulation error rides along as the
-        # secondary column it always was.
-        referee_runs = config.referee_mc_runs or config.mc_runs
-        result["referee_mc_runs"] = referee_runs
-        print(f"[run] likelihood referee ({referee_runs} NDlib runs per kernel step)...")
-
-        referee = MonteCarloEnvironment(
-            graph,
-            config.diffusion_model,
-            mc_runs=referee_runs,
-            base_seed=config.seed,
-            remove_semantics=config.remove_semantics,
-        )
+    elif task.decodes or task.recovers:
+        # The held-out reward re-measured with the referee's own kernel in place
+        # of the arm's evaluator (every decoded history, or every recovered set,
+        # re-scored), which is to `reward` what the replay below is to a spread.
+        referee = _build_referee(config, graph, task, outbreak)
         reported = heldout if heldout is not None else trajectory
         referee_instances = evaluate_instances or list(task.instances)
-        result |= referee_likelihood(
-            referee, task, referee_instances, reported.cost.get("per_instance", [])
-        )
-        result |= referee_reconstruction_error(
-            referee, task, referee_instances, reported.cost.get("per_instance", [])
-        )
+        per_instance = reported.cost.get("per_instance", [])
+        result["referee"] = config.referee
+        result["referee_samples"] = config.referee_samples
         print(
-            f"[run] referee reward={result.get('mc_reward', float('nan')):.4f} "
-            f"(arm's own {reported.reward:.4f}); resim_error="
-            f"{result.get('resim_error', float('nan')):.5f} (true sources score "
-            f"{result.get('resim_error_true_sources', float('nan')):.5f})"
+            f"[run] {config.referee} referee ({config.referee_samples} samples per "
+            f"kernel call)..."
         )
-    elif config.compare and task.recovers:
-        # The reward re-measured on the GROUND-TRUTH simulator: every held-out
-        # recovered set is re-simulated on NDlib and scored against the
-        # observation, which is to `reward` what the MC replay is to a
-        # world-model spread. Reported beside the TRUE source set's own error,
-        # because on an ill-posed problem a recovered set can reproduce y better
-        # than the truth did, and the number is unreadable without knowing that.
-        referee_runs = config.referee_mc_runs or config.mc_runs
-        result["referee_mc_runs"] = referee_runs
-        print(f"[run] re-simulation referee ({referee_runs} NDlib runs per set)...")
 
-        referee = MonteCarloEnvironment(
-            graph,
-            config.diffusion_model,
-            mc_runs=referee_runs,
-            base_seed=config.seed,
-            remove_semantics=config.remove_semantics,
-        )
-        reported = heldout if heldout is not None else trajectory
-        result |= referee_resimulation_error(
-            referee,
-            task,
-            evaluate_instances or list(task.instances),
-            reported.cost.get("per_instance", []),
-        )
+        def measure(kernel_environment: object) -> dict:
+            if task.decodes:
+                return referee_likelihood(
+                    kernel_environment, task, referee_instances, per_instance
+                ) | referee_reconstruction_error(
+                    kernel_environment, task, referee_instances, per_instance
+                )
+            return referee_resimulation_error(
+                kernel_environment, task, referee_instances, per_instance
+            )
+
+        result |= measure(referee)
+        result["arm_minus_referee"] = reported.reward - result["referee_reward"]
         print(
-            f"[run] referee reward={result.get('mc_reward', float('nan')):.5f} "
+            f"[run] referee reward={result['referee_reward']:.5f} "
             f"(arm's own {reported.reward:.5f}); resim_error="
             f"{result.get('resim_error', float('nan')):.5f} (true sources score "
             f"{result.get('resim_error_true_sources', float('nan')):.5f})"
         )
-    elif config.compare:
-        referee_runs = config.referee_mc_runs or config.mc_runs
-        result["referee_mc_runs"] = referee_runs
-        print(f"[run] MC compare replay ({referee_runs} runs)...")
 
-        mc_environment = MonteCarloEnvironment(
-            graph,
-            config.diffusion_model,
-            mc_runs=referee_runs,
-            base_seed=config.seed,
-            remove_semantics=config.remove_semantics,
-            # The referee has to run the SAME dynamics the arm was scored on, or the
-            # shared ground-truth column would compare a two-cascade result against a
-            # one-cascade replay and read as a huge fidelity error
-            negative_seeds=outbreak,
-            competitive_config=(
-                _competitive_config(config) if task.blocks else None
-            ),
-            # ...and the same rule for the compartmental case: refereeing an SIR
-            # arm on an IC replay would compare a process with recovery against one
-            # without and read as an enormous fidelity error
-            epidemic_config=(
-                _epidemic_config(config) if task.immunizes else None
-            ),
-        )
-
-        if config.campaigns > 1:
-            # The referee has to score the SAME quantity the arm was scored on.
-            # Without this the arm reports a 3-campaign union and the shared
-            # referee reports a 1-campaign spread, and the report silently puts
-            # the two in one column.
-            mc_environment = MultiRoundEnvironment(
-                mc_environment, campaigns=config.campaigns, base_seed=config.seed
+        if config.mc_agreement:
+            agreement_runs = config.mc_agreement_runs or config.mc_runs
+            print(f"[run] NDlib agreement check ({agreement_runs} runs per kernel call)...")
+            result |= _agreement_keys(
+                measure(
+                    MonteCarloEnvironment(
+                        graph,
+                        config.diffusion_model,
+                        mc_runs=agreement_runs,
+                        base_seed=config.seed,
+                        remove_semantics=config.remove_semantics,
+                    )
+                )
             )
+            result["mc_agreement_runs"] = agreement_runs
+            result["referee_minus_mc"] = result["referee_reward"] - result["mc_reward"]
+            print(
+                f"[run] mc_reward={result['mc_reward']:.5f} "
+                f"(referee_minus_mc={result['referee_minus_mc']:+.5f})"
+            )
+    else:
+        referee_environment = _build_referee(config, graph, task, outbreak)
+        result["referee"] = config.referee
+        result["referee_samples"] = config.referee_samples
 
         # Replay the actions that EARNED the reward rather than re-planning. A
         # generated script that samples (RIS with a live seed, a randomized local
@@ -2115,19 +2147,35 @@ class Baseline(Strategy):
         # a fresh LLM call per (run, timestep) of the replay.
         action_fn = partial(planned_action, trajectory.actions)
 
-        mc_trajectory = mc_environment.rollout(action_fn, config.horizon, config.budget)
-        result["mc_reward"] = mc_trajectory.reward
-        result["mc_seed"] = mc_trajectory.cost["seed"]
-        result["mc_spread_pct"] = round(
-            100.0 * mc_trajectory.reward / graph.num_nodes, 2
+        # A canned arm (a library baseline, a routed pick, an external repo's seed
+        # set) was scored exactly once, on the referee's own environment at the
+        # referee's sample count, so that trajectory IS the referee replay and a
+        # second rollout would buy nothing but time.
+        if (
+            canned_script is not None
+            and config.evaluator == config.referee
+            and config.n_samples >= config.referee_samples
+        ):
+            referee_trajectory = trajectory
+            print(f"[run] canned arm: its {config.referee} evaluation is the referee replay")
+        else:
+            print(f"[run] {config.referee} referee replay ({config.referee_samples} samples)...")
+            referee_trajectory = referee_environment.rollout(
+                action_fn, config.horizon, config.budget
+            )
+
+        result["referee_reward"] = referee_trajectory.reward
+        result["referee_seed"] = referee_trajectory.cost["seed"]
+        result["referee_spread_pct"] = round(
+            100.0 * referee_trajectory.reward / graph.num_nodes, 2
         )
-        result["mc_reward_se"] = mc_trajectory.cost["reward_se"]
-        result["mc_rollout_seconds"] = mc_trajectory.cost["rollout_seconds"]
-        result["wm_minus_mc"] = trajectory.reward - mc_trajectory.reward
+        result["referee_reward_se"] = referee_trajectory.cost["reward_se"]
+        result["referee_rollout_seconds"] = referee_trajectory.cost["rollout_seconds"]
+        result["arm_minus_referee"] = trajectory.reward - referee_trajectory.reward
         print(
-            f"[run] mc_reward={mc_trajectory.reward:.2f} "
-            f"±{mc_trajectory.cost['reward_se']:.2f} "
-            f"(wm_minus_mc={result['wm_minus_mc']:+.2f})"
+            f"[run] referee_reward={referee_trajectory.reward:.2f} "
+            f"±{referee_trajectory.cost['reward_se']:.2f} "
+            f"(arm_minus_referee={result['arm_minus_referee']:+.2f})"
         )
 
         if task.immunizes:
@@ -2137,27 +2185,27 @@ class Baseline(Strategy):
             # DIFFERENCE and a difference of two evaluators' numbers is not a
             # quantity. The curve comes back too, so peak and time-to-peak are
             # ground-truth rather than model-predicted.
-            mc_unprotected, mc_unprotected_curve = unprotected_reference(
-                mc_environment, task, graph, config.horizon, config.budget
+            referee_unprotected, referee_unprotected_curve = unprotected_reference(
+                referee_environment, task, graph, config.horizon, config.budget
             )
-            result["mc_unprotected_prevalence_curve"] = mc_unprotected_curve
-            result["mc_unprotected_attack_rate"] = mc_unprotected
-            result["mc_prevented_infections"] = mc_unprotected - mc_trajectory.reward
-            result["mc_prevented_pct_of_unprotected"] = (
-                100.0 * (mc_unprotected - mc_trajectory.reward) / mc_unprotected
-                if mc_unprotected
+            result["referee_unprotected_prevalence_curve"] = referee_unprotected_curve
+            result["referee_unprotected_attack_rate"] = referee_unprotected
+            result["referee_prevented_infections"] = referee_unprotected - referee_trajectory.reward
+            result["referee_prevented_pct_of_unprotected"] = (
+                100.0 * (referee_unprotected - referee_trajectory.reward) / referee_unprotected
+                if referee_unprotected
                 else 0.0
             )
-            result["mc_prevalence_curve"] = mc_trajectory.prevalence_curve
-            result["mc_curve"] = epidemic_curve_metrics(
-                mc_trajectory.prevalence_curve or [], graph.num_nodes, config.epi_burn_in
+            result["referee_prevalence_curve"] = referee_trajectory.prevalence_curve
+            result["referee_curve"] = epidemic_curve_metrics(
+                referee_trajectory.prevalence_curve or [], graph.num_nodes, config.epi_burn_in
             )
             print(
                 f"[run] ground-truth prevented infections: "
-                f"{result['mc_prevented_infections']:+.2f} of {mc_unprotected:.2f} "
-                f"({result['mc_prevented_pct_of_unprotected']:.1f}%), peak "
-                f"{result['mc_curve']['peak_prevalence']:.1f} at t="
-                f"{result['mc_curve']['time_to_peak']}"
+                f"{result['referee_prevented_infections']:+.2f} of {referee_unprotected:.2f} "
+                f"({result['referee_prevented_pct_of_unprotected']:.1f}%), peak "
+                f"{result['referee_curve']['peak_prevalence']:.1f} at t="
+                f"{result['referee_curve']['time_to_peak']}"
             )
 
         if task.blocks:
@@ -2165,25 +2213,70 @@ class Baseline(Strategy):
             # SHARED referee. Both terms are re-measured here rather than reusing the
             # arm's own reference, because prevented influence is a DIFFERENCE and a
             # difference of two evaluators' numbers is not a quantity.
-            mc_unopposed = unopposed_reference(
-                mc_environment, task, config.horizon, config.budget
+            referee_unopposed = unopposed_reference(
+                referee_environment, task, config.horizon, config.budget
             )
-            result["mc_unopposed_spread"] = mc_unopposed
-            result["mc_prevented_influence"] = mc_unopposed - mc_trajectory.reward
-            result["mc_prevented_pct_of_unopposed"] = (
-                100.0 * (mc_unopposed - mc_trajectory.reward) / mc_unopposed
-                if mc_unopposed
+            result["referee_unopposed_spread"] = referee_unopposed
+            result["referee_prevented_influence"] = referee_unopposed - referee_trajectory.reward
+            result["referee_prevented_pct_of_unopposed"] = (
+                100.0 * (referee_unopposed - referee_trajectory.reward) / referee_unopposed
+                if referee_unopposed
                 else 0.0
             )
             print(
                 f"[run] ground-truth prevented influence: "
-                f"{result['mc_prevented_influence']:+.2f} of {mc_unopposed:.2f} "
-                f"({result['mc_prevented_pct_of_unopposed']:.1f}%)"
+                f"{result['referee_prevented_influence']:+.2f} of {referee_unopposed:.2f} "
+                f"({result['referee_prevented_pct_of_unopposed']:.1f}%)"
             )
+        if config.mc_agreement:
+            # The same winner on NDlib: the independent reference the oracle is
+            # judged against, and the per-rollout timing the efficiency table reads.
+            # Same dynamics as the arm (two cascades, or recovery), or the column
+            # would compare processes rather than implementations.
+            agreement_runs = config.mc_agreement_runs or config.mc_runs
+            monte_carlo_environment = MonteCarloEnvironment(
+                graph,
+                config.diffusion_model,
+                mc_runs=agreement_runs,
+                base_seed=config.seed,
+                remove_semantics=config.remove_semantics,
+                negative_seeds=outbreak,
+                competitive_config=(
+                    _competitive_config(config) if task.blocks else None
+                ),
+                epidemic_config=(
+                    _epidemic_config(config) if task.immunizes else None
+                ),
+            )
+            if config.campaigns > 1:
+                monte_carlo_environment = MultiRoundEnvironment(
+                    monte_carlo_environment,
+                    campaigns=config.campaigns,
+                    base_seed=config.seed,
+                )
+
+            print(f"[run] NDlib agreement check ({agreement_runs} runs)...")
+            mc_trajectory = monte_carlo_environment.rollout(
+                action_fn, config.horizon, config.budget
+            )
+            result["mc_agreement_runs"] = agreement_runs
+            result["mc_reward"] = mc_trajectory.reward
+            result["mc_reward_se"] = mc_trajectory.cost["reward_se"]
+            result["mc_rollout_seconds"] = mc_trajectory.cost["rollout_seconds"]
+            result["mc_seed"] = mc_trajectory.cost["seed"]
+            result["referee_minus_mc"] = referee_trajectory.reward - mc_trajectory.reward
+            print(
+                f"[run] mc_reward={mc_trajectory.reward:.2f} "
+                f"±{mc_trajectory.cost['reward_se']:.2f} "
+                f"(referee_minus_mc={result['referee_minus_mc']:+.2f}, "
+                f"{mc_trajectory.cost['rollout_seconds']:.1f}s against the referee's "
+                f"{referee_trajectory.cost['rollout_seconds']:.1f}s)"
+            )
+
         # Fidelity re-evaluation only means something for a model-based evaluator:
         # it measures how far the MODEL is from truth. For a monte_carlo evaluator
         # the "model" is the simulator itself, so there is nothing to measure.
-        if config.evaluator in (world_model, oracle):
+        if config.evaluator in (world_model, oracle) and canned_script is None:
             print(
                 f"[run] re-evaluating winner on {wm_reeval_seeds} fresh "
                 f"{config.evaluator} seeds..."
@@ -2193,7 +2286,7 @@ class Baseline(Strategy):
             # seed 0: it carries selection optimism (winner's curse) plus that one
             # seed's persistent luck. Re-evaluating the winner on fresh seeds gives
             # the unbiased WM estimate: judge evaluator fidelity by
-            # wm_reeval_minus_mc, not wm_minus_mc.
+            # wm_reeval_minus_referee, not arm_minus_referee.
             # Offset from the base seed, so these are fresh realizations no
             # matter what --seed is, and each one is recorded for replay
             reeval_seed_list = [
@@ -2208,15 +2301,15 @@ class Baseline(Strategy):
             result["wm_reeval_seeds"] = reeval_seed_list
             result["wm_reeval_rewards"] = reeval_rewards
             result["wm_reeval_mean"] = sum(reeval_rewards) / len(reeval_rewards)
-            result["wm_reeval_minus_mc"] = (
-                result["wm_reeval_mean"] - mc_trajectory.reward
+            result["wm_reeval_minus_referee"] = (
+                result["wm_reeval_mean"] - referee_trajectory.reward
             )
             print(
                 f"[run] wm_reeval_mean={result['wm_reeval_mean']:.2f} "
-                f"(reeval_minus_mc={result['wm_reeval_minus_mc']:+.2f})"
+                f"(reeval_minus_mc={result['wm_reeval_minus_referee']:+.2f})"
             )
 
-    # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives in cost.rollout_seconds / mc_rollout_seconds
+    # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives in cost.rollout_seconds / referee_rollout_seconds
     result["elapsed_seconds"] = time.perf_counter() - experiment_start
 
     if config.arm_spec:
@@ -2257,14 +2350,21 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model",
         type=str,
-        default="gpt-5.6-sol",
-        help="gateway model name, e.g. gpt-5.6-sol (default: gpt-5.6-sol).",
+        default=default_model,
+        help=f"gateway model name (default: {default_model}; gpt-5.6-sol, gpt-5.6-terra and gpt-5.6-luna are the alternatives the gateway served before it).",
     )
     parser.add_argument(
         "--temperature",
         type=float,
         default=None,
         help="LLM sampling temperature; 0.0 = greedy decoding, omit for the provider default (default: None).",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        default=default_reasoning_effort,
+        choices=[*reasoning_efforts, "none"],
+        help=f"reasoning effort for the OpenAI reasoning family; 'none' sends nothing (default: {default_reasoning_effort}).",
     )
     parser.add_argument(
         "--allowed-ops",
@@ -2769,10 +2869,17 @@ if __name__ == "__main__":
         help="Monte Carlo simulator runs; ~(spread_std/target_se)^2, dial down for large graphs with --evaluator monte_carlo (default: 200).",
     )
     parser.add_argument(
-        "--referee-mc-runs",
+        "--referee",
+        type=str,
+        default=oracle,
+        choices=[oracle, monte_carlo],
+        help="the shared referee every arm's winner is replayed on (default: oracle).",
+    )
+    parser.add_argument(
+        "--referee-samples",
         type=int,
-        default=None,
-        help="runs for the --compare ground-truth replay; keep this high even when --mc-runs is 1 for a native-agent condition (default: --mc-runs).",
+        default=referee_samples_default,
+        help=f"rollout samples for the referee replay (default: {referee_samples_default}).",
     )
     parser.add_argument(
         "--n-samples",
@@ -2811,9 +2918,15 @@ if __name__ == "__main__":
         help="world-model results JSON path (default: None).",
     )
     parser.add_argument(
-        "--compare",
+        "--mc-agreement",
         action="store_true",
-        help="also evaluate the final strategy on Monte Carlo (default: False).",
+        help="also replay the final strategy on NDlib Monte Carlo: the independent check on the oracle referee, and the timing row (default: False).",
+    )
+    parser.add_argument(
+        "--mc-agreement-runs",
+        type=int,
+        default=None,
+        help="NDlib runs for --mc-agreement (default: --mc-runs).",
     )
     parser.add_argument(
         "--credit",
@@ -2856,6 +2969,7 @@ if __name__ == "__main__":
     config = ExperimentConfig(
         model=args.model,
         temperature=args.temperature,
+        reasoning_effort=None if args.reasoning_effort == "none" else args.reasoning_effort,
         baseline=args.baseline,
         routing=args.routing,
         allowed_ops=tuple(args.allowed_ops),
@@ -2916,14 +3030,16 @@ if __name__ == "__main__":
         windows=args.windows,
         outer_iters=args.outer_iters,
         mc_runs=args.mc_runs,
-        referee_mc_runs=args.referee_mc_runs,
-        n_samples=args.n_samples,
+                n_samples=args.n_samples,
         seed=args.seed,
         device=args.device,
         data_dir=args.data_dir,
         graph_id=args.graph_id,
         wm_results_json=args.wm_results_json,
-        compare=args.compare,
+        referee=args.referee,
+        referee_samples=args.referee_samples,
+        mc_agreement=args.mc_agreement,
+        mc_agreement_runs=args.mc_agreement_runs,
         credit=args.credit,
         out_json=args.out_json,
         arm_spec=arm_spec,

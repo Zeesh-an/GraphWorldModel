@@ -63,7 +63,6 @@ for lever in $LEVERS; do
     DATASET="$DATASET" \
     RUN="lever_$lever" \
     RUN_JOBID=0 \
-    COMPARE=1 \
     GEN_MODELS=IC \
     BLOCKING_LEVER="$lever" \
     BUDGETS="${BUDGETS:-10 20 30 40 50}" \

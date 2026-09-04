@@ -149,7 +149,7 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
 
     The inverse task's table reads like an intervention task's: the reward the
     search ran on (consistency, on the arm's own evaluator), the same quantity
-    re-measured by the ground-truth referee under --compare, and beside them the
+    re-measured by the shared referee, and beside them the
     F1 / PR / RE / AUC the literature publishes, computed against the stored
     sources AFTER the search and never fed to it.
     """
@@ -159,8 +159,8 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
         "episode; the harness rolls that set forward on the arm's own evaluator and "
         "scores minus the mean squared error against the observed state "
         "(`consistency`, 0 is perfect). `referee` is the same quantity re-measured "
-        "on the ground-truth simulator under `--compare` and is the column "
-        "comparable across arms, exactly as a spread is. **F1 is the published "
+        "on the shared referee (the exact oracle simulator by default) and is the "
+        "column comparable across arms, exactly as a spread is. **F1 is the published "
         "metric** (SL-VAE calls it \"the most commonly used\"; IVGD \"the most "
         "important\") and it is computed against the true sources only after the "
         "search, on the winner: a set that reproduces the observation need not be "
@@ -223,7 +223,7 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
             f"| `{result['arm']}` "
             f"| `{result.get('evaluator', ', ')}` "
             f"| {_format_number(reward, 5)} "
-            f"| {_format_number(result.get('mc_reward'), 5)} "
+            f"| {_format_number(result.get('referee_reward'), 5)} "
             f"| {_format_number(selection, 5)} "
             f"| {', ' if gap is None else f'{gap:+.5f}'} "
             f"| {_format_number(metrics.get('f1'), 4)} "
@@ -518,8 +518,8 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
         "per node, minus the fraction of the observation the history contradicts "
         "(reported nodes dropped, reported times moved, nodes named that a snapshot "
         "says stayed clean). `referee` is the same quantity re-measured under the "
-        "ground-truth kernel under `--compare` and is the column comparable across "
-        "arms, exactly as a spread is.",
+        "shared referee's kernel (the exact oracle by default) and is the column "
+        "comparable across arms, exactly as a spread is.",
         "",
         f"**The tree score is the published metric**, `{tree_weight:.2f} * "
         f"PathPrecision + {1.0 - tree_weight:.2f} * EventF1`, computed against the "
@@ -584,7 +584,7 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
             f"| {result.get('condition', ', ')} | `{result['arm']}` "
             f"| `{result.get('evaluator', ', ')}` "
             f"| {_format_number(reward, 4)} "
-            f"| {_format_number(result.get('mc_reward'), 4)} "
+            f"| {_format_number(result.get('referee_reward'), 4)} "
             f"| {_format_number(selection, 4)} "
             f"| {', ' if gap is None else f'{gap:+.4f}'} "
             f"| {_format_number(metrics.get('loglik_per_node'), 4)} "
@@ -647,7 +647,7 @@ def _results_table(agent_results: list[dict]) -> list[str]:
     if not agent_results:
         return []
 
-    has_mc = any(result.get("mc_reward") is not None for result in agent_results)
+    has_mc = any(result.get("referee_reward") is not None for result in agent_results)
     sense = result_sense(agent_results)
     recover = is_recover(agent_results)
     lines = ["## Results", ""]
@@ -696,19 +696,41 @@ def _results_table(agent_results: list[dict]) -> list[str]:
         lines += _ring_note(agent_results)
 
     if has_mc:
+        referee = next(
+            (result.get("referee") for result in agent_results if result.get("referee")),
+            "oracle",
+        )
+        samples = next(
+            (result.get("referee_samples") for result in agent_results if result.get("referee_samples")),
+            None,
+        )
         lines += [
-            "**Spread** is the ground-truth Monte Carlo replay of each arm's winning "
-            "strategy: the only number comparable across conditions, since each "
-            "arm's own `reward` is measured by its own evaluator. **Estimate** is "
-            "what that arm's evaluator believed, so estimate − spread is its "
-            "fidelity error (zero by construction for a `monte_carlo` arm).",
+            f"**Spread** is the shared referee's replay of each arm's winning strategy "
+            f"(`{referee}`" + (f", {samples} samples" if samples else "") + "): the only "
+            "number comparable across conditions, since each arm's own `reward` is "
+            "measured by its own evaluator. **Estimate** is what that arm's evaluator "
+            "believed, so estimate − spread is its fidelity error (zero by construction "
+            "for an arm whose evaluator is the referee).",
             "",
         ]
+        agreed = [result for result in agent_results if result.get("referee_minus_mc") is not None]
+        if agreed:
+            worst = max(agreed, key=lambda result: abs(result["referee_minus_mc"]))
+            lines += [
+                f"**NDlib agreement check** on {len(agreed)} of {len(agent_results)} rows: "
+                f"the same winners replayed on Monte Carlo agree with the referee to within "
+                f"{max(abs(result['referee_minus_mc']) for result in agreed):.2f} nodes "
+                f"(largest gap `{worst['arm']}` at k={worst.get('budget', '?')}: "
+                f"{worst['referee_minus_mc']:+.2f}, referee SE "
+                f"{_format_number(worst.get('referee_reward_se'), 2)}, MC SE "
+                f"{_format_number(worst.get('mc_reward_se'), 2)}).",
+                "",
+            ]
     else:
         lines += [
-            "> **Warning:** `--compare` was off, so each row is scored by its own "
-            "evaluator and rows are NOT comparable across conditions. Re-run with "
-            "`--compare` for a valid table.",
+            "> **Warning:** no row carries a referee number, so each row is scored by "
+            "its own evaluator and rows are NOT comparable across conditions. These "
+            "results predate the referee replay; re-run the arm.",
             "",
         ]
 
@@ -753,7 +775,7 @@ def _results_table(agent_results: list[dict]) -> list[str]:
             row += f" {_format_number(estimate)} |"
             row += (
                 f" {estimate - spread:+.2f} |"
-                if result.get("mc_reward") is not None
+                if result.get("referee_reward") is not None
                 else ": |"
             )
 
@@ -783,8 +805,8 @@ def _adaptivity_section(agent_results: list[dict]) -> list[str]:
         "## Adaptivity gap",
         "",
         "`gap = spread(adaptive policy) / spread(matched non-adaptive arm)` at "
-        "the same budget and the same evaluator, both read on the ground-truth "
-        "MC replay. Rounds commit `k` in batches, each chosen after observing "
+        "the same budget and the same evaluator, both read on the shared "
+        "referee replay. Rounds commit `k` in batches, each chosen after observing "
         "what the previous batch activated. The control is the STRONGEST static "
         "arm at that budget and evaluator, which is the closest available "
         "estimate of the `max` the gap is defined against.",
@@ -837,16 +859,16 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
     largest = max(result["budget"] for result in scored)
     at_largest = sorted(
         [result for result in scored if result["budget"] == largest],
-        key=lambda result: -(result.get("mc_prevented_influence") or 0.0),
+        key=lambda result: -(result.get("referee_prevented_influence") or 0.0),
     )
     head = at_largest[0]
-    unopposed = head.get("mc_unopposed_spread") or head.get("unopposed_spread") or 0.0
+    unopposed = head.get("referee_unopposed_spread") or head.get("unopposed_spread") or 0.0
 
     lines = [
         f"## Prevented influence at k={largest}",
         "",
         f"`prevented = sigma(S_N, empty) - sigma(S_N | blockers)`, both terms measured "
-        f"on the shared ground-truth referee. The rumour was seeded by "
+        f"on the shared referee. The rumour was seeded by "
         f"`{head.get('attacker', '?')}` at **{head.get('n_negative_seeds', '?')} "
         f"nodes** and reaches **{unopposed:,.1f}** of them unopposed; the lever is "
         f"`{head.get('lever', '?')}` ({head.get('lever_papers', '')}); the tie-break "
@@ -876,8 +898,8 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
     ]
 
     for result in at_largest:
-        prevented = result.get("mc_prevented_influence")
-        percent = result.get("mc_prevented_pct_of_unopposed")
+        prevented = result.get("referee_prevented_influence")
+        percent = result.get("referee_prevented_pct_of_unopposed")
         ratio = result.get("budget_ratio")
         lines.append(
             f"| `{result['arm']}` "
@@ -928,11 +950,11 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
     largest = max(result["budget"] for result in scored)
     at_largest = sorted(
         [result for result in scored if result["budget"] == largest],
-        key=lambda result: -(result.get("mc_prevented_infections") or 0.0),
+        key=lambda result: -(result.get("referee_prevented_infections") or 0.0),
     )
     head = at_largest[0]
     unprotected = (
-        head.get("mc_unprotected_attack_rate")
+        head.get("referee_unprotected_attack_rate")
         or head.get("unprotected_attack_rate")
         or 0.0
     )
@@ -942,7 +964,7 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
         f"## Prevented infections at k={largest}",
         "",
         f"`prevented = |R(inf)| unprotected - |R(inf)| with doses`, both terms "
-        f"measured on the shared ground-truth referee. The outbreak was seeded by "
+        f"measured on the shared referee. The outbreak was seeded by "
         f"`{head.get('outbreak_selector', '?')}` at **{head.get('n_outbreak', '?')} "
         f"index case(s)** and reaches **{unprotected:,.1f}** nodes unprotected. "
         f"Dynamics: **{head.get('compartments', '?')}**, per-contact transmission "
@@ -972,9 +994,9 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
     ]
 
     for result in at_largest:
-        curve = result.get("mc_curve") or result
-        prevented = result.get("mc_prevented_infections")
-        percent = result.get("mc_prevented_pct_of_unprotected")
+        curve = result.get("referee_curve") or result
+        prevented = result.get("referee_prevented_infections")
+        percent = result.get("referee_prevented_pct_of_unprotected")
         spectral = result.get("spectral") or {}
         eigendrop = spectral.get("eigendrop_pct")
         lines.append(
@@ -1495,8 +1517,8 @@ def _wm_planning(wm_results: dict) -> list[str]:
 
 
 def _wm_in_loop_fidelity(agent_results: list[dict]) -> list[str]:
-    """The world model as the outer loop saw it: its estimate against the ground-truth replay."""
-    # An inverse or forecast reward carries no evaluator noise and `mc_reward` IS
+    """The world model as the outer loop saw it: its estimate against the referee replay."""
+    # An inverse or forecast reward carries no evaluator noise and `referee_reward` IS
     # the held-out score there, so a "bias" column would print +0.00 under a
     # "spread" header over an F1 or an MSLE
     if is_recover(agent_results) or is_forecast(agent_results):
@@ -1504,7 +1526,7 @@ def _wm_in_loop_fidelity(agent_results: list[dict]) -> list[str]:
 
     paired = [
         result for result in agent_results
-        if result.get("mc_reward") is not None and result.get("evaluator") in ("world_model", "oracle")
+        if result.get("referee_reward") is not None and result.get("evaluator") in ("world_model", "oracle")
     ]
     if not paired:
         return []
@@ -1516,16 +1538,16 @@ def _wm_in_loop_fidelity(agent_results: list[dict]) -> list[str]:
             pretty_arm(result["arm"]),
             _wm_value(result.get("budget"), 0),
             _wm_value(estimate, 2),
-            _wm_value(result["mc_reward"], 2),
-            f"{float(estimate) - float(result['mc_reward']):+.2f}",
+            _wm_value(result["referee_reward"], 2),
+            f"{float(estimate) - float(result['referee_reward']):+.2f}",
         ))
 
     return ["### In-Loop Evaluator Fidelity", "", 
             "What each model-based evaluator believed about its own winning strategy against "
-            "the ground-truth Monte Carlo replay of that strategy. This is the number the "
+            "the shared referee's replay of that strategy. This is the number the "
             "outer loop actually depends on; the offline rollout fidelity above is its "
             "prediction.", ""] + _wm_table(
-        ("Arm", "Budget", "Evaluator Estimate", "Ground-Truth Spread", "Bias"), rows
+        ("Arm", "Budget", "Evaluator Estimate", "Referee Spread", "Bias"), rows
     )
 
 

@@ -68,7 +68,7 @@ DATASET="${DATASET:-casflow_weibo}"
 # and both need `python -m baselines.setup_baselines --only <name>` first; a missing
 # install is SKIPPED with a marker rather than failing the sweep.
 env TASK=cascade_prediction DATASET="$DATASET" RUN=conditions RUN_JOBID=0 \
-    COMPARE=1 GEN_MODELS="IC" DIFFUSION_MODEL=IC \
+    GEN_MODELS="IC" DIFFUSION_MODEL=IC \
     CP_SPLIT=chronological \
     BASELINES="all-classical external:casflow external:ctcp" \
     ./sbatch/pipeline.sbatch

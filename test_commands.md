@@ -4,7 +4,7 @@ SLURM, one `sbatch/pipeline.sbatch` submission per task. Each runs **condition 1
 
 **No world model anywhere.** `SKIP_STAGES=train` is safe because `needs_world_model` returns `False` for every arm here, so no checkpoint is built or loaded. That is what keeps these cheap.
 
-`COMPARE=1` on every submission. Without it each arm reports its own evaluator's number and the table is not a comparison; `--compare` replays every arm through one ground-truth Monte Carlo referee, which is the only column that may be read across rows.
+The default model is `gpt-6-astra` at reasoning effort `high` (`REASONING_EFFORT`, `--reasoning-effort`; GPT-6 Astra takes no temperature and rejects effort `none`); every run preflights the gateway and fails in seconds if the token cannot use it (on 2026-09-04 the gateway still served only the gpt-5.x family, so `LLM_MODEL=gpt-5.6-sol` is the fallback until it is enabled). Every submission replays every arm on the shared oracle referee (`REFEREE=oracle`, `REFEREE_SAMPLES=1000`, the defaults), and that column is the only one that may be read across rows. `MC_AGREEMENT=1` adds the NDlib replay of every winner, the independent check on the oracle and the timing row; it is on for the section-6 ladders and off elsewhere.
 
 ---
 
@@ -92,7 +92,7 @@ ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -113,7 +113,7 @@ EVALUATOR=oracle \
 ROUNDS=3 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -142,7 +142,7 @@ ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -169,7 +169,7 @@ external:cosasi_rumor_centrality" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -184,12 +184,12 @@ SKIP_STAGES=train \
 BLOCKING_LEVER=counter_seed TIE_BREAK=auto \
 BASELINES="proximity multi_hop_proximity rps cmia_o cldag forward_blocking \
 reverse_blocking degree_blocking pagerank_blocking betweenness_blocking random_blocking \
-external:sandimin external:imin_joc external:diffim" \
+external:sandimin external:imin_joc" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGETS="10 20 30 40 50" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -210,7 +210,7 @@ external:grin external:spin external:deep_demixing" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -234,7 +234,7 @@ ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=15 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -260,7 +260,7 @@ external:casflow external:ccgl external:ctcp external:cascn external:coupledgnn"
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=50 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 ```
@@ -276,38 +276,38 @@ The same shape as your existing IM commands, for iterating on one arm without re
 ```bash
 # netscience, evolve/free, oracle
 python -m coding_agent.run \
-    --model gpt-5.6-sol \
+    --model gpt-6-astra \
     --task influence_maximization \
     --data-dir results/influence_maximization/netscience/testrun/data \
     --method evolve --strategy-mode free \
     --evaluator oracle --budget-pct 5 --horizon 10 \
     --allowed-ops add_node \
     --outer-iters 20 --n-samples 50 \
-    --mc-runs 200 --compare \
+    --mc-runs 200 \
     --out-json results/influence_maximization/netscience/testrun/agent/pct5/evolve_free@oracle.json
 
 # netscience, evolve/scored, oracle
 python -m coding_agent.run \
-    --model gpt-5.6-sol \
+    --model gpt-6-astra \
     --task influence_maximization \
     --data-dir results/influence_maximization/netscience/testrun/data \
     --method evolve --strategy-mode scored \
     --evaluator oracle --budget-pct 5 --horizon 10 \
     --allowed-ops add_node \
     --outer-iters 20 --n-samples 50 \
-    --mc-runs 200 --compare \
+    --mc-runs 200 \
     --out-json results/influence_maximization/netscience/testrun/agent/pct5/evolve_scored@oracle.json
 
 # power_grid containment, evolve/free, oracle  (the budget buys remove_node)
 python -m coding_agent.run \
-    --model gpt-5.6-sol \
+    --model gpt-6-astra \
     --task critical_node_detection \
     --data-dir results/critical_node_detection/power_grid/testrun/data \
     --method evolve --strategy-mode free \
     --evaluator oracle --budget-pct 5 --horizon 10 \
     --allowed-ops remove_node \
     --outer-iters 20 --n-samples 50 \
-    --mc-runs 200 --compare \
+    --mc-runs 200 \
     --out-json results/critical_node_detection/power_grid/testrun/agent/pct5/evolve_free@oracle.json
 ```
 
@@ -320,7 +320,7 @@ python -m coding_agent.run \
 ```bash
 TASK=adaptive_online_im DATASET=netscience RUN=adaptgreedy RUN_JOBID=0 \
 SKIP_STAGES=train BASELINES="adapt_greedy adapt_epic static_split" ARMS=none \
-ROUNDS=3 BUDGET_PCTS="5" HORIZON=10 MC_RUNS=20 COMPARE=1 CREDIT=1 FORCE=1 \
+ROUNDS=3 BUDGET_PCTS="5" HORIZON=10 MC_RUNS=20 CREDIT=1 FORCE=1 \
 GRES=gpu:1 MEM=64G TIME=12:00:00 ./sbatch/pipeline.sbatch
 ```
 
@@ -333,7 +333,7 @@ If you want the classical CELF reference row for the paper, run it once at a sin
 ```bash
 TASK=influence_maximization DATASET=netscience RUN=celfpp RUN_JOBID=0 \
 SKIP_STAGES=train BASELINES="celf_pp imm" ARMS=none \
-BUDGET_PCTS="1" HORIZON=10 MC_RUNS=200 COMPARE=1 CREDIT=1 FORCE=1 \
+BUDGET_PCTS="1" HORIZON=10 MC_RUNS=200 CREDIT=1 FORCE=1 \
 STRATEGY_TIMEOUT=7200 MEM=64G TIME=6:00:00 ./sbatch/pipeline.sbatch
 ```
 
@@ -343,7 +343,7 @@ STRATEGY_TIMEOUT=7200 MEM=64G TIME=6:00:00 ./sbatch/pipeline.sbatch
 
 ## 6. The ladder: conditions 3-6, with the world model
 
-Everything above is the smoke test, and it leaves condition 6 unmeasured: `evolve_free@oracle` is the CEILING of model-based guidance (a perfect internal model), not our method. The method is `evolve_free@world_model`, and the claim is that it sits near the oracle's spread at a fraction of `@monte_carlo`'s cost. These submissions resume from the `data/` the smoke test wrote (no `FORCE`, `START_STAGE=train`), train the checkpoint the registry's head needs, and run the four agent arms that share one method and differ only in evaluator. Read the result as two columns: `spread` (ground-truth MC replay, all four comparable) and `eval s` / `real episodes` (where `@monte_carlo` pays and `@world_model` does not).
+Everything above is the smoke test, and it leaves condition 6 unmeasured: `evolve_free@oracle` is the CEILING of model-based guidance (a perfect internal model), not our method. The method is `evolve_free@world_model`, and the claim is that it sits near the oracle's spread at a fraction of `@monte_carlo`'s cost. These submissions resume from the `data/` the smoke test wrote (no `FORCE`, `START_STAGE=train`), train the checkpoint the registry's head needs, and run the four agent arms that share one method and differ only in evaluator. Read the result as two columns: `spread` (shared referee replay, all four comparable) and `eval s` / `real episodes` (where `@monte_carlo` pays and `@world_model` does not).
 
 Six things changed under the loop since the smoke test, and each one moves these numbers: the search no longer scores every candidate on one fixed RNG draw (epidemic_control overfit a 50-sample rollout by 30 nodes at k=48); an adaptive policy gets one copy per ensemble member (the adaptive arm was scoring 50 cross-contaminated policies); `frontier_removal` sits in the CND pool as the outbreak-aware control and the CND outbreak defaults to 10% of N so the sweep sits below its ring; the three exogenous-cascade tasks bind `self.score_plan(plan)` so a generated program tests candidate interventions on its own arm's evaluator, metered, instead of hand-rolling numpy simulation (the first IB winner burned 260 of every 262 seconds doing exactly that); the default search budget is `OUTER_ITERS=20`; and the ladder runs at `N_SAMPLES=200`, because at 50 the reward SE (2.5 to 12 nodes across tasks) sat above the deltas the late iterations were deciding between. Adaptive arms are capped at 50 samples by the pipeline whatever the flag says, since their per-round `act()` runs once per ensemble member and 200 would turn one evaluation into half an hour. The CND smoke-test rows at k >= 247 are void and that block needs a re-run before its ladder means anything.
 
@@ -370,8 +370,8 @@ Six things changed under the loop since the smoke test, and each one moves these
 # `all-discovery` adds condition 9: the nine published LLM algorithm-discovery systems
 # (OpenEvolve, CodeEvolve, LLaMEA, EoH, ReEvo, MCTS-AHD, FunSearch, HillClimb, DeepEvolve)
 # at their published defaults, through the same gateway and the same LLM_MODEL as our arms
-# (gpt-5.6-sol is now the default everywhere; LLM_MODELS stays available for a multi-model
-# sweep), with the plain Monte Carlo simulator as their only fitness. They need the setup
+# (gpt-6-astra is now the default everywhere, since 2026-09-04; LLM_MODELS stays available for a multi-model
+# sweep), with the exact oracle simulator as their only fitness. They need the setup
 # command from section 8 once, and they dominate wall clock: one search per system per
 # budget, sequential, and MCTS-AHD alone runs 1000 evaluations per budget, so the timeout
 # floor is 12 h per run and the job asks for a week. Section 8 has the split alternative
@@ -386,13 +386,13 @@ external:opim external:ssa external:subsim \
 external:touplegdd external:deepim external:moeim external:glie \
 all-discovery" \
 ARMS="evolve_free@oracle evolve_free@world_model" \
-LLM_MODEL=gpt-5.6-sol \
+LLM_MODEL=gpt-6-astra \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+MC_AGREEMENT=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -406,13 +406,13 @@ external:opim external:ssa external:subsim \
 external:touplegdd external:deepim external:moeim external:glie \
 all-discovery" \
 ARMS="evolve_free@oracle evolve_free@world_model" \
-LLM_MODEL=gpt-5.6-sol \
+LLM_MODEL=gpt-6-astra \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+MC_AGREEMENT=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -430,13 +430,13 @@ external:opim external:ssa external:subsim \
 external:touplegdd external:deepim external:moeim external:glie \
 all-discovery" \
 ARMS="evolve_free@oracle evolve_free@world_model" \
-LLM_MODEL=gpt-5.6-sol \
+LLM_MODEL=gpt-6-astra \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+MC_AGREEMENT=1 CREDIT=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -448,7 +448,7 @@ ARMS="evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@
 WM_MODEL=sage HEAD=structured \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+CREDIT=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 
@@ -469,7 +469,7 @@ ARMS="evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@
 WM_MODEL=sage HEAD=structured \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=15 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
+CREDIT=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 ./sbatch/pipeline.sbatch
 ```
@@ -505,15 +505,15 @@ The section 6 submissions already include `all-discovery`. The split alternative
 
 ```bash
 TASK=influence_maximization DATASET=netscience RUN=testrun_ic RUN_JOBID=0 DIFFUSION_MODEL=IC \
-  START_STAGE=agent ARMS=none BASELINES=all-discovery LLM_MODEL=gpt-5.6-sol \
-  BUDGET_PCTS="1 5 10 20" HORIZON=10 MC_RUNS=200 N_SAMPLES=200 COMPARE=1 \
+  START_STAGE=agent ARMS=none BASELINES=all-discovery LLM_MODEL=gpt-6-astra \
+  BUDGET_PCTS="1 5 10 20" HORIZON=10 MC_RUNS=200 N_SAMPLES=200 \
   BASELINE_TIMEOUT=43200 MEM=64G TIME=7-00:00:00 ./sbatch/pipeline.sbatch
 
 TASK=influence_maximization DATASET=netscience RUN=testrun_lt RUN_JOBID=0 DIFFUSION_MODEL=LT \
-  START_STAGE=agent ARMS=none BASELINES=all-discovery LLM_MODEL=gpt-5.6-sol \
-  BUDGET_PCTS="1 5 10 20" HORIZON=10 MC_RUNS=200 N_SAMPLES=200 COMPARE=1 \
+  START_STAGE=agent ARMS=none BASELINES=all-discovery LLM_MODEL=gpt-6-astra \
+  BUDGET_PCTS="1 5 10 20" HORIZON=10 MC_RUNS=200 N_SAMPLES=200 \
   BASELINE_TIMEOUT=43200 MEM=64G TIME=7-00:00:00 ./sbatch/pipeline.sbatch
 ```
 
-Reusing `RUN=testrun_ic` / `testrun_lt` drops the nine rows into the same results tree as the world-model arms, so the report and plots carry all conditions in one table. A subset is `BASELINES="discovery:eoh discovery:reevo discovery:openevolve"`, and `LLM_MODELS="gpt-5.6-luna gpt-5.6-terra"` fans each one out per model (the default is `gpt-5.6-sol`). Every other task takes the same flags; the contract per task is in `baselines/README.md`.
+Reusing `RUN=testrun_ic` / `testrun_lt` drops the nine rows into the same results tree as the world-model arms, so the report and plots carry all conditions in one table. A subset is `BASELINES="discovery:eoh discovery:reevo discovery:openevolve"`, and `LLM_MODELS="gpt-5.6-luna gpt-5.6-terra"` fans each one out per model (the default is `gpt-6-astra`). Every other task takes the same flags; the contract per task is in `baselines/README.md`.
 

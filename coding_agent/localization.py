@@ -30,7 +30,7 @@ where a specific claim of that file lives:
 The reward is EXACT rather than estimated, which is unusual for this pipeline and
 worth stating: F1 against a known source set carries no evaluator noise, so a
 recover task's `reward` is already comparable across conditions and does not need
-the `--compare` referee to become so. The referee still runs, measuring the
+the referee to become so. The referee still runs, measuring the
 re-simulated error (§8.5.5): the metric this literature should report and does
 not (§11).
 """
@@ -444,7 +444,7 @@ def evaluate_localizer(
     elapsed = time.perf_counter() - start
 
     # A representative recovered set, so the results JSON's timeline and the
-    # --compare referee have concrete actions to replay: the seed commit that WOULD
+    # referee have concrete actions to replay: the seed commit that WOULD
     # reproduce the observation if the program got it right
     representative = per_instance[0]
     bag = [ActionOp("add_node", int(node)) for node in representative["predicted"]]
@@ -618,11 +618,12 @@ def referee_resimulation_error(
     per_instance: list[dict],
 ) -> dict[str, float]:
     """
-    The `--compare` referee: the reward re-measured on the ground-truth simulator.
+    The referee: the reward re-measured on the referee's own simulator (the exact
+    oracle by default, NDlib for the agreement check).
 
     Re-simulate each RECOVERED source set on NDlib and compare it against what was
     observed, exactly the quantity the arm's own evaluator scored in the loop, so
-    `mc_reward` here is to `reward` what the MC replay is to a world-model spread.
+    `referee_reward` here is to `reward` what the referee replay is to a world-model spread.
     Reported beside the TRUE source set's own error, because the number is
     unreadable without knowing what the oracle set scores: on an ill-posed
     problem a recovered set can reproduce `y` better than the truth did.
@@ -650,8 +651,8 @@ def referee_resimulation_error(
     rewards = [-error for error in recovered_errors]
 
     return {
-        "mc_reward": float(np.mean(rewards)),
-        "mc_reward_se": (
+        "referee_reward": float(np.mean(rewards)),
+        "referee_reward_se": (
             float(np.std(rewards, ddof=1) / np.sqrt(len(rewards)))
             if len(rewards) > 1
             else 0.0

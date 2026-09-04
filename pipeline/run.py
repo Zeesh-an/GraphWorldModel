@@ -11,19 +11,19 @@ its own evaluator, so conditions 3-6 differ in exactly one thing: the inner-loop
 feedback, and land in one report table:
 
 python -m pipeline.run --dataset ba --num-graphs 40 --syn-nodes 100 \
-    --budget-pcts 1 5 10 20 --compare \
-    --llm-model gpt-5.6-sol --outer-iters 5
+    --budget-pcts 1 5 10 20 \
+    --llm-model gpt-6-astra --outer-iters 5
 
 Just the classical pool and our method, at one budget:
 
 python -m pipeline.run --dataset netscience \
     --baselines celf_pp degree_discount imm \
-    --arms one_shot_free@world_model --budget-pcts 5 --compare
+    --arms one_shot_free@world_model --budget-pcts 5
 
 No world model anywhere (the train stage is then skipped automatically):
 
 python -m pipeline.run --dataset sbm --num-graphs 40 \
-    --arms routing one_shot_free@native one_shot_free@oracle --compare
+    --arms routing one_shot_free@native one_shot_free@oracle
 
 Resume just the reporting half of a finished run:
 
@@ -72,6 +72,12 @@ from baselines.run_baseline import (
     seed_script,
 )
 from coding_agent import executor
+from coding_agent.agent import (
+    default_model,
+    default_reasoning_effort,
+    reasoning_efforts,
+    verify_gateway_model,
+)
 from coding_agent.run import ExperimentConfig, run_experiment
 from data.generate_wm_data import (
     GenConfig,
@@ -151,6 +157,7 @@ from data.wm_simulator import (
     valid_remove_semantics,
 )
 from pipeline.conditions import (
+    discovery_condition,
     expand_llm_models,
     Arm,
     condition_names,
@@ -186,6 +193,9 @@ native_mc_runs_default = 1
 # ensemble member, so evaluation cost scales linearly in this where every other
 # arm's is one batched forward pass
 adaptive_n_samples = 50
+
+# The referee replay's sample count, shared with coding_agent.run
+referee_samples_default = 1000
 
 
 @dataclass
@@ -284,11 +294,12 @@ class PipelineConfig:
     budgets: tuple | None = None
     evaluator: str = "oracle"
     native_mc_runs: int = native_mc_runs_default
-    llm_model: str = "gpt-5.6-sol"
+    llm_model: str = default_model
     # Fan every LLM-driven arm out across these models, one result row each;
     # None = the single llm_model above
     llm_models: tuple | None = None
     temperature: float | None = None
+    reasoning_effort: str | None = default_reasoning_effort
     diffusion_model: str = "IC"
     horizon: int = 10
     outer_iters: int = 20
@@ -375,7 +386,10 @@ class PipelineConfig:
     # USD per 1M tokens for the cost line; None -> tokens counted, cost null
     llm_price_in: float | None = None
     llm_price_out: float | None = None
-    compare: bool = False
+    referee: str = "oracle"
+    referee_samples: int = referee_samples_default
+    mc_agreement: bool = False
+    mc_agreement_runs: int | None = None
     credit: bool = True
     graph_id: str | None = None
     # driver
@@ -658,6 +672,19 @@ def needs_gpu(config: PipelineConfig) -> tuple[bool, str]:
     """
     selected = active_stages(config)
     arms = build_arms(config)
+
+    # Preflight the gateway before the data stage: every LLM arm (ours, routing,
+    # and the discovery systems, which call the same gateway with the same model)
+    # would otherwise fail hours later, after generation and training
+    if "agent" in selected:
+        needing_llm = [
+            arm
+            for arm in arms
+            if arm.is_agent or arm.routing or arm.condition == discovery_condition
+        ]
+        for model in sorted({arm.llm_model or config.llm_model for arm in needing_llm}):
+            verify_gateway_model(model)
+            print(f"[pipeline] gateway serves {model}")
 
     if "train" in selected:
         return True, "the train stage fits f_theta"
@@ -1033,8 +1060,8 @@ def _external_script(external_seeds: dict, config: PipelineConfig) -> str:
 
     batches = external_seeds.get("batches")
 
-    # An EDGE repo hands back a flat list of arc endpoints (see
-    # registry._diffim_parse), which only the edge levers can emit
+    # An EDGE repo hands back a flat list of arc endpoints, which only the edge
+    # levers can emit
     if budget_op in ("remove_edge", "set_edge_weight"):
         return edge_script(external_seeds["seeds"], budget_op)
 
@@ -1209,28 +1236,6 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
 
         _check_wm_results(config, wm_results)
 
-    # Rewards from different evaluators are not comparable, so a multi-condition
-    # sweep is only readable once every arm has been replayed on the same referee.
-    # An INVERSE task is the exception and the warning would be wrong there: its
-    # reward is F1 against a source set we know, so it carries no evaluator noise
-    # and is already comparable across conditions. --compare still buys the
-    # re-simulated error column, it just is not load-bearing for the table.
-    if (
-        not config.compare
-        and not get_task(config.task).recovers
-        # ...and a FORECAST task, for the same reason and with the same wrinkle: its
-        # error is measured against a popularity read off a log, so it carries no
-        # evaluator noise. --compare still buys the modelling-error column, which is
-        # the number §9.1 is actually about; it just is not load-bearing for the table.
-        and not get_task(config.task).forecasts
-        and len({arm.evaluator for arm in arms}) > 1
-    ):
-        print(
-            "[agent] WARNING: arms span multiple evaluators without --compare, so "
-            "their rewards are measured by different judges and cannot be compared. "
-            "Re-run with --compare for a valid table."
-        )
-
     points = budget_points(config)
     completed = []
     reused = failed = 0
@@ -1272,6 +1277,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 evaluator=evaluator,
                 model=arm.llm_model or config.llm_model,
                 temperature=config.temperature,
+                reasoning_effort=config.reasoning_effort,
                 diffusion_model=config.diffusion_model,
                 remove_semantics=config.remove_semantics,
                 # Inert unless arm.method == "adaptive"; passing them always is
@@ -1342,15 +1348,22 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     else config.outer_iters
                 ),
                 mc_runs=mc_runs,
-                referee_mc_runs=config.mc_runs,
+                referee=config.referee,
+                referee_samples=config.referee_samples,
+                mc_agreement=config.mc_agreement,
+                mc_agreement_runs=config.mc_agreement_runs,
                 # Adaptive arms are capped: act() runs once per ensemble member per
                 # round, so the policy's own compute scales linearly with the sample
                 # count and 200 samples turns a 500 s evaluation into a 30-minute
                 # one. Every other arm takes the flag as given; 200 is the ladder
                 # default because 50 samples put the reward SE (2.5-12 nodes) above
                 # the deltas the late search iterations are deciding between.
+                # A canned arm is scored once, on the referee at the referee's
+                # count, and that evaluation doubles as its referee replay
                 n_samples=(
-                    min(config.n_samples, adaptive_n_samples)
+                    config.referee_samples
+                    if not arm.is_agent
+                    else min(config.n_samples, adaptive_n_samples)
                     if arm.method == "adaptive"
                     else config.n_samples
                 ),
@@ -1359,7 +1372,6 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 data_dir=str(layout.data_dir),
                 graph_id=config.graph_id,
                 wm_results_json=str(wm_results) if wm_results.exists() else None,
-                compare=config.compare,
                 credit=config.credit,
                 baseline=arm.baseline,
                 routing=arm.routing,
@@ -2788,8 +2800,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--llm-model",
         type=str,
-        default="gpt-5.6-sol",
-        help="gateway model name for the coding agent (default: gpt-5.6-sol).",
+        default=default_model,
+        help=f"gateway model name for the coding agent (default: {default_model}).",
     )
     parser.add_argument(
         "--llm-models",
@@ -2805,6 +2817,13 @@ if __name__ == "__main__":
         type=float,
         default=None,
         help="LLM sampling temperature (default: None).",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        type=str,
+        default=default_reasoning_effort,
+        choices=[*reasoning_efforts, "none"],
+        help=f"reasoning effort for the OpenAI reasoning family; 'none' sends nothing (default: {default_reasoning_effort}).",
     )
     parser.add_argument(
         "--diffusion-model",
@@ -2882,9 +2901,31 @@ if __name__ == "__main__":
         help="USD per 1M completion tokens; see --llm-price-in (default: None).",
     )
     parser.add_argument(
-        "--compare",
+        "--referee",
+        type=str,
+        default="oracle",
+        choices=["oracle", "monte_carlo"],
+        help="the shared referee every arm's winner is replayed on for the final number: "
+        "the exact batched oracle simulator, or NDlib (default: oracle).",
+    )
+    parser.add_argument(
+        "--referee-samples",
+        type=int,
+        default=referee_samples_default,
+        help=f"rollout samples for the referee replay (default: {referee_samples_default}).",
+    )
+    parser.add_argument(
+        "--mc-agreement",
         action="store_true",
-        help="replay each winning strategy on Monte Carlo for a fidelity check (default: False).",
+        help="also replay each winner on NDlib Monte Carlo: the independent check on the "
+        "oracle referee and the per-rollout timing row; run it on the critical datasets, "
+        "not everywhere (default: False).",
+    )
+    parser.add_argument(
+        "--mc-agreement-runs",
+        type=int,
+        default=None,
+        help="NDlib runs for --mc-agreement (default: --mc-runs).",
     )
     parser.add_argument(
         "--credit",
@@ -2983,6 +3024,7 @@ if __name__ == "__main__":
         llm_model=args.llm_model,
         llm_models=(None if args.llm_models is None else tuple(args.llm_models)),
         temperature=args.temperature,
+        reasoning_effort=None if args.reasoning_effort == "none" else args.reasoning_effort,
         diffusion_model=args.diffusion_model,
         horizon=args.horizon,
         outer_iters=args.outer_iters,
@@ -3048,7 +3090,10 @@ if __name__ == "__main__":
         strategy_timeout=args.strategy_timeout,
         llm_price_in=args.llm_price_in,
         llm_price_out=args.llm_price_out,
-        compare=args.compare,
+        referee=args.referee,
+        referee_samples=args.referee_samples,
+        mc_agreement=args.mc_agreement,
+        mc_agreement_runs=args.mc_agreement_runs,
         credit=args.credit,
         graph_id=args.graph_id,
         wm_results_json=args.wm_results_json,

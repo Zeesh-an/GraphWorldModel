@@ -45,10 +45,16 @@ summary_columns = (
     "spread_pct_own_evaluator",
     "estimate_unbiased",
     "fidelity_error",
+    "referee",
+    "referee_reward",
+    "referee_reward_se",
+    "referee_rollout_seconds",
+    "referee_samples",
     "mc_reward",
     "mc_reward_se",
     "mc_rollout_seconds",
-    "referee_mc_runs",
+    "mc_agreement_runs",
+    "referee_minus_mc",
     "reward_se",
     "rollout_seconds",
     "n_samples",
@@ -309,9 +315,9 @@ def _row(result: dict, sense: str = "maximize") -> dict:
     # The spectral block is present only under a NODE lever: the edge levers spend
     # arcs, and `immunization_metrics` has nothing to delete
     spectral = result.get("spectral") or {}
-    # ...and the ground-truth curve only exists under --compare, so the arm's own
+    # ...and the referee curve only exists once the referee ran, so the arm's own
     # is the fallback rather than the preference
-    epidemic_curve = result.get("mc_curve") or {}
+    epidemic_curve = result.get("referee_curve") or {}
 
     return {
         "arm": result.get("arm"),
@@ -336,18 +342,26 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         # How far this arm's own evaluator was from the shared referee
         "fidelity_error": (
             round(estimate - spread, 4)
-            if result.get("mc_reward") is not None and estimate is not None
+            if result.get("referee_reward") is not None and estimate is not None
             else None
         ),
+        "referee": result.get("referee"),
+        "referee_reward": result.get("referee_reward"),
+        "referee_reward_se": result.get("referee_reward_se"),
+        "referee_rollout_seconds": result.get("referee_rollout_seconds"),
+        "referee_samples": result.get("referee_samples"),
+        # The NDlib agreement check, when --mc-agreement ran: the independent
+        # reference the oracle referee is measured against, and the timing row
         "mc_reward": result.get("mc_reward"),
         "mc_reward_se": result.get("mc_reward_se"),
         "mc_rollout_seconds": result.get("mc_rollout_seconds"),
-        "referee_mc_runs": result.get("referee_mc_runs"),
+        "mc_agreement_runs": result.get("mc_agreement_runs"),
+        "referee_minus_mc": result.get("referee_minus_mc"),
         "reward_se": cost.get("reward_se"),
         "rollout_seconds": cost.get("rollout_seconds"),
         "n_samples": cost.get("n_samples"),
         "mc_runs": cost.get("mc_runs"),
-        # Inner-loop cost, excluding the --credit and --compare post-hoc replays.
+        # Inner-loop cost, excluding the --credit, referee and agreement replays.
         # evaluator_seconds is the cross-condition axis: elapsed_seconds is mostly
         # LLM latency, and rollout_seconds above is only the final rollout.
         "real_env_episodes": result.get("real_env_episodes"),
@@ -422,13 +436,13 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "blocking_negative_seeds": result.get("n_negative_seeds"),
         "blocking_detection_delay": result.get("detection_delay"),
         "blocking_unopposed": result.get(
-            "mc_unopposed_spread", result.get("unopposed_spread")
+            "referee_unopposed_spread", result.get("unopposed_spread")
         ),
         "blocking_prevented": result.get(
-            "mc_prevented_influence", result.get("prevented_influence")
+            "referee_prevented_influence", result.get("prevented_influence")
         ),
         "blocking_prevented_pct": result.get(
-            "mc_prevented_pct_of_unopposed", result.get("prevented_pct_of_unopposed")
+            "referee_prevented_pct_of_unopposed", result.get("prevented_pct_of_unopposed")
         ),
         "blocking_prevented_pct_of_nodes": result.get("prevented_pct_of_nodes"),
         "blocking_budget_ratio": result.get("budget_ratio"),
@@ -447,17 +461,17 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "epi_alpha": result.get("epi_alpha"),
         "epi_outbreak_selector": result.get("outbreak_selector"),
         "epi_attack_rate": result.get(
-            "mc_reward", result.get("attack_rate")
+            "referee_reward", result.get("attack_rate")
         ) if result.get("epidemic") else None,
         "epi_attack_rate_pct": result.get("attack_rate_pct"),
         "epi_unprotected": result.get(
-            "mc_unprotected_attack_rate", result.get("unprotected_attack_rate")
+            "referee_unprotected_attack_rate", result.get("unprotected_attack_rate")
         ),
         "epi_prevented": result.get(
-            "mc_prevented_infections", result.get("prevented_infections")
+            "referee_prevented_infections", result.get("prevented_infections")
         ),
         "epi_prevented_pct": result.get(
-            "mc_prevented_pct_of_unprotected",
+            "referee_prevented_pct_of_unprotected",
             result.get("prevented_pct_of_unprotected"),
         ),
         "epi_peak_prevalence": epidemic_curve.get(
@@ -486,11 +500,11 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         # noise), so there is no fidelity column here and none is expected.
         "localization": result.get("localization"),
         # The reward is label-free consistency on the arm's own evaluator and
-        # `sl_reward_referee` its re-measurement on NDlib under --compare; F1 is
+        # `sl_reward_referee` its re-measurement on the referee; F1 is
         # the reported metric against the stored sources, computed after the search
         "sl_reward": result.get("reward") if result.get("localization") else None,
         "sl_reward_referee": (
-            result.get("mc_reward") if result.get("localization") else None
+            result.get("referee_reward") if result.get("localization") else None
         ),
         "sl_f1": metrics.get("f1"),
         "sl_precision": metrics.get("precision"),
@@ -532,7 +546,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         # under NDlib's kernel; the tree score is the reported label metric
         "cr_reward": result.get("reward") if result.get("reconstruction") else None,
         "cr_reward_referee": (
-            result.get("mc_reward") if result.get("reconstruction") else None
+            result.get("referee_reward") if result.get("reconstruction") else None
         ),
         "cr_loglik_per_node": metrics.get("loglik_per_node"),
         "cr_consistency": metrics.get("consistency"),

@@ -57,7 +57,7 @@
 # Rules for the env vars:
 #   * list-valued vars are space-separated inside quotes:  GEN_MODELS="IC LT"
 #   * the literal string `none` empties a list flag:       BASELINES=none
-#   * booleans are 1 / 0:                                  COMPARE=1  CREDIT=0
+#   * booleans are 1 / 0:                                  MC_AGREEMENT=1  CREDIT=0
 #   * anything unset falls back to a per-dataset default (see DEFAULTS below)
 #
 # Slurm-side knobs, all optional: JOB_NAME, GRES, MEM, TIME, CPUS, PARTITION,
@@ -222,9 +222,9 @@
 #
 #   DATASET=sbm START_STAGE=agent END_STAGE=agent FORCE=1 \
 #   ARMS=evolve_scored@world_model \
-#   LLM_MODEL=gpt-5.6-sol TEMPERATURE=0.7 OUTER_ITERS=20 \
+#   LLM_MODEL=gpt-6-astra TEMPERATURE=0.7 OUTER_ITERS=20 \
 #   BUDGET_PCTS="1 5 10 20" HORIZON=10 N_SAMPLES=50 MC_RUNS=200 \
-#   ALLOWED_OPS="add_node remove_node" COMPARE=1 CREDIT=0 \
+#   ALLOWED_OPS="add_node remove_node" MC_AGREEMENT=1 CREDIT=0 \
 #       ./sbatch/pipeline.sbatch
 #
 #   ARMS is where method and strategy mode live: <method>_<mode>@<evaluator>
@@ -237,7 +237,8 @@
 #     routing              condition 2, one LLM call picks a library algorithm
 #     baseline:<algorithm> condition 1, no LLM
 #
-#   LLM_MODEL       gateway model name (default gpt-5.6-sol; gpt-5.6-terra, gpt-5.6-luna, ...)
+#   LLM_MODEL       gateway model name (default gpt-6-astra; gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, ...)
+#   REASONING_EFFORT low | medium | high | xhigh | max | none for the OpenAI family (default high)
 #   TEMPERATURE     sampling temperature; unset = provider default, 0.0 = greedy
 #   OUTER_ITERS     refinement iterations per agent arm (conditions 1-2 force 1)
 #   WINDOWS         window count, `windowed` method only
@@ -333,7 +334,9 @@
 #                   registry's own sweep, which is a single 10% point for source
 #                   localization because k there is a property of the instance
 #   BUDGETS         absolute k, overrides BUDGET_PCTS entirely
-#   COMPARE         1 = replay every winner on the shared ground-truth referee.
+#   REFEREE         oracle (default) or monte_carlo: the shared referee every winner is replayed on.
+#   REFEREE_SAMPLES rollout samples for that replay (default 1000).
+#   MC_AGREEMENT    1 = also replay every winner on NDlib: the independent check on the oracle and the timing row.
 #                   Keep this at 1. Without it the table is not comparable
 #                   across conditions, because each arm's own reward comes
 #                   from its own evaluator.
@@ -506,7 +509,7 @@
 #       --num-graphs 2 --syn-nodes 60 --rollouts 2 --mc-marginals 3 \
 #       --epochs 3 --gen-models IC \
 #       --baselines high_degree --arms evolve_free@oracle \
-#       --budget-pcts 10 --outer-iters 1 --mc-runs 20 --compare
+#       --budget-pcts 10 --outer-iters 1 --mc-runs 20 --mc-agreement
 #
 # ============================================================================
 
@@ -769,9 +772,10 @@ NATIVE_MC_RUNS="${NATIVE_MC_RUNS:-1}"
 BUDGET_PCTS="${BUDGET_PCTS:-}"
 BUDGETS="${BUDGETS:-}"
 EVALUATOR="${EVALUATOR:-oracle}"
-LLM_MODEL="${LLM_MODEL:-gpt-5.6-sol}"
+LLM_MODEL="${LLM_MODEL:-gpt-6-astra}"
+REASONING_EFFORT="${REASONING_EFFORT:-high}"
 # Space-separated list: every LLM-driven arm runs once per model, e.g.
-# LLM_MODELS="gpt-5.6-luna gpt-5.6-terra gpt-5.6-sol"
+# LLM_MODELS="gpt-6-astra gpt-5.6-sol gpt-5.6-terra gpt-5.6-luna"
 LLM_MODELS="${LLM_MODELS:-}"
 TEMPERATURE="${TEMPERATURE:-}"
 if [ "$TASK" = "epidemic_control" ]; then
@@ -786,7 +790,9 @@ MC_RUNS="${MC_RUNS:-200}"
 N_SAMPLES="${N_SAMPLES:-200}"
 # Unset = the task registry decides; see GEN_ACTION_OPS above
 ALLOWED_OPS="${ALLOWED_OPS:-}"
-COMPARE="${COMPARE:-1}"
+REFEREE="${REFEREE:-oracle}"
+REFEREE_SAMPLES="${REFEREE_SAMPLES:-1000}"
+MC_AGREEMENT="${MC_AGREEMENT:-0}"
 CREDIT="${CREDIT:-1}"
 ALLOW_MC_ALGOS="${ALLOW_MC_ALGOS:-0}"
 STRATEGY_TIMEOUT="${STRATEGY_TIMEOUT:-}"
@@ -863,8 +869,10 @@ elif [ -n "$BUDGET_PCTS" ]; then
 fi
 
 [ -n "$TEMPERATURE" ]     && flags+=(--temperature "$TEMPERATURE")
+flags+=(--reasoning-effort "$REASONING_EFFORT")
 [ -n "$GRAPH_ID" ]        && flags+=(--graph-id "$GRAPH_ID")
-[ "$COMPARE" = "1" ]      && flags+=(--compare)
+flags+=(--referee "$REFEREE" --referee-samples "$REFEREE_SAMPLES")
+[ "$MC_AGREEMENT" = "1" ] && flags+=(--mc-agreement)
 [ "$CREDIT" = "1" ]       && flags+=(--credit)
 [ "$CREDIT" = "0" ]       && flags+=(--no-credit)
 [ "$ALLOW_MC_ALGOS" = "1" ] && flags+=(--allow-mc-algorithms)

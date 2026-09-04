@@ -33,6 +33,7 @@ from pipeline.conditions import (
     discovery_condition,
     expand_llm_models,
     monte_carlo,
+    oracle,
     parse_arm,
 )
 from pipeline.run import expand_baselines
@@ -284,7 +285,7 @@ def test_discovery_arms_parse_to_condition_nine_and_fan_out_per_model():
     arm = parse_arm("discovery:eoh")
 
     assert (arm.condition, arm.name, arm.external, arm.method, arm.evaluator) == (
-        discovery_condition, "discovery_eoh", "eoh", "one_shot", monte_carlo
+        discovery_condition, "discovery_eoh", "eoh", "one_shot", oracle
     )
     assert not arm.is_agent
 

@@ -68,7 +68,7 @@ run_dataset () {
     local dataset="$1"; shift
     echo "=== $dataset ==="
     env TASK=cascade_prediction DATASET="$dataset" RUN=default RUN_JOBID=0 \
-        COMPARE=1 GEN_MODELS="IC" DIFFUSION_MODEL=IC "$@" \
+        GEN_MODELS="IC" DIFFUSION_MODEL=IC "$@" \
         ./sbatch/pipeline.sbatch || echo "[cp_datasets] $dataset FAILED, continuing"
 }
 

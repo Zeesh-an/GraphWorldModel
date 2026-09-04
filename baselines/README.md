@@ -17,7 +17,7 @@ Every external baseline reduces to:
 (graph, budget, diffusion_model)  ->  list[int] seed set
 ```
 
-We then score that seed set with **our own Monte Carlo referee**, the same one that judges our own arms. This is deliberate and it is the single most important design decision here.
+We then score that seed set with **our own referee**, the exact oracle simulator that judges our own arms (NDlib Monte Carlo under `--mc-agreement`). This is deliberate and it is the single most important design decision here.
 
 A paper's reported spread depends on its simulator, its edge probabilities, its MC count, its horizon, and sometimes its own version of the graph (see `research/influence_maximization.md` §6.3: "Cora-ML" alone means two different graphs). Those numbers are **not** comparable to ours. Their _seed set_ is. Running every method's seeds through one referee is the only apples-to-apples comparison available, and it means external baselines need no special result format: the seeds are wrapped as a canned `Strategy` and flow through the identical executor, validation, rollout, MC replay, and results JSON as every other arm.
 
@@ -88,7 +88,7 @@ All five appear in DeepIM's published tables, which are transcribed in [`../rese
 | `adaptive_online_im` | 6 (`adaptiveim`, `rl4im`, `mrim`, `oim`, `oim_lt`, `timlinucb`) | 2 |
 | `critical_node_detection` | 12 (`finder`, `gdm`, `mind`, `spr`, `nirm`, `dcrs`, `gnd`, `decycler`, `collective_influence`, `explosive_immunization`, `dismantling_review`, `selinda`) | 11 |
 | `source_localization` | 17 (six `graphsl_*` arms, four `cosasi_*` arms, plus `graphsl`, `cosasi`, `slvae`, `ivgd`, `cnsl`, `pdsl`, `gnn_source_detection`) | 10 |
-| `influence_blocking` | 4 (`sandimin`, `imin_joc`, `diffim`, `stratlearner`) | 3 |
+| `influence_blocking` | 3 (`sandimin`, `imin_joc`, `stratlearner`) | 2 |
 | `cascade_reconstruction` | 13 (three `ditto*` arms, plus `grin`, `spin`, `deep_demixing`, `reconstructing_cascade`, `cascade_tree_samples`, `cult`, `active_cascade_reconstruction`, `brits`, `dipt`, `netrate`) | 6 |
 | `cascade_prediction` | 20 (`casflow`, `ccgl`, `ctcp`, `castemp`, `deephawkes`, `deepcas`, `cascn`, `mucas`, `coupledgnn`, `seismic`, `featuredriven_hawkes`, `hip`, `topolstm`, `deepinf`, `forest`, `ms_hgat`, `casseqgcn`, `ccasgnn`, `casft`, `casdo`) | 5 |
 | `epidemic_control` | 25 (six `netimm_*` arms, five shared `*_epi` dismantlers, plus `rlgn`, `idrleca`, `durleca`, `epilearn`, `covasim`, `pandemic_simulator`, `epimodel`, `greedywalk`, `netmelt`, `fractional_immunization`, `preciado`, `colagnn`, `stan`, `epignn`) | 11 |
@@ -100,7 +100,7 @@ The five that DO run share one export: CasFlow's canonical five-field line forma
 ```bash
 python -m baselines.setup_baselines --only casflow
 python -m pipeline.run --dataset casflow_weibo --task cascade_prediction \
-    --baselines szabo_huberman external:casflow external:ctcp --compare
+    --baselines szabo_huberman external:casflow external:ctcp
 ```
 
 **`coupledgnn` is the one worth reading the notes on.** §4.1 calls it the closest published method to our own formulation (two coupled GNNs, one propagating activation state and one propagating influence) so a difference in that row is a statement about the architecture rather than about a feature pipeline. Its TF1 API is shimmed to `compat.v1` by three registry patches (mechanical, no behavioural content), but **two of its inputs are ours rather than the authors'**: `load_data` needs a 6-d per-node feature vector and a 32-d `.emb_32` embedding and the repo ships a derivation for neither, so the driver computes six standard graph statistics (matching the shipped example's `[degree, 5 normalized floats]` shape) and a spectral embedding in place of the DeepWalk one its own comment names. Neither is the method's contribution, and the row says so.
@@ -112,7 +112,7 @@ python -m pipeline.run --dataset casflow_weibo --task cascade_prediction \
 ```bash
 python -m baselines.setup_baselines --only netimm_netshield
 python -m pipeline.run --dataset hospital_lh10 --task epidemic_control \
-    --baselines external:netimm_netshield external:netimm_dava netshield dava --compare
+    --baselines external:netimm_netshield external:netimm_dava netshield dava
 ```
 
 **Our reimplementations produce byte-identical node sets to theirs.** On `hospital_lh10` at `k=8`, our `netshield` and `external:netimm_netshield` both return `[0, 4, 6, 14, 16, 22, 28, 36]`, and our `dava` and `external:netimm_dava` both return `[7, 45, 58, 60, 61, 65, 66, 71]` [derived, 2026-08-05]. That is the cross-check §11 asks for and neither implementation is authoritative without.
@@ -138,7 +138,7 @@ Warning: **`--cr-setting final_snapshot` is not optional for these three.** Veri
 ```bash
 python -m baselines.setup_baselines --only grin
 python -m pipeline.run --dataset jazz --task cascade_reconstruction \
-    --baselines external:grin external:spin --compare
+    --baselines external:grin external:spin
 ```
 
 `grin` is the one to run first: DITTO uses it as the **ideal upper bound** and every `Gap` column in its Tables 4-5 is measured against it, which makes it the single most useful reference number in this literature.
@@ -175,7 +175,7 @@ The second addition is `supervised=True` on the export, which ships the selectio
 
 **Two deviations to know before quoting a number.** GraphSL cuts its score vector at a tuned threshold; we take the TOP-K of the same vector, because our table compares every arm at matched `k`. And the driver defaults to `graphsl_epochs = 50` for the three learned methods, far below the papers' regime: raise it before treating a GCNSI/IVGD/SL-VAE row as anything but a smoke result. Two more traps apply to every entry (§8.4): the **source fraction is not standardized** (10% uniform-random in SL-VAE, first 5% by infection time in SL-Diff, top 10% by influence time in SIDSL), and **nothing in that literature evaluates under IC or LT**, which §11 calls the single biggest comparability gap in the file.
 
-**For critical node detection, wire `dismantling_review` first.** It is the Artime et al. survey's harness rather than a method, and it already drives CI, CoreHD, GND, EI, MinSum, FINDER and GDM behind one interface, so it is one adapter instead of seven, and it is the only practical route to a FINDER number at all, since [`../research/critical_node_detection.md`](../research/critical_node_detection.md) §11 records that FINDER publishes its real-network results as heatmaps only, has no arXiv version, and the `results/` directory its README advertises does not exist in `master`.
+**For critical node detection, `dismantling_review` is the route that does not work in a uv venv**: its harness imports `graph_tool`, which pip cannot install, so it stays registered and unrunnable. `gdm` runs on its own instead: its adapter loads GDM's `models/GAT.py` by file path with GDM's published four-feature checkpoint, converting the 2019 PyG 1.x state dict through `baselines/gdm_support.py` (rewired 2026-09-04). The paragraph below records the original reasoning. **For critical node detection, wire `dismantling_review` first.** It is the Artime et al. survey's harness rather than a method, and it already drives CI, CoreHD, GND, EI, MinSum, FINDER and GDM behind one interface, so it is one adapter instead of seven, and it is the only practical route to a FINDER number at all, since [`../research/critical_node_detection.md`](../research/critical_node_detection.md) §11 records that FINDER publishes its real-network results as heatmaps only, has no arXiv version, and the `results/` directory its README advertises does not exist in `master`.
 
 Two traps apply to every entry in that group before any number is quoted (§8.2): almost all of them run on the **largest connected component** of the input silently (trap 7), and several ship a **reinsertion** pass that makes `X` and `X+R` different methods cited under one name (trap 2). A third is specific to `gnd`: its contribution is *cost*-weighted dismantling, so scoring its cost-optimal set on a cardinality budget is unfair in both directions (trap 4).
 
@@ -202,13 +202,13 @@ In the pipeline, external baselines are just another `--baselines` entry:
 
 ```bash
 # Everything: classical library + every installed external repo + our conditions
-python -m pipeline.run --dataset ba --baselines all --compare
+python -m pipeline.run --dataset ba --baselines all
 
 # Only the external published methods
-python -m pipeline.run --dataset ba --baselines all-external --compare
+python -m pipeline.run --dataset ba --baselines all-external
 
 # Hand-picked
-python -m pipeline.run --dataset jazz --compare \
+python -m pipeline.run --dataset jazz \
     --baselines celf_pp imm external:moeim external:touplegdd
 ```
 
@@ -227,7 +227,7 @@ results/<task>/<dataset>/<run>/
 └── baselines/_runs/<name>/<budget>/   raw stdout/stderr + artifacts per run
 ```
 
-External results carry an extra `external` block recording the seed set, the repo, the paper, and `selection_seconds` (time the external code spent choosing seeds, separate from our scoring time). Everything else (`reward`, `mc_reward`, `spread_pct`, `timeline`, `condition`) is the standard schema, so plots and the report read all arms uniformly.
+External results carry an extra `external` block recording the seed set, the repo, the paper, and `selection_seconds` (time the external code spent choosing seeds, separate from our scoring time). Everything else (`reward`, `referee_reward`, `spread_pct`, `timeline`, `condition`) is the standard schema, so plots and the report read all arms uniformly.
 
 Two figures compare directly: `ours_vs_baselines.png` and `ours_vs_baselines_pct.png` draw our method heavy and solid, published methods dashed, classical algorithms thin and dotted, across the whole budget sweep.
 
@@ -277,8 +277,8 @@ Three things the table cannot show. **Sample budgets differ by design**: every s
 
 ```bash
 python -m baselines.setup_baselines --only openevolve codeevolve llamea eoh reevo mcts_ahd llm4ad_funsearch deepevolve
-python -m pipeline.run --task influence_maximization --dataset netscience --baselines all-discovery --compare
-python -m pipeline.run --task source_localization --dataset jazz --baselines discovery:eoh discovery:reevo --compare
+python -m pipeline.run --task influence_maximization --dataset netscience --baselines all-discovery
+python -m pipeline.run --task source_localization --dataset jazz --baselines discovery:eoh discovery:reevo
 python -m baselines.check_discovery --live eoh      # smoke one adapter end to end
 ```
 

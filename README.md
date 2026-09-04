@@ -165,15 +165,14 @@ source .venv/bin/activate
 
 # Everything: generate -> train the WM -> run all six baseline conditions at
 # 1/5/10/20% budgets -> plot -> report
-python -m pipeline.run --dataset ba --num-graphs 40 --syn-nodes 100 \
-    --compare
+python -m pipeline.run --dataset ba --num-graphs 40 --syn-nodes 100
 
 # Same thing on a real graph: only the dataset changes
-python -m pipeline.run --dataset netscience --compare
+python -m pipeline.run --dataset netscience
 
 # Outer-loop development without training a world model: drop the one arm that
 # needs it and the train stage is skipped automatically
-python -m pipeline.run --dataset sbm --num-graphs 40 --compare \
+python -m pipeline.run --dataset sbm --num-graphs 40 \
     --arms routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle
 ```
 
@@ -195,15 +194,15 @@ Conditions 3-6 hold the method fixed, so the **only** thing varying down that la
 
 The synthesis method is `evolve`, not `one_shot`: both refine a program against the same feedback under the same LLM-call budget, but `evolve` edits the **population best** each generation while `one_shot` edits the latest attempt, so `one_shot` compounds a regression instead of rejecting it. Same cost, strictly better search.
 
-**`--compare` is effectively mandatory for a multi-condition sweep.** Each arm's own `reward` is measured by its own evaluator (a native arm's is one noisy episode, ours is a model estimate) so those numbers cannot be compared to each other. `--compare` replays every winning strategy on the same ground-truth Monte Carlo referee, and that replay is the number the tables and plots use. Without it the pipeline warns and the report is marked as not comparable.
+**Every arm is judged on one shared referee.** Each arm's own `reward` is measured by its own evaluator (a native arm's is one noisy episode, ours is a model estimate) so those numbers cannot be compared to each other. Every arm's winner is replayed on one shared referee, the exact batched oracle simulator by default (`--referee`, `--referee-samples`, 1,000 samples), and that replay (`referee_reward`) is the only column that may be read across rows; `--mc-agreement` adds an NDlib Monte Carlo replay of the same winner as the independent check on the oracle and the per-rollout timing row, and is meant for the critical datasets, not every run.
 
 ```bash
 # Add a classical baseline, drop an expensive one
 python -m pipeline.run --dataset sbm --baselines celf_pp imm community_im \
-    --arms evolve_free@oracle evolve_free@world_model --compare
+    --arms evolve_free@oracle evolve_free@world_model
 
 # Give the native agent a bigger real-episode budget per candidate
-python -m pipeline.run --dataset ba --native-mc-runs 5 --compare
+python -m pipeline.run --dataset ba --native-mc-runs 5
 ```
 
 ### Progress and logging
@@ -260,8 +259,11 @@ python -m pipeline.run --dataset ba --run new_agent_sweep \
 | `--allow-mc-algorithms` | off | re-expose `celf`/`vanilla_greedy`/… to generated scripts; blocked by default (>60s per call, and their episodes are invisible to `real_env_episodes`) |
 | `--strategy-timeout` | `300` | wall-clock cap (s) on one generated `plan_horizon()`/`act()` call; an overrun becomes a repair turn instead of hanging the sweep. `0` disables |
 | `--llm-price-in` / `--llm-price-out` | none | USD per 1M tokens, for the cost column. Tokens are always counted; cost stays `null` unless both are given (the gateway bills nothing per token) |
-| `--compare` | off | ground-truth referee replay: required for a valid cross-condition table |
-| `--llm-model` / `--outer-iters` | `gpt-5.6-sol` / `20` | coding-agent model and refinement budget |
+| `--referee` | oracle | the shared referee every winner is replayed on: the exact batched oracle simulator, or `monte_carlo` |
+| `--referee-samples` | 1000 | rollout samples for that replay |
+| `--mc-agreement` | off | also replay every winner on NDlib: the independent check on the oracle and the timing row; critical datasets only |
+| `--llm-model` / `--outer-iters` | `gpt-6-astra` / `20` | coding-agent model and refinement budget |
+| `--reasoning-effort` | `high` | reasoning effort for the OpenAI family (`low` to `max`, or `none`); GPT-6 Astra also ignores `--temperature` |
 
 Generation, training, and agent hyperparameters are all exposed too (`--rollouts`, `--mc-marginals`, `--wm-model`, `--head`, `--epochs`, `--n-samples`, …): see `python -m pipeline.run --help`.
 
@@ -287,16 +289,16 @@ Every run is scoped to a **graph task**. `pipeline/tasks.py` is the registry: na
 ```bash
 python -m pipeline.run --dataset jazz                          # influence_maximization
 python -m pipeline.run --dataset ppi_yeast \
-    --task critical_node_detection --compare                   # contain an outbreak
+    --task critical_node_detection                   # contain an outbreak
 python -m pipeline.run --dataset jazz \
-    --task source_localization --compare                       # recover the sources
+    --task source_localization                       # recover the sources
 python -m pipeline.run --dataset ca_grqc \
-    --task cascade_reconstruction --compare                    # recover the whole history
+    --task cascade_reconstruction                    # recover the whole history
 
 python -m pipeline.run --dataset hospital_lh10 \
-    --task epidemic_control --compare                         # vaccinate under SIR/SIS/SEIR
+    --task epidemic_control                         # vaccinate under SIR/SIS/SEIR
 python -m pipeline.run --dataset casflow_weibo \
-    --task cascade_prediction --compare                       # forecast a REAL cascade's size
+    --task cascade_prediction                       # forecast a REAL cascade's size
 python -m pipeline.run --dataset jazz --run gcnii_ablation \
     --wm-model gcnii --n-layers 8                              # a second variant
 python -c "from pipeline.tasks import runnable_task_names; print(runnable_task_names())"
@@ -326,21 +328,21 @@ That reward needs a ground-truth parent, and **NDlib never produces one**: its I
 
 It also needed its own simulator. NDlib ships SIR/SIS/SEIR and reusing them would have been ~60 lines, but all three carry **no per-arc transmission probability at all**, which deletes `set_edge_weight` (and with it the entire graded contact-reduction branch of that literature) and makes `structured_residual` inexpressible. `data/wm_epidemic.py` is four lines of transition rule and recovers both; **SIR at `γ = 1.0` reproduces IC exactly**, which is the cheapest correctness check it has. `--epi-lever` then picks which of four published interventions the budget buys, `vaccinate` (immune, uncounted), `quarantine` (isolated but still counted), `edge_cut`, `contact_reduce`, and the vaccinate/quarantine pair is the same node set scored two ways, which is the "recovered is not removed" distinction that makes two papers' "nodes saved" columns differ by a constant.
 
-`cascade_prediction` is the **real-data** task, and the only one here that runs no simulator at all. A cascade already spread on a real platform; you see its first `t_o` timesteps and predict how many nodes it reaches by `t_p`. [`research/cascade_prediction.md`](research/cascade_prediction.md) §9.3 says outright that it *cannot* demonstrate the capability this project is about (`a_t` is NULL at every step, so the action space goes idle) and §9.1 says why it ships anyway: **it is the only falsification test available for the IC/LT assumption every other task inherits.** Everywhere else a learned model is evaluated against traces drawn from the simulator that trained it, a closed loop that can only measure *learning* error. Weibo retweets break the loop: real adoption is not memoryless, exposure is repeated rather than one-shot per neighbour, and some adopters arrive with no adopting neighbour at all. `--compare` reports the **modelling error** of each arm's own forward model with no program in the loop, which is the number that experiment is actually about.
+`cascade_prediction` is the **real-data** task, and the only one here that runs no simulator at all. A cascade already spread on a real platform; you see its first `t_o` timesteps and predict how many nodes it reaches by `t_p`. [`research/cascade_prediction.md`](research/cascade_prediction.md) §9.3 says outright that it *cannot* demonstrate the capability this project is about (`a_t` is NULL at every step, so the action space goes idle) and §9.1 says why it ships anyway: **it is the only falsification test available for the IC/LT assumption every other task inherits.** Everywhere else a learned model is evaluated against traces drawn from the simulator that trained it, a closed loop that can only measure *learning* error. Weibo retweets break the loop: real adoption is not memoryless, exposure is repeated rather than one-shot per neighbour, and some adopters arrive with no adopting neighbour at all. `--mc-agreement` reports the **modelling error** of each arm's own forward model with no program in the loop, which is the number that experiment is actually about.
 
 Three things it gives up are the point. The targets go **hard**: a real cascade happened once, so `--mc-marginals` has nothing to average. The reward **minimizes**, it is MSLE, the only column in this pipeline that runs downward for a reason unrelated to containment. And conditions 3-6 survive an empty action space because what varies down the ladder becomes the **forward model the predictor may call** (`self.forecast_marginals(adopters, frontier, steps)`, absent under `@native`) rather than the intervention it may choose, and `@native` may win outright, because feature-driven regression is reported to beat deep models on these corpora.
 
 ```bash
-python -m pipeline.run --dataset casflow_aps --task cascade_prediction --compare
+python -m pipeline.run --dataset casflow_aps --task cascade_prediction
 sbatch sbatch/cascade_prediction/sweep_splits.sbatch      # the leakage replication
 ```
 
 `--cp-split` is the headline experiment rather than a knob. The field's standard 70/15/15 **random-over-cascades** split leaks the future: cascades overlap in wall-clock time, so a training cascade's prediction window can sit inside a test cascade's observation window and the model learns "there was a burst around time T". Under the leak-free fix, two 2021-24 SOTA methods fall **below a plain MLP** and the field's APS band moves from 1.19-2.11 to 2.28-4.82. `chronological` is our default from the first commit and `random` reproduces the leaky protocol on purpose, so the gap is measured here rather than cited, the source is an unreplicated preprint, and this is the cheapest second source anyone can produce. Eight new loaders carry the corpora (`casflow_weibo` / `casflow_twitter` / `casflow_aps`, `weibo_cascades`, `aps`, `digg_cascades`, `memetracker`, `taoke`); `coding_agent/check_cascade_prediction.py` is the runnable contract.
 
 ```bash
-python -m pipeline.run --dataset ca_grqc --task cascade_reconstruction --compare
+python -m pipeline.run --dataset ca_grqc --task cascade_reconstruction
 python -m pipeline.run --dataset oregon2 --task cascade_reconstruction \
-    --cr-setting final_snapshot --baselines all --compare      # DITTO's own regime
+    --cr-setting final_snapshot --baselines all      # DITTO's own regime
 ```
 
 `--cr-setting` is a protocol rather than a knob, and its four values are four separate experiments whose rows are never pooled: reports with times, reports without, the terminal snapshot alone (DITTO's DASH, the hardest published formulation), and hidden nodes deleted from the graph. `--cr-observation-rate` is the probability a node **is reported**, spelled out in that direction because two papers in this literature use the symbol `σ` for opposite quantities. See §2.4 for why the decoder and not the kernel is the contribution, and `coding_agent/check_cascade_reconstruction.py` for the runnable contract.
@@ -348,9 +350,9 @@ python -m pipeline.run --dataset oregon2 --task cascade_reconstruction \
 `influence_blocking` splits the `minimize` family in two. It is the only **two-cascade** task: a rumour is committed at `t=0` and is already spreading, and the budget buys an answer to it, which may itself be a cascade. Its literature is organized by *what the blocker is allowed to do*, and those four levers are our four ops, so `--blocking-lever` picks between counter-seeding (`add_node`, the founding sub-literature), node blocking (`remove_node`, SandIMIN and Xie), link blocking (`remove_edge`, Kimura) and weight reduction (`set_edge_weight`, which is literally DiffIM's continuous relaxation). This is the task the five-op action space was built for, and the one that makes the last three load-bearing rather than idle.
 
 ```bash
-python -m pipeline.run --dataset email_eu_core --task influence_blocking --compare
+python -m pipeline.run --dataset email_eu_core --task influence_blocking
 python -m pipeline.run --dataset email_eu_core --task influence_blocking \
-    --blocking-lever edge_block --tie-break negative --detection-delay 2 --compare
+    --blocking-lever edge_block --tie-break negative --detection-delay 2
 ```
 
 Three things it does differently, each because the literature does. **The budget is absolute `k`**, not a percentage of `N`: percentage budgets speak to no blocking paper at all, while `k ∈ {10..50}` is the shared convention of every comparable table. **The metric is prevented influence**, `σ(S_N, ∅) − σ(S_N | blockers)`, which counts only nodes the rumour *would* have infected: protecting nodes it never reaches scores zero. And **the tie-break is a reported hyperparameter**, not an implementation detail, which cascade wins a node both reach on the same step changes the numbers materially, and most papers never state theirs. Expect a heuristic to win: `proximity` beats every learned method except StratLearner on two of that paper's three graphs, SandIMIN's own trivial heuristic beats both of its principled methods in 6 of 30 cells, and plain degree (the strong baseline in IM) *fails outright* here. All three are in the default pool for those reasons. See [`research/influence_blocking.md`](research/influence_blocking.md) §1.1 and §9.1, and `coding_agent/check_influence_blocking.py` for the runnable contract.

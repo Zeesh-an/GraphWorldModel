@@ -69,7 +69,7 @@ run_split () {
     local label="$1"; shift
     echo "=== $label ==="
     env TASK=cascade_prediction DATASET="$DATASET" RUN="$label" RUN_JOBID=0 \
-        COMPARE=1 GEN_MODELS="IC" DIFFUSION_MODEL=IC "$@" \
+        GEN_MODELS="IC" DIFFUSION_MODEL=IC "$@" \
         ./sbatch/pipeline.sbatch || echo "[cp_splits] $label FAILED, continuing"
 }
 

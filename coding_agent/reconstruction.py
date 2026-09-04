@@ -35,7 +35,7 @@ that is actually hard. Four pieces:
 
 Like source localization, the reward is EXACT: it is computed against a history we
 stored, so it carries no evaluator noise and is comparable across conditions
-without the `--compare` referee. The referee still runs and measures something
+without the referee. The referee still runs and measures something
 else: re-simulating the RECOVERED sources against what was observed (§8.5.5's
 analogue), which is the column no paper in this literature reports.
 """
@@ -859,7 +859,7 @@ def evaluate_reconstructor(
     elapsed = time.perf_counter() - start
 
     # A representative recovered SOURCE set, so the results JSON's timeline and the
-    # --compare referee have concrete actions to replay: the seed commit that WOULD
+    # referee have concrete actions to replay: the seed commit that WOULD
     # reproduce the observation if the decode got its roots right
     representative = per_instance[0]
     recovered_sources = sorted(
@@ -1025,11 +1025,12 @@ def referee_likelihood(
     per_instance: list[dict],
 ) -> dict[str, float]:
     """
-    The `--compare` referee: the reward re-measured under the ground-truth kernel.
+    The referee: the reward re-measured under the referee's own kernel (the exact
+    oracle by default, NDlib for the agreement check).
 
     Every stored decode is re-scored by `score_history` with NDlib's own
-    step marginals in place of the arm's evaluator, so `mc_reward` is to
-    `reward` exactly what the MC replay is to a world-model spread.
+    step marginals in place of the arm's evaluator, so `referee_reward` is to
+    `reward` exactly what the referee replay is to a world-model spread.
     """
     by_episode = {entry["episode_id"]: entry for entry in per_instance}
     kernel = StepOracle(environment=environment)
@@ -1054,8 +1055,8 @@ def referee_likelihood(
         return {}
 
     return {
-        "mc_reward": float(np.mean(rewards)),
-        "mc_reward_se": (
+        "referee_reward": float(np.mean(rewards)),
+        "referee_reward_se": (
             float(np.std(rewards, ddof=1) / np.sqrt(len(rewards)))
             if len(rewards) > 1
             else 0.0
@@ -1072,7 +1073,7 @@ def referee_resimulation_error(
     """
     Re-simulate each decode's RECOVERED sources and compare against what happened.
 
-    The `--compare` referee for this task. The reward is already exact (it is
+    The referee's secondary column for this task. The reward is already exact (it is
     scored against a history we stored), so the referee measures the other thing:
     whether the recovered roots actually reproduce the observed cascade. Reported
     beside the TRUE source set's own error, because on an ill-posed problem a

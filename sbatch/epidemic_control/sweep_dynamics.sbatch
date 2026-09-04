@@ -65,7 +65,7 @@ for model in $DYNAMICS; do
     DATASET="$DATASET" \
     RUN="dyn_$(echo "$model" | tr "A-Z" "a-z")" \
     RUN_JOBID=0 \
-    COMPARE=1 \
+    \
     GEN_MODELS="$model" \
     DIFFUSION_MODEL="$model" \
     EPI_GAMMA="${EPI_GAMMA:-0.3}" \

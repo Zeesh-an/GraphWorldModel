@@ -79,7 +79,7 @@ for DATASET in jazz infectious email_univ uci_students citeseer cora_ml ca_grqc 
                power_grid ca_hepth oregon2 rt_pol; do
     echo "=== $DATASET ($SETTING) ==="
     env TASK=cascade_reconstruction DATASET="$DATASET" RUN="${RUN:-default}" \
-        RUN_JOBID=0 COMPARE=1 CR_SETTING="$SETTING" \
+        RUN_JOBID=0 CR_SETTING="$SETTING" \
         ./sbatch/pipeline.sbatch \
         || echo "[cr_datasets] $DATASET FAILED, continuing"
 done

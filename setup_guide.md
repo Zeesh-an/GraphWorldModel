@@ -68,7 +68,9 @@ EOF
 chmod 600 .env
 ```
 
-The base URL must be exactly `https://<host>/v1` with no further path: two of the discovery systems (EoH, LLM4AD) hard-code `/v1/chat/completions` onto the host. The token is chosen by model family (`claude-*` uses the Claude token, everything else the ChatGPT token), and the default model everywhere is `gpt-5.6-sol` (`--llm-model`, `LLM_MODEL`; `--llm-models` / `LLM_MODELS` is the opt-in multi-model sweep). Verify without printing the token:
+The base URL must be exactly `https://<host>/v1` with no further path: two of the discovery systems (EoH, LLM4AD) hard-code `/v1/chat/completions` onto the host. The token is chosen by model family (`claude-*` uses the Claude token, everything else the ChatGPT token), and the default model everywhere is `gpt-6-astra` (`--llm-model`, `LLM_MODEL`; `--llm-models` / `LLM_MODELS` is the opt-in multi-model sweep). Verify without printing the token:
+
+The default model is `gpt-6-astra` (OpenAI's GPT-6 Astra: chat completions and responses endpoints, 1.05M context, $10 in and $50 out per 1M tokens). Every pipeline run preflights the gateway before its data stage and fails in seconds if the token cannot use the configured model, printing the served list. On 2026-09-04 the lab gateway served only `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini` and `gpt-5.3-codex-spark` and rejected `gpt-6-astra` with a 403, so until the gateway admin enables it, pass `LLM_MODEL=gpt-5.6-sol` (or another served name) to run at all.
 
 ```bash
 set -a; . ./.env; set +a
@@ -137,6 +139,7 @@ python -m baselines.setup_baselines --only openevolve codeevolve llamea eoh reev
 What to expect from the last cluster rounds (`test_commands.md` section 0 has the full table):
 
 - `finder` and `finder_epi` fail: `tensorflow-gpu==1.14.0` needs CPython 3.7, which uv no longer ships. They are already removed from the submissions.
+- `gdm` and `gdm_epi` download GDM's published checkpoint (27 KB, from selinda's `thirdparty/GDM-slim`) in their build step, so that entry needs outbound network access at setup time; the runner itself is offline.
 - `decycler` fails unless Boost headers are installed (`module load boost` on most sites, then re-run `--only decycler`).
 - `imm` and `tim` print manual instructions: Tang et al. publish SourceForge tarballs, not git repos, and neither has an adapter, so they are not in any submission. The library's Python `imm` / `tim` are the condition-1 stand-ins.
 - `rl4im` installs on x86_64 only (its `torch==1.7.0` has no arm64 wheels); `adaptiveim` is patched at setup from x86 inline assembly to `std::chrono`.
@@ -167,12 +170,12 @@ python -m baselines.check_discovery --live codeevolve   # one discovery system a
 
 ## 8. Smoke run before the first real submission
 
-A synthetic run on the login node exercises data generation, the oracle coding-agent arm (three LLM calls), the referee replay, plots and the report. It takes about ten minutes, almost all of it gateway latency: a `gpt-5.6-sol` reply takes one to three minutes, which is also why the real submissions are measured in hours.
+A synthetic run on the login node exercises data generation, the oracle coding-agent arm (three LLM calls), the referee replay, plots and the report. It takes about ten minutes, almost all of it gateway latency: a `gpt-6-astra` reply takes one to three minutes, which is also why the real submissions are measured in hours.
 
 ```bash
 python -m pipeline.run --task influence_maximization --dataset ba --run smoke \
   --num-graphs 2 --syn-nodes 60 --budget-pcts 10 --baselines high_degree --arms evolve_free@oracle \
-  --outer-iters 2 --mc-runs 20 --n-samples 20 --compare
+  --outer-iters 2 --mc-runs 20 --n-samples 20
 ls results/influence_maximization/ba/smoke/           # data/ agent/ plots/ report.md pipeline.json
 ```
 
@@ -199,13 +202,13 @@ external:opim external:ssa external:subsim \
 external:touplegdd external:deepim external:moeim external:glie \
 all-discovery" \
 ARMS="evolve_free@oracle evolve_free@world_model" \
-LLM_MODEL=gpt-5.6-sol \
+LLM_MODEL=gpt-6-astra \
 WM_MODEL=sage HEAD=structured \
 GEN_ACTION_OPS="add_node remove_node" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 ```
@@ -214,7 +217,7 @@ Submit the LT twin with `RUN=testrun_lt DIFFUSION_MODEL=LT` and everything else 
 
 Rules that decide whether a run is comparable and resumable:
 
-- `COMPARE=1` always. Each arm's own `reward` comes from its own evaluator; only the shared ground-truth replay (`mc_reward`) is comparable across rows.
+- The referee replay always runs (`REFEREE=oracle`, `REFEREE_SAMPLES=1000`). Each arm's own `reward` comes from its own evaluator; only the shared referee replay (`referee_reward`) is comparable across rows. `MC_AGREEMENT=1` adds the NDlib check on the critical datasets.
 - `RUN_JOBID=0` gives a stable `results/<task>/<dataset>/<run>/` that reruns append to. Without it the job id is appended and nothing is ever overwritten.
 - Resume by resubmitting the same `RUN` without `FORCE`, optionally with `START_STAGE=agent`: finished baseline rows and the checkpoint are reused and only missing arms run. `FORCE=1` redoes everything.
 - `SKIP_STAGES=train` is safe only when no arm uses `@world_model`; the pipeline also skips training on its own when no arm needs it.

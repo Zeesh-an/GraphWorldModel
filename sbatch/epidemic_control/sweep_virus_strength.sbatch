@@ -69,7 +69,7 @@ for gamma in $GAMMAS; do
     DATASET="$DATASET" \
     RUN="gamma_${gamma}" \
     RUN_JOBID=0 \
-    COMPARE=1 \
+    \
     GEN_MODELS=SIR \
     DIFFUSION_MODEL=SIR \
     EPI_GAMMA="$gamma" \

@@ -69,7 +69,7 @@ for lever in $LEVERS; do
     DATASET="$DATASET" \
     RUN="lever_$lever" \
     RUN_JOBID=0 \
-    COMPARE=1 \
+    \
     GEN_MODELS=SIR \
     DIFFUSION_MODEL=SIR \
     EPI_LEVER="$lever" \

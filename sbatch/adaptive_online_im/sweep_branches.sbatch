@@ -56,7 +56,7 @@ mkdir -p results logs
 
 DATASET="${DATASET:-powerlaw_cluster}"
 BUDGET_PCTS="${BUDGET_PCTS:-1 5 10 20}"
-common=(TASK=adaptive_online_im DATASET="$DATASET" RUN_JOBID=0 COMPARE=1)
+common=(TASK=adaptive_online_im DATASET="$DATASET" RUN_JOBID=0)
 
 # Reuse (a)'s transitions and checkpoint across every later branch: the
 # transitions are identical, only the evaluation loop differs (§9.2), so
