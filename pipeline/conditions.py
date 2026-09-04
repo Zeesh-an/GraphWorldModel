@@ -49,34 +49,14 @@ valid_evaluators = (native, monte_carlo, oracle, world_model)
 # of a static plan decided up front. Pairing `adaptive_<mode>@E` with
 # `evolve_<mode>@E` at the same budget is what makes the adaptivity gap an A/B
 # on that one variable (research/adaptive_online_im.md §9.3 item 3).
-# `gradient` is arm A of research/source_localization.md §2.6, and it is the one
-# method here with NO LLM anywhere: it freezes the world model and runs Adam on a
-# relaxed source vector per instance, which is SL-VAE's own procedure with our
-# likelihood plugged in. The seed paper reports no significant difference across
-# GAT / MONSTOR / DeepIS forward models, so that swap is a no-op it already
-# published, which makes this the CONTROL program search is measured against
-# rather than a competing method.
-# `decode` is arm A of research/cascade_reconstruction.md §2.9, and the same kind
-# of object `gradient` is: a fixed numerical procedure with no LLM in it. It runs
-# DITTO's Metropolis-Hastings sampler over histories with our learned kernel in
-# place of DITTO's mean-field beta-hat, which §2.3 argues is the component swap the
-# tempting move would make, so it is the CONTROL decoder search is measured
-# against rather than a competing method.
 valid_methods = (
     "one_shot",
     "per_step",
     "windowed",
     "evolve",
     "adaptive",
-    "gradient",
-    "decode",
 )
 adaptive_method = "adaptive"
-gradient_method = "gradient"
-decode_method = "decode"
-# The two ablation methods: fixed numerical procedures with no model in the loop,
-# so neither is charged --outer-iters LLM turns and neither joins the 3-6 ladder
-ablation_methods = (gradient_method, decode_method)
 # The non-adaptive counterpart an adaptive arm is divided by
 non_adaptive_method = "evolve"
 valid_modes = ("free", "scored")
@@ -85,7 +65,6 @@ pure_ga_condition = 1
 routing_condition = 2
 evaluator_conditions = {native: 3, monte_carlo: 4, oracle: 5, world_model: 6}
 external_condition = 7
-ablation_condition = 8
 discovery_condition = 9
 
 condition_names = {
@@ -96,12 +75,6 @@ condition_names = {
     5: "Agent + oracle dynamics",
     6: "Ours: agent + learned GWM",
     7: "Published baseline (external repo)",
-    # Two tasks fill this cell with their own control, and both are the same KIND
-    # of object: a fixed numerical procedure that inverts a frozen world model with
-    # no LLM anywhere. Source localization's is Adam on a relaxed source vector
-    # (SL-VAE's own procedure); cascade reconstruction's is Metropolis-Hastings
-    # over histories (DITTO's). The name is generic because the cell is.
-    8: "Ablation: per-instance inversion of a frozen GWM",
     # Published LLM algorithm-discovery systems (OpenEvolve, EoH, ReEvo, ...) run
     # at their own defaults with our simulator as the only fitness: the same
     # "their code, our referee" rule as condition 7, for a PROGRAM instead of a
@@ -198,19 +171,8 @@ class Arm:
     def is_agent(self) -> bool:
         """
         True when an LLM actually synthesises code (conditions 3-6).
-
-        `gradient` and `decode` are excluded even though they name an evaluator:
-        both are fixed numerical procedures with no model in the loop: Adam on a
-        relaxed source vector against a frozen world model, and Metropolis-Hastings
-        over histories against the same one, so giving either --outer-iters LLM
-        turns would charge it for calls it never makes.
         """
-        return (
-            self.baseline is None
-            and not self.routing
-            and self.external is None
-            and self.method not in ablation_methods
-        )
+        return self.baseline is None and not self.routing and self.external is None
 
 
 def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
@@ -330,15 +292,7 @@ def parse_arm(spec: str, default_evaluator: str | None = None) -> Arm:
         method=method,
         strategy_mode=mode,
         evaluator=evaluator,
-        # Arm A is its own condition rather than a member of the 3-6 ladder: those
-        # four hold the METHOD fixed and vary only the evaluator, and folding a
-        # different method into one of their cells would break exactly the
-        # ablation they exist to be
-        condition=(
-            ablation_condition
-            if method in ablation_methods
-            else evaluator_conditions[evaluator]
-        ),
+        condition=evaluator_conditions[evaluator],
     )
 
 
@@ -351,14 +305,7 @@ def resolve_evaluator(arm: Arm, mc_runs: int, native_mc_runs: int) -> tuple[str,
 
 
 def needs_world_model(arms: list[Arm]) -> bool:
-    # The gradient arm needs f_theta regardless of which evaluator it names: its
-    # loss is ||y - f_theta(x~)||^2 and it descends THROUGH the network, so a
-    # checkpoint is required even under @oracle. Keying only on the evaluator let
-    # `gradient_free@oracle` skip the train stage and then die inside the method,
-    # after every baseline in the sweep had already been paid for.
-    return any(
-        arm.evaluator == world_model or arm.method == gradient_method for arm in arms
-    )
+    return any(arm.evaluator == world_model for arm in arms)
 
 
 def ground_truth_reward(result: dict) -> float:
@@ -410,10 +357,10 @@ def is_reconstruct(results: list[dict]) -> bool:
     True when these results score a whole TRAJECTORY rather than a set or a spread.
 
     Narrows `is_recover` the way `TaskSpec.decodes` narrows `TaskSpec.recovers`:
-    the shared comparable column is a tree-weighted score in [0, 1], the metric
-    table is Event F1 / Path Precision / NRMSE rather than PR / RE / F1 / AUC, and
-    a reader that printed either of the other two headers would name the wrong
-    quantity.
+    the shared comparable column is the kernel-likelihood reward (nats per node
+    minus observation violations), the reported metric table is Event F1 / Path
+    Precision / NRMSE rather than PR / RE / F1 / AUC, and a reader that printed
+    either of the other two headers would name the wrong quantity.
     """
     return any(result.get("reconstruction") for result in results) or any(
         result.get("task") in tasks and get_task(result["task"]).reconstructs
@@ -444,8 +391,9 @@ def is_recover(results: list[dict]) -> bool:
     True when these results score an INVERSE prediction rather than a cascade.
 
     Every reader that prints the word "spread" asks this first: a recover task's
-    reward is mean F1 against the true source set, in [0, 1], and labelling it a
-    node count would misread it by three orders of magnitude.
+    reward is the consistency of the recovered set with the observation (minus a
+    mean squared error, in [-1, 0]), and labelling it a node count would misread
+    it entirely.
     """
     return any(result.get("localization") for result in results) or any(
         result.get("task") in tasks and get_task(result["task"]).recovers
@@ -467,10 +415,10 @@ def reward_name(results: list[dict]) -> str:
         return "MSLE"
 
     if is_reconstruct(results):
-        return "score"
+        return "reward"
 
     if is_recover(results):
-        return "F1"
+        return "consistency"
 
     return "final infected" if result_sense(results) == minimize else "spread"
 
@@ -559,9 +507,9 @@ def expand_llm_models(arms: list[Arm], models: tuple) -> list[Arm]:
     One row per (LLM-driven arm, model): the multi-model comparison axis.
 
     Only arms whose loop actually calls an LLM fan out: the synthesis conditions
-    (3-6), the routing condition (2) and the discovery systems (9). Baselines,
-    seed-set external repos, and the two fixed numerical procedures (`gradient`,
-    `decode`) run once regardless, since a model name changes nothing about them.
+    (3-6), the routing condition (2) and the discovery systems (9). Baselines and
+    seed-set external repos run once regardless, since a model name changes
+    nothing about them.
     """
     from dataclasses import replace
 

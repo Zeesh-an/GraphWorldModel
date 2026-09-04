@@ -1309,23 +1309,22 @@ def baseline_anchor(
         best_name, best_trajectory = scored[0]
 
         lines = [
-            f"REFERENCE SCORES: classical cascade-reconstruction baselines run on "
-            f"THESE episodes, under the same mask and the same setting. The score "
-            f"is {task.tree_weight:.2f} * PathPrecision + "
-            f"{1.0 - task.tree_weight:.2f} * EventF1, HIGHER is better, and beating "
-            f"the top row is the bar. Read the two component columns, not just the "
-            f"score: `delayed_bfs` is the row that matters, and "
-            f"`personalized_pagerank` is on this list because the published finding "
-            f"is that it BEATS tree sampling on assortative graphs like ca_grqc. "
-            f"`observed_only` reports exactly what it was shown and infers nothing: "
-            f"if it is competitive, the reward is wrong, not the arm:",
+            "REFERENCE SCORES: classical cascade-reconstruction baselines run on "
+            "THESE episodes, under the same mask and the same setting. The reward "
+            "is the kernel log-likelihood of the decoded history per node minus the "
+            "fraction of the observation it contradicts, HIGHER is better, and "
+            "beating the top row is the bar. `delayed_bfs` is the row that matters, "
+            "and `personalized_pagerank` is on this list because the published "
+            "finding is that it BEATS tree sampling on assortative graphs like "
+            "ca_grqc. `observed_only` reports exactly what it was shown and infers "
+            "nothing: if it is competitive, look at what the kernel expected and it "
+            "left out:",
         ]
         lines += [
-            f"  {name:<24} score {trajectory.reward:7.4f} "
-            f"(path_prec {trajectory.cost['metrics']['path_precision']:.4f}  "
-            f"event_f1 {trajectory.cost['metrics']['event_f1']:.4f}  "
-            f"node_f1 {trajectory.cost['metrics']['node_f1']:.4f}  "
-            f"NRMSE {trajectory.cost['metrics']['time_nrmse']:.4f})"
+            f"  {name:<24} reward {trajectory.reward:8.4f} "
+            f"(loglik/node {trajectory.cost['metrics']['loglik_per_node']:.4f}  "
+            f"consistency {trajectory.cost['metrics']['consistency']:.3f}  "
+            f"decoded {trajectory.cost['metrics']['n_predicted']:.1f} nodes)"
             for name, trajectory in scored
         ]
 
@@ -1350,16 +1349,18 @@ def baseline_anchor(
 
         lines = [
             "REFERENCE SCORES: classical source-localization baselines run on THESE "
-            "episodes, at the same k and the same observation. F1 against the true "
-            "source set, HIGHER is better; beating the top row is the bar. LPSI is "
-            "the row that matters: it is a 2017 label-propagation method with no "
-            "learning at all, and it beats both SL-VAE and DDMSL on real cascades:"
+            "episodes, at the same k and the same observation. Consistency = minus "
+            "the mean squared error between re-simulating the named sources and the "
+            "observation, HIGHER is better (0 is perfect); beating the top row is "
+            "the bar. LPSI is the row that matters: it is a 2017 label-propagation "
+            "method with no learning at all, and it beats both SL-VAE and DDMSL on "
+            "real cascades:"
         ]
         lines += [
-            f"  {name:<20} F1 {trajectory.reward:7.4f} "
-            f"(PR {trajectory.cost['metrics']['precision']:.4f}  "
-            f"RE {trajectory.cost['metrics']['recall']:.4f}  "
-            f"AUC {trajectory.cost['metrics']['auc']:.4f})"
+            f"  {name:<20} consistency {trajectory.reward:8.5f} "
+            f"(over-explained {trajectory.cost['metrics']['n_over']:.1f}  "
+            f"under-explained {trajectory.cost['metrics']['n_under']:.1f} nodes "
+            f"per episode)"
             for name, trajectory in scored
         ]
 

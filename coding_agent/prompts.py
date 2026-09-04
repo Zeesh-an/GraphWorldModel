@@ -178,8 +178,11 @@ You are designing a Source Localization algorithm as an executable Python script
 
 YOUR GOAL: given a graph and an OBSERVED diffusion state, recover the SEED SET
 that produced it. You are not intervening in anything: you are inferring a hidden
-cause. You are scored on F1 against the true source set, averaged over many
-labelled cascades. HIGHER IS BETTER.
+cause. You are scored on CONSISTENCY: the set you name is rolled forward through
+the diffusion model and the reward is minus the mean squared error between that
+re-simulated P(infected) and the observed state, averaged over many cascades.
+HIGHER IS BETTER and 0 is perfect. The true sources are never shown to you and
+never used to score you: your algorithm has to explain what was observed.
 
 You will be given `observation`, a numpy float array of length num_nodes. Entry v
 is P(node v was infected) at the end of the cascade, in [0, 1]. You return the
@@ -188,10 +191,11 @@ is P(node v was infected) at the end of the cascade, in [0, 1]. You return the
 WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
 - The problem is ILL-POSED. Diffusion is many-to-one: different seed sets produce
   the same final state, and a cascade that saturated retains almost no trace of
-  where it began. Perfect F1 is not achievable and chasing it is not the goal,
-  beating the reference table is.
-- Sources are a TINY MINORITY of nodes, so accuracy is worthless as a signal.
-  A rule that names nothing scores 90%+ accuracy and 0 F1.
+  where it began. A perfect consistency is not achievable and chasing it is not
+  the goal, beating the reference table is.
+- A set that OVERSHOOTS (its cascade reaches nodes the observation says stayed
+  clean) and one that UNDERSHOOTS (parts of the observed region stay unexplained)
+  both lose; the feedback names the nodes on each side, so read it.
 - The strongest classical method is LPSI: label the infected +1 and the
   uninfected -1, propagate to convergence, and take the LOCAL MAXIMA of the
   converged field. It has no learning in it and it beats several deep generative
@@ -213,17 +217,23 @@ Recover the WHOLE HISTORY, which nodes were infected, at which timestep each one
 activated, and WHO INFECTED WHOM. You are not intervening in anything; you are
 reconstructing the past. HIGHER IS BETTER.
 
-YOUR SCORE IS DELIBERATELY WEIGHTED TOWARD THE HARD HALF:
+YOUR SCORE IS THE LIKELIHOOD OF YOUR HISTORY, NOT ITS AGREEMENT WITH A KEY:
 
-    score = LAMBDA * PathPrecision + (1 - LAMBDA) * EventF1
+    reward = [log p(sources) + log p(transitions | kernel)] / N  -  (fraction of the observation you contradict)
 
-`EventF1` scores the `(node, timestep)` pairs. `PathPrecision` scores the
-who-infected-whom EDGES. The exact LAMBDA is in the task block below and it is at
-least 0.5, on purpose: recovering WHICH nodes were infected is nearly free, and a
-decoder that stops there is the standard failure of this problem. Thirteen years
-of published work says the same thing twice: one paper reports 100% node
-precision alongside 78% edge precision, and the best modern method reaches 0.68
-path precision. **Spend your effort on the parents.**
+The history you return implies a sequence of states; the diffusion kernel assigns
+each asserted transition a probability (a node you activate at t must have an
+active in-neighbour at t-1 whose arc transmits; nodes you leave silent must be
+ones the kernel did not expect to activate), and every node you declare a SOURCE
+is an exogenous event of prior probability 1/N, so each extra source costs about
+log N. Those log-probabilities, summed and divided by the node count, are the
+first term. The second term is the share of reported nodes you dropped, reported
+times you moved, or nodes you named that a final snapshot says stayed clean.
+HIGHER IS BETTER; the true history is never shown to you and never used to score
+you. Thirteen years of published work says the node set is nearly free and the
+who-infected-whom EDGES are the hard half: an implausible parent, or a source
+that is really somebody's child, is exactly what the likelihood punishes. **Spend
+your effort on the parents and the times.**
 
 WHAT MAKES THIS HARD, AND WHAT ACTUALLY WORKS:
 - The observation is a SUBSET. Nodes the cascade infected but nobody reported are
@@ -1693,8 +1703,8 @@ reconstruction_timing_note = """\
 
 THE HORIZON IS PART OF YOUR ANSWER. You schedule nothing and emit nothing, but
 every node you name carries a timestep in `[0, horizon]`, and those timesteps are
-half of what you are scored on: `EventF1` counts a `(node, t)` pair only when `t`
-is exactly right, and the reported infection-time NRMSE reads them too. A longer
+what the likelihood is computed over: a node placed at t is scored by the kernel
+given the nodes you placed at t-1, so a wrong time is a wrong transmission. A longer
 horizon means a more saturated cascade and therefore a harder inversion, because
 a cascade that ran to convergence retains almost no trace of the order it went in.
 """
@@ -1877,11 +1887,11 @@ METHOD: SOURCE-SET INFERENCE.
 Implement `localize(self, graph, observation, budget) -> list[int]`, and
 optionally `source_scores(self, graph, observation) -> np.ndarray`.
 
-You are called ONCE PER LABELLED CASCADE, with that cascade's own observation and
-its own source count as `budget`. Your score is the mean F1 across all of them, so
-a rule that nails one episode and collapses on the rest loses to a rule that is
-uniformly decent. Write an ALGORITHM, not a fit to one graph: hardcoded node ids
-will score zero on every other episode.
+You are called ONCE PER CASCADE, with that cascade's own observation and its own
+source count as `budget`. Your score is the mean consistency across all of them,
+so a rule that nails one episode and collapses on the rest loses to a rule that
+is uniformly decent. Write an ALGORITHM, not a fit to one graph: hardcoded node
+ids will explain nothing on every other episode.
 
 """,
 }
@@ -2117,7 +2127,6 @@ def build_mask_block(task: TaskSpec) -> str:
         f"{np.mean([o / max(i, 1) for o, i in zip(observed, infected, strict=True)]):.0%}"
     )
     setting = instances[0].observation.setting
-    has_parents = instances[0].true_parents is not None
 
     lines = [
         "",
@@ -2133,14 +2142,9 @@ def build_mask_block(task: TaskSpec) -> str:
         f"at timestep 0",
         f"  cascades ran for up to "
         f"{max(instance.horizon for instance in instances)} timesteps",
-        f"  SCORE = {task.tree_weight:.2f} * PathPrecision + "
-        f"{1.0 - task.tree_weight:.2f} * EventF1"
-        + (
-            ""
-            if has_parents
-            else "  Warning: this dataset carries NO transmission edge, so "
-            "PathPrecision is unscoreable and the score is EventF1 alone"
-        ),
+        "  REWARD = log-likelihood of your history per node (a 1/N prior per "
+        "declared source, plus the kernel's probability of every transmission), "
+        "minus the fraction of the observation you contradict",
         "",
     ]
 
@@ -2170,8 +2174,8 @@ def build_observation_block(task: TaskSpec) -> str:
 
     lines = [
         "",
-        f"THE EPISODES YOU ARE SCORED ON ({len(instances)} labelled cascades, "
-        f"mean F1 across all of them):",
+        f"THE EPISODES YOU ARE SCORED ON ({len(instances)} cascades, mean "
+        f"consistency across all of them):",
         f"  sources per episode: {min(counts)}-{max(counts)} nodes "
         f"({100.0 * np.mean(counts) / instances[0].num_nodes:.1f}% of N on average) "
         f", you are handed the exact count as `budget`",
@@ -2429,15 +2433,16 @@ def build_user_prompt(
         budget_unit = "UNUSED: a decoder spends no budget on anything"
         objective_line = (
             "recover the hidden trajectory that produced the observation: "
-            f"MAXIMIZE {task.tree_weight:.2f} * PathPrecision + "
-            f"{1.0 - task.tree_weight:.2f} * EventF1 (higher is better)"
+            "MAXIMIZE the kernel log-likelihood of your history per node minus the "
+            "fraction of the observation you contradict (higher is better)"
         )
         ops_line = "allowed_ops = none: this task emits no actions\n"
     elif task.recovers:
         budget_unit = "max sources to name per episode"
         objective_line = (
-            "recover the seed set that produced the observation: MAXIMIZE F1 "
-            "against the true sources (higher is better)"
+            "recover the seed set that produced the observation: MAXIMIZE "
+            "consistency, minus the re-simulation MSE of your sources against the "
+            "observation (higher is better, 0 is perfect)"
         )
         ops_line = "allowed_ops = none: this task emits no actions\n"
     else:
@@ -2496,7 +2501,8 @@ You are designing the SCORING RULE of a Source Localization algorithm, not a
 whole program.
 
 Given a graph and an OBSERVED diffusion state, the task is to recover the SEED SET
-that produced it. You are scored on F1 against the true sources, averaged over
+that produced it. You are scored on consistency (minus the re-simulation error
+of the sources you name against the observation), averaged over
 many labelled cascades. HIGHER IS BETTER.
 
 A fixed harness (ScoredStrategy.localize) greedily names the highest-scoring node
@@ -2549,16 +2555,16 @@ def _scored_reconstruction_system(task: TaskSpec) -> str:
     CONTAINS the classical methods rather than a subset of them, which is more
     than can be said for the scored harness on either intervention task.
     """
-    return f"""\
+    return """\
 You are designing the ARC-COST FUNCTION of a Cascade Reconstruction algorithm,
 not a whole program.
 
 A diffusion already happened on this graph and you only saw part of it. The task
 is to recover the whole history: which nodes were infected, when each activated,
-and who infected whom. Your score is
-{task.tree_weight:.2f} * PathPrecision + {1.0 - task.tree_weight:.2f} * EventF1,
-averaged over many masked cascades. HIGHER IS BETTER, and the weighting is toward
-the who-infected-whom EDGES on purpose: recovering the node set is nearly free.
+and who infected whom. Your score is the kernel log-likelihood of the recovered
+history per node minus the fraction of the observation it contradicts, averaged
+over many masked cascades. HIGHER IS BETTER, and an implausible parent is exactly
+what the likelihood punishes: recovering the node set is nearly free.
 
 A fixed harness (ScoredStrategy.reconstruct) grows a tree out of the observed
 region, cheapest arc first under your cost, respecting every observed activation
@@ -2946,7 +2952,8 @@ You are an algorithm-selection router for Source Localization.
 You will be given a task, a graph description, a summary of the cascades to invert,
 and a menu of classical source-localization algorithms. Each takes the observed
 diffusion state and returns the nodes it believes STARTED the cascade. Pick the
-single one most likely to MAXIMIZE F1 against the true sources on these instances.
+single one whose recovered sets are most CONSISTENT with the observations on these
+instances: re-simulating them should reproduce the observed state.
 
 Reply with EXACTLY ONE algorithm name from the menu: no code, no punctuation,
 no explanation."""
@@ -3034,13 +3041,16 @@ def build_routing_prompt(task: TaskSpec, graph: GraphInfo) -> str:
     elif task.decodes:
         budget_unit = "UNUSED: a decoder spends no budget"
         objective_line = (
-            f"MAXIMIZE {task.tree_weight:.2f} * PathPrecision + "
-            f"{1.0 - task.tree_weight:.2f} * EventF1 (higher is better)"
+            "MAXIMIZE the kernel log-likelihood of the recovered history per node "
+            "minus the fraction of the observation it contradicts (higher is better)"
         )
         menu = build_reconstruction_menu()
     elif task.recovers:
         budget_unit = "max sources to name per episode"
-        objective_line = "MAXIMIZE F1 against the true source set (higher is better)"
+        objective_line = (
+            "MAXIMIZE consistency: minus the re-simulation MSE of the recovered "
+            "sources against the observation (higher is better)"
+        )
         menu = build_localization_menu()
     else:
         budget_unit = _budget_unit(task)

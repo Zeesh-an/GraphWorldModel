@@ -608,6 +608,187 @@ def aggregate_metrics(per_instance: list[dict]) -> dict[str, float]:
     return means
 
 
+# Reward ---------------------------------------------------------------------
+#
+# The reward never sees the true history. A decoded history is scored by how
+# probable the arm's own transition kernel says it is (its log-likelihood, summed
+# over the steps it implies and normalized per node) minus how much of the
+# observation it contradicts (reported nodes it dropped, reported times it
+# moved, nodes it named that a final snapshot says stayed clean). Both parts are
+# computable at deployment. Path precision, event F1 and the tree-weighted score
+# against the stored history are computed AFTER the search, on the winner only,
+# by `reconstruction_label_metrics`, and stay the reported columns.
+
+# One unit of observation violation (all constraints broken) costs as much as one
+# nat per node of likelihood; a decode that argues with the data loses first
+observation_penalty_weight = 1.0
+max_listed_transitions = 8
+# A susceptible node the kernel expects to activate with at least this
+# probability, and the decode says did not, is listed as a silent candidate
+silent_threshold = 0.5
+
+
+def observation_violations(
+    decoded: dict[int, tuple[int, int | None]], observation: Observation
+) -> dict:
+    """How much of what was OBSERVED the decode contradicts, label-free."""
+    missing = [int(node) for node in observation.infected if node not in decoded]
+    mistimed = [
+        [int(node), int(time), int(decoded[node][0])]
+        for node, time in observation.times.items()
+        if node in decoded and decoded[node][0] != time
+    ]
+    outside = []
+    if observation.final_state is not None:
+        outside = [
+            int(node)
+            for node in decoded
+            if float(observation.final_state[int(node)]) < 0.5
+        ]
+
+    n_constraints = len(observation.infected) + len(observation.times)
+    if observation.final_state is not None:
+        n_constraints += len(decoded)
+    violations = len(missing) + len(mistimed) + len(outside)
+
+    return {
+        "consistency": 1.0 - violations / max(1, n_constraints),
+        "n_missing": len(missing),
+        "n_mistimed": len(mistimed),
+        "n_outside": len(outside),
+        "missing": missing[:max_listed_transitions],
+        "mistimed": mistimed[:max_listed_transitions],
+        "outside": outside[:max_listed_transitions],
+    }
+
+
+def history_steps(
+    decoded: dict[int, tuple[int, int | None]], horizon: int
+) -> list[tuple[int, list[int], list[int], list[int]]]:
+    """
+    The state sequence a decoded history implies: `(t, infected_t, frontier_t,
+    frontier_{t+1})` for every transition it asserts, plus one terminal
+    transition asserting nothing more activated, when the horizon allows it.
+    """
+    by_time = {}
+    for node, (when, _) in decoded.items():
+        by_time.setdefault(int(when), []).append(int(node))
+
+    last = max(by_time)
+    end = min(int(horizon), last + 1)
+    steps = []
+    infected = []
+    for when in range(end):
+        infected = sorted(infected + by_time.get(when, []))
+        steps.append(
+            (
+                when,
+                list(infected),
+                sorted(by_time.get(when, [])),
+                sorted(by_time.get(when + 1, [])),
+            )
+        )
+
+    return steps
+
+
+def score_history(
+    decoded: dict[int, tuple[int, int | None]],
+    observation: Observation,
+    horizon: int,
+    kernel: object,
+    num_nodes: int,
+) -> dict:
+    """
+    One decoded history's reward and the diagnostics behind it.
+
+    `reward = (log p(sources) + log p(transitions | kernel)) / N - w * (1 -
+    consistency)`. The transition term is the kernel's log-probability of every
+    activation the history asserts. The source term is the generative model's own
+    prior: each node is an exogenous source with probability `1/N`, independently,
+    so declaring a node a source costs about `log N` nats. Without it, "every
+    reported node is a source at t=0" explains any observation without asserting
+    a single transmission and outscores every real decoder (measured on the first
+    smoke run). Minus the fraction of the observation the decode contradicts.
+    `weakest` lists the asserted activations the kernel found least probable (a
+    parent not yet active, an arc that rarely transmits), and `silent` the
+    susceptible nodes the kernel expected to activate that the decode left out:
+    the two places a decoder edits next.
+    """
+    steps = history_steps(decoded, horizon)
+    parent_of = {int(node): parent for node, (_, parent) in decoded.items()}
+    n_sources = sum(1 for parent in parent_of.values() if parent is None)
+    source_prior = 1.0 / max(2, num_nodes)
+    loglik = n_sources * np.log(source_prior) + (num_nodes - n_sources) * np.log1p(
+        -source_prior
+    )
+    weakest = []
+    silent = []
+
+    for when, infected, frontier, next_frontier in steps:
+        marginal = np.asarray(kernel(infected, frontier), dtype=np.float64)
+        loglik += transition_logprob(marginal, infected, next_frontier)
+
+        for node in next_frontier:
+            weakest.append(
+                [round(float(marginal[node]), 4), int(node), parent_of[node], when + 1]
+            )
+
+        active = np.zeros(num_nodes, dtype=bool)
+        active[infected] = True
+        active[next_frontier] = True
+        candidates = np.flatnonzero(~active)
+        expected = candidates[marginal[candidates] >= silent_threshold]
+        for node in expected[np.argsort(-marginal[expected])][:3]:
+            silent.append([round(float(marginal[node]), 4), int(node), when + 1])
+
+    weakest.sort(key=lambda item: item[0])
+    silent.sort(key=lambda item: -item[0])
+    violations = observation_violations(decoded, observation)
+    per_node = loglik / max(1, num_nodes)
+
+    return {
+        "reward": per_node
+        - observation_penalty_weight * (1.0 - violations["consistency"]),
+        "loglik": float(loglik),
+        "loglik_per_node": float(per_node),
+        "n_steps": len(steps),
+        "n_predicted": len(decoded),
+        "n_sources": n_sources,
+        "weakest": weakest[:max_listed_transitions],
+        "silent": silent[:max_listed_transitions],
+        **violations,
+    }
+
+
+reward_keys = (
+    "reward",
+    "loglik_per_node",
+    "consistency",
+    "n_missing",
+    "n_mistimed",
+    "n_outside",
+    "n_predicted",
+    "n_sources",
+    "n_steps",
+)
+
+
+def _mean_over(per_instance: list[dict], keys: tuple) -> dict[str, float]:
+    return {
+        key: float(np.mean([entry[key] for entry in per_instance]))
+        for key in keys
+        if per_instance and all(key in entry for entry in per_instance)
+    }
+
+
+def _decoded_tuples(decoded: dict) -> dict[int, tuple[int, int | None]]:
+    """The JSON form `{node: [t, parent]}` back to the contract's tuples."""
+    return {
+        int(node): (int(value[0]), None if value[1] is None else int(value[1]))
+        for node, value in decoded.items()
+    }
+
 def evaluate_reconstructor(
     strategy: object,
     environment: object,
@@ -617,11 +798,15 @@ def evaluate_reconstructor(
     tree_weight: float = default_tree_weight,
 ) -> tuple[Trajectory, float]:
     """
-    Score one trajectory decoder over the labelled episodes.
+    Score one trajectory decoder over the selection episodes, label-free.
 
     Returns the same `(Trajectory, plan_seconds)` pair `evaluate_strategy` does, so
     every method (one_shot, evolve, the checkpointing, the population feedback)
-    consumes it unchanged. `reward` is §2.6's Score, which maximizes.
+    consumes it unchanged. `reward` is the mean of `score_history`: the arm's own
+    kernel's log-likelihood of the decoded history per node, minus the observation
+    it contradicts. It maximizes and uses nothing a deployed decoder would not
+    have. The stored history is read only by `reconstruction_label_metrics`,
+    after the search, on the winner; `tree_weight` is carried for that report.
     """
     start = time.perf_counter()
     reconstruct = implemented(strategy, "reconstruct")
@@ -639,50 +824,38 @@ def evaluate_reconstructor(
             "are not called here."
         )
 
+    # What the PROGRAM may call: the four bindings, a raiser under @native
     oracle = bind_step_marginals(environment, task)
     strategy.step_marginals = oracle
     strategy.transition_logprob = transition_logprob
+    # What the HARNESS scores with: the same kernel, counted apart from the
+    # program's own calls, available under every condition (the native arm's is
+    # one real episode per step, as an intervention task's native arm is scored)
+    scorer = StepOracle(environment=environment)
 
     per_instance = []
-
     for instance in instances:
         decoded = call_strategy(
             reconstruct, graph, instance.observation, instance.horizon
         )
         decoded = validate_reconstruction(decoded, instance, graph)
-
-        metrics = reconstruction_metrics(
-            decoded,
-            instance.true_times,
-            instance.true_parents,
-            instance.num_nodes,
-            instance.horizon,
+        entry = score_history(
+            decoded, instance.observation, instance.horizon, scorer, instance.num_nodes
         )
-        metrics["reward"] = reconstruction_reward(metrics, tree_weight)
-        # The tree the decoder is scored against: one edge per non-source node
-        # whose cause survived the mask. What `n_tree_edges` is read against.
-        metrics["n_true_edges"] = float(
-            sum(1 for causes in (instance.true_parents or {}).values() if causes)
-        )
-        metrics["episode_id"] = instance.episode_id
-        metrics["observed"] = instance.observed_count
-        metrics["infected_count"] = instance.infected_count
-        metrics["decoded"] = {
+        entry["episode_id"] = instance.episode_id
+        entry["observed"] = instance.observed_count
+        entry["infected_count"] = instance.infected_count
+        entry["decoded"] = {
             int(node): [int(time), None if parent is None else int(parent)]
             for node, (time, parent) in decoded.items()
         }
-        per_instance.append(metrics)
+        per_instance.append(entry)
 
     if not per_instance:
-        raise StrategyError("no labelled episodes to score this decoder against")
+        raise StrategyError("no episodes to score this decoder against")
 
-    means = aggregate_metrics(per_instance)
+    means = _mean_over(per_instance, reward_keys)
     rewards = [entry["reward"] for entry in per_instance]
-    # The aggregate score belongs IN the metrics block, not only on the trajectory:
-    # `selection_metrics` is what the report and the generalization figure read
-    # back, and without it a selection score would have to be reconstructed from
-    # the gap
-    means["reward"] = float(np.mean(rewards))
     elapsed = time.perf_counter() - start
 
     # A representative recovered SOURCE set, so the results JSON's timeline and the
@@ -698,7 +871,7 @@ def evaluate_reconstructor(
     trajectory = Trajectory(
         states=[State([], []), State(recovered_sources, [])],
         actions=[[ActionOp("add_node", node) for node in recovered_sources]],
-        reward=float(np.mean(rewards)),
+        reward=means["reward"],
         infected_counts=rewards,
         cost={
             "env": "cascade_reconstruction",
@@ -710,17 +883,18 @@ def evaluate_reconstructor(
             "rollout_seconds": elapsed,
             "n_instances": len(per_instance),
             "setting": instances[0].observation.setting,
-            # §8.3: the reward function is a design decision with a documented
-            # failure mode, so lambda belongs in the results rather than a footnote
+            # The weight of the REPORTED tree score, computed after the search
             "tree_weight": tree_weight,
             "metrics": means,
             "per_instance": per_instance,
             # The cost axis §2.4.2 exists to measure, and the number §11 says
-            # nobody has published: kernel evaluations per decoded instance
+            # nobody has published: kernel evaluations the PROGRAM made per
+            # decoded instance. The harness's own scoring steps are separate.
             "kernel_calls": getattr(oracle, "calls", 0),
             "kernel_calls_per_instance": round(
                 getattr(oracle, "calls", 0) / len(per_instance), 3
             ),
+            "scoring_kernel_calls": scorer.calls,
         },
         # No cascade was rolled out; nothing was seeded and nothing spread
         final_marginals=None,
@@ -730,56 +904,164 @@ def evaluate_reconstructor(
     return trajectory, elapsed
 
 
-def trivial_decoder_reward(
-    instances: list[CascadeInstance], graph: GraphInfo, tree_weight: float
+def reconstruction_label_metrics(
+    trajectory: Trajectory, instances: list[CascadeInstance], tree_weight: float
 ) -> dict[str, float]:
     """
-    What "predict everyone reachable, assign parents by BFS" scores under this reward.
+    Path precision, event F1, timing error and the tree-weighted score against the
+    STORED history, after the fact.
 
-    §2.11 risk 1 makes this a REQUIRED check rather than a diagnostic: "confirm
-    before running the full search that a trivial decoder scores badly under the
-    chosen Score. If it does not, the reward is wrong." Reported into the results
-    JSON so the number a reader needs to interpret a program-search result is in
-    the same file as the result.
+    Called once per split on the winning decoder only, after the search has
+    finished and the write-up has been requested, so no label reaches a prompt or
+    a selection decision. Merges the label metrics into the trajectory's
+    `metrics` and `per_instance` blocks in place; `tree_score` is the
+    `lambda * PathPrecision + (1 - lambda) * EventF1` the literature is read in.
     """
-    scores = []
+    by_episode = {instance.episode_id: instance for instance in instances}
+    labelled = []
 
-    for instance in instances:
-        observation = instance.observation
-        seen = {node: (0, None) for node in observation.infected}
-        queue = list(seen)
-        step = 0
-
-        # BFS out of the reports, giving every node the hop it was reached at and
-        # the neighbour that reached it: the laziest decoder that type-checks
-        while queue and step < instance.horizon:
-            step += 1
-            wave = []
-
-            for node in queue:
-                for neighbour in graph.out_neighbors(node):
-                    if neighbour in seen or not observation.is_visible(neighbour):
-                        continue
-
-                    seen[neighbour] = (step, node)
-                    wave.append(neighbour)
-
-            queue = wave
+    for entry in trajectory.cost.get("per_instance", []):
+        instance = by_episode.get(entry["episode_id"])
+        if instance is None:
+            continue
 
         metrics = reconstruction_metrics(
-            seen,
+            _decoded_tuples(entry["decoded"]),
             instance.true_times,
             instance.true_parents,
             instance.num_nodes,
             instance.horizon,
         )
-        scores.append(reconstruction_reward(metrics, tree_weight))
+        metrics["tree_score"] = reconstruction_reward(metrics, tree_weight)
+        # The tree the decoder is scored against: one edge per non-source node
+        # whose cause survived the mask. What `n_tree_edges` is read against.
+        metrics["n_true_edges"] = float(
+            sum(1 for causes in (instance.true_parents or {}).values() if causes)
+        )
+        entry.update(metrics)
+        labelled.append(metrics)
+
+    means = aggregate_metrics(labelled) if labelled else {}
+    if labelled:
+        means["tree_score"] = float(np.mean([entry["tree_score"] for entry in labelled]))
+    trajectory.cost["metrics"] = {**trajectory.cost.get("metrics", {}), **means}
+
+    return means
+
+
+def trivial_decoder(instance: CascadeInstance, graph: GraphInfo) -> dict:
+    """Everyone reachable from the reports, parents by BFS: the laziest decoder that type-checks."""
+    observation = instance.observation
+    seen = {node: (0, None) for node in observation.infected}
+    queue = list(seen)
+    step = 0
+
+    while queue and step < instance.horizon:
+        step += 1
+        wave = []
+        for node in queue:
+            for neighbour in graph.out_neighbors(node):
+                if neighbour in seen or not observation.is_visible(neighbour):
+                    continue
+                seen[neighbour] = (step, node)
+                wave.append(neighbour)
+        queue = wave
+
+    return seen
+
+
+def trivial_decoder_reward(
+    instances: list[CascadeInstance],
+    graph: GraphInfo,
+    tree_weight: float,
+    environment: object | None = None,
+) -> dict[str, float]:
+    """
+    What "predict everyone reachable, assign parents by BFS" scores.
+
+    §2.11 risk 1 makes this a REQUIRED check rather than a diagnostic: a trivial
+    decoder has to score badly under the reward, or the reward is wrong. Two
+    numbers, because two rewards are in play: `trivial_decoder_reward` is the
+    label-free likelihood reward the search runs on (needs the arm's evaluator),
+    `trivial_decoder_tree_score` the reported tree-weighted score against the
+    stored history. Written into the results JSON so the number a reader needs to
+    interpret a program-search result is in the same file as the result.
+    """
+    tree_scores = []
+    rewards = []
+    kernel = StepOracle(environment=environment) if environment is not None else None
+
+    for instance in instances:
+        decoded = trivial_decoder(instance, graph)
+        metrics = reconstruction_metrics(
+            decoded,
+            instance.true_times,
+            instance.true_parents,
+            instance.num_nodes,
+            instance.horizon,
+        )
+        tree_scores.append(reconstruction_reward(metrics, tree_weight))
+        if kernel is not None:
+            rewards.append(
+                score_history(
+                    decoded, instance.observation, instance.horizon, kernel,
+                    instance.num_nodes,
+                )["reward"]
+            )
 
     return {
-        "trivial_decoder_reward": float(np.mean(scores)) if scores else float("nan"),
+        "trivial_decoder_tree_score": (
+            float(np.mean(tree_scores)) if tree_scores else float("nan")
+        ),
+        "trivial_decoder_reward": float(np.mean(rewards)) if rewards else None,
         "tree_weight": tree_weight,
     }
 
+
+def referee_likelihood(
+    environment: object,
+    task: TaskSpec,
+    instances: list[CascadeInstance],
+    per_instance: list[dict],
+) -> dict[str, float]:
+    """
+    The `--compare` referee: the reward re-measured under the ground-truth kernel.
+
+    Every stored decode is re-scored by `score_history` with NDlib's own
+    step marginals in place of the arm's evaluator, so `mc_reward` is to
+    `reward` exactly what the MC replay is to a world-model spread.
+    """
+    by_episode = {entry["episode_id"]: entry for entry in per_instance}
+    kernel = StepOracle(environment=environment)
+    rewards = []
+
+    for instance in instances:
+        entry = by_episode.get(instance.episode_id)
+        if entry is None:
+            continue
+
+        rewards.append(
+            score_history(
+                _decoded_tuples(entry["decoded"]),
+                instance.observation,
+                instance.horizon,
+                kernel,
+                instance.num_nodes,
+            )["reward"]
+        )
+
+    if not rewards:
+        return {}
+
+    return {
+        "mc_reward": float(np.mean(rewards)),
+        "mc_reward_se": (
+            float(np.std(rewards, ddof=1) / np.sqrt(len(rewards)))
+            if len(rewards) > 1
+            else 0.0
+        ),
+        "referee_kernel_calls": kernel.calls,
+    }
 
 def referee_resimulation_error(
     environment: object,
@@ -848,72 +1130,42 @@ def summarize_reconstruction(
     trajectory: Trajectory, graph: GraphInfo, task: TaskSpec
 ) -> str:
     """
-    What the decoded trajectories got right and wrong, split by HALF.
+    Where the decoded histories are implausible or contradict the data, label-free.
 
     Neither `methods.base.summarize` (which describes where a cascade should go
     next) nor `localization.summarize_localization` (which describes a recovered
-    set) answers the question here. The split that matters is §2.6's: the node set
-    against the tree, printed side by side, so the model can see that its Event F1
-    is high while its Path Precision is not, which is the exact failure the
-    reward is weighted to prevent it from settling into.
+    set) answers the question here. This reads the reward's own parts back: the
+    asserted transmissions the kernel found least probable, the activations it
+    expected and the decode left out, and the reports the decode contradicted.
     """
     cost = trajectory.cost
     means = cost.get("metrics", {})
     per_instance = cost.get("per_instance", [])
-    tree_weight = cost.get("tree_weight", default_tree_weight)
-    path_precision = means.get("path_precision", float("nan"))
 
     lines = [
-        f"SCORE={trajectory.reward:.4f} (±{cost.get('reward_se', 0.0):.4f} SE, "
-        f"HIGHER IS BETTER) = {tree_weight:.2f} * PathPrecision + "
-        f"{1.0 - tree_weight:.2f} * EventF1, over "
-        f"{cost.get('n_instances', 0)} labelled cascades "
-        f"({cost.get('setting', '?')} observation)",
-        f"THE HARD HALF: tree: path_precision={path_precision:.4f}  "
-        f"jaccard={means.get('jaccard', float('nan')):.4f}  "
-        f"order_accuracy={means.get('order_accuracy', float('nan')):.4f}  "
-        f"({means.get('n_tree_edges', 0.0):.0f} edges named per cascade)",
-        f"THE EASY HALF: events: event_f1={means.get('event_f1', 0.0):.4f} "
-        f"(PR {means.get('event_precision', 0.0):.4f} / "
-        f"RE {means.get('event_recall', 0.0):.4f})  "
-        f"node_f1={means.get('node_f1', 0.0):.4f}  "
-        f"mcc={means.get('mcc', 0.0):.4f}",
-        f"timing: MAE={means.get('time_mae', 0.0):.3f} steps, "
-        f"NRMSE={means.get('time_nrmse', 0.0):.4f} (lower is better; reported, "
-        f"NOT part of the score)",
-        f"sources recovered as a side effect: F1={means.get('source_f1', 0.0):.4f} "
-        f"(the nodes you gave no parent)",
-        f"kernel calls: {cost.get('kernel_calls', 0)} total, "
-        f"{cost.get('kernel_calls_per_instance', 0)} per cascade",
+        f"REWARD={trajectory.reward:.4f} (±{cost.get('reward_se', 0.0):.4f} SE, "
+        f"HIGHER IS BETTER) over {cost.get('n_instances', 0)} cascades "
+        f"({cost.get('setting', '?')} observation) = log-likelihood of your decoded "
+        f"history per node ({means.get('loglik_per_node', 0.0):.4f}: a 1/N prior "
+        f"per source you declare, plus the kernel's probability of every "
+        f"transmission you assert) minus {observation_penalty_weight:g} x the "
+        f"fraction of the observation you contradicted (consistency "
+        f"{means.get('consistency', 0.0):.3f})",
+        f"per cascade: {means.get('n_predicted', 0.0):.1f} nodes decoded "
+        f"({means.get('n_sources', 0.0):.1f} as sources), "
+        f"{means.get('n_missing', 0.0):.1f} reported nodes DROPPED, "
+        f"{means.get('n_mistimed', 0.0):.1f} reported times MOVED, "
+        f"{means.get('n_outside', 0.0):.1f} nodes named that the snapshot says stayed clean",
+        f"kernel calls by your program: {cost.get('kernel_calls', 0)} total, "
+        f"{cost.get('kernel_calls_per_instance', 0)} per cascade (the harness's own "
+        f"scoring steps, {cost.get('scoring_kernel_calls', 0)}, are separate)",
     ]
 
-    if np.isfinite(path_precision) and means.get("event_f1", 0.0) - path_precision > 0.2:
+    if means.get("n_missing", 0.0) > 0 or means.get("n_mistimed", 0.0) > 0:
         lines.append(
-            "DIAGNOSIS: your event F1 is far above your path precision, which is "
-            "the known failure mode of this task: you are recovering WHICH nodes "
-            "were infected and WHEN, and guessing who infected them. The score is "
-            "weighted toward the tree precisely because the node half is nearly "
-            "free; spend your next edit on the parent assignment."
-        )
-
-    # The second reward hazard, and one the literature does not name because no
-    # published method has a search to game: PathPrecision is a PRECISION, so a
-    # decoder that names three edges and gets them right scores 1.0 on the half the
-    # reward is weighted toward. `path_recall` and `jaccard` are reported for
-    # exactly this and the diagnostic says so out loud, because a search will find
-    # the under-prediction corner long before a human notices it.
-    named = means.get("n_tree_edges", 0.0)
-    truth = max(means.get("n_true_edges", means.get("n_true", 0.0)), 1.0)
-    if np.isfinite(path_precision) and named < 0.5 * truth:
-        lines.append(
-            f"DIAGNOSIS: you named only {named:.0f} transmission edges against "
-            f"~{truth:.0f} real ones, so your path precision "
-            f"({path_precision:.4f}) is measured on a small fraction of the tree "
-            f"and your path RECALL is {means.get('path_recall', 0.0):.4f}. "
-            f"Precision on three lucky edges is not a reconstruction: predicting "
-            f"fewer nodes is the cheapest way to make this number look good and it "
-            f"is the corner to avoid, not to find. Jaccard "
-            f"({means.get('jaccard', 0.0):.4f}) is the honest summary of the tree."
+            "DIAGNOSIS: you are arguing with the data. Every reported node must be in "
+            "your history at its reported time; dropping or moving one costs more "
+            "than any likelihood gain can pay back."
         )
 
     if not per_instance:
@@ -924,12 +1176,53 @@ def summarize_reconstruction(
 
     for label, entry in (("WORST", worst), ("BEST", best)):
         lines.append(
-            f"{label} cascade (score={entry['reward']:.3f}): "
-            f"{entry['observed']} nodes reported of {entry['infected_count']} "
-            f"actually infected ({graph.num_nodes} in the graph); you named "
-            f"{entry['n_predicted']:.0f}, "
-            f"path_precision={entry.get('path_precision', float('nan')):.3f}, "
-            f"event_f1={entry['event_f1']:.3f}"
+            f"{label} cascade (reward={entry['reward']:.4f}, log-lik/node "
+            f"{entry['loglik_per_node']:.4f}, consistency {entry['consistency']:.3f}): "
+            f"{entry['observed']} nodes reported, you decoded {entry['n_predicted']} "
+            f"({entry['n_sources']} sources) over {entry['n_steps']} steps"
+        )
+        lines.append(
+            "  least probable transmissions you asserted (p, child, parent, t): "
+            + (
+                ", ".join(
+                    f"{node}<-{parent}@t{time} (p={probability:.3f})"
+                    for probability, node, parent, time in entry["weakest"]
+                )
+                or "none"
+            )
+        )
+        lines.append(
+            "  activations the kernel expected that you left out (p, node, t): "
+            + (
+                ", ".join(
+                    f"{node}@t{time} (p={probability:.3f})"
+                    for probability, node, time in entry["silent"]
+                )
+                or "none"
+            )
+        )
+        if entry["missing"] or entry["mistimed"] or entry["outside"]:
+            lines.append(
+                f"  contradicted: dropped reports {entry['missing'] or 'none'}; "
+                f"moved times (node, reported, yours) {entry['mistimed'] or 'none'}; "
+                f"named outside the snapshot {entry['outside'] or 'none'}"
+            )
+
+    if worst["weakest"] and worst["weakest"][0][0] < 0.05:
+        lines.append(
+            "DIAGNOSIS: some transmissions you asserted are near-impossible under the "
+            "kernel: the parent was not active at t-1, or the arc almost never "
+            "transmits. Re-time those nodes or pick the in-neighbour that was."
+        )
+
+    if means.get("n_predicted", 0.0) <= means.get("n_missing", 0.0) + (
+        per_instance[0]["observed"] if per_instance else 0
+    ):
+        lines.append(
+            "DIAGNOSIS: you inferred nothing beyond the reports. The silent "
+            "candidates above are where the kernel expects hidden activations; a "
+            "history that reaches the later reports through them is more probable "
+            "than one that jumps."
         )
 
     return "\n".join(lines)

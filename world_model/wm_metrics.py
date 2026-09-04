@@ -261,10 +261,12 @@ def resimulation_error(predicted_marginal: np.ndarray, observation: np.ndarray) 
 
     The metric this literature should report and does not: §11 records that no
     surveyed paper reports a genuine re-simulated error, so this column is
-    self-contained and must not be presented as a cross-paper comparison. It is
-    also NOT the outer loop's reward: diffusion is many-to-one, so a program that
-    systematically recovers the wrong member of an equivalence class scores well
-    here and badly on F1, which is exactly why §2.3.3 selects on F1.
+    self-contained and must not be presented as a cross-paper comparison. Its
+    negative IS the source-localization reward (`localization.consistency_score`):
+    the only signal a deployed localizer could also compute. Diffusion is
+    many-to-one, so a set that reproduces `y` need not be the true set, which is
+    why F1 against the stored sources stays a REPORTED column, computed after the
+    search and never fed to it.
     """
     predicted_marginal = np.asarray(predicted_marginal, dtype=np.float64)
     observation = np.asarray(observation, dtype=np.float64)

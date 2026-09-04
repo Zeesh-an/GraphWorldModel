@@ -338,12 +338,6 @@ class PipelineConfig:
     sl_observation: str = "marginal"
     sl_budget_mode: str = episode_budget
     sl_source_tolerance: float = 0.5
-    sl_prior: str = "vae"
-    sl_steps: int = 200
-    sl_lr: float = 0.1
-    sl_cardinality_weight: float = 0.05
-    sl_prior_weight: float = 1.0
-    sl_prior_epochs: int = 300
     sl_transfer_from: str | None = None
     # Cascade reconstruction; every field is inert unless the task decodes, so one
     # sweep configuration serves all six runnable tasks
@@ -354,8 +348,6 @@ class PipelineConfig:
     cr_select_split: str = "train"
     cr_eval_split: str = "test"
     cr_tree_weight: float = 0.6
-    cr_mcmc_proposals: int = 400
-    cr_mcmc_burn_in: float = 0.3
     # Cascade prediction; every field is inert unless the task forecasts, so one
     # sweep configuration serves all seven runnable tasks. The two that decide
     # whether a number means anything are `cp_observation` (§8.2 pairs TWO windows
@@ -1318,12 +1310,6 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 sl_observation=config.sl_observation,
                 sl_budget_mode=config.sl_budget_mode,
                 sl_source_tolerance=config.sl_source_tolerance,
-                sl_prior=config.sl_prior,
-                sl_steps=config.sl_steps,
-                sl_lr=config.sl_lr,
-                sl_cardinality_weight=config.sl_cardinality_weight,
-                sl_prior_weight=config.sl_prior_weight,
-                sl_prior_epochs=config.sl_prior_epochs,
                 sl_transfer_from=config.sl_transfer_from,
                 # ...and inert unless the task decodes
                 cr_setting=config.cr_setting,
@@ -1333,8 +1319,6 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 cr_select_split=config.cr_select_split,
                 cr_eval_split=config.cr_eval_split,
                 cr_tree_weight=config.cr_tree_weight,
-                cr_mcmc_proposals=config.cr_mcmc_proposals,
-                cr_mcmc_burn_in=config.cr_mcmc_burn_in,
                 # ...and inert unless the task forecasts
                 cp_select_split=config.cp_select_split,
                 cp_eval_split=config.cp_eval_split,
@@ -1571,9 +1555,9 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 f"held-out {result.get('prediction_metric', 'error').upper()} "
                 f"{score:.4f} (lower is better)"
                 if result.get("prediction")
-                else f"held-out score {score:.4f}"
+                else f"held-out reward {score:.4f} (kernel log-lik/node minus violations)"
                 if result.get("reconstruction")
-                else f"held-out F1 {score:.4f}"
+                else f"held-out consistency {score:.4f} (minus resim MSE)"
                 if result.get("localization")
                 else (
                     f"spread {score:.2f} "
@@ -2562,46 +2546,6 @@ if __name__ == "__main__":
         "sweep keeps an episode in (default: 0.5).",
     )
     parser.add_argument(
-        "--sl-prior",
-        type=str,
-        default="vae",
-        choices=["none", "vae"],
-        help="arm A only (gradient_*): none reproduces SL-VAE (a), frozen forward "
-        "model plus descent, no prior; vae reproduces the full method, which is "
-        "worth +0.19 F1 on Jazz in SL-VAE's own ablation (default: vae).",
-    )
-    parser.add_argument(
-        "--sl-steps",
-        type=int,
-        default=200,
-        help="arm A only: Adam steps per instance (default: 200).",
-    )
-    parser.add_argument(
-        "--sl-lr",
-        type=float,
-        default=0.1,
-        help="arm A only: Adam learning rate on the source logits (default: 0.1).",
-    )
-    parser.add_argument(
-        "--sl-cardinality-weight",
-        type=float,
-        default=0.05,
-        help="arm A only: weight on (sum(x~) - k)^2, the given-k constraint "
-        "(default: 0.05).",
-    )
-    parser.add_argument(
-        "--sl-prior-weight",
-        type=float,
-        default=1.0,
-        help="arm A only: weight on -log p(x~) (default: 1.0).",
-    )
-    parser.add_argument(
-        "--sl-prior-epochs",
-        type=int,
-        default=300,
-        help="arm A only: epochs fitting the source VAE (default: 300).",
-    )
-    parser.add_argument(
         "--sl-transfer-from",
         type=str,
         default=None,
@@ -2825,21 +2769,6 @@ if __name__ == "__main__":
         "call. An @monte_carlo arm pays steps x samples x mc_runs real episodes per "
         f"call and a @world_model arm pays steps x samples matmuls "
         f"(default: {default_forecast_samples}).",
-    )
-    parser.add_argument(
-        "--cr-mcmc-proposals",
-        type=int,
-        default=400,
-        help="arm A only (decode_*): Metropolis-Hastings proposals per cascade. "
-        "The first number to raise before quoting arm A as DITTO-parity "
-        "(default: 400).",
-    )
-    parser.add_argument(
-        "--cr-mcmc-burn-in",
-        type=float,
-        default=0.3,
-        help="arm A only: fraction of the chain discarded before the barycenter "
-        "starts accumulating (default: 0.3).",
     )
     parser.add_argument(
         "--budgets",
@@ -3091,12 +3020,6 @@ if __name__ == "__main__":
         sl_observation=args.sl_observation,
         sl_budget_mode=args.sl_budget_mode,
         sl_source_tolerance=args.sl_source_tolerance,
-        sl_prior=args.sl_prior,
-        sl_steps=args.sl_steps,
-        sl_lr=args.sl_lr,
-        sl_cardinality_weight=args.sl_cardinality_weight,
-        sl_prior_weight=args.sl_prior_weight,
-        sl_prior_epochs=args.sl_prior_epochs,
         sl_transfer_from=args.sl_transfer_from,
         cr_setting=args.cr_setting,
         cr_observation_rate=args.cr_observation_rate,
@@ -3105,8 +3028,6 @@ if __name__ == "__main__":
         cr_select_split=args.cr_select_split,
         cr_eval_split=args.cr_eval_split,
         cr_tree_weight=args.cr_tree_weight,
-        cr_mcmc_proposals=args.cr_mcmc_proposals,
-        cr_mcmc_burn_in=args.cr_mcmc_burn_in,
         cp_observation=args.cp_observation,
         cp_horizon=args.cp_horizon,
         cp_step=args.cp_step,

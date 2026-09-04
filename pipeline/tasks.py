@@ -454,19 +454,15 @@ tasks = {
             "rumor_centrality",
             "random_sources",
         ),
-        # The six-condition ladder plus arm A (§2.6): §2.2's framing, in which the
-        # world model is FROZEN and a relaxed source vector is gradient-descended
-        # against it. That is SL-VAE with our likelihood plugged in, which the seed
-        # paper has already declared a no-op component swap, so it is the CONTROL
-        # program search is measured against, not the method. 6 vs A is the
-        # methodological claim this task exists to make.
+        # The same six-condition ladder as every intervention task: the program
+        # is scored by how well the set it recovers re-simulates to the
+        # observation on the arm's own evaluator, never by the stored labels
         default_arms=(
             "routing",
             "evolve_free@native",
             "evolve_free@monte_carlo",
             "evolve_free@oracle",
             "evolve_free@world_model",
-            "gradient_free@world_model",
         ),
         blocker=None,
     ),
@@ -524,20 +520,15 @@ tasks = {
             "observed_only",
             "random_reconstruction",
         ),
-        # The six-condition ladder plus arm A (§2.9): DITTO's decoder with our
-        # kernel substituted for its mean-field beta-hat. That is §2.3's framing,
-        # the component swap the tempting move would make, so it is the CONTROL
-        # decoder SEARCH is measured against, not the method. 6 vs A is the
-        # methodological claim this task exists to make, and §2.11 risk 6 is why it
-        # is built well: DITTO beats a supervised model trained with the TRUE beta
-        # on two of eight rows, so a weak arm A makes the comparison meaningless.
+        # The same six-condition ladder as every intervention task: the decoder
+        # is scored by its history's likelihood under the arm's own kernel and its
+        # agreement with the reports, never by the stored history
         default_arms=(
             "routing",
             "evolve_free@native",
             "evolve_free@monte_carlo",
             "evolve_free@oracle",
             "evolve_free@world_model",
-            "decode_free@world_model",
         ),
         blocker=None,
     ),

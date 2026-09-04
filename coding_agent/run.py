@@ -94,6 +94,7 @@ from coding_agent.localization import (
     episode_budget,
     evaluate_localizer,
     load_instances,
+    localization_label_metrics,
     referee_resimulation_error,
     valid_budget_modes,
     valid_observations,
@@ -123,11 +124,13 @@ from coding_agent.reconstruction import (
 from coding_agent.reconstruction import (
     referee_resimulation_error as referee_reconstruction_error,
 )
-from coding_agent.reconstruction import trivial_decoder_reward
+from coding_agent.reconstruction import (
+    reconstruction_label_metrics,
+    referee_likelihood,
+    trivial_decoder_reward,
+)
 from coding_agent.methods.base import OuterLoopMethod, summarize
-from coding_agent.methods.decode import BarycenterDecoding
 from coding_agent.methods.evolve import EvolveSearch
-from coding_agent.methods.gradient import GradientInversion
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm, default_max_repairs
 from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
@@ -196,7 +199,6 @@ from pipeline.layout import budget_label, checkpoint_suffix
 from pipeline.tasks import get_task, maximize, task_names
 from world_model.wm_data import load_graph_store
 from world_model.wm_metrics import containment_metrics, epidemic_curve_metrics
-from world_model.wm_sl import valid_priors, vae_prior
 
 world_model = "world_model"
 monte_carlo = "monte_carlo"
@@ -287,15 +289,6 @@ class ExperimentConfig:
     sl_observation: str = "marginal"
     sl_budget_mode: str = episode_budget
     sl_source_tolerance: float = 0.5
-    # Arm A knobs; read only by method="gradient". `none` reproduces SL-VAE (a)
-    # (forward model + descent, no prior) and `vae` the full method, which is
-    # SL-VAE's own ablation and worth +0.19 F1 on Jazz in its Table 4.
-    sl_prior: str = vae_prior
-    sl_steps: int = 200
-    sl_lr: float = 0.1
-    sl_cardinality_weight: float = 0.05
-    sl_prior_weight: float = 1.0
-    sl_prior_epochs: int = 300
     # §8.5.1's GRAPH axis: run the winning program of ANOTHER run, unmodified, on
     # this dataset. That comparison is the headline of the amortization claim and
     # is one no per-instance method can even enter: SL-VAE has no artifact to
@@ -315,14 +308,12 @@ class ExperimentConfig:
     cr_instances: int = 20
     cr_select_split: str = "train"
     cr_eval_split: str = "test"
-    # lambda in `lambda * PathPrecision + (1 - lambda) * EventF1`. >= 0.5 is a
-    # REQUIREMENT rather than a taste (§2.6): the node set is nearly free, so a
-    # search rewarded mostly on Event F1 discovers the tree contributes nothing to
-    # its score and converges on decoders that never attempt it.
+    # lambda in the REPORTED `lambda * PathPrecision + (1 - lambda) * EventF1`
+    # tree score, computed against the stored history after the search. The
+    # search itself runs on the label-free kernel likelihood (§2.6's warning
+    # about a search that never attempts the tree is answered by the likelihood
+    # scoring the asserted transmissions, not by this weight).
     cr_tree_weight: float = 0.6
-    # Arm A knobs; read only by method="decode"
-    cr_mcmc_proposals: int = 400
-    cr_mcmc_burn_in: float = 0.3
     # Cascade prediction. The two SPLITS are the load-bearing pair for the same
     # reason source localization's are, plus one this task has and that one does
     # not: research/cascade_prediction.md §8.3 shows that a decade of published
@@ -425,7 +416,6 @@ def build_method(
     checkpoint_path: Path | None = None,
     checkpoint_fingerprint: dict | None = None,
     instances: list | None = None,
-    training_sources: list | None = None,
 ) -> OuterLoopMethod:
     """
     The single construction site for every method.
@@ -433,51 +423,8 @@ def build_method(
     `strategy_mode` / `allow_mc_algorithms` are the resolved values, not
     config's: a canned script overrides both. Only the two methods with a
     refinement loop take a checkpoint: per_step and windowed have nothing to
-    resume, and `gradient` is a single deterministic pass.
+    resume.
     """
-    if config.method == "decode":
-        # Arm A for cascade reconstruction. No agent, no population, no
-        # refinement: Metropolis-Hastings over histories against the frozen
-        # kernel, reporting DITTO's posterior-mean barycenter rather than the MAP
-        # sample: the component swap §2.3 warns against, hence a CONTROL.
-        return BarycenterDecoding(
-            instances=instances or [],
-            proposals=config.cr_mcmc_proposals,
-            burn_in=config.cr_mcmc_burn_in,
-            tree_weight=config.cr_tree_weight,
-            seed=config.seed,
-        )
-
-    if config.method == "gradient":
-        # Arm A. No agent, no population, no refinement: Adam on a relaxed source
-        # vector against a frozen f_theta, which is SL-VAE's own procedure with our
-        # likelihood plugged in: the control program search is measured against
-        # (research/source_localization.md §2.6 arm A).
-        if config.evaluator in (monte_carlo,):
-            raise ValueError(
-                f"the gradient method needs GRADIENTS through the forward model, "
-                f"and the {config.evaluator!r} evaluator is a sampler with none. "
-                f"Use gradient_free@world_model: arm A descends through f_theta "
-                f"itself, so it needs a CHECKPOINT and no other evaluator can "
-                f"stand in, @oracle included. Arms 3 and 4 are agent conditions, "
-                f"not this one."
-            )
-
-        return GradientInversion(
-            wm_results_json=config.wm_results_json,
-            instances=instances or [],
-            budget_mode=config.sl_budget_mode,
-            steps=config.sl_steps,
-            lr=config.sl_lr,
-            cardinality_weight=config.sl_cardinality_weight,
-            prior_kind=config.sl_prior,
-            prior_weight=config.sl_prior_weight,
-            prior_epochs=config.sl_prior_epochs,
-            training_sources=training_sources or [],
-            device=config.device,
-            seed=config.seed,
-        )
-
     if config.method == "one_shot":
         return OneShotSuperAlgorithm(
             outer_iters=config.outer_iters,
@@ -841,7 +788,7 @@ def run_experiment(
     # reward is computed on `select`, and the winner is re-run unmodified on
     # `evaluate`. A program that memorized specific cascades scores well on the
     # first and badly on the second.
-    select_instances, evaluate_instances, training_sources = [], [], []
+    select_instances, evaluate_instances = [], []
 
     if registry.forecasts:
         # The same two-pool split as both inverse tasks, and here it carries an
@@ -944,11 +891,6 @@ def run_experiment(
             source_tolerance=config.sl_source_tolerance,
             seed=config.seed,
         )
-        # Arm A's prior is fit on the SELECTION split's source sets: withholding it
-        # strawmans the control, and fitting it on the held-out split leaks the
-        # answer. Both mistakes flip the sign of the headline claim.
-        training_sources = [instance.sources for instance in select_instances]
-
         print(
             f"[run] source localization: selecting on {len(select_instances)} "
             f"{config.sl_select_split} episodes, held out on "
@@ -1436,7 +1378,6 @@ class Baseline(Strategy):
             else checkpoint.fingerprint(config, config.method, graph)
         ),
         instances=select_instances,
-        training_sources=training_sources,
     )
 
     # Optimize the method with the outer-loop coding agent iteration loop to find the best strategy and trajectory result
@@ -1450,13 +1391,15 @@ class Baseline(Strategy):
         )
     elif task.decodes:
         print(
-            f"[run] winner: score={trajectory.reward:.4f} on the "
-            f"{config.cr_select_split} split (selection score, higher is better)"
+            f"[run] winner: reward={trajectory.reward:.4f} on the "
+            f"{config.cr_select_split} split (kernel likelihood per node minus "
+            f"observation violations, higher is better)"
         )
     elif task.recovers:
         print(
-            f"[run] winner: F1={trajectory.reward:.4f} on the "
-            f"{config.sl_select_split} split (selection score, higher is better)"
+            f"[run] winner: consistency={trajectory.reward:.5f} on the "
+            f"{config.sl_select_split} split (minus re-simulation error, higher is "
+            f"better)"
         )
     else:
         print(
@@ -1507,7 +1450,7 @@ class Baseline(Strategy):
             config.cr_tree_weight,
         )
         print(
-            f"[run] held-out score={heldout.reward:.4f} "
+            f"[run] held-out reward={heldout.reward:.4f} "
             f"(selection {trajectory.reward:.4f}, "
             f"generalization gap {heldout.reward - trajectory.reward:+.4f})"
         )
@@ -1525,9 +1468,9 @@ class Baseline(Strategy):
             config.sl_budget_mode,
         )
         print(
-            f"[run] held-out F1={heldout.reward:.4f} "
-            f"(selection {trajectory.reward:.4f}, "
-            f"generalization gap {heldout.reward - trajectory.reward:+.4f})"
+            f"[run] held-out consistency={heldout.reward:.5f} "
+            f"(selection {trajectory.reward:.5f}, "
+            f"generalization gap {heldout.reward - trajectory.reward:+.5f})"
         )
 
     # One closing turn on the generation thread: what it tried each iteration and
@@ -1729,11 +1672,15 @@ class Baseline(Strategy):
         )
 
     if task.decodes:
-        # Same reasoning as the localization block below: the score is measured
-        # against a history we stored, so it carries no evaluator noise and is
-        # already comparable across conditions. `mc_reward` is filled from the
-        # held-out score so every reader that asks for "the number comparable
-        # across arms" gets the right one unchanged.
+        # The reward was label-free (the arm's kernel likelihood of the decoded
+        # history). Only NOW, with the search over and the write-up requested, is
+        # the stored history read: path precision, event F1 and the tree-weighted
+        # score are computed on the winner for both splits and reported beside
+        # the reward, never fed to it. `mc_reward` is the --compare referee's
+        # re-measurement under the ground-truth kernel, exactly as a spread's is.
+        reconstruction_label_metrics(trajectory, select_instances, config.cr_tree_weight)
+        if heldout is not None:
+            reconstruction_label_metrics(heldout, evaluate_instances, config.cr_tree_weight)
         selection = trajectory.cost.get("metrics", {})
         reported = heldout if heldout is not None else trajectory
         metrics = reported.cost.get("metrics", {})
@@ -1758,37 +1705,47 @@ class Baseline(Strategy):
         result["kernel_calls_per_instance"] = reported.cost.get(
             "kernel_calls_per_instance"
         )
-        result["mcmc_proposals_per_instance"] = trajectory.cost.get(
-            "mcmc_proposals_per_instance"
-        )
-        result["mcmc_acceptance_rate"] = trajectory.cost.get("mcmc_acceptance_rate")
+        result["scoring_kernel_calls"] = reported.cost.get("scoring_kernel_calls")
+        # The gap on the REWARD (held-out minus selection, both on this arm's
+        # evaluator) and on the reported tree score, side by side
         result["generalization_gap"] = (
             round(reported.reward - trajectory.reward, 6)
             if heldout is not None
             else None
         )
-        result["mc_reward"] = reported.reward
+        result["tree_score_generalization_gap"] = (
+            round(metrics.get("tree_score", 0.0) - selection.get("tree_score", 0.0), 6)
+            if heldout is not None and "tree_score" in metrics
+            else None
+        )
+        result["mc_reward"] = None
         result["reward"] = reported.reward
-        result["mc_reward_se"] = reported.cost.get("reward_se")
+        result["reward_se"] = reported.cost.get("reward_se")
         result["spread_pct"] = None
         result["per_instance"] = reported.cost.get("per_instance")
         result["summary"] = summarize(reported, graph, task)
         # §2.11 risk 1 makes this a REQUIRED check rather than a diagnostic: a
         # trivial decoder (everyone reachable, parents by BFS) must score badly
-        # under the chosen reward, or the reward is wrong. Reported into the same
-        # file as the result, because a reader cannot interpret a program-search
-        # number without it.
+        # under the reward, or the reward is wrong. Both rewards in play are
+        # reported, in the same file as the result, because a reader cannot
+        # interpret a program-search number without them.
         result |= trivial_decoder_reward(
-            evaluate_instances or select_instances, graph, config.cr_tree_weight
+            evaluate_instances or select_instances,
+            graph,
+            config.cr_tree_weight,
+            environment=environment,
         )
 
     if task.recovers and not task.decodes:
-        # The F1 an inverse task reports needs NO ground-truth referee to be
-        # comparable across conditions: it is measured against a source set we
-        # know, so it carries no evaluator noise at all. That is unusual for this
-        # pipeline and is why `mc_reward` is filled from the held-out score rather
-        # than from a Monte-Carlo replay: every reader that asks for "the number
-        # comparable across arms" then gets the right one unchanged.
+        # The reward was label-free (consistency of the recovered set with the
+        # observation on this arm's evaluator). Only NOW, with the search over and
+        # the write-up requested, are the stored sources read: F1, precision,
+        # recall and AUC are computed on the winner for both splits and reported
+        # beside the reward, never fed to it. `mc_reward` is the --compare
+        # referee's re-measurement on NDlib, exactly as a spread's is.
+        localization_label_metrics(strategy, trajectory, select_instances, graph)
+        if heldout is not None:
+            localization_label_metrics(strategy, heldout, evaluate_instances, graph)
         selection = trajectory.cost.get("metrics", {})
         reported = heldout if heldout is not None else trajectory
         metrics = reported.cost.get("metrics", {})
@@ -1807,21 +1764,24 @@ class Baseline(Strategy):
         result["forward_calls_per_instance"] = reported.cost.get(
             "forward_calls_per_instance"
         )
-        result["gradient_steps_per_instance"] = trajectory.cost.get(
-            "gradient_steps_per_instance"
-        )
-        result["sl_prior"] = trajectory.cost.get("sl_prior")
+        result["scoring_calls"] = reported.cost.get("scoring_calls")
         result["transfer_from"] = config.sl_transfer_from
-        # The generalization gap §8.5.1 exists to expose: large and positive-side
-        # means the program memorized the episodes it was selected on
+        # The generalization gap §8.5.1 exists to expose, on the REWARD and on
+        # the reported F1: a large negative gap means the program memorized the
+        # episodes it was selected on rather than learning an algorithm
         result["generalization_gap"] = (
             round(reported.reward - trajectory.reward, 6)
             if heldout is not None
             else None
         )
-        result["mc_reward"] = reported.reward
+        result["f1_generalization_gap"] = (
+            round(metrics.get("f1", 0.0) - selection.get("f1", 0.0), 6)
+            if heldout is not None and "f1" in metrics
+            else None
+        )
+        result["mc_reward"] = None
         result["reward"] = reported.reward
-        result["mc_reward_se"] = reported.cost.get("reward_se")
+        result["reward_se"] = reported.cost.get("reward_se")
         result["spread_pct"] = None
         result["per_instance"] = reported.cost.get("per_instance")
         result["summary"] = summarize(reported, graph, task)
@@ -2052,15 +2012,14 @@ class Baseline(Strategy):
                 "to measure: that is the condition, not a gap"
             )
     elif config.compare and task.decodes:
-        # A decoder's score is already ground truth (it is measured against a
-        # history we stored), so the referee measures the other thing: re-simulate
-        # each decode's RECOVERED SOURCES on NDlib and compare against what the
-        # cascade actually did. Reported beside the TRUE source set's own error,
-        # because on an ill-posed problem a recovered set can reproduce the
-        # observation better than the truth did.
+        # The reward re-measured under the GROUND-TRUTH kernel: every held-out
+        # decode is re-scored with NDlib's own step marginals in place of the arm's
+        # evaluator, which is to `reward` what the MC replay is to a world-model
+        # spread. The recovered ROOTS' re-simulation error rides along as the
+        # secondary column it always was.
         referee_runs = config.referee_mc_runs or config.mc_runs
         result["referee_mc_runs"] = referee_runs
-        print(f"[run] re-simulation referee ({referee_runs} NDlib runs per set)...")
+        print(f"[run] likelihood referee ({referee_runs} NDlib runs per kernel step)...")
 
         referee = MonteCarloEnvironment(
             graph,
@@ -2070,25 +2029,26 @@ class Baseline(Strategy):
             remove_semantics=config.remove_semantics,
         )
         reported = heldout if heldout is not None else trajectory
+        referee_instances = evaluate_instances or list(task.instances)
+        result |= referee_likelihood(
+            referee, task, referee_instances, reported.cost.get("per_instance", [])
+        )
         result |= referee_reconstruction_error(
-            referee,
-            task,
-            evaluate_instances or list(task.instances),
-            reported.cost.get("per_instance", []),
+            referee, task, referee_instances, reported.cost.get("per_instance", [])
         )
         print(
-            f"[run] resim_error={result.get('resim_error', float('nan')):.5f} "
-            f"(true sources score "
+            f"[run] referee reward={result.get('mc_reward', float('nan')):.4f} "
+            f"(arm's own {reported.reward:.4f}); resim_error="
+            f"{result.get('resim_error', float('nan')):.5f} (true sources score "
             f"{result.get('resim_error_true_sources', float('nan')):.5f})"
         )
     elif config.compare and task.recovers:
-        # An inverse task's F1 is already ground truth, so the referee measures the
-        # OTHER thing §8.5.5 asks for: re-simulate the recovered sources on NDlib
-        # and compare against what was observed. Reported beside the TRUE source
-        # set's own error, because on an ill-posed problem a recovered set can
-        # reproduce y better than the truth did, and the number is unreadable
-        # without knowing that. §11: no surveyed paper reports this at all, so the
-        # column is self-contained and is not a cross-paper comparison.
+        # The reward re-measured on the GROUND-TRUTH simulator: every held-out
+        # recovered set is re-simulated on NDlib and scored against the
+        # observation, which is to `reward` what the MC replay is to a
+        # world-model spread. Reported beside the TRUE source set's own error,
+        # because on an ill-posed problem a recovered set can reproduce y better
+        # than the truth did, and the number is unreadable without knowing that.
         referee_runs = config.referee_mc_runs or config.mc_runs
         result["referee_mc_runs"] = referee_runs
         print(f"[run] re-simulation referee ({referee_runs} NDlib runs per set)...")
@@ -2108,8 +2068,10 @@ class Baseline(Strategy):
             reported.cost.get("per_instance", []),
         )
         print(
-            f"[run] resim_error={result.get('resim_error', float('nan')):.5f} "
-            f"(true sources score {result.get('resim_error_true_sources', float('nan')):.5f})"
+            f"[run] referee reward={result.get('mc_reward', float('nan')):.5f} "
+            f"(arm's own {reported.reward:.5f}); resim_error="
+            f"{result.get('resim_error', float('nan')):.5f} (true sources score "
+            f"{result.get('resim_error_true_sources', float('nan')):.5f})"
         )
     elif config.compare:
         referee_runs = config.referee_mc_runs or config.mc_runs
@@ -2601,45 +2563,6 @@ if __name__ == "__main__":
         "sweep keeps an episode in (default: 0.5).",
     )
     parser.add_argument(
-        "--sl-prior",
-        type=str,
-        default=vae_prior,
-        choices=list(valid_priors),
-        help="arm A only: none reproduces SL-VAE (a) (frozen forward model + "
-        f"descent, no prior); vae reproduces the full method (default: {vae_prior}).",
-    )
-    parser.add_argument(
-        "--sl-steps",
-        type=int,
-        default=200,
-        help="arm A only: Adam steps per instance (default: 200).",
-    )
-    parser.add_argument(
-        "--sl-lr",
-        type=float,
-        default=0.1,
-        help="arm A only: Adam learning rate on the source logits (default: 0.1).",
-    )
-    parser.add_argument(
-        "--sl-cardinality-weight",
-        type=float,
-        default=0.05,
-        help="arm A only: weight on (sum(x~) - k)^2, the given-k constraint "
-        "(default: 0.05).",
-    )
-    parser.add_argument(
-        "--sl-prior-weight",
-        type=float,
-        default=1.0,
-        help="arm A only: weight on -log p(x~) (default: 1.0).",
-    )
-    parser.add_argument(
-        "--sl-prior-epochs",
-        type=int,
-        default=300,
-        help="arm A only: epochs fitting the source VAE (default: 300).",
-    )
-    parser.add_argument(
         "--sl-transfer-from",
         type=str,
         default=None,
@@ -2777,20 +2700,6 @@ if __name__ == "__main__":
         "that never attempt it. 0 acknowledges a node-only protocol explicitly and "
         "is the only value that runs without a transmission edge in the data "
         "(default: 0.6).",
-    )
-    parser.add_argument(
-        "--cr-mcmc-proposals",
-        type=int,
-        default=400,
-        help="arm A only: Metropolis-Hastings proposals per cascade. This is the "
-        "first number to raise before quoting arm A as DITTO-parity (default: 400).",
-    )
-    parser.add_argument(
-        "--cr-mcmc-burn-in",
-        type=float,
-        default=0.3,
-        help="arm A only: fraction of the chain discarded before the barycenter "
-        "starts accumulating (default: 0.3).",
     )
     parser.add_argument(
         "--strategy-mode",
@@ -2981,12 +2890,6 @@ if __name__ == "__main__":
         sl_observation=args.sl_observation,
         sl_budget_mode=args.sl_budget_mode,
         sl_source_tolerance=args.sl_source_tolerance,
-        sl_prior=args.sl_prior,
-        sl_steps=args.sl_steps,
-        sl_lr=args.sl_lr,
-        sl_cardinality_weight=args.sl_cardinality_weight,
-        sl_prior_weight=args.sl_prior_weight,
-        sl_prior_epochs=args.sl_prior_epochs,
         sl_transfer_from=args.sl_transfer_from,
         cr_setting=args.cr_setting,
         cr_observation_rate=args.cr_observation_rate,
@@ -3002,8 +2905,6 @@ if __name__ == "__main__":
         cp_target=args.cp_target,
         cp_forecast_samples=args.cp_forecast_samples,
         cr_tree_weight=args.cr_tree_weight,
-        cr_mcmc_proposals=args.cr_mcmc_proposals,
-        cr_mcmc_burn_in=args.cr_mcmc_burn_in,
         native_arm=args.native_arm,
         strategy_mode=args.strategy_mode,
         evaluator=args.evaluator,

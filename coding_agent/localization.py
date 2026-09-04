@@ -305,6 +305,75 @@ def implemented(strategy: object, name: str) -> object | None:
     return getattr(strategy, name)
 
 
+# Reward ---------------------------------------------------------------------
+#
+# The reward never sees the true sources. The harness rolls the RECOVERED set
+# forward through the arm's own evaluator and scores how well that explains the
+# observation: minus the mean squared error between the re-simulated
+# P(infected) and the observed state, so 0 is a perfect explanation and higher
+# is better. That is the same shape as every intervention task's reward (the
+# arm's evaluator scores what the program produced) and it is computable at
+# deployment, where no label exists. F1 against the true sources is computed
+# AFTER the search, on the winner only, by `localization_label_metrics`.
+
+# A node whose re-simulated infection probability differs from the observation
+# by at least this much is listed in the feedback as over- or under-explained
+residual_threshold = 0.25
+max_listed_residuals = 12
+
+
+def consistency_score(resimulated: np.ndarray, observation: np.ndarray) -> float:
+    """Minus the re-simulation error: 0 means the named sources reproduce y exactly."""
+    return -resimulation_error(resimulated, observation)
+
+
+def residual_diagnostics(
+    resimulated: np.ndarray,
+    observation: np.ndarray,
+    graph: GraphInfo,
+    top: int = max_listed_residuals,
+) -> dict:
+    """
+    Where the recovered set's cascade disagrees with the observation, node by node.
+
+    `over` are nodes the re-simulation reaches that the observation says stayed
+    clean (the named sources overshoot); `under` are observed infections the
+    re-simulation misses (the named sources undershoot, or sit in the wrong
+    component). Each carries its residual and its degree, which is what a
+    localizer needs to move a pick and is label-free.
+    """
+    residual = np.asarray(resimulated, dtype=np.float64) - np.asarray(
+        observation, dtype=np.float64
+    )
+    over = np.flatnonzero(residual >= residual_threshold)
+    under = np.flatnonzero(residual <= -residual_threshold)
+    over = over[np.argsort(-residual[over])][:top]
+    under = under[np.argsort(residual[under])][:top]
+
+    return {
+        "n_over": int(np.count_nonzero(residual >= residual_threshold)),
+        "n_under": int(np.count_nonzero(residual <= -residual_threshold)),
+        "over": [
+            [int(node), round(float(residual[node]), 3), int(graph.degree(node))]
+            for node in over
+        ],
+        "under": [
+            [int(node), round(float(residual[node]), 3), int(graph.degree(node))]
+            for node in under
+        ],
+    }
+
+
+consistency_keys = ("consistency", "resim_error", "n_named", "n_over", "n_under")
+
+
+def _mean_over(per_instance: list[dict], keys: tuple) -> dict[str, float]:
+    return {
+        key: float(np.mean([entry[key] for entry in per_instance]))
+        for key in keys
+        if per_instance and all(key in entry for entry in per_instance)
+    }
+
 def evaluate_localizer(
     strategy: object,
     environment: object,
@@ -314,13 +383,15 @@ def evaluate_localizer(
     budget_mode: str = episode_budget,
 ) -> tuple[Trajectory, float]:
     """
-    Score one recovered-source program over the labelled episodes.
+    Score one recovered-source program over the selection episodes, label-free.
 
     Returns the same `(Trajectory, plan_seconds)` pair `evaluate_strategy` does, so
     every method (one_shot, evolve, the checkpointing, the population feedback)
-    consumes it unchanged. `reward` is the mean F1 against the true sources, which
-    maximizes: no sign work is needed anywhere, unlike the containment tasks
-    (§2.7 item 3).
+    consumes it unchanged. `reward` is the mean consistency: minus the error with
+    which the RECOVERED set, rolled forward through this arm's evaluator,
+    reproduces the observation. It maximizes and it uses nothing a deployed
+    localizer would not have. The true sources are read only by
+    `localization_label_metrics`, after the search, on the winner.
     """
     start = time.perf_counter()
     localize = implemented(strategy, "localize")
@@ -335,47 +406,41 @@ def evaluate_localizer(
             "called here."
         )
 
+    # What the PROGRAM may call: the four bindings, a raiser under @native
     oracle = bind_predict_marginals(environment, task)
     strategy.predict_marginals = oracle
-    scorer = implemented(strategy, "source_scores")
+    # What the HARNESS scores with: the same rollout, counted apart from the
+    # program's own calls, and available under every condition. The native arm
+    # is scored on one real episode exactly as an intervention task's native arm
+    # is, rather than on nothing.
+    scorer = ForwardOracle(environment=environment, task=task)
 
     per_instance = []
-
     for instance in instances:
         budget = instance_budget(instance, task, budget_mode)
         predicted = call_strategy(
             localize, graph, instance.observation.copy(), budget
         )
         predicted = validate_sources(predicted, instance, budget)
+        resimulated = scorer(predicted)
 
-        scores = None
-        if scorer is not None:
-            scores = np.asarray(
-                call_strategy(scorer, graph, instance.observation.copy()),
-                dtype=np.float64,
-            )
-            if scores.shape != (instance.num_nodes,):
-                raise StrategyError(
-                    f"source_scores() returned shape {scores.shape}, expected "
-                    f"({instance.num_nodes},): one score per node, higher meaning "
-                    f"more likely to be a source."
-                )
-
-        metrics = localization_metrics(
-            predicted, instance.sources, instance.num_nodes, scores
-        )
-        metrics["episode_id"] = instance.episode_id
-        metrics["budget"] = budget
-        metrics["predicted"] = predicted
-        metrics["sources"] = list(instance.sources)
-        metrics["infected_count"] = instance.infected_count
-        per_instance.append(metrics)
+        entry = {
+            "episode_id": instance.episode_id,
+            "budget": budget,
+            "predicted": predicted,
+            "infected_count": instance.infected_count,
+            "consistency": consistency_score(resimulated, instance.observation),
+            "resim_error": resimulation_error(resimulated, instance.observation),
+            "n_named": len(predicted),
+        }
+        entry |= residual_diagnostics(resimulated, instance.observation, graph)
+        per_instance.append(entry)
 
     if not per_instance:
-        raise StrategyError("no labelled instances to score this program against")
+        raise StrategyError("no episodes to score this program against")
 
-    means = aggregate_metrics(per_instance)
-    f1_values = [entry["f1"] for entry in per_instance]
+    means = _mean_over(per_instance, consistency_keys)
+    rewards = [entry["consistency"] for entry in per_instance]
     elapsed = time.perf_counter() - start
 
     # A representative recovered set, so the results JSON's timeline and the
@@ -387,13 +452,13 @@ def evaluate_localizer(
     trajectory = Trajectory(
         states=[State([], []), State(sorted(representative["predicted"]), [])],
         actions=[bag],
-        reward=means["f1"],
-        infected_counts=f1_values,
+        reward=means["consistency"],
+        infected_counts=rewards,
         cost={
             "env": "source_localization",
             "reward_se": (
-                float(np.std(f1_values, ddof=1) / np.sqrt(len(f1_values)))
-                if len(f1_values) > 1
+                float(np.std(rewards, ddof=1) / np.sqrt(len(rewards)))
+                if len(rewards) > 1
                 else 0.0
             ),
             "rollout_seconds": elapsed,
@@ -401,23 +466,86 @@ def evaluate_localizer(
             "budget_mode": budget_mode,
             "metrics": means,
             "per_instance": per_instance,
-            # C in §2.3.2: forward evaluations this program performed, in total and
+            # C in §2.3.2: forward evaluations the PROGRAM performed, in total and
             # per instance. The inference-cost claim of §8.5.3 is read off this.
             "forward_calls": getattr(oracle, "calls", 0),
             "forward_calls_per_instance": round(
                 getattr(oracle, "calls", 0) / len(per_instance), 3
             ),
-            "auc_source": "source_scores" if scorer is not None else "rank_derived",
+            # ...and the harness's own scoring rollouts, one per instance
+            "scoring_calls": scorer.calls,
+            "auc_source": (
+                "source_scores"
+                if implemented(strategy, "source_scores") is not None
+                else "rank_derived"
+            ),
         },
-        # No cascade was rolled out, so there is no per-node P(infected) to report.
-        # reference_diff() already returns None on that, which is the right
-        # behaviour: its seed-centric diff describes where a cascade went, and this
-        # program did not run one.
+        # No cascade was rolled out for the plan, so there is no per-node
+        # P(infected) to report. reference_diff() already returns None on that.
         final_marginals=None,
         spread_curve=None,
     )
 
     return trajectory, elapsed
+
+
+def localization_label_metrics(
+    strategy: object | None,
+    trajectory: Trajectory,
+    instances: list[SourceInstance],
+    graph: GraphInfo,
+) -> dict[str, float]:
+    """
+    F1, precision, recall, AUC and accuracy against the TRUE sources, after the fact.
+
+    Called once per split on the winning program only, after the search has
+    finished and the closing write-up has been requested, so no label reaches a
+    prompt or a selection decision. The literature reports F1, so it stays the
+    reported column; it just stops being the reward. Merges the label metrics
+    into the trajectory's `metrics` and `per_instance` blocks in place.
+    """
+    by_episode = {instance.episode_id: instance for instance in instances}
+    scorer = implemented(strategy, "source_scores") if strategy is not None else None
+    labelled = []
+
+    for entry in trajectory.cost.get("per_instance", []):
+        instance = by_episode.get(entry["episode_id"])
+        if instance is None:
+            continue
+
+        scores = None
+        if scorer is not None:
+            try:
+                scores = np.asarray(
+                    call_strategy(scorer, graph, instance.observation.copy()),
+                    dtype=np.float64,
+                )
+            except StrategyError as error:
+                # The winner's optional ranking hook failing after the search is a
+                # reporting detail, not a failed arm: fall back to the rank-derived
+                # AUC and say so
+                print(f"[run] source_scores() failed post hoc, AUC is rank-derived: {error}")
+                scores = None
+                trajectory.cost["auc_source"] = "rank_derived (source_scores failed)"
+            if scores is not None and scores.shape != (instance.num_nodes,):
+                print(
+                    f"[run] source_scores() returned shape {scores.shape}, expected "
+                    f"({instance.num_nodes},): AUC is rank-derived"
+                )
+                scores = None
+                trajectory.cost["auc_source"] = "rank_derived (source_scores failed)"
+
+        metrics = localization_metrics(
+            entry["predicted"], instance.sources, instance.num_nodes, scores
+        )
+        metrics["sources"] = list(instance.sources)
+        entry.update(metrics)
+        labelled.append(metrics)
+
+    means = aggregate_metrics(labelled) if labelled else {}
+    trajectory.cost["metrics"] = {**trajectory.cost.get("metrics", {}), **means}
+
+    return means
 
 
 def validate_sources(
@@ -490,14 +618,13 @@ def referee_resimulation_error(
     per_instance: list[dict],
 ) -> dict[str, float]:
     """
-    Re-simulate each RECOVERED source set on the ground-truth simulator and compare
-    it against what was observed.
+    The `--compare` referee: the reward re-measured on the ground-truth simulator.
 
-    §8.5.5's second column, and the one metric in this literature with no baseline
-    at all: §11 records that no surveyed paper reports a genuine re-simulated
-    error, so it is self-contained and must never be presented as a cross-paper
-    comparison. Reported beside the true-source error, because the number is
-    meaningless without knowing what the ORACLE set scores: on an ill-posed
+    Re-simulate each RECOVERED source set on NDlib and compare it against what was
+    observed, exactly the quantity the arm's own evaluator scored in the loop, so
+    `mc_reward` here is to `reward` what the MC replay is to a world-model spread.
+    Reported beside the TRUE source set's own error, because the number is
+    unreadable without knowing what the oracle set scores: on an ill-posed
     problem a recovered set can reproduce `y` better than the truth did.
     """
     by_episode = {entry["episode_id"]: entry for entry in per_instance}
@@ -520,7 +647,15 @@ def referee_resimulation_error(
     if not recovered_errors:
         return {}
 
+    rewards = [-error for error in recovered_errors]
+
     return {
+        "mc_reward": float(np.mean(rewards)),
+        "mc_reward_se": (
+            float(np.std(rewards, ddof=1) / np.sqrt(len(rewards)))
+            if len(rewards) > 1
+            else 0.0
+        ),
         "resim_error": float(np.mean(recovered_errors)),
         "resim_error_true_sources": float(np.mean(oracle_errors)),
         "resim_referee_calls": oracle.calls,
@@ -534,81 +669,85 @@ def summarize_localization(
     trajectory: Trajectory, graph: GraphInfo, task: TaskSpec
 ) -> str:
     """
-    What the recovered sets got right and wrong, in the terms an inverse problem
-    is actually debugged in.
+    Where the recovered sets' cascades disagree with the observation, label-free.
 
     `methods.base.summarize`'s cascade diagnostics (residual gain, community reach,
     unreached nodes) all describe where a cascade SHOULD go next, which is the
-    wrong question here: nothing was seeded and nothing spread. This replaces them.
+    wrong question here. This describes the residual instead: the nodes the named
+    sources over-explain and under-explain when rolled forward, which is what the
+    reward is made of and everything a deployed localizer could also see.
     """
     cost = trajectory.cost
     means = cost.get("metrics", {})
     per_instance = cost.get("per_instance", [])
+
     lines = [
-        f"F1={means.get('f1', 0.0):.4f} (±{cost.get('reward_se', 0.0):.4f} SE, "
-        f"HIGHER IS BETTER) over {cost.get('n_instances', 0)} labelled episodes",
-        f"precision={means.get('precision', 0.0):.4f}  "
-        f"recall={means.get('recall', 0.0):.4f}  "
-        f"auc={means.get('auc', float('nan')):.4f} "
-        f"(from {cost.get('auc_source', 'rank_derived')})  "
-        f"accuracy={means.get('accuracy', 0.0):.4f} "
-        f"(accuracy is near-useless alone here: sources are a tiny minority class)",
-        f"forward-model calls: {cost.get('forward_calls', 0)} total, "
-        f"{cost.get('forward_calls_per_instance', 0)} per instance",
+        f"consistency={trajectory.reward:.5f} (±{cost.get('reward_se', 0.0):.5f} SE, "
+        f"HIGHER IS BETTER, 0 = the sources you named re-simulate to exactly the "
+        f"observation) over {cost.get('n_instances', 0)} episodes: minus the mean "
+        f"squared error between P(infected) re-simulated from your sources and the "
+        f"observed state",
+        f"per episode: {means.get('n_named', 0.0):.1f} sources named, "
+        f"{means.get('n_over', 0.0):.1f} nodes OVER-explained (your cascade reaches "
+        f"them, the observation says clean), {means.get('n_under', 0.0):.1f} nodes "
+        f"UNDER-explained (observed infected, your cascade misses them)",
+        f"forward-model calls by your program: {cost.get('forward_calls', 0)} total, "
+        f"{cost.get('forward_calls_per_instance', 0)} per instance (the harness's "
+        f"own scoring rollouts, {cost.get('scoring_calls', 0)}, are separate)",
     ]
 
     if not per_instance:
         return "\n".join(lines)
 
-    ranked = sorted(per_instance, key=lambda entry: entry["f1"])
+    ranked = sorted(per_instance, key=lambda entry: entry["consistency"])
     worst, best = ranked[0], ranked[-1]
 
     for label, entry in (("WORST", worst), ("BEST", best)):
-        hit = sorted(set(entry["predicted"]) & set(entry["sources"]))
-        missed = sorted(set(entry["sources"]) - set(entry["predicted"]))
-        spurious = sorted(set(entry["predicted"]) - set(entry["sources"]))
-        lines.append(
-            f"{label} episode (F1={entry['f1']:.3f}, k={entry['budget']}, "
-            f"{entry['infected_count']}/{graph.num_nodes} nodes infected): "
-            f"hit {len(hit)}, missed {len(missed)}, spurious {len(spurious)}"
+        named = ", ".join(
+            f"{node}(d={graph.degree(node)})"
+            for node in entry["predicted"][:max_listed_sources]
         )
         lines.append(
-            "  missed sources (degree in brackets): "
+            f"{label} episode (consistency={entry['consistency']:.5f}, "
+            f"k={entry['budget']}, {entry['infected_count']}/{graph.num_nodes} nodes "
+            f"observed infected): named {named or 'nothing'}"
+        )
+        lines.append(
+            "  over-explained (node, residual, degree): "
             + (
                 ", ".join(
-                    f"{node}(d={graph.degree(node)})"
-                    for node in missed[:max_listed_sources]
+                    f"{node}({residual:+.2f}, d={degree})"
+                    for node, residual, degree in entry["over"]
                 )
                 or "none"
             )
         )
         lines.append(
-            "  nodes you named that were NOT sources: "
+            "  under-explained (node, residual, degree): "
             + (
                 ", ".join(
-                    f"{node}(d={graph.degree(node)})"
-                    for node in spurious[:max_listed_sources]
+                    f"{node}({residual:+.2f}, d={degree})"
+                    for node, residual, degree in entry["under"]
                 )
                 or "none"
             )
         )
 
-    # The one systematic bias worth surfacing: are the false positives high-degree
-    # hubs the cascade merely passed through, or peripheral nodes?
-    spurious_degrees = [
-        graph.degree(node)
-        for entry in per_instance
-        for node in set(entry["predicted"]) - set(entry["sources"])
-    ]
-    source_degrees = [
-        graph.degree(node) for entry in per_instance for node in entry["sources"]
-    ]
-    if spurious_degrees and source_degrees:
+    over = means.get("n_over", 0.0)
+    under = means.get("n_under", 0.0)
+    if over > under and over > 0:
         lines.append(
-            f"degree bias: your false positives average degree "
-            f"{np.mean(spurious_degrees):.1f} against {np.mean(source_degrees):.1f} "
-            f"for the true sources: a large gap means you are naming hubs the "
-            f"cascade travelled THROUGH rather than the nodes it started from"
+            "DIAGNOSIS: your sets OVERSHOOT: the sources you name spread into regions "
+            "the observation never reached, which is what naming a hub the cascade "
+            "merely passed through looks like. Prefer nodes whose forward reach stays "
+            "inside the observed region: peripheral members of it, one per component."
+        )
+    elif under > over and under > 0:
+        lines.append(
+            "DIAGNOSIS: your sets UNDERSHOOT: parts of the observed region stay "
+            "unexplained. The missing sources sit inside those under-explained "
+            "components; name one node per unexplained component before refining "
+            "the rest."
         )
 
     return "\n".join(lines)

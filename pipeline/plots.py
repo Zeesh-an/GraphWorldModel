@@ -37,7 +37,6 @@ condition_colors = {
     5: "#55A868",
     6: "#4C72B0",
     7: "#9370DB",
-    8: "#E377C2",
     9: "#17BECF",
 }
 
@@ -433,9 +432,9 @@ def _reward_label(results: list[dict], normalize: bool = False) -> str:
     with an unlabelled y-axis is read as a win for the highest curve, which is
     exactly backwards.
     """
-    # A decoder's reward is a tree-weighted score in [0, 1] and an inverse task's
-    # is an F1 in the same range; neither is a node count and neither needs a
-    # referee, since both are measured against something we stored
+    # A decoder's reward is a kernel log-likelihood per node minus observation
+    # violations and an inverse task's is minus a re-simulation error; neither is
+    # a node count, and both are re-measured by the referee like a spread is
     # A forecast task's reward is an ERROR: not a count, and the one column in
     # this pipeline where lower is better for a reason that has nothing to do with
     # containment
@@ -449,12 +448,15 @@ def _reward_label(results: list[dict], normalize: bool = False) -> str:
 
     if is_reconstruct(results):
         return (
-            "tree-weighted reconstruction score: higher is better "
-            "(held-out cascades)"
+            "kernel log-likelihood per node minus observation violations: "
+            "higher is better (held-out cascades)"
         )
 
     if is_recover(results):
-        return "F1 against the true sources: higher is better (held-out episodes)"
+        return (
+            "consistency (minus re-simulation MSE): higher is better "
+            "(held-out episodes)"
+        )
 
     unit = "% of nodes" if normalize else "nodes"
     judge = "ground-truth MC" if is_ground_truth(results) else "mixed evaluators"
@@ -1872,10 +1874,10 @@ def plot_generalization_gap(
     axes.plot([0, 1], [0, 1], color="#888888", linestyle="--", linewidth=1.0,
               label="perfect transfer")
 
-    # Three families store their selection score under three keys, and only two of
-    # them live in [0, 1]: a decoder's tree-weighted score and a localizer's F1 do,
-    # and a forecast task's error is unbounded above. One figure serves all three
-    # once it reads the right key AND stops assuming the range.
+    # Three families store their selection score under three keys, and only one
+    # of them lives in [0, 1] (a localizer's F1); a decoder's reward is
+    # non-positive and a forecast task's error is unbounded above. One figure
+    # serves all three once it reads the right key AND stops assuming the range.
     decodes = is_reconstruct(paired)
     forecasts = is_forecast(paired)
 
@@ -1892,11 +1894,7 @@ def plot_generalization_gap(
         run = _by_arm(paired, arm)[0]
         selection = float(run["selection_metrics"].get(key) or 0.0)
         heldout = float(
-            (
-                run.get("mc_reward")
-                if decodes or forecasts
-                else run["metrics"].get(key)
-            )
+            (run.get("mc_reward") if forecasts else run["metrics"].get(key))
             or 0.0
         )
         points.append((selection, heldout))

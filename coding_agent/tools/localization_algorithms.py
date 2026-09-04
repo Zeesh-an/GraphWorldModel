@@ -56,8 +56,7 @@ no input to consume without a generation change. **Belief propagation (Altarelli
 et al. 2014)** is a full posterior over initial conditions on a time-unrolled
 factor graph; `dmp_localize` is its tractable relative and is implemented instead.
 Every method in §4 is LEARNED and is registered as an external repo in
-`baselines/registry.py` rather than reimplemented here: except SL-VAE's inversion
-procedure, which is `world_model/wm_sl.py` because it is the control arm A.
+`baselines/registry.py` rather than reimplemented here.
 
 Three conventions everything here obeys:
 

@@ -150,9 +150,9 @@ GRES=gpu:1 MEM=64G TIME=48:00:00 \
 # k is a property of the INSTANCE, so the budget sweep is a single point by design.
 # SL_OBSERVATION=binary is the comparable column: our default `marginal` is strictly
 # more informative than the single realization the literature observes.
-# gradient_free is arm A, condition 8, and is DELIBERATELY absent here: it descends
-# through f_theta itself, so it needs a checkpoint and cannot run in a no-world-model
-# sweep under any evaluator. Add it back with the train stage on.
+# The reward is label-free: each program's recovered set is re-simulated on the arm's
+# evaluator and scored against the observation; F1 against the true sources is
+# computed after the search and reported beside it, never fed to it.
 TASK=source_localization \
 DATASET=jazz \
 RUN=testrun \
@@ -207,7 +207,7 @@ personalized_pagerank consistent_tree_wpct consistent_tree_wbct cult dhrec cri n
 jordan_backward observed_only one_hop random_reconstruction \
 external:ditto external:ditto_dhrec external:ditto_cri \
 external:grin external:spin external:deep_demixing" \
-ARMS="decode_free@oracle evolve_free@oracle" \
+ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 COMPARE=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
@@ -455,8 +455,9 @@ GRES=gpu:1 MEM=64G TIME=48:00:00 \
 # ---------------------------------------------------------------- the other simulator tasks: same four arms
 # Swap TASK / DATASET / the task flags from §3. The data stage is already on disk for
 # every task that ran there. adaptive_online_im adds `adaptive_free@<evaluator>` for the
-# same four evaluators; cascade_reconstruction keeps `decode_free@world_model` (condition 8)
-# beside them; source_localization adds `gradient_free@world_model` (condition 8). Two
+# same four evaluators; cascade_reconstruction and source_localization run exactly the
+# same four, with a label-free reward (kernel likelihood of the decoded history, and
+# re-simulation consistency of the recovered sources) scored on each arm's evaluator. Two
 # stay out: cascade_prediction trains on hard 0/1 targets and its own report already
 # measures the forward model's modelling error, and the smoke test showed its agent never
 # called the forward model at all, so run it last.

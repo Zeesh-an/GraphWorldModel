@@ -296,8 +296,6 @@
 #   SL_BUDGET_MODE  episode = each instance's own source count, the published
 #                   given-k convention; sweep = the pipeline's k, with the pool
 #                   filtered to that source fraction
-#   SL_PRIOR        arm A only: none = SL-VAE (a), vae = the full method
-#   SL_STEPS        arm A only: Adam steps per instance
 #   SL_TRANSFER_FROM  run ANOTHER run's winning program here, unmodified: the
 #                   graph axis of the amortization claim
 #
@@ -330,7 +328,6 @@
 #                   At least 0.5 is a REQUIREMENT: recovering the node set is
 #                   nearly free, so a search rewarded mostly on Event F1
 #                   converges on decoders that never attempt the tree
-#   CR_MCMC_PROPOSALS / CR_MCMC_BURN_IN  arm A only (decode_*)
 #   EVALUATOR       fallback for arms written without an @evaluator suffix
 #   BUDGET_PCTS     seed budgets as % of N, one run per value. UNSET = the task
 #                   registry's own sweep, which is a single 10% point for source
@@ -597,12 +594,6 @@ SL_INSTANCES="${SL_INSTANCES:-}"
 SL_OBSERVATION="${SL_OBSERVATION:-}"
 SL_BUDGET_MODE="${SL_BUDGET_MODE:-}"
 SL_SOURCE_TOLERANCE="${SL_SOURCE_TOLERANCE:-}"
-SL_PRIOR="${SL_PRIOR:-}"
-SL_STEPS="${SL_STEPS:-}"
-SL_LR="${SL_LR:-}"
-SL_CARDINALITY_WEIGHT="${SL_CARDINALITY_WEIGHT:-}"
-SL_PRIOR_WEIGHT="${SL_PRIOR_WEIGHT:-}"
-SL_PRIOR_EPOCHS="${SL_PRIOR_EPOCHS:-}"
 SL_TRANSFER_FROM="${SL_TRANSFER_FROM:-}"
 
 # Cascade reconstruction. `CR_SETTING` is the load-bearing one: the four settings
@@ -657,8 +648,6 @@ EPI_ALPHA="${EPI_ALPHA:-}"
 EPI_BURN_IN="${EPI_BURN_IN:-}"
 OUTBREAK_SELECTORS="${OUTBREAK_SELECTORS:-}"
 IMMUNIZER_SELECTORS="${IMMUNIZER_SELECTORS:-}"
-CR_MCMC_PROPOSALS="${CR_MCMC_PROPOSALS:-}"
-CR_MCMC_BURN_IN="${CR_MCMC_BURN_IN:-}"
 
 # Dataset class drives the settings that genuinely cannot share a default:
 # graph population, seed selectors, encoder width, and memory.
@@ -918,12 +907,6 @@ fi
 [ -n "$SL_OBSERVATION" ]       && flags+=(--sl-observation "$SL_OBSERVATION")
 [ -n "$SL_BUDGET_MODE" ]       && flags+=(--sl-budget-mode "$SL_BUDGET_MODE")
 [ -n "$SL_SOURCE_TOLERANCE" ]  && flags+=(--sl-source-tolerance "$SL_SOURCE_TOLERANCE")
-[ -n "$SL_PRIOR" ]             && flags+=(--sl-prior "$SL_PRIOR")
-[ -n "$SL_STEPS" ]             && flags+=(--sl-steps "$SL_STEPS")
-[ -n "$SL_LR" ]                && flags+=(--sl-lr "$SL_LR")
-[ -n "$SL_CARDINALITY_WEIGHT" ] && flags+=(--sl-cardinality-weight "$SL_CARDINALITY_WEIGHT")
-[ -n "$SL_PRIOR_WEIGHT" ]      && flags+=(--sl-prior-weight "$SL_PRIOR_WEIGHT")
-[ -n "$SL_PRIOR_EPOCHS" ]      && flags+=(--sl-prior-epochs "$SL_PRIOR_EPOCHS")
 [ -n "$SL_TRANSFER_FROM" ]     && flags+=(--sl-transfer-from "$SL_TRANSFER_FROM")
 [ -n "$CR_SETTING" ]           && flags+=(--cr-setting "$CR_SETTING")
 [ -n "$CR_OBSERVATION_RATE" ]  && flags+=(--cr-observation-rate "$CR_OBSERVATION_RATE")
@@ -932,8 +915,6 @@ fi
 [ -n "$CR_SELECT_SPLIT" ]      && flags+=(--cr-select-split "$CR_SELECT_SPLIT")
 [ -n "$CR_EVAL_SPLIT" ]        && flags+=(--cr-eval-split "$CR_EVAL_SPLIT")
 [ -n "$CR_TREE_WEIGHT" ]       && flags+=(--cr-tree-weight "$CR_TREE_WEIGHT")
-[ -n "$CR_MCMC_PROPOSALS" ]    && flags+=(--cr-mcmc-proposals "$CR_MCMC_PROPOSALS")
-[ -n "$CR_MCMC_BURN_IN" ]      && flags+=(--cr-mcmc-burn-in "$CR_MCMC_BURN_IN")
 [ -n "$CP_OBSERVATION" ]       && flags+=(--cp-observation "$CP_OBSERVATION")
 [ -n "$CP_HORIZON" ]           && flags+=(--cp-horizon "$CP_HORIZON")
 [ -n "$CP_STEP" ]              && flags+=(--cp-step "$CP_STEP")

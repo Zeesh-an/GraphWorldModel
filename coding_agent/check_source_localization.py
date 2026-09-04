@@ -18,7 +18,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import torch
 
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.executor import StrategyError, build_strategy
@@ -28,6 +27,7 @@ from coding_agent.localization import (
     bind_predict_marginals,
     evaluate_localizer,
     load_instances,
+    localization_label_metrics,
     unavailable_forward_oracle,
     validate_sources,
 )
@@ -45,8 +45,6 @@ from pipeline.conditions import parse_arm
 from pipeline.tasks import get_task, recover
 from world_model.wm_data import load_episode_endpoints
 from world_model.wm_metrics import localization_metrics, roc_auc
-from world_model.wm_model import WorldModel
-from world_model.wm_sl import build_graph_tensors, invert, soft_rollout, train_source_prior
 
 # A 3-armed star of paths: node 0 is the hub, and each arm is 0 -> a -> b. A
 # cascade seeded at one leaf reaches the hub and the other arms, so "which leaf
@@ -101,19 +99,16 @@ def registry_says_recover_and_generates_no_actions() -> None:
     # runs of one experiment
     assert task.default_budget_pcts == (10.0,)
     assert "lpsi" in task.default_baselines
-    assert "gradient_free@world_model" in task.default_arms
+    assert "evolve_free@world_model" in task.default_arms
 
 
-def arm_a_is_its_own_condition() -> None:
-    """Folding the ablation into the 3-6 ladder would break the ladder's ablation."""
-    ours = parse_arm("evolve_free@world_model", default_evaluator="oracle")
-    control = parse_arm("gradient_free@world_model", default_evaluator="oracle")
+def the_default_arms_are_the_ladder() -> None:
+    """The same conditions as every intervention task, nothing task-specific beside them."""
+    task = get_task("source_localization")
+    arms = [parse_arm(spec, default_evaluator="oracle") for spec in task.default_arms]
 
-    assert ours.condition == 6 and ours.is_agent
-    assert control.condition == 8
-    # No LLM anywhere in arm A, so charging it --outer-iters turns would bill it
-    # for calls it never makes
-    assert not control.is_agent
+    assert sorted(arm.condition for arm in arms) == [2, 3, 4, 5, 6], arms
+    assert all(arm.is_agent for arm in arms if arm.condition >= 3)
 
 
 def metrics_are_the_published_ones() -> None:
@@ -511,24 +506,39 @@ class FieldMaxima(Strategy):
         strategy, environment, task, graph, instances, "episode"
     )
 
-    assert 0.0 <= trajectory.reward <= 1.0, trajectory.reward
+    # Consistency is minus a mean squared error over [0, 1] values
+    assert -1.0 <= trajectory.reward <= 0.0, trajectory.reward
     assert trajectory.cost["n_instances"] == len(instances)
-    # source_scores() was implemented, so the AUC is measured on a real ranking
+    # source_scores() was implemented, so the post-hoc AUC will use a real ranking
     assert trajectory.cost["auc_source"] == "source_scores"
-    # ...and the forward oracle was actually called and counted
+    # ...the forward oracle was actually called and counted, apart from the
+    # harness's own scoring rollouts
     assert trajectory.cost["forward_calls"] > 0
+    assert trajectory.cost["scoring_calls"] == len(instances)
     assert seconds > 0.0
 
-    # The inverse task's own summary, not the cascade one
+    # The reward never read a label: nothing label-derived is in the loop's
+    # objects until the post-search merge, and the summary the LLM sees is built
+    # from the residual alone
+    entry = trajectory.cost["per_instance"][0]
+    assert not any(key in entry for key in ("f1", "precision", "sources")), entry
     text = summarize(trajectory, graph, task)
-    assert "F1=" in text and "precision=" in text, text
-    assert "frontier_counts" not in text, text
+    assert "consistency=" in text and "over-explained" in text, text
+    assert "F1" not in text and "frontier_counts" not in text, text
+
+    # ...and the label metrics land only afterwards, on both the aggregate and the
+    # per-instance entries
+    means = localization_label_metrics(strategy, trajectory, instances, graph)
+    assert 0.0 <= means["f1"] <= 1.0, means
+    assert "f1" in entry and "sources" in entry, entry
+    assert trajectory.cost["metrics"]["f1"] == means["f1"]
 
     # ...and the reference table it is read against runs on the same instances
     anchor, best, name = baseline_anchor(environment, task, graph)
     assert "LPSI" in anchor or "lpsi" in anchor, anchor
+    assert "consistency" in anchor and "F1" not in anchor, anchor
     assert name in localization_algorithms, name
-    assert 0.0 <= best.reward <= 1.0
+    assert -1.0 <= best.reward <= 0.0
 
 
 def the_anchor_wrapper_matches_the_library() -> None:
@@ -563,69 +573,9 @@ def the_prompt_states_the_right_contract() -> None:
     assert "lpsi" in user, user
 
 
-def the_inversion_is_differentiable_and_recovers_a_source() -> None:
-    """
-    Arm A's load-bearing property: gradients reach the relaxed source vector.
-
-    Run against the ORACLE head (q = the true edge probability, no learning), so a
-    failure here is the unroll or the optimizer, never an undertrained checkpoint.
-    """
-    graph = _graph(spider, 7)
-    device = torch.device("cpu")
-    model = WorldModel(
-        "gcn",
-        in_channels=6,
-        hidden_dim=8,
-        n_layers=1,
-        dropout=0.0,
-        head_type="structured_oracle",
-        diffusion_model="IC",
-    ).eval()
-    for parameter in model.parameters():
-        parameter.requires_grad_(False)
-
-    graph_input, degree_channel = build_graph_tensors(graph, "IC", device)
-
-    relaxed = torch.full((7,), 0.3, requires_grad=True)
-    predicted = soft_rollout(model, graph_input, degree_channel, relaxed, steps=3)
-
-    assert predicted.shape == (7,)
-    predicted.sum().backward()
-    assert relaxed.grad is not None and relaxed.grad.abs().sum() > 0, relaxed.grad
-
-    # ...and the whole inversion recovers a planted source on a graph where the
-    # answer is unambiguous. Certain transmission from leaf 2 reaches the hub
-    # first, so an observation of {0, 1, 2} can only have started at 2.
-    observation = _observation([0, 1, 2], 7)
-    sources, scores, info = invert(
-        model,
-        graph_input,
-        degree_channel,
-        observation,
-        budget=1,
-        steps=120,
-        horizon=2,
-        cardinality_weight=0.2,
-    )
-
-    assert scores.shape == (7,)
-    assert info["gradient_steps"] == 120
-    # The recovered node has to be inside the infected set at minimum; on this
-    # graph the endpoint is the only consistent single source
-    assert sources[0] in (0, 1, 2), (sources, scores)
-
-    # The prior is a real generative model over source sets, and it has to
-    # penalize a vector that looks nothing like the sets it was fit on
-    prior = train_source_prior([[2], [4], [6]], num_nodes=7, epochs=60)
-    plausible = torch.zeros(7)
-    plausible[2] = 1.0
-    implausible = torch.ones(7)
-    assert prior.negative_log_prior(plausible) < prior.negative_log_prior(implausible)
-
-
 checks = (
     registry_says_recover_and_generates_no_actions,
-    arm_a_is_its_own_condition,
+    the_default_arms_are_the_ladder,
     metrics_are_the_published_ones,
     auc_handles_ties_and_perfect_rankings,
     labels_come_from_the_t0_seed_commit,
@@ -638,7 +588,6 @@ checks = (
     a_generated_program_runs_end_to_end,
     the_anchor_wrapper_matches_the_library,
     the_prompt_states_the_right_contract,
-    the_inversion_is_differentiable_and_recovers_a_source,
 )
 
 

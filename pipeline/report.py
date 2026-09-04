@@ -51,8 +51,6 @@ reported_config_keys = (
     "sl_instances",
     "sl_observation",
     "sl_budget_mode",
-    "sl_prior",
-    "sl_steps",
     "sl_transfer_from",
     "cr_setting",
     "cr_observation_rate",
@@ -61,7 +59,6 @@ reported_config_keys = (
     "cr_select_split",
     "cr_eval_split",
     "cr_tree_weight",
-    "cr_mcmc_proposals",
     "wm_model",
     "head",
     "hide_edge_weights",
@@ -118,7 +115,6 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
         5: "ceiling of model-based guidance, a perfect internal model",
         6: "does the *learned* model recover the true dynamics?",
         7: "the original authors' code, seeds scored by our referee",
-        8: "what program *search* buys over per-instance inversion of the same model",
         9: "published LLM algorithm-discovery loops at their own defaults, our simulator as the only fitness",
     }
 
@@ -148,30 +144,39 @@ def _taxonomy_section(agent_results: list[dict]) -> list[str]:
 
 def _localization_table(agent_results: list[dict]) -> list[str]:
     """
-    PR / RE / F1 / AUC per arm, on HELD-OUT episodes, plus the cost each one paid.
+    The reward, its referee re-measurement, and the label metrics per arm, on
+    HELD-OUT episodes, plus the cost each one paid.
 
-    The inverse task's results table, and it reads differently from the other two
-    in one important way: F1 against a known source set carries no evaluator noise,
-    so there is no ground-truth referee to fall back on and no fidelity column to
-    report. Every number here is exact.
+    The inverse task's table reads like an intervention task's: the reward the
+    search ran on (consistency, on the arm's own evaluator), the same quantity
+    re-measured by the ground-truth referee under --compare, and beside them the
+    F1 / PR / RE / AUC the literature publishes, computed against the stored
+    sources AFTER the search and never fed to it.
     """
     first = agent_results[0]
     lines = [
-        "**F1 is the headline.** SL-VAE calls it \"the most commonly used\" metric "
-        "and IVGD \"the most important metric for performance evaluation\"; AUC is "
-        "the tie-breaker, added because sources are a tiny positive class. "
-        "**Accuracy is near-useless alone**: IVGD's Table 3 has GCNSI at `ACC "
-        "0.8840` with `F1 0.0218`, so it is reported only beside F1 "
+        "**The reward is label-free.** Each arm's program names a source set per "
+        "episode; the harness rolls that set forward on the arm's own evaluator and "
+        "scores minus the mean squared error against the observed state "
+        "(`consistency`, 0 is perfect). `referee` is the same quantity re-measured "
+        "on the ground-truth simulator under `--compare` and is the column "
+        "comparable across arms, exactly as a spread is. **F1 is the published "
+        "metric** (SL-VAE calls it \"the most commonly used\"; IVGD \"the most "
+        "important\") and it is computed against the true sources only after the "
+        "search, on the winner: a set that reproduces the observation need not be "
+        "the true set (diffusion is many-to-one), and the gap between the two "
+        "columns is that identifiability, measured. AUC is the tie-breaker; "
+        "**accuracy is near-useless alone** (IVGD's Table 3 has GCNSI at `ACC "
+        "0.8840` with `F1 0.0218`), so it is reported only beside F1 "
         "([`research/source_localization.md`](../../../../research/source_localization.md) "
         "§8.1).",
         "",
         f"Every row is scored on the **held-out** `{first.get('eval_split', '?')}` "
-        f"episodes, by re-running that arm's winning program unmodified. The "
-        f"`selection F1` column is what it scored on the "
-        f"`{first.get('select_split', '?')}` episodes the outer loop actually "
-        f"optimized against, and `gap` is the difference: a large negative gap "
-        f"means the program memorized specific cascades rather than learning an "
-        f"algorithm, which is the failure §8.5.1 exists to catch.",
+        f"episodes, by re-running that arm's winning program unmodified. "
+        f"`selection` is the reward on the `{first.get('select_split', '?')}` "
+        f"episodes the outer loop optimized against, and `gap` the difference: a "
+        f"large negative gap means the program memorized specific cascades rather "
+        f"than learning an algorithm, which is the failure §8.5.1 exists to catch.",
         "",
         f"Observation: `{first.get('observation_mode', '?')}`. The MC marginal is "
         f"strictly MORE informative than the single binary realization the "
@@ -183,12 +188,13 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
         "ranking; one that supplied only a SET (`rank_derived`, which every "
         "external repo is, because a set is all that crosses the process "
         "boundary) has every un-nominated node tied and lands near 0.5 whatever "
-        "its quality. Compare AUC only within one value of that column. **F1 is "
-        "exact for every row** and is the column to read across them.",
+        "its quality. Compare AUC only within one value of that column.",
         "",
-        "| # | k | arm | evaluator | F1 (higher is better) | PR | RE | AUC | ACC | "
-        "selection F1 | gap | AUC from | fwd calls / instance | eval s | total s |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| # | k | arm | evaluator | consistency (higher is better) | referee | "
+        "selection | gap | F1 | PR | RE | AUC | ACC | F1 gap | AUC from "
+        "| fwd calls / instance | eval s | total s |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | "
+        "--- | --- | --- | --- | --- | --- |",
     ]
 
     # Sorted and LABELLED by budget: `--sl-budget-mode sweep` runs the same arm at
@@ -205,27 +211,29 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
 
     for result in ordered:
         metrics = result.get("metrics") or {}
-        selection = result.get("selection_metrics") or {}
         gap = result.get("generalization_gap")
-        # Arm A pays gradient steps rather than forward-oracle calls, and printing
-        # a 0 there would read as "this arm is free"
-        per_instance = result.get("forward_calls_per_instance")
-        if result.get("gradient_steps_per_instance"):
-            per_instance = f"{result['gradient_steps_per_instance']:g} (Adam steps)"
+        f1_gap = result.get("f1_generalization_gap")
+        reward = result.get("reward")
+        selection = (
+            reward - gap if reward is not None and gap is not None else None
+        )
 
         lines.append(
             f"| {result.get('condition', ', ')} | {result.get('budget', ', ')} "
             f"| `{result['arm']}` "
             f"| `{result.get('evaluator', ', ')}` "
+            f"| {_format_number(reward, 5)} "
+            f"| {_format_number(result.get('mc_reward'), 5)} "
+            f"| {_format_number(selection, 5)} "
+            f"| {', ' if gap is None else f'{gap:+.5f}'} "
             f"| {_format_number(metrics.get('f1'), 4)} "
             f"| {_format_number(metrics.get('precision'), 4)} "
             f"| {_format_number(metrics.get('recall'), 4)} "
             f"| {_format_number(metrics.get('auc'), 4)} "
             f"| {_format_number(metrics.get('accuracy'), 4)} "
-            f"| {_format_number(selection.get('f1'), 4)} "
-            f"| {', ' if gap is None else f'{gap:+.4f}'} "
+            f"| {', ' if f1_gap is None else f'{f1_gap:+.4f}'} "
             f"| `{result.get('auc_source', ', ')}` "
-            f"| {per_instance if per_instance is not None else ', '} "
+            f"| {_format_number(result.get('forward_calls_per_instance'), 1)} "
             f"| {_format_number(result.get('evaluator_seconds'), 1)} "
             f"| {_format_number(result.get('elapsed_seconds'), 1)} |"
         )
@@ -233,15 +241,15 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
     if any(result.get("resim_error") is not None for result in ordered):
         lines += [
             "",
-            "### Re-simulated error",
+            "### Re-simulated error on the referee",
             "",
-            "Re-run the ground-truth simulator from each arm's RECOVERED sources "
-            "and compare against what was observed. **No surveyed paper reports "
-            "this at all** (§11), so the column is self-contained and is not a "
-            "cross-paper comparison. It is reported beside the TRUE source set's "
-            "own error because the number is unreadable without it: on an ill-posed "
-            "problem a recovered set can reproduce `y` better than the truth did, "
-            "which is exactly why F1 and not this is the selection signal (§2.3.3).",
+            "The `referee` column, unpacked: the ground-truth simulator re-run from "
+            "each arm's RECOVERED sources against what was observed, beside the TRUE "
+            "source set's own error. **No surveyed paper reports this at all** "
+            "(§11), so the column is self-contained and is not a cross-paper "
+            "comparison. A ratio below 1 means the recovered set explains the "
+            "observation better than the truth did, which is what an ill-posed "
+            "instance looks like.",
             "",
             "| arm | resim error (recovered) | resim error (true sources) | ratio |",
             "| --- | --- | --- | --- |",
@@ -271,11 +279,12 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
             "claim, and it is a comparison no per-instance method can enter, "
             "because SL-VAE, IVGD and DDMSL have no artifact to transfer.",
             "",
-            "| arm | selected on | F1 here |",
-            "| --- | --- | --- |",
+            "| arm | selected on | consistency here | F1 here |",
+            "| --- | --- | --- | --- |",
         ]
         lines += [
             f"| `{result['arm']}` | `{result['transfer_from']}` "
+            f"| {_format_number(result.get('reward'), 5)} "
             f"| {_format_number((result.get('metrics') or {}).get('f1'), 4)} |"
             for result in transferred
         ]
@@ -472,15 +481,14 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
 
 def _reconstruction_table(agent_results: list[dict]) -> list[str]:
     """
-    The tree half and the node half side by side, on HELD-OUT cascades.
+    The reward, its referee re-measurement, and the tree half against the node
+    half, on HELD-OUT cascades.
 
-    The decoding task's results table, and the one thing it must never do is print
-    only the easy half. Zong ICDM'12 reports `prec_v = 100%` alongside
-    `prec_e = 78-86%` and DIPT's best path precision thirteen years later is
-    `0.680` against source-localization F1 of `0.518-0.839` on the same graphs
+    The decoding task's table, and the one thing it must never do is lead with
+    the easy half. Zong ICDM'12 reports `prec_v = 100%` alongside `prec_e =
+    78-86%` and DIPT's best path precision thirteen years later is `0.680`
     ([`research/cascade_reconstruction.md`](../../../../research/cascade_reconstruction.md)
-    §5.2, §8.1): the node set is easy and the tree is hard, and a table that led
-    with `node F1` would look excellent and say nothing.
+    §5.2, §8.1): the node set is easy and the tree is hard.
     """
     first = agent_results[0]
     tree_weight = first.get("tree_weight")
@@ -494,20 +502,36 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
         ),
         None,
     )
+    trivial_tree = next(
+        (
+            result["trivial_decoder_tree_score"]
+            for result in agent_results
+            if result.get("trivial_decoder_tree_score") is not None
+        ),
+        None,
+    )
     lines = [
-        f"**The score is `{tree_weight:.2f} * PathPrecision + "
-        f"{1.0 - tree_weight:.2f} * EventF1`, and the weighting is the "
-        f"specification rather than a presentation choice.** §2.6: recovering "
-        f"WHICH nodes were infected is nearly free, so an outer loop rewarded on "
-        f"Event F1 alone discovers the tree contributes nothing to its score and "
-        f"converges on decoders that never attempt the hard half. The two "
-        f"components are printed separately because the gap between them is the "
-        f"result.",
+        "**The reward is label-free.** Each arm's decoder returns a whole history "
+        "per cascade; the harness scores its log-probability under the generative "
+        "model (a `1/N` prior per declared source, plus the probability the arm's "
+        "own transition kernel assigns to every transmission the history asserts), "
+        "per node, minus the fraction of the observation the history contradicts "
+        "(reported nodes dropped, reported times moved, nodes named that a snapshot "
+        "says stayed clean). `referee` is the same quantity re-measured under the "
+        "ground-truth kernel under `--compare` and is the column comparable across "
+        "arms, exactly as a spread is.",
+        "",
+        f"**The tree score is the published metric**, `{tree_weight:.2f} * "
+        f"PathPrecision + {1.0 - tree_weight:.2f} * EventF1`, computed against the "
+        f"stored history AFTER the search and never fed to it. The two components "
+        f"are printed separately because the gap between them is the result: "
+        f"recovering WHICH nodes were infected is nearly free and the tree is not "
+        f"(§2.6).",
         "",
         f"Every row is scored on the **held-out** `{first.get('eval_split', '?')}` "
-        f"cascades by re-running that arm's winning decoder unmodified; `selection` "
-        f"is what it scored on the `{first.get('select_split', '?')}` cascades the "
-        f"outer loop optimized against, and `gap` is the difference.",
+        f"cascades by re-running that arm's winning decoder unmodified; "
+        f"`selection` is the reward on the `{first.get('select_split', '?')}` "
+        f"cascades the outer loop optimized against, and `gap` the difference.",
         "",
         f"Masking: **`{first.get('observation_setting', '?')}`**, with each infected "
         f"node reported at probability "
@@ -518,28 +542,29 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
         "",
     ]
 
-    if trivial is not None:
+    if trivial is not None or trivial_tree is not None:
         lines += [
             f"**Reward sanity check (§2.11 risk 1): a trivial decoder, everyone "
-            f"reachable, parents by BFS: scores `{trivial:.4f}` under this reward.** "
-            f"If that number were competitive with the arms below, the reward would "
-            f"be wrong rather than the arms good.",
+            f"reachable, parents by BFS, scores `{_format_number(trivial, 4)}` under "
+            f"the reward and `{_format_number(trivial_tree, 4)}` on the tree score.** "
+            f"If either were competitive with the arms below, that reward would be "
+            f"wrong rather than the arms good.",
             "",
         ]
 
     lines += [
         "Warning: **`path precision` is a PRECISION.** An arm that names three "
-        "transmission edges and gets them right scores 1.0 on the half the reward "
-        "is weighted toward, so read `path recall`, `jaccard` and `tree edges` "
-        "beside it: under-predicting is the second gaming corner and it is not one "
-        "this literature names, because no published method has a search that could "
-        "find it.",
+        "transmission edges and gets them right scores 1.0 on it, so read `path "
+        "recall`, `jaccard` and `tree edges` beside it: under-predicting is the "
+        "corner this literature does not name, because no published method has a "
+        "search that could find it.",
         "",
-        "| # | arm | evaluator | score | path prec | path rec | jaccard | order acc "
-        "| event F1 | node F1 | MCC | NRMSE↓ | src F1 | tree edges | selection | gap "
-        "| kernel calls / cascade | eval s |",
+        "| # | arm | evaluator | reward | referee | selection | gap | log-lik/node "
+        "| consistency | tree score | path prec | path rec | jaccard | event F1 "
+        "| node F1 | MCC | NRMSE↓ | src F1 | tree edges | kernel calls / cascade "
+        "| eval s |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | "
-        "--- | --- | --- | --- | --- | --- |",
+        "--- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
 
     ordered = sorted(
@@ -550,33 +575,31 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
     for result in ordered:
         metrics = result.get("metrics") or {}
         gap = result.get("generalization_gap")
-        score = ground_truth_reward(result)
-        # Arm A pays MCMC proposals rather than free-form kernel calls, and both
-        # are the cost axis §2.4.2 exists to measure
-        per_instance = result.get("kernel_calls_per_instance")
-        if result.get("mcmc_proposals_per_instance"):
-            per_instance = (
-                f"{result['kernel_calls_per_instance']} "
-                f"({result['mcmc_proposals_per_instance']} MH proposals)"
-            )
+        reward = result.get("reward")
+        selection = (
+            reward - gap if reward is not None and gap is not None else None
+        )
 
         lines.append(
             f"| {result.get('condition', ', ')} | `{result['arm']}` "
             f"| `{result.get('evaluator', ', ')}` "
-            f"| {_format_number(score, 4)} "
+            f"| {_format_number(reward, 4)} "
+            f"| {_format_number(result.get('mc_reward'), 4)} "
+            f"| {_format_number(selection, 4)} "
+            f"| {', ' if gap is None else f'{gap:+.4f}'} "
+            f"| {_format_number(metrics.get('loglik_per_node'), 4)} "
+            f"| {_format_number(metrics.get('consistency'), 3)} "
+            f"| {_format_number(metrics.get('tree_score'), 4)} "
             f"| {_format_number(metrics.get('path_precision'), 4)} "
             f"| {_format_number(metrics.get('path_recall'), 4)} "
             f"| {_format_number(metrics.get('jaccard'), 4)} "
-            f"| {_format_number(metrics.get('order_accuracy'), 4)} "
             f"| {_format_number(metrics.get('event_f1'), 4)} "
             f"| {_format_number(metrics.get('node_f1'), 4)} "
             f"| {_format_number(metrics.get('mcc'), 4)} "
             f"| {_format_number(metrics.get('time_nrmse'), 4)} "
             f"| {_format_number(metrics.get('source_f1'), 4)} "
             f"| {_format_number(metrics.get('n_tree_edges'), 1)} "
-            f"| {_format_number(score - gap, 4) if gap is not None else ', '} "
-            f"| {', ' if gap is None else f'{gap:+.4f}'} "
-            f"| {per_instance if per_instance is not None else ', '} "
+            f"| {_format_number(result.get('kernel_calls_per_instance'), 1)} "
             f"| {_format_number(result.get('evaluator_seconds'), 1)} |"
         )
 
@@ -584,25 +607,21 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
         lines += [
             "",
             "Warning: **this dataset carries no transmission edge**, so every tree "
-            "column above is empty and the score collapsed onto Event F1. That is "
-            "the exact failure §2.6 describes: regenerate with "
-            "`--trace-parents` (the pipeline sets it automatically for "
-            "`--task cascade_reconstruction`) before reading any of these numbers "
+            "column above is empty and the tree score collapsed onto Event F1. "
+            "Regenerate with `--trace-parents` (the pipeline sets it automatically "
+            "for `--task cascade_reconstruction`) before reading the tree columns "
             "as a reconstruction result.",
         ]
 
     if any(result.get("resim_error") is not None for result in ordered):
         lines += [
             "",
-            "### Re-simulated error",
+            "### Re-simulated error of the recovered roots",
             "",
-            "Re-run the ground-truth simulator from each decode's RECOVERED SOURCES "
-            ", the nodes it gave no parent, and compare against what the cascade "
-            "actually did. The score above is already exact (it is measured against "
-            "a history we stored), so this measures something else: whether the "
-            "recovered ROOTS reproduce the observation. Reported beside the true "
-            "source set's own error, because on an ill-posed problem a recovered "
-            "set can reproduce it better than the truth did.",
+            "Re-run the ground-truth simulator from each decode's RECOVERED SOURCES, "
+            "the nodes it gave no parent, and compare against what the cascade "
+            "actually did, beside the true source set's own error. A secondary "
+            "column: the reward already scores the whole history.",
             "",
             "| arm | resim error (recovered) | resim error (true sources) | ratio |",
             "| --- | --- | --- | --- |",
@@ -1547,7 +1566,7 @@ def _stage_timings(layout: Layout, agent_results: list[dict]) -> list[str]:
     """Per-stage wall time from pipeline.json, and the total the run cost so far.
 
     The agent stage is split from the per-arm `elapsed_seconds`: baseline rows
-    (conditions 1, 7 and 9) against our method arms (conditions 2-6 and 8), with
+    (conditions 1, 7 and 9) against our method arms (conditions 2-6), with
     whatever the stage spent outside any arm shown as overhead.
     """
     if not layout.manifest_path.exists():
@@ -1598,7 +1617,7 @@ def _stage_timings(layout: Layout, agent_results: list[dict]) -> list[str]:
                 f"selection) | | {baseline_seconds:,.1f} s |"
             )
             lines.append(
-                f"| &nbsp;&nbsp;our arms (conditions 2-6, 8) | | "
+                f"| &nbsp;&nbsp;our arms (conditions 2-6) | | "
                 f"{method_seconds:,.1f} s |"
             )
             if skipped_seconds > 1.0:

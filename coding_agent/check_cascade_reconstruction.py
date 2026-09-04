@@ -52,6 +52,7 @@ from coding_agent.reconstruction import (
     partial_nodes,
     partial_times,
     transition_logprob,
+    reconstruction_label_metrics,
     trivial_decoder_reward,
     unavailable_step_marginals,
     valid_settings,
@@ -322,8 +323,16 @@ def check_logprob(graph: GraphInfo) -> None:
 def check_reward_hazards(
     data_dir: Path, graph: GraphInfo, environment: object, task: TaskSpec, instances: list
 ) -> None:
-    """Both gaming corners: the easy half, and naming almost nothing."""
-    trivial = trivial_decoder_reward(instances, graph, task.tree_weight)["trivial_decoder_reward"]
+    """
+    The reward is label-free and still not gameable by the easy half.
+
+    A trivial decoder (everyone reachable, parents by BFS) must score badly under
+    the likelihood reward, the reported tree score must still expose an under-tree
+    decode, and path precision must still be read beside recall.
+    """
+    both = trivial_decoder_reward(
+        instances, graph, task.tree_weight, environment=environment
+    )
 
     class Decoder:
         def reconstruct(self, graph, observation, horizon):
@@ -334,20 +343,36 @@ def check_reward_hazards(
     )
 
     check(
-        "a TRIVIAL decoder scores badly under the tree-weighted reward",
-        trivial < real.reward,
-        f"trivial {trivial:.4f} against delayed_bfs {real.reward:.4f} "
-        f"(lambda={task.tree_weight})",
+        "a TRIVIAL decoder scores badly under the likelihood reward",
+        both["trivial_decoder_reward"] < real.reward,
+        f"trivial {both['trivial_decoder_reward']:.4f} against delayed_bfs "
+        f"{real.reward:.4f}",
     )
 
-    # ...and the same decode scored on Event F1 alone would hide the difference,
-    # which is the whole reason lambda exists
+    # The reward never read a label: every per-instance entry is built from the
+    # kernel and the observation alone, and the stored history is merged in only
+    # by reconstruction_label_metrics afterwards
+    entry = real.cost["per_instance"][0]
+    check(
+        "the in-loop entries carry no label metric",
+        not any(key in entry for key in ("path_precision", "event_f1", "tree_score")),
+        f"keys: {sorted(entry)}",
+    )
+    reconstruction_label_metrics(real, instances, task.tree_weight)
+    check(
+        "the label metrics land only after the search",
+        "path_precision" in entry and "tree_score" in real.cost["metrics"],
+        f"keys: {sorted(entry)}",
+    )
+
+    # The reported tree score still has its own hazard, which is why lambda is
+    # printed beside it: Event F1 alone would rank an under-tree decode far higher
     node_only = reconstruction_reward(real.cost["metrics"], 0.0)
     check(
         "the EASY half alone would rank an under-tree decode far higher",
-        node_only > real.reward,
+        node_only > real.cost["metrics"]["tree_score"],
         f"event F1 alone {node_only:.4f} against the weighted score "
-        f"{real.reward:.4f}",
+        f"{real.cost['metrics']['tree_score']:.4f}",
     )
 
     # The second corner: a decoder that names three TRUE edges and nothing else

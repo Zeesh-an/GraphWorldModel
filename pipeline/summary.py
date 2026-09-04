@@ -154,6 +154,8 @@ summary_columns = (
     # purpose: the shared column keeps cross-task readers working, and the named
     # one keeps a spreadsheet from calling an F1 a spread.
     "localization",
+    "sl_reward",
+    "sl_reward_referee",
     "sl_f1",
     "sl_precision",
     "sl_recall",
@@ -161,6 +163,7 @@ summary_columns = (
     "sl_accuracy",
     "sl_f1_selection",
     "sl_generalization_gap",
+    "sl_f1_generalization_gap",
     "sl_auc_source",
     "sl_observation_mode",
     "sl_budget_mode",
@@ -170,8 +173,6 @@ summary_columns = (
     "sl_eval_instances",
     "sl_forward_calls",
     "sl_forward_calls_per_instance",
-    "sl_gradient_steps_per_instance",
-    "sl_prior",
     "sl_transfer_from",
     "sl_resim_error",
     "sl_resim_error_true_sources",
@@ -181,7 +182,11 @@ summary_columns = (
     # for the same reason `sl_f1` does: the shared column keeps cross-task readers
     # working and the named one keeps a spreadsheet from calling a score a spread.
     "reconstruction",
-    "cr_score",
+    "cr_reward",
+    "cr_reward_referee",
+    "cr_loglik_per_node",
+    "cr_consistency",
+    "cr_tree_score",
     "cr_path_precision",
     "cr_path_recall",
     "cr_jaccard",
@@ -195,8 +200,9 @@ summary_columns = (
     "cr_time_nrmse",
     "cr_source_f1",
     "cr_n_tree_edges",
-    "cr_score_selection",
+    "cr_reward_selection",
     "cr_generalization_gap",
+    "cr_tree_score_generalization_gap",
     "cr_setting",
     "cr_observation_rate",
     "cr_hidden_rate",
@@ -209,8 +215,6 @@ summary_columns = (
     "cr_eval_instances",
     "cr_kernel_calls",
     "cr_kernel_calls_per_instance",
-    "cr_mcmc_proposals_per_instance",
-    "cr_mcmc_acceptance_rate",
     "cr_resim_error",
     "cr_resim_error_true_sources",
     # Cascade prediction: the forecasting task's own metric set. Empty for every
@@ -481,13 +485,23 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         # metrics are exact (F1 against a known source set carries no evaluator
         # noise), so there is no fidelity column here and none is expected.
         "localization": result.get("localization"),
+        # The reward is label-free consistency on the arm's own evaluator and
+        # `sl_reward_referee` its re-measurement on NDlib under --compare; F1 is
+        # the reported metric against the stored sources, computed after the search
+        "sl_reward": result.get("reward") if result.get("localization") else None,
+        "sl_reward_referee": (
+            result.get("mc_reward") if result.get("localization") else None
+        ),
         "sl_f1": metrics.get("f1"),
         "sl_precision": metrics.get("precision"),
         "sl_recall": metrics.get("recall"),
         "sl_auc": metrics.get("auc"),
         "sl_accuracy": metrics.get("accuracy"),
         "sl_f1_selection": selection_metrics.get("f1"),
-        "sl_generalization_gap": result.get("generalization_gap"),
+        "sl_generalization_gap": (
+            result.get("generalization_gap") if result.get("localization") else None
+        ),
+        "sl_f1_generalization_gap": result.get("f1_generalization_gap"),
         "sl_auc_source": result.get("auc_source"),
         "sl_observation_mode": result.get("observation_mode"),
         "sl_budget_mode": result.get("source_budget_mode"),
@@ -497,8 +511,6 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "sl_eval_instances": result.get("n_eval_instances"),
         "sl_forward_calls": result.get("forward_calls"),
         "sl_forward_calls_per_instance": result.get("forward_calls_per_instance"),
-        "sl_gradient_steps_per_instance": result.get("gradient_steps_per_instance"),
-        "sl_prior": result.get("sl_prior"),
         "sl_transfer_from": result.get("transfer_from"),
         "sl_resim_error": (
             result.get("resim_error") if not result.get("reconstruction") else None
@@ -515,7 +527,16 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         # `cr_jaccard` ride along because PathPrecision alone rewards naming FEW
         # edges, which is the under-prediction corner a search would otherwise find.
         "reconstruction": result.get("reconstruction"),
-        "cr_score": spread if result.get("reconstruction") else None,
+        # The reward is the label-free kernel likelihood per node minus observation
+        # violations on the arm's own kernel, `cr_reward_referee` its re-measurement
+        # under NDlib's kernel; the tree score is the reported label metric
+        "cr_reward": result.get("reward") if result.get("reconstruction") else None,
+        "cr_reward_referee": (
+            result.get("mc_reward") if result.get("reconstruction") else None
+        ),
+        "cr_loglik_per_node": metrics.get("loglik_per_node"),
+        "cr_consistency": metrics.get("consistency"),
+        "cr_tree_score": metrics.get("tree_score"),
         "cr_path_precision": metrics.get("path_precision"),
         "cr_path_recall": metrics.get("path_recall"),
         "cr_jaccard": metrics.get("jaccard"),
@@ -529,12 +550,13 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "cr_time_nrmse": metrics.get("time_nrmse"),
         "cr_source_f1": metrics.get("source_f1"),
         "cr_n_tree_edges": metrics.get("n_tree_edges"),
-        "cr_score_selection": (
+        "cr_reward_selection": (
             selection_metrics.get("reward") if result.get("reconstruction") else None
         ),
         "cr_generalization_gap": (
             result.get("generalization_gap") if result.get("reconstruction") else None
         ),
+        "cr_tree_score_generalization_gap": result.get("tree_score_generalization_gap"),
         "cr_setting": result.get("observation_setting"),
         "cr_observation_rate": result.get("observation_rate"),
         "cr_hidden_rate": result.get("hidden_rate"),
@@ -558,8 +580,6 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         # The cost axis §2.4.2 exists to measure and §11 says nobody has published
         "cr_kernel_calls": result.get("kernel_calls"),
         "cr_kernel_calls_per_instance": result.get("kernel_calls_per_instance"),
-        "cr_mcmc_proposals_per_instance": result.get("mcmc_proposals_per_instance"),
-        "cr_mcmc_acceptance_rate": result.get("mcmc_acceptance_rate"),
         "cr_resim_error": (
             result.get("resim_error") if result.get("reconstruction") else None
         ),

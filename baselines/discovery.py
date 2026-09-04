@@ -21,6 +21,7 @@ rows is a difference between two search loops and nothing else.
 import json
 import os
 import sys
+import numpy as np
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
@@ -205,10 +206,13 @@ def select_doses(graph, k, outbreak, lever):
             "Source localization. A cascade already happened; `observation` is a "
             "numpy array of length N giving, per node, the observed probability "
             "that it was infected (0 or 1 for a single realization). Recover the k "
-            "nodes that STARTED the cascade. Scored by F1 against the true source "
-            "set. Return a list of k distinct node ids."
+            "nodes that STARTED the cascade. Scored by CONSISTENCY: the set you "
+            "return is re-simulated and the reward is minus the mean squared error "
+            "between the re-simulated infection probabilities and the observation, "
+            "so 0 is perfect. The true sources are never used to score you. Return "
+            "a list of k distinct node ids."
         ),
-        reward_name="F1 against the true sources (higher is better)",
+        reward_name="re-simulation consistency, minus MSE (higher is better, 0 is perfect)",
         initial_program='''\
 import networkx as nx
 
@@ -237,10 +241,13 @@ def localize(graph, observation, k):
             "'num_nodes' and 'horizon'. Recover the whole hidden history: return a "
             "dict mapping every node you believe was infected to a pair "
             "(activation timestep, parent node id), with parent None for a source. "
-            "Scored by a tree-weighted mix of path precision (who infected whom) and "
-            "event F1 (which nodes, when)."
+            "Scored by the LIKELIHOOD of your history under the diffusion kernel "
+            "(log-probability of the transitions it asserts, per node) minus the "
+            "fraction of the observation it contradicts (reported nodes dropped, "
+            "reported times moved, nodes named that a snapshot says stayed clean). "
+            "The true history is never used to score you."
         ),
-        reward_name="tree-weighted reconstruction score (higher is better)",
+        reward_name="kernel log-likelihood per node minus observation violations (higher is better)",
         initial_program='''\
 import networkx as nx
 
@@ -333,9 +340,18 @@ def oriented_fitness(task: str, sense: str, reward: float, num_nodes: int) -> fl
 
     Every framework here either maximizes or asserts a positive objective, and a
     failed candidate has to sit BELOW every valid one. A minimizing spread task
-    reports nodes saved and cascade prediction reports 1/(1+MSLE), so zero is the
-    floor everywhere and the raw reward travels beside it under its own name.
+    reports nodes saved, cascade prediction 1/(1+MSLE), source localization
+    1 + consistency and cascade reconstruction exp(reward), so zero is the floor
+    everywhere and the raw reward travels beside it under its own name.
     """
+    if task == "source_localization":
+        # consistency is minus a mean squared error over [0, 1] values: in [-1, 0]
+        return max(0.0, 1.0 + float(reward))
+
+    if task == "cascade_reconstruction":
+        # log-likelihood per node minus violations: non-positive, unbounded below
+        return float(np.exp(min(0.0, float(reward))))
+
     if sense == "maximize":
         return max(0.0, float(reward))
 
