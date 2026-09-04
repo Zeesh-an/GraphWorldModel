@@ -1,3 +1,5 @@
+import difflib
+
 import numpy as np
 
 from coding_agent.probes import max_probes_per_generation
@@ -3087,27 +3089,81 @@ ALGORITHM MENU:
 Reply with exactly one name from the menu."""
 
 
+# Per-iteration diff cap in the write-up prompt: a restructure can rewrite the
+# whole script, and the model only needs enough of it to say what changed
+max_diff_lines = 120
+
+
+def _iteration_change(record: dict, by_iteration: dict, winner: str) -> str:
+    """The exact edit one iteration made, as a unified diff against its target."""
+    script = record.get("script")
+    if script is None:
+        return "  (no script recorded for this iteration)"
+
+    parent = by_iteration.get(record.get("parent_iteration"))
+    if parent is None or parent.get("script") is None:
+        if record.get("operator") in ("refine", "restructure"):
+            return "  (edited the population best; the target was not recorded)"
+        if script == winner:
+            return "  first script, from scratch: identical to the winning script above"
+        return f"  first script, from scratch:\n```python\n{script}\n```"
+
+    diff = list(
+        difflib.unified_diff(
+            parent["script"].splitlines(),
+            script.splitlines(),
+            fromfile=f"iteration {parent['iteration']}",
+            tofile=f"iteration {record['iteration']}",
+            lineterm="",
+            n=2,
+        )
+    )
+    if not diff:
+        return f"  resubmitted iteration {parent['iteration']} unchanged"
+    if len(diff) > max_diff_lines:
+        diff = diff[:max_diff_lines] + [f"... {len(diff) - max_diff_lines} more diff lines"]
+
+    return "```diff\n" + "\n".join(diff) + "\n```"
+
+
 def build_explanation_prompt(
     script: str, reward: float, history: list[dict], summary: str
 ) -> str:
     """
     Closing turn: describe the search and the winner in plain English.
 
-    Sent on the generation thread, so the model can see the scripts it actually
-    wrote rather than reconstructing them. `history` is passed anyway because a
-    long run trims the middle of the thread while every reward survives here,
-    and `script` because the winner is the max over iterations, not the last
-    turn, without the echo the model would narrate the wrong algorithm.
+    Sent on the generation thread, but the thread is trimmed to the last few
+    exchanges, so the model cannot see most of what it wrote. `history` carries
+    every iteration's script and the iteration it edited, and each one is shown
+    here as a diff against its target: that is what makes the iteration log
+    describable at all. `script` is echoed because the winner is the max over
+    iterations, not the last turn, without it the model narrates the wrong
+    algorithm.
     """
-    iteration_lines = "\n".join(
-        f"  iteration {record['iteration']}: "
+    by_iteration = {record["iteration"]: record for record in history}
+    iteration_blocks = "\n\n".join(
+        f"### iteration {record['iteration']}: "
         + (
             f"FAILED: {record['error'].splitlines()[0]}"
             if record.get("error")
             else f"reward={record['reward']:.2f} (best so far {record['best']:.2f})"
         )
         + (f" [operator={record['operator']}]" if record.get("operator") else "")
+        + (
+            f", edited iteration {record['parent_iteration']}"
+            if record.get("parent_iteration") is not None
+            else ""
+        )
+        + "\n"
+        + _iteration_change(record, by_iteration, script)
         for record in history
+    )
+    scored = [record for record in history if record.get("reward") is not None]
+    trajectory_line = (
+        f"first scored attempt: iteration {scored[0]['iteration']} at "
+        f"{scored[0]['reward']:.2f}; winner: {reward:.2f}"
+        if scored
+        else "no scored attempt recorded"
     )
 
     return f"""\
@@ -3121,8 +3177,13 @@ is NOT necessarily your last attempt:
 Its rollout diagnostics:
 {summary}
 
-Reward per iteration:
-{iteration_lines or "  (none recorded)"}
+Every iteration, with the exact change it made to the script it was editing (a
+unified diff against that script; a script written from scratch is given in
+full). Each iteration is scored on a fresh random realization and "best so far"
+is the incumbent re-scored on that same realization, so judge an iteration
+against the best-so-far beside it, never against another iteration's number.
+Trajectory: {trajectory_line}.
+{iteration_blocks or "  (none recorded)"}
 
 Reply with GitHub-flavoured markdown using EXACTLY these headings, in this
 order, and nothing before the first one:
@@ -3132,26 +3193,62 @@ Two or three sentences: what the final algorithm is, and what it scored.
 
 ## Iteration log
 One `### Iteration N: reward X` subsection per iteration above. For each: what
-you were trying to fix, what you actually changed in the code, and whether it
-worked. Be specific about the change ("raised the redundancy penalty from 1.0 to
-2.5", not "tuned parameters"). If an iteration is no longer visible in this
-conversation, say so for that iteration rather than inventing what you did.
+you were trying to fix, what you changed in the ALGORITHM, and whether it
+worked. Read the change off the diff given for that iteration: it is the ground
+truth even where this conversation no longer shows the attempt. Be specific
+("raised the redundancy penalty from 1.0 to 2.5", not "tuned parameters") but
+describe it at the level of the method, not the code: no libraries, no variable
+names, no data-structure details. Only an iteration with no diff recorded may be
+described as unknown; never invent a change.
+
+## From first attempt to winner
+Three short paragraphs, all read off the diffs above. (1) The starting
+algorithm: what the first script did, in method terms. (2) The intermediate
+step that mattered most: the one iteration whose change moved the reward the
+most, and what that change was. (3) Start to finish: what is different between
+the first script and the winner, and how much the reward moved.
+
+## Closest classical algorithm
+Name the published or library algorithm the winner is closest to (the baseline
+table in the opening turn of this conversation lists the ones that were run
+here, with their rewards), say what the winner shares with it, and state
+exactly how it differs: added stages, a changed scoring rule, a different
+candidate set. If the winner is a composition of several known algorithms, name
+each and say which one supplies which stage.
 
 ## How the final algorithm works
-A numbered step-by-step walkthrough of the winning script, in execution order.
-Each step: what it computes, and why. Name the variables and functions as they
-appear in the code so a reader can follow along with the source.
+A short numbered walkthrough of the winning ALGORITHM, in the order it acts,
+written the way a paper's method section would describe it. One or two sentences
+per step: what that stage does to the graph or the cascade, and what it buys the
+result. Rules:
+- Name every library algorithm the script calls (`rps`, `degree_removal`, ...)
+  and what it is used for.
+- Start each step that is your own idea rather than a library call with
+  **[new]**, and say what it does that the library algorithms do not. Point out
+  anything else interesting about the design in the same way.
+- Skip everything that is not the algorithm: reading inputs, clamping the
+  budget, empty-graph guards, deduplication, cleaning, random seeds, bookkeeping,
+  validation, and how the plan is packaged into action bags.
+- No libraries (no NumPy, no arrays, no bit masks), no quoted code, no variable
+  or function names. A formula is fine when it IS the idea, such as the scoring
+  rule; a number is fine only when the method depends on it.
 
-## Why it beats the baseline
-What structural property of this graph the algorithm exploits, and which part of
-the diagnostics above shows it working.
+## What is new and why it wins
+For each step marked [new] above: what the agent figured out, why the closest
+classical algorithm cannot produce it (what it does not see, or does not do),
+and how much of the gain over that classical algorithm it accounts for, pointing
+at the iteration that introduced it and the reward move it caused. Then the
+structural property of this graph the winner exploits, and which part of the
+diagnostics above shows it working. If nothing is new and the winner is a known
+algorithm with tuned parameters, say so plainly.
 
 ## Limitations
 Where this algorithm would do badly, and what you would try next with more
 iterations.
 
-Write for someone who has the script in front of them but has not read this
-conversation. Do not invent results that are not in the numbers above."""
+Write for someone who has not read the script or this conversation and wants to
+know what the algorithm does, not how the code is laid out. Do not invent
+results that are not in the numbers above."""
 
 
 def build_feedback_prompt(

@@ -118,6 +118,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         self.conversation = conversation
         pending = base_user
         best = None
+        best_iteration = None
         last_error = None
         last_script = None
         evaluations = 0
@@ -146,6 +147,8 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     ),
                     checkpoint.trajectory_from_dict(resumed["best"]["trajectory"]),
                 )
+                # .get: checkpoints from before the iteration was recorded still resume
+                best_iteration = resumed["best"].get("iteration")
 
             best_text = "none yet" if best is None else f"{best[1].reward:.2f}"
             tqdm.write(
@@ -159,6 +162,8 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         )
         while evaluations < self.outer_iters:
             iteration += 1
+            # Recorded on a failure that happens before the script exists
+            script = None
             try:
                 tqdm.write(
                     f"[one_shot] iter {iteration} "
@@ -201,6 +206,8 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                         "reward": None,
                         "error": last_error,
                         "repair": repairs,
+                        "script": script,
+                        "parent_iteration": best_iteration,
                     }
                 )
 
@@ -257,6 +264,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     anchor,
                     anchor_name,
                     anchor_trajectory,
+                    best_iteration=best_iteration,
                 )
 
                 continue
@@ -267,17 +275,23 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
             # Captured before `best` moves: the paired delta and the edit target
             # both refer to the incumbent this attempt was measured against
             previous_best = best
+            parent_iteration = best_iteration
 
             if best is None or improves(
                 trajectory.reward, best[1].reward, task.sense
             ):
                 best = (strategy, trajectory)
+                best_iteration = iteration
 
             self.history.append(
                 {
                     "iteration": iteration,
                     "reward": trajectory.reward,
                     "best": best[1].reward,
+                    # The script and what it edited: the closing write-up diffs
+                    # them, since the thread is trimmed and cannot show old turns
+                    "script": strategy.source_script,
+                    "parent_iteration": parent_iteration,
                     "plan_seconds": round(plan_seconds, 3),
                     "rollout_seconds": round(
                         trajectory.cost.get("rollout_seconds", 0.0), 3
@@ -367,6 +381,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 anchor,
                 anchor_name,
                 anchor_trajectory,
+                best_iteration=best_iteration,
             )
 
         progress_bar.close()
@@ -392,6 +407,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         anchor: str,
         anchor_name: str,
         anchor_trajectory: Trajectory | None,
+        best_iteration: int | None,
     ) -> None:
         """Everything needed to continue this loop, written after every turn."""
         checkpoint.save(
@@ -407,6 +423,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     else {
                         "script": best[0].source_script,
                         "trajectory": checkpoint.trajectory_to_dict(best[1]),
+                        "iteration": best_iteration,
                     }
                 ),
                 "pending": pending,

@@ -160,6 +160,7 @@ class EvolveSearch(OuterLoopMethod):
         for iteration in progress_bar:
             if not population:
                 operator = "seed"
+                parent = None
                 error_text = (
                     f"\n\nYour previous attempt failed with:\n{last_error}\n"
                     if last_error
@@ -206,6 +207,8 @@ class EvolveSearch(OuterLoopMethod):
             )
 
             probe_request, probe_note = [], None
+            # Recorded on a failure that happens before the script exists
+            script = None
 
             try:
                 script = conversation.send(user)
@@ -239,6 +242,10 @@ class EvolveSearch(OuterLoopMethod):
                         "reward": None,
                         "operator": operator,
                         "error": last_error,
+                        "script": script,
+                        "parent_iteration": (
+                            None if parent is None else parent.get("iteration")
+                        ),
                     }
                 )
                 tqdm.write(
@@ -299,6 +306,7 @@ class EvolveSearch(OuterLoopMethod):
             )
             population.append(
                 {
+                    "iteration": iteration + 1,
                     "script": strategy.source_script,
                     "reward": trajectory.reward,
                     "summary": summarize(trajectory, graph, task)
@@ -328,6 +336,12 @@ class EvolveSearch(OuterLoopMethod):
                     "reward": trajectory.reward,
                     "best": best[1].reward,
                     "operator": operator,
+                    # The script and what it edited: the closing write-up diffs
+                    # them, since the thread is trimmed and cannot show old turns
+                    "script": strategy.source_script,
+                    "parent_iteration": (
+                        None if parent is None else parent.get("iteration")
+                    ),
                     "plan_seconds": round(plan_seconds, 3),
                     "rollout_seconds": round(
                         trajectory.cost.get("rollout_seconds", 0.0), 3
