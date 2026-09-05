@@ -62,7 +62,6 @@ data_dir = Path(__file__).resolve().parent.parent / "raw" / "digg_cascades"
 
 # KONECT's own note: "The dataset contains multiple edges, when a single user has
 # apparently given multiple votes to a single item." The first vote is the adoption.
-first_vote_wins = True
 
 
 def _fetch(name: str, url: str, archive: str, member: str) -> Path:

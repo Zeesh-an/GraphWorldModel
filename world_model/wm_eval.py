@@ -384,122 +384,6 @@ def evaluate_one_step(
     return results
 
 
-@torch.inference_mode()
-def rollout_episodes(
-    model: nn.Module,
-    out_dir: str,
-    diffusion_model: str,
-    store: dict[str, dict],
-    device: torch.device,
-    split: str = "test",
-    threshold: float = 0.5,
-    hide_edge_weights: bool = False,
-    action_encoding: str = basic_encoding,
-) -> dict[str, float]:
-    """
-    Feed the model its own thresholded prediction + recorded action; compare to truth.
-
-    For each episode (main branch only), the model is initialised with the true state
-    at t = 0 and then fed its own binary output at each subsequent step.  The recorded
-    (ground-truth) action is applied at every step so the model sees the correct intervention signal.
-
-    Three metrics are reported:
-    - rollout_newinf_f1: per-step F1 on newly infected nodes only (susceptible mask)
-    - rollout_count_mae: per-step |predicted count - true count| of infected nodes
-    - rollout_final_f1: F1 between rolled-out final state and true final state
-    """
-    path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"
-    records = [
-        json.loads(line) for line in path.read_text().splitlines() if line.strip()
-    ]
-
-    # Keep only main-branch records; group by (graph_id, episode_id).
-    by_episode = defaultdict(list)
-    for record in records:
-        if record["branch"] == "main":
-            by_episode[(record["graph_id"], record["episode_id"])].append(record)
-
-    model.eval()
-    per_step_f1, count_mae, final_f1 = [], [], []
-
-    for (graph_id, _), episode_records in by_episode.items():
-        episode_records.sort(key=lambda record: record["t"])
-        num_nodes = store[graph_id]["num_nodes"]
-        adjacency_map = reconstruct_episode_adjacency(
-            episode_records, store[graph_id]["base_edges"]
-        )
-
-        # Initialise the autoregressive state from the first recorded true state
-        current_infected = set(episode_records[0]["state"]["infected"])
-        current_frontier = set(episode_records[0]["state"]["frontier"])
-
-        for record in episode_records:
-            edge_index, weights = edges_to_arrays(adjacency_map[(record["t"], "main")])
-
-            # Replace the record's state with the rolled-out state for feature building
-            rolled = dict(record)
-            rolled["state"] = {
-                "infected": sorted(current_infected),
-                "frontier": sorted(current_frontier),
-            }
-            X, _, _ = build_features(rolled, edge_index, num_nodes, action_encoding)
-            graph_input = build_graph_input(
-                edge_index,
-                weights,
-                num_nodes,
-                diffusion_model,
-                device,
-                hide_edge_weights,
-            )
-
-            probs = (
-                torch.sigmoid(model(torch.from_numpy(X).to(device), graph_input))
-                .cpu()
-                .numpy()
-            )
-            pred_infected = probs[:, 0] > threshold  # (N,) bool
-            pred_frontier = probs[:, 1] > threshold  # (N,) bool
-
-            # Ground-truth next state from the record.
-            target_infected = np.zeros(num_nodes, dtype=np.float32)
-            target_infected[record["next_state"]["infected"]] = 1.0
-            state_infected = np.zeros(num_nodes, dtype=np.float32)
-            state_infected[record["state"]["infected"]] = 1.0
-
-            # New-infection F1: evaluate only on susceptible nodes (state_infected == 0)
-            susceptible_mask = state_infected == 0
-            per_step_f1.append(
-                binary_f1(
-                    pred_infected & susceptible_mask,
-                    target_infected.astype(bool) & susceptible_mask,
-                )
-            )
-            count_mae.append(
-                abs(float(pred_infected.sum()) - len(record["next_state"]["infected"]))
-            )
-
-            # Advance the autoregressive state.
-            current_infected = set(
-                int(node) for node in np.nonzero(pred_infected)[0].tolist()
-            )
-            current_frontier = set(
-                int(node) for node in np.nonzero(pred_frontier)[0].tolist()
-            )
-
-        # Final-state F1 compares rolled-out endpoint to the true endpoint
-        truth_final = np.zeros(num_nodes, dtype=np.float32)
-        truth_final[episode_records[-1]["next_state"]["infected"]] = 1.0
-        rolled_final = np.zeros(num_nodes, dtype=np.float32)
-        rolled_final[list(current_infected)] = 1.0
-        final_f1.append(binary_f1(rolled_final, truth_final))
-
-    return {
-        "rollout_newinf_f1": float(np.mean(per_step_f1)) if per_step_f1 else 0.0,
-        "rollout_count_mae": float(np.mean(count_mae)) if count_mae else 0.0,
-        "rollout_final_f1": float(np.mean(final_f1)) if final_f1 else 0.0,
-    }
-
-
 def _action_bag(action_dicts: list[dict]) -> list[ActionOp]:
     """Rebuild an ActionOp bag from a record's serialized action list."""
     return [
@@ -616,7 +500,7 @@ def rollout_ensemble(
                     sample, step, np.asarray(state.infected, dtype=np.int64)
                 ] = 1.0
 
-        # Model ensemble: n_samples sampled rollouts (mirror rollout_episodes, but sample).
+        # Model ensemble: n_samples sampled rollouts (sampled rather than thresholded).
         model_infected = np.zeros((n_samples, num_steps, num_nodes), dtype=np.float32)
         for sample in range(n_samples):
             current_infected = set(episode_records[0]["state"]["infected"])

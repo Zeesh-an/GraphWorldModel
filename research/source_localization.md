@@ -290,7 +290,7 @@ Smaller than the §2.2 framing's estimate, because it reuses the entire agent lo
 | 4 | Episode regrouping: `(x, y)` pairs from `transitions_*.jsonl` by `episode_id` | `world_model/wm_data.py` | ~50 lines, §2.1 |
 | 5 | `PR / RE / F1 / AUC` plus a true re-simulated error | `world_model/wm_eval.py` | ~40 lines |
 | 6 | Prompt scaffolding: task statement, the `localize` contract, the primitive's signature | `coding_agent/prompts.py` | ~40 lines |
-| 7 | **Arm A** (the ablation): frozen-model gradient descent on $\tilde{x}$, plus the VAE prior | `world_model/wm_sl.py` | ~200 lines, and it is the _only_ genuinely new modelling code |
+| 7 | **Arm A** (the ablation): frozen-model gradient descent on $\tilde{x}$, plus the VAE prior | built, then removed on 2026-09-04 with condition 8; `world_model/wm_sl.py` no longer exists | superseded by the label-free consistency reward, which arms 3-6 score directly |
 | 8 | Registry entry: flip `source_localization` from `planned`, set `objective`, keep `action_ops = ()` | `pipeline/tasks.py` | ~10 lines |
 
 Items 1-6 and 8 are the method; item 7 is the control it is measured against. **Multi-source is our default**, not an extension: our seed sets are $k = 1$, $20\%$ of $N$, squarely the multi-source regime (§8.2). A single-source arm needs a `--budget 1` generation run, which is cheap but changes which baselines are admissible, since rumor centrality and the Jordan centre only make sense there.
@@ -822,7 +822,7 @@ Because the outer loop selects a program, the split has to prevent that program 
 
 #### 8.5.2 Budget parity across arms
 
-Arms 3-6 differ only in the binding of `predict_marginals` (§2.4.3), so any difference in their _outer_ budget invalidates the comparison. This is the same requirement `--compare` already enforces for influence maximization, and it has two halves:
+Arms 3-6 differ only in the binding of `predict_marginals` (§2.4.3), so any difference in their _outer_ budget invalidates the comparison. This is the same requirement `--referee` (with `--mc-agreement` for the NDlib replay) already enforces for influence maximization, and it has two halves:
 
 1. **Equal outer-loop budget.** Identical $P$ (generations × population), identical LLM model, identical prompt scaffolding, identical seeds. An arm that gets more generations wins for the wrong reason.
 2. **Equal inner-loop budget, reported two ways.** Fix either the number of `predict_marginals` calls (which favours `@monte_carlo`, since each of its calls is more accurate) or the wall-clock (which favours `@world_model`). **Report both.** Only reporting the second is the version of this table that a reviewer will correctly disbelieve.
@@ -879,7 +879,7 @@ Ordered so the risk that kills the project is tested before the work that depend
 
 1. **Kill-test LPSI first, before building anything else.** Hand-write LPSI (roughly fifteen lines), run the outer loop on one graph with a small $P$, and check whether any generated program beats it. §5.5 has LPSI beating both SL-VAE and DDMSL on Digg [verified], and LPSI sits _inside_ the agent's expressible space, so the realistic floor is "the search rediscovers LPSI". If forward-model-guided refinement cannot improve on that floor, stop: items 2-5 are not worth building. This is §2.9 risk 1 and it is cheap to run.
 2. **Build the loop: items 1-6 and 8 of §2.7.** The primitive and its four bindings, `localize` on the Protocol, the F1 reward, episode regrouping, metrics, prompts, registry entry. This produces arms 3-6.
-3. **Build arm A** (`world_model/wm_sl.py`): freeze the world model, gradient-descend a relaxed source vector against $\lVert y - f_\theta(\tilde{x}, G)\rVert^2$, then add the VAE prior. This is SL-VAE (a) → SL-VAE, whose own ablation is worth `+0.19` F1 on Jazz and `+0.26` on Network Science [verified, Table 4]. **6 vs A is the methodological claim**, so the control has to be built well rather than strawmanned.
+3. **Arm A was built and then removed on 2026-09-04** (condition 8, `world_model/wm_sl.py`, deleted): under the label-free consistency reward the frozen-model inversion duplicated what arms 3-6 already measure, so the 6-vs-A comparison is no longer run.
 4. **Install GraphSL rather than reimplementing** (`pip install GraphSL`) for arms 1 and 2. It ships LPSI, NETSLEUTH, OJC, GCNSI, IVGD and SL-VAE behind one API returning accuracy / precision / recall / F1 / AUC, plus the six benchmark graphs, and it packages **our** Network Science version.
 5. **Run the transfer experiments of §8.5.1.** A program selected and evaluated on the same graph proves nothing about amortization. Select on one graph set, run unmodified on another, and report that as the headline.
 6. **Report on Jazz, Cora-ML, Power Grid and Karate** against §5.1 and §5.2 directly, on both the marginal and the binarized observation. Report Network Science against IVGD / GraphSL / SIDSL and state explicitly that SL-VAE's column is a different graph (§11).

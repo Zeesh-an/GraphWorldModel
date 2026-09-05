@@ -26,7 +26,6 @@ from data.wm_simulator import (
 
 implemented = "implemented"
 planned = "planned"
-out_of_scope = "out_of_scope"
 
 # Objective sense the planner optimizes. `recover` tasks invert the forward model
 # instead of choosing an intervention, so they have no action ops; `forecast` tasks
@@ -413,7 +412,7 @@ tasks = {
         # x_hat into exactly the seed commit the generator writes at t=0 for any
         # re-simulation it needs (research/source_localization.md §2.4.1). Nothing
         # is ever emitted as an intervention: a localize() program returns node
-        # ids, but naming the op keeps `predict_marginals` and the --compare
+        # ids, but naming the op keeps `predict_marginals` and the shared
         # referee speaking the same action vocabulary as every other task.
         action_ops=("add_node",),
         summary="Recover the seed set s_0 from an observed diffusion state s_T.",
@@ -476,7 +475,7 @@ tasks = {
         # Named for the same reason source localization names it: nothing is ever
         # emitted as an intervention: a reconstruct() program returns
         # `{node: (time, parent)}`, but the recovered SOURCES (the nodes whose
-        # parent is None) are an `add_node` bag, which is what the --compare
+        # parent is None) are an `add_node` bag, which is what the shared
         # re-simulation referee replays. Naming the op keeps every arm speaking one
         # action vocabulary (research/cascade_reconstruction.md §2.5.1).
         action_ops=("add_node",),

@@ -53,7 +53,7 @@ Four pieces:
 
 Like the two inverse tasks, the reward is EXACT: it is measured against a
 popularity we read off a log, so it carries no evaluator noise and is comparable
-across conditions without the `--compare` referee. The referee still runs and
+across conditions without a referee replay. `--mc-agreement` still runs and
 measures something else: what the ARM's own evaluator thinks the cascade would
 have done, which is §9.1's modelling error in the units the rest of this repo
 reports.
@@ -85,16 +85,11 @@ default_instances = 40
 # kernel evaluations, so the total per call is `steps * samples`.
 default_forecast_samples = 8
 
-# Unrolls the `--compare` MODELLING referee averages. Far below the search's,
+# Unrolls the `--mc-agreement` MODELLING referee averages. Far below the search's,
 # deliberately: it is a diagnostic (§9.1) rather than a reward, and under
 # @monte_carlo one unroll costs `steps * mc_runs` real episodes, so it is the single
 # most expensive thing in a forecast run.
 referee_forecast_samples = 2
-
-# A node is treated as adopting in an unrolled realization at this probability. Only
-# the SAMPLED unroll needs a threshold; the returned marginal is an average over
-# realizations and stays continuous.
-adoption_threshold = 0.5
 
 
 @dataclass()
@@ -706,7 +701,7 @@ def referee_modelling_error(
     """
     What the ARM'S OWN EVALUATOR predicts, rolled forward from each observed prefix.
 
-    The `--compare` referee for this task, and the number §9.1 is actually about.
+    The `--mc-agreement` modelling referee for this task, and the number §9.1 is actually about.
     The reward already measures how good a PROGRAM is; this measures how good the
     MODEL is: roll `f_theta` (or NDlib, or the analytic IC form) forward from the
     observed prefix with no program in the loop, and compare its expected popularity
@@ -754,9 +749,6 @@ def referee_modelling_error(
         "model_mean_actual": metrics["mean_actual"],
         "model_kernel_calls": oracle.kernel_calls,
     }
-
-
-max_listed_cascades = 6
 
 
 def summarize_prediction(

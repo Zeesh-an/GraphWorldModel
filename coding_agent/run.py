@@ -493,7 +493,7 @@ def build_method(
 
     raise ValueError(
         f"unknown method {config.method!r}; "
-        f"choose one_shot|per_step|windowed|evolve|adaptive|gradient|decode"
+        f"choose one_shot|per_step|windowed|evolve|adaptive"
     )
 
 
@@ -1996,8 +1996,13 @@ class Baseline(Strategy):
     # When the credit flag is enabled, ablate the executed action sequence against the same environment and measure the reward
     # An inverse or forecast task emits no actions: there is nothing to ablate,
     # and the base rollout would report a spread number beside an F1 or an MSLE
-    if config.credit and config.evaluator == monte_carlo and not (
-        task.recovers or task.forecasts
+    # Canned rows skip both blocks: nothing renders the credit of a library
+    # algorithm, and at the referee sample count it is (k+1) rollouts for nothing
+    if (
+        config.credit
+        and canned_script is None
+        and config.evaluator == monte_carlo
+        and not (task.recovers or task.forecasts)
     ):
         print(
             "[run] credit skipped under @monte_carlo: one sequential rollout per "
@@ -2007,6 +2012,7 @@ class Baseline(Strategy):
 
     if (
         config.credit
+        and canned_script is None
         and config.evaluator != monte_carlo
         and not (task.recovers or task.forecasts)
     ):
@@ -2453,15 +2459,10 @@ if __name__ == "__main__":
             "windowed",
             "evolve",
             "adaptive",
-            "gradient",
-            "decode",
         ],
         help="outer-loop method; evolve = population edits with refine/restructure "
         "operators; adaptive = the same search over a per-round policy for adaptive "
-        "IM; gradient = arm A for source localization, per-instance Adam on a "
-        "relaxed source vector against a frozen world model, no LLM; decode = arm A "
-        "for cascade reconstruction, Metropolis-Hastings over histories against the "
-        "same frozen model, also no LLM (default: one_shot).",
+        "IM (default: one_shot).",
     )
     parser.add_argument(
         "--native-arm",

@@ -78,6 +78,8 @@ Chosen to finish in reasonable time while still being a graph the task's own lit
 
 ## 3. The eight submissions
 
+Every submission below carries `all-discovery` (condition 9, the nine published LLM algorithm-discovery systems, added 2026-09-04) beside its classical and external baselines, so each job asks for a week and a 12-hour per-arm timeout as the section-6 ladders do; drop the alias for a two-day smoke test.
+
 ```bash
 # ---------------------------------------------------------------- 1. influence maximization
 TASK=influence_maximization \
@@ -87,13 +89,14 @@ RUN_JOBID=0 \
 SKIP_STAGES=train \
 BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
 external:opim external:ssa external:subsim \
-external:touplegdd external:deepim external:moeim external:glie" \
+external:touplegdd external:deepim external:moeim external:glie \
+all-discovery" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 2. adaptive online IM
@@ -107,14 +110,15 @@ RUN_JOBID=0 \
 SKIP_STAGES=train \
 BASELINES="adapt_epic adapt_degree_discount adapt_degree adapt_pagerank adapt_random \
 static_split imm \
-external:adaptiveim external:rl4im" \
+external:adaptiveim external:rl4im \
+all-discovery" \
 ARMS="adaptive_free@oracle evolve_free@oracle" \
 EVALUATOR=oracle \
 ROUNDS=3 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 3. critical node detection
@@ -137,13 +141,14 @@ bpd_r decycling explosive_immunization gnd gndr netshield kshell_removal \
 frontier_removal degree_removal betweenness_removal acquaintance_immunization random_removal \
 external:gdm external:mind external:nirm external:dcrs external:selinda \
 external:gnd external:collective_influence \
-external:explosive_immunization external:dismantling_review" \
+external:explosive_immunization external:dismantling_review \
+all-discovery" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 4. source localization
@@ -165,12 +170,13 @@ infected_closeness infected_eigenvector random_sources \
 external:graphsl_lpsi external:graphsl_netsleuth external:graphsl_ojc \
 external:graphsl_gcnsi external:graphsl_ivgd external:graphsl_slvae \
 external:cosasi_jordan external:cosasi_netsleuth external:cosasi_lisn \
-external:cosasi_rumor_centrality" \
+external:cosasi_rumor_centrality \
+all-discovery" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 5. influence blocking
@@ -184,13 +190,14 @@ SKIP_STAGES=train \
 BLOCKING_LEVER=counter_seed TIE_BREAK=auto \
 BASELINES="proximity multi_hop_proximity rps cmia_o cldag forward_blocking \
 reverse_blocking degree_blocking pagerank_blocking betweenness_blocking random_blocking \
-external:sandimin external:imin_joc" \
+external:sandimin external:imin_joc \
+all-discovery" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGETS="10 20 30 40 50" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 6. cascade reconstruction
@@ -206,12 +213,13 @@ BASELINES="delayed_bfs ordered_steiner_closure greedy_ordered steiner_tree tree_
 personalized_pagerank consistent_tree_wpct consistent_tree_wbct cult dhrec cri netfill \
 jordan_backward observed_only one_hop random_reconstruction \
 external:ditto external:ditto_dhrec external:ditto_cri \
-external:grin external:spin external:deep_demixing" \
+external:grin external:spin external:deep_demixing \
+all-discovery" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
-CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 7. epidemic control
@@ -229,13 +237,14 @@ eigenvector_immunization kshell_immunization betweenness_immunization random_imm
 external:netimm_netshield external:netimm_dava external:netimm_dava_fast \
 external:netimm_netshape external:netimm_degree external:netimm_random \
 external:gdm_epi external:collective_influence_epi \
-external:explosive_immunization_epi external:dismantling_review_epi" \
+external:explosive_immunization_epi external:dismantling_review_epi \
+all-discovery" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 BUDGET_PCTS="1 5 10 20" \
 HORIZON=15 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
-CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 8. cascade prediction
@@ -256,12 +265,13 @@ CP_SPLIT=chronological CP_METRIC=msle \
 BASELINES="szabo_huberman feature_linear feature_gbt weng_communities \
 seismic hawkes hawkes_hybrid rpp hip branching_factor \
 neighborhood_size degree_scaled reachability persistence mean_size random_prediction \
-external:casflow external:ccgl external:ctcp external:cascn external:coupledgnn" \
+external:casflow external:ccgl external:ctcp external:cascn external:coupledgnn \
+all-discovery" \
 ARMS="evolve_free@oracle" \
 EVALUATOR=oracle \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=50 \
-CREDIT=1 FORCE=1 BASELINE_TIMEOUT=21600 \
-GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
+GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 ```
 
@@ -517,3 +527,90 @@ TASK=influence_maximization DATASET=netscience RUN=testrun_lt RUN_JOBID=0 DIFFUS
 
 Reusing `RUN=testrun_ic` / `testrun_lt` drops the nine rows into the same results tree as the world-model arms, so the report and plots carry all conditions in one table. A subset is `BASELINES="discovery:eoh discovery:reevo discovery:openevolve"`, and `LLM_MODELS="gpt-5.6-luna gpt-5.6-terra"` fans each one out per model (the default is `gpt-6-astra`). Every other task takes the same flags; the contract per task is in `baselines/README.md`.
 
+
+## 9. The scale row: the section-6 ladder on digg
+
+The same two submissions as section 6 (data, world-model training, every baseline, the discovery systems, the oracle and world-model arms) on `digg`, 116,893 nodes and 4,022,894 arcs, the IM scale row of `final_results_plan.md`. Every setting that differs from the netscience ladder is there because the graph is 70 times larger, and each one is named with its reason. The whole path was exercised end to end on the real digg graph on 2026-09-04 with tiny sizes (six episodes at two marginal draws, one training epoch, one world-model agent iteration, one canned baseline, the oracle referee at eight samples and a two-episode NDlib agreement replay), which is where the measured numbers below come from.
+
+What changes and why:
+
+- **Data**: `GEN_MODELS` is one dynamics per job (`IC` for the IC run, `LT` for the LT run) instead of the default `IC LT`, because the two jobs use separate `RUN`s anyway and generating both files twice doubles the most expensive stage. `ROLLOUTS=10` over the class's three selectors (`random degree pagerank`; exact betweenness is $O(VE)$ and takes hours here) gives 30 episodes per dynamics, and `MC_MARGINALS=10` instead of 30. One digg IC episode costs 19 s at one marginal draw (12 s at horizon 6), so at ten draws per step with the default counterfactual forks the data stage is about 2 to 3 hours per dynamics on one core; the class default (50 rollouts at 30 draws) would take days. The split is per episode, which the pipeline resolves itself for a single real graph (a graph-disjoint split needs three graphs).
+- **Training**: `HIDDEN_DIM=128` instead of the class's 256 and `BATCH_SIZE=2` instead of 32, because a batch is a block-diagonal union of whole digg graphs and the SAGE message gather materializes arcs times hidden per layer (32 graphs would be 128M arcs, tens of gigabytes per layer). `EPOCHS=60 PATIENCE=10` instead of 400 and 50, since one epoch is about 175 optimizer steps over the full graph. `NO_PLAN_DEMO=1` skips the training-side planning demo, which scores candidate interventions on the true simulator. The training report's rollout-fidelity block still runs NDlib, 20 draws per test episode, which at 30 episodes per dynamics is about five test episodes and 100 NDlib episodes, about half an hour; that block is the world-model evaluation, not the agent's evaluator. If the GPU has less than 40 GB, `BATCH_SIZE=1`.
+- **No Monte Carlo in the loop**: `ARMS` is the oracle and world-model arms only, as in section 6; neither the `@monte_carlo` arm nor the `@native` arm runs, `EVALUATOR=oracle` scores every baseline, and `MC_AGREEMENT=0`. The one NDlib replay the runtime chart needs is the separate job below. `CREDIT=0`, because credit ablates every budgeted action one at a time and a pct20 plan here has 23,379 of them.
+- **Sample counts**: `N_SAMPLES=200` stays. The world-model environment now advances samples in chunks of at most 16M arcs per forward pass (`coding_agent/envs/world_model_env.py`, `default_max_block_arcs`; four digg samples per pass, one pass per timestep on netscience as before), so 200 samples cost 50 forward passes per timestep instead of one pass over an 800M-arc block. `REFEREE_SAMPLES=200` instead of 1,000: the referee replay itself would be fine at 1,000, but condition 9 scores every candidate program at the referee's count and MCTS-AHD alone evaluates 1,000 of them per budget; the referee's standard error is written beside every number as `referee_reward_se`.
+- **Baselines**: the RIS repos (`opim`, `ssa`, `subsim`) are built for this size and stay. `moeim` is dropped: it is a pure-Python evolutionary search that simulates every candidate on its own, already 10 hours with DeepIM at netscience. `deepim` is left out of the default list and given as an opt-in line: its input is 1,000 simulated cascades per budget point generated by our simulator (about four hours of NDlib per budget on digg before its VAE trains), which is the Monte Carlo cost this row exists to avoid. `touplegdd` and `glie` run inference only and stay under the 12-hour per-arm timeout; an overrun is recorded as a skipped row and the sweep continues. `all-discovery` is included as in section 6.
+
+```bash
+# ---------------------------------------------------------------- IM on digg, IC
+TASK=influence_maximization \
+DATASET=digg \
+RUN=scale_ic \
+RUN_JOBID=0 \
+DIFFUSION_MODEL=IC GEN_MODELS=IC \
+BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
+external:opim external:ssa external:subsim \
+external:touplegdd external:glie \
+all-discovery" \
+ARMS="evolve_free@oracle evolve_free@world_model" \
+LLM_MODEL=gpt-6-astra \
+WM_MODEL=sage HEAD=structured \
+GEN_ACTION_OPS="add_node remove_node" \
+ROLLOUTS=10 MC_MARGINALS=10 \
+HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
+EVALUATOR=oracle \
+BUDGET_PCTS="1 5 10 20" \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 REFEREE_SAMPLES=200 \
+MC_AGREEMENT=0 CREDIT=0 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=128G TIME=7-00:00:00 \
+./sbatch/pipeline.sbatch
+
+# ---------------------------------------------------------------- IM on digg, LT
+TASK=influence_maximization \
+DATASET=digg \
+RUN=scale_lt \
+RUN_JOBID=0 \
+DIFFUSION_MODEL=LT GEN_MODELS=LT \
+BASELINES="high_degree degree_discount pagerank_seeds imm voterank random_seeds \
+external:opim external:ssa external:subsim \
+external:touplegdd external:glie \
+all-discovery" \
+ARMS="evolve_free@oracle evolve_free@world_model" \
+LLM_MODEL=gpt-6-astra \
+WM_MODEL=sage HEAD=structured \
+GEN_ACTION_OPS="add_node remove_node" \
+ROLLOUTS=10 MC_MARGINALS=10 \
+HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
+EVALUATOR=oracle \
+BUDGET_PCTS="1 5 10 20" \
+HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 REFEREE_SAMPLES=200 \
+MC_AGREEMENT=0 CREDIT=0 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+GRES=gpu:1 MEM=128G TIME=7-00:00:00 \
+./sbatch/pipeline.sbatch
+
+# ---------------------------------------------------------------- the one Monte Carlo run: the speedup bar
+# Submit after a ladder job has finished (same RUN, START_STAGE=agent, no data or
+# training). It re-runs ONE canned row at ONE budget with the NDlib agreement replay,
+# which writes mc_rollout_seconds beside referee_rollout_seconds on that row and
+# gives runtime.png its `monte_carlo (agreement)` bar and the report its
+# referee_minus_mc line; nothing else in the run touches NDlib. FORCE=1 overwrites
+# only that row, because ARMS=none and BASELINES names one arm. Fifty episodes of
+# digg IC are about 15 to 20 minutes; the oracle evaluation of the same row rides
+# along. For the LT run change RUN and DIFFUSION_MODEL.
+TASK=influence_maximization DATASET=digg RUN=scale_ic RUN_JOBID=0 DIFFUSION_MODEL=IC \
+  START_STAGE=agent ARMS=none BASELINES=degree_discount BUDGET_PCTS=1 \
+  EVALUATOR=oracle REFEREE_SAMPLES=200 MC_AGREEMENT=1 MC_AGREEMENT_RUNS=50 \
+  CREDIT=0 FORCE=1 \
+  GRES=none MEM=64G TIME=06:00:00 \
+  ./sbatch/pipeline.sbatch
+
+# ---------------------------------------------------------------- opt-in: DeepIM on digg
+# Costs about four hours of NDlib per budget point for its own training data before
+# its VAE trains; run it into the same RUN afterwards if the row is wanted.
+TASK=influence_maximization DATASET=digg RUN=scale_ic RUN_JOBID=0 DIFFUSION_MODEL=IC \
+  START_STAGE=agent ARMS=none BASELINES="external:deepim" \
+  EVALUATOR=oracle REFEREE_SAMPLES=200 CREDIT=0 BASELINE_TIMEOUT=86400 \
+  GRES=gpu:1 MEM=128G TIME=3-00:00:00 \
+  ./sbatch/pipeline.sbatch
+```
+
+What to read: `referee_reward` and `referee_reward_se` at 200 samples on every row; `cost.rollout_seconds` on the two agent arms against `referee_rollout_seconds` (both the oracle at 200 samples, chunked) and, on the degree-discount row after the timing job, `mc_rollout_seconds` for 50 NDlib episodes, which is the speedup figure. A generated program that samples on its own will hit `STRATEGY_TIMEOUT` more often here than on netscience; that shows up as a failed generation in the attempts table, not as a crash.

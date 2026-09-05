@@ -40,10 +40,6 @@ repo_root = Path(__file__).resolve().parents[1]
 # Seconds one candidate scoring subprocess may take: the executor's own 300 s cap
 # on a plan_horizon() call plus the Monte Carlo rollouts behind it
 candidate_timeout_seconds = 900
-# Failure fitness. Every task's fitness is non-negative (see `oriented_fitness`),
-# so zero is the floor and a crashed or timed-out candidate can never outrank a
-# valid one under a minimizing task
-failure_fitness = 0.0
 base_url_env = "GATEWAY_BASE_URL"
 # Frameworks that truncate at their own default token budget lose long programs
 max_completion_tokens = 16000
@@ -304,8 +300,6 @@ def predict(graph, observation):
 # t=0 and the harness scores that as a one-shot plan, which is the non-adaptive
 # side of the adaptivity gap every adaptive arm is compared against
 contracts["adaptive_online_im"] = contracts["influence_maximization"]
-
-edge_levers = ("edge_block", "weight_block", "edge_cut", "contact_reduce")
 
 
 def token_env(model: str) -> str:

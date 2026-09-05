@@ -61,8 +61,8 @@ from coding_agent.types import (
     rank_by,
 )
 
+# The other three operators (refine, parameters, simplify) exploit the population best
 explore_operators = ("from_scratch", "crossover", "synthesize")
-exploit_operators = ("refine", "parameters", "simplify")
 # EoH's operator weights in spirit (its m1/m2 at 2, e1/e2/s1 at 1), with refine
 # as the workhorse: the schedule below decides the explore/exploit split, these
 # decide the mix inside each side

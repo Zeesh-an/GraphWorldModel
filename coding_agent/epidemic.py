@@ -291,7 +291,7 @@ def dose_set(actions: list[list[ActionOp]], lever: str) -> list:
     What a finished trajectory actually spent its budget on, in the order it spent it.
 
     Read back from the executed bags rather than re-planning, for the same reason
-    `--compare` replays them: a randomized allocation returns a different set on a
+    the referee replays them: a randomized allocation returns a different set on a
     second call, and every reported number has to describe the set that earned the
     reward.
     """
@@ -335,7 +335,7 @@ def epidemic_metrics(
       1. **The attack rate and prevented infections**: the objective, directly, on
          the same evaluator that produced `reward`. A ratio of two different rulers
          means nothing, which is why `unprotected` is measured on this arm's own
-         evaluator and `--compare` re-measures both on the shared referee.
+         evaluator and the referee replay re-measures both on the shared referee.
       2. **The outbreak SHAPE**: peak prevalence, time to peak, AUC, endemic
          prevalence. §8.2 trap 4 is the reason these are not optional: a good policy
          flattens rather than eliminates, so a terminal-state number alone can rank

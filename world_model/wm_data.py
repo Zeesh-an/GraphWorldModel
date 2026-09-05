@@ -87,13 +87,6 @@ epidemic_in_channels = 9
 # all of them keep working with no branch. Columns 2-4 are the current compartments
 # and are what the compartment sampler actually draws from.
 epidemic_out_channels = 5
-(
-    out_epi_ever,
-    out_epi_incidence,
-    out_epi_exposed,
-    out_epi_infectious,
-    out_epi_recovered,
-) = range(5)
 
 
 def channels_for(competitive: bool = False, epidemic: bool = False) -> tuple[int, int]:
@@ -608,7 +601,6 @@ def edges_to_arrays(
     return edge_index, weights
 
 
-
 def _diffusion_only_groups(groups: dict, path: Path) -> dict:
     """
     Keep only the episodes whose main branch injects nothing after t=0.
@@ -868,16 +860,6 @@ def load_episode_trajectories(
         )
 
     return sorted(episodes, key=lambda episode: episode["episode_id"])
-
-
-def dataset_has_parents(out_dir: Path) -> bool:
-    """Whether this dataset carries the transmission edge, from its own metadata."""
-    metadata_path = Path(out_dir) / "metadata.json"
-
-    if not metadata_path.exists():
-        return False
-
-    return bool(json.loads(metadata_path.read_text())["config"].get("trace_parents"))
 
 
 def dataset_is_competitive(out_dir: Path) -> bool:

@@ -56,11 +56,6 @@ class Layout:
         return f"{self.task}/{self.dataset}/{self.run}"
 
     @property
-    def task_dir(self) -> Path:
-        """All runs of this task, across datasets: what a cross-dataset table reads."""
-        return self.root.parent.parent
-
-    @property
     def dataset_dir(self) -> Path:
         """All runs of this (task, dataset): what an ablation comparison reads."""
         return self.root.parent
@@ -108,10 +103,6 @@ class Layout:
 
         return root / label / f"{arm}.json"
 
-    def agent_checkpoint(self, label: str, arm: str) -> Path:
-        """Mid-search state for one (budget, arm), beside its result file."""
-        return self.agent_dir / label / f"{arm}{checkpoint_suffix}"
-
     def result_globs(self) -> list[Path]:
         """
         Every result file, ours and external, in one list for plots/report.
@@ -133,13 +124,3 @@ class Layout:
         return sorted(self.baselines_dir.glob(f"*/*{skip_marker_suffix}")) + sorted(
             self.agent_dir.glob(f"*/*{skip_marker_suffix}")
         )
-
-
-def discover_runs(task: str, root: Path | str = results_root) -> list[Layout]:
-    """Every finished run of one task, for cross-dataset comparison tables."""
-    task_root = Path(root) / task
-
-    return [
-        Layout(task, manifest.parent.parent.name, manifest.parent.name, root=root)
-        for manifest in sorted(task_root.glob("*/*/pipeline.json"))
-    ]

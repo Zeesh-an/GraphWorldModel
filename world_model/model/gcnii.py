@@ -1,7 +1,7 @@
 """
-GCNII Forward Model
+GCNII encoder
 
-GCNII adapted to the forward diffusion task.
+GCNII as a world-model backbone: forward(X: (N, C), graph) -> (N, hidden_dim).
 
 Layer formula:
     β_l    = log(λ/l + 1)
@@ -12,9 +12,6 @@ Layer formula:
 H^0 is the output of the input projection (shared across all layers).
 α (alpha) controls the weight of the initial residual connection.
 λ (lamda) controls the decay of β_l with depth: larger λ → larger β_l.
-
-Interface matches GraphTransformerForwardModel:
-    forward(seed_vec: (N, 1), adj: sparse COO (N, N)) -> (N, 1)
 """
 
 import math
@@ -22,7 +19,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from world_model.model.model_utils import degree_encoding
 
 
 class GCNIILayer(nn.Module):
@@ -80,90 +76,6 @@ class GCNIILayer(nn.Module):
         )  # shape: (N, H)
 
         return F.relu(output)
-
-
-class GCNIIForwardModel(nn.Module):
-    """
-    GCNII-based forward diffusion model.
-
-    Architecture:
-        1. Input projection: cat(seed_vec, degree_PE) -> hidden_dim (= H^0)
-        2. n_layers x GCNIILayer (initial residual + identity mapping)
-        3. Output head: LayerNorm -> Linear(hidden_dim, 1) -> Sigmoid
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int = 64,
-        n_layers: int = 8,
-        alpha: float = 0.1,
-        lamda: float = 0.5,
-        dropout: float = 0.1,
-        use_pe: bool = True,
-    ) -> None:
-        super().__init__()
-
-        self.hidden_dim = hidden_dim
-        self.use_pe = use_pe
-
-        in_features = 1 + hidden_dim if use_pe else 1
-        self.input_proj = nn.Sequential(
-            nn.Linear(in_features=in_features, out_features=hidden_dim),
-            nn.ReLU(),
-        )
-
-        self.layers = nn.ModuleList(
-            [
-                GCNIILayer(
-                    hidden_dim=hidden_dim,
-                    alpha=alpha,
-                    lamda=lamda,
-                    layer_index=layer_index + 1,  # 1-based, matches paper
-                    dropout=dropout,
-                )
-                for layer_index in range(n_layers)
-            ]
-        )
-
-        self.output_proj = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(in_features=hidden_dim, out_features=1),
-        )
-
-        self._reset_parameters()
-
-    def _reset_parameters(self) -> None:
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
-    def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
-        """
-        seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adjacency: sparse COO (N, N), normalized D^-1/2 (A+I) D^-1/2
-        returns: (N, 1) predicted outcome probabilities in [0, 1]
-        """
-        device = seed_vec.device
-
-        if self.use_pe:
-            positional_encoding = degree_encoding(
-                adjacency, self.hidden_dim, device
-            )  # shape: (N, H)
-            features = torch.cat(
-                [seed_vec, positional_encoding], dim=-1
-            )  # shape: (N, 1 + H)
-        else:
-            features = seed_vec  # shape: (N, 1)
-
-        initial_hidden = self.input_proj(features)  # shape: (N, H)
-        hidden = initial_hidden
-
-        for layer in self.layers:
-            hidden = layer(hidden, initial_hidden, adjacency)  # shape: (N, H)
-
-        return torch.sigmoid(self.output_proj(hidden))  # shape: (N, 1)
 
 
 class GCNIIEncoder(nn.Module):

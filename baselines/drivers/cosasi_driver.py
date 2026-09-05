@@ -52,11 +52,9 @@ import numpy as np
 
 methods = ("jordan", "netsleuth", "lisn", "rumor_centrality")
 
-# Single-source estimators, kept and labelled as such. They rank all N nodes and
-# are exact on trees, but under a multi-source protocol at k = 10% of N they
-# score near zero BY CONSTRUCTION (research/source_localization.md §8.2): a
-# property of the protocol, not the estimator. Run them at --budgets 1.
-single_source_methods = ("rumor_centrality",)
+# rumor_centrality is a single-source estimator: exact on trees, near zero BY
+# CONSTRUCTION under a multi-source protocol at k = 10% of N (§8.2). Run it at
+# --budgets 1.
 
 
 def patch_int32_indices():

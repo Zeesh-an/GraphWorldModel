@@ -226,7 +226,7 @@ def blocker_set(actions: list[list[ActionOp]], lever: str) -> list:
     What a finished trajectory actually spent its budget on, in the order it spent it.
 
     Read back from the executed bags rather than re-planning, for the same reason
-    `--compare` replays them: a randomized strategy returns a different set on a
+    the referee replays them: a randomized strategy returns a different set on a
     second call, and every reported number has to describe the set that earned the
     reward.
     """

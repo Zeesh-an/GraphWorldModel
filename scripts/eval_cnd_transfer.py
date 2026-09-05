@@ -53,14 +53,6 @@ from world_model.wm_eval import graphs_in_split, rebuild_simulator, seed_upper_b
 default_threads = 1
 
 
-def outbreak_state(simulator, num_nodes, outbreak_pct, rng):
-    """Seed an exogenous outbreak the planner did not start."""
-    count = max(1, round(num_nodes * outbreak_pct / 100))
-    seeds = [int(v) for v in rng.choice(num_nodes, size=count, replace=False)]
-
-    return simulator.advance([ActionOp("add_node", v) for v in seeds]), seeds
-
-
 def spread_after_removal(store_entry, diffusion_model, outbreak_seeds, removals,
                          horizon, mc_runs, crn_seeds, cost=None):
     """

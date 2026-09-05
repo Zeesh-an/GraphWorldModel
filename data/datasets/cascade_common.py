@@ -53,17 +53,6 @@ from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
 
-# Elapsed time is stored in the corpus's own unit (seconds for the social corpora,
-# days for APS). A replayed timestep is a BIN of that unit, and the bin width is
-# `--cp-step`; these are the field's own observation windows expressed in it, and
-# they are quoted from CasFlow's `gene_cas.py` header rather than from any paper.
-casflow_windows = {
-    # corpus stem -> (observation windows, prediction horizon), corpus time units
-    "weibo": ((1800, 3600), 86400),  # 0.5 h / 1 h, predicted to 24 h
-    "twitter": ((86400, 172800), 2764800),  # 1 d / 2 d, predicted to 32 d
-    "aps": ((1095, 1826), 7305),  # 3 y / 5 y in DAYS, predicted to 20 y
-}
-
 # CasFlow drops any cascade with fewer than this many participants inside the
 # observation window, and CasFT does the same. §8.4 is why it is a named constant
 # rather than a literal: dropping small cascades removes the hardest and most

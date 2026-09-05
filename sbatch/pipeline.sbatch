@@ -337,6 +337,7 @@
 #   REFEREE         oracle (default) or monte_carlo: the shared referee every winner is replayed on.
 #   REFEREE_SAMPLES rollout samples for that replay (default 1000).
 #   MC_AGREEMENT    1 = also replay every winner on NDlib: the independent check on the oracle and the timing row.
+#   MC_AGREEMENT_RUNS NDlib episodes for that replay (default: MC_RUNS); lower it on a large graph.
 #                   Keep this at 1. Without it the table is not comparable
 #                   across conditions, because each arm's own reward comes
 #                   from its own evaluator.
@@ -793,6 +794,7 @@ ALLOWED_OPS="${ALLOWED_OPS:-}"
 REFEREE="${REFEREE:-oracle}"
 REFEREE_SAMPLES="${REFEREE_SAMPLES:-1000}"
 MC_AGREEMENT="${MC_AGREEMENT:-0}"
+MC_AGREEMENT_RUNS="${MC_AGREEMENT_RUNS:-}"
 CREDIT="${CREDIT:-1}"
 ALLOW_MC_ALGOS="${ALLOW_MC_ALGOS:-0}"
 STRATEGY_TIMEOUT="${STRATEGY_TIMEOUT:-}"
@@ -873,6 +875,7 @@ flags+=(--reasoning-effort "$REASONING_EFFORT")
 [ -n "$GRAPH_ID" ]        && flags+=(--graph-id "$GRAPH_ID")
 flags+=(--referee "$REFEREE" --referee-samples "$REFEREE_SAMPLES")
 [ "$MC_AGREEMENT" = "1" ] && flags+=(--mc-agreement)
+[ -n "$MC_AGREEMENT_RUNS" ] && flags+=(--mc-agreement-runs "$MC_AGREEMENT_RUNS")
 [ "$CREDIT" = "1" ]       && flags+=(--credit)
 [ "$CREDIT" = "0" ]       && flags+=(--no-credit)
 [ "$ALLOW_MC_ALGOS" = "1" ] && flags+=(--allow-mc-algorithms)

@@ -1837,7 +1837,6 @@ def _rl4im_parse(work_dir: Path, stdout: str, budget: int) -> list[int]:
 # episode id rather than a flat list. `run_baseline.run_external_baseline`
 # dispatches on whether `instances` was passed.
 
-graphsl_methods = ("lpsi", "netsleuth", "ojc", "gcnsi", "ivgd", "slvae")
 # Training epochs for GraphSL's three learned methods. Low by the papers'
 # standards and deliberately so: this is a default that has to finish on a
 # laptop, and it is the one number to raise before quoting a GCNSI/IVGD/SL-VAE
@@ -2029,29 +2028,6 @@ def _localization_parse(work_dir: Path, stdout: str, instances: list) -> dict:
 # every runnable repo here produces per-step node STATES (DITTO's `y_pred`) and a
 # Path Precision comparison between two of them would otherwise be a comparison of
 # two different tree-building tricks rather than of two decoders.
-
-# DITTO's own hyperparameters, read from `scripts/ditto-ba-si.sh` rather than from
-# the paper. Its MCMC is `t_steps` Hastings rounds over `t_samples` parallel
-# chains, and `q_steps` is the proposal network's training budget, which is the
-# expensive half and the first thing to cut for a smoke run.
-ditto_defaults = {
-    "b_pI0": "1e-6",
-    "b_pR0": "1e-6",
-    "b_steps": "500",
-    "b_lr": "0.003",
-    "q_steps": "500",
-    "q_lr": "0.001",
-    "q_hid": "16",
-    "q_gnn": "3",
-    "q_mlp": "2",
-    "q_samples": "10",
-    "q_zlim": "16",
-    "p_coef": "1.0",
-    "t_samples": "100",
-    "t_steps": "10",
-    "t_keep": "0.5",
-}
-
 
 def _reconstruction_export(
     graph, work_dir: Path, instances: list, diffusion_model: str, driver: str,

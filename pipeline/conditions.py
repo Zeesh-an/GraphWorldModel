@@ -57,8 +57,6 @@ valid_methods = (
     "adaptive",
 )
 adaptive_method = "adaptive"
-# The non-adaptive counterpart an adaptive arm is divided by
-non_adaptive_method = "evolve"
 valid_modes = ("free", "scored")
 
 pure_ga_condition = 1
@@ -89,12 +87,13 @@ condition_names = {
 selection_evaluator = oracle
 
 # The classical pool run as condition 1: one representative per major IM family
-# (heuristic, discount, centrality, greedy/CELF, RIS/sketch) plus the random floor
+# (heuristic, discount, centrality, RIS/sketch) plus the random floor; celf_pp was
+# dropped from the final tables (final_results_plan.md) and stays callable as
+# `baseline:celf_pp`
 default_baselines = (
     "high_degree",
     "degree_discount",
     "pagerank_seeds",
-    "celf_pp",
     "imm",
     "random_seeds",
 )

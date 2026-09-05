@@ -91,7 +91,7 @@ This guarantees the model is always shown the adjacency that actually produced t
 
 ## The backbones (encoders): `X (N,6) → h (N, H)`
 
-All five live in `world_model/model/` and share the encoder interface `forward(X, graph) → (N, hidden_dim)`. Each is a stack of pre-norm residual blocks ending in a `LayerNorm`. (Each file also contains a legacy `*ForwardModel` class from the old seed→outcome pipeline; the world model uses only the `*Encoder` classes.) The encoder is selected by `--model` via the `backbones` registry in `wm_model.py`.
+All five live in `world_model/model/` and share the encoder interface `forward(X, graph) → (N, hidden_dim)`. Each is a stack of pre-norm residual blocks ending in a `LayerNorm`. The encoder is selected by `--model` via the `backbones` registry in `wm_model.py`.
 
 | backbone                                       | `--model` | what it does                                                                                                                                                                                                      | graph view used             |
 | ---------------------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- |
@@ -347,7 +347,7 @@ These reload a `.pt` checkpoint named by a results JSON (from the checkpoint's o
 | `eval_structured_oracle.py` | IC structural-form oracle check                                                                                                                  |
 | `../coding_agent/check_containment.py` | runnable self-check for the critical-node-detection contract (outbreak, removal budget, minimize sense, structural metrics) |
 | `../coding_agent/check_source_localization.py` | runnable self-check for the inverse contract (localize, the four oracle bindings, label extraction, PR/RE/F1/AUC, the differentiable inversion) |
-| `model/*.py`                | the five backbone encoders + `model_utils.py` (each file also retains an unused legacy `*ForwardModel` class from the old seed→outcome pipeline) |
+| `model/*.py`                | the five backbone encoders |
 | `checkpoints/`              | trained `.pt` weights, per-run results JSONs, and `RESULTS.md`                                                                                   |
 
 
@@ -387,7 +387,7 @@ The number to read first in the rollout block is `ens_prevalence_bias`, not `ens
 
 ## Forecasting on REAL cascades (`--task cascade_prediction`)
 
-The one task that trains this model on transitions **no simulator produced**, and the reason it is here is the reason `research/cascade_prediction.md` §9.1 gives: every other evaluation in this file measures a learned model against traces drawn from the same NDlib simulator that trained it, which is a closed loop that can only report LEARNING error. A replayed Weibo corpus breaks the loop, and `--compare` then reports the quantity that loop hides, the **modelling error** of the forward model itself, with no program involved.
+The one task that trains this model on transitions **no simulator produced**, and the reason it is here is the reason `research/cascade_prediction.md` §9.1 gives: every other evaluation in this file measures a learned model against traces drawn from the same NDlib simulator that trained it, which is a closed loop that can only report LEARNING error. A replayed Weibo corpus breaks the loop, and `--referee` (with `--mc-agreement` for the NDlib replay) then reports the quantity that loop hides, the **modelling error** of the forward model itself, with no program involved.
 
 Three things change for the model, none of them a flag:
 

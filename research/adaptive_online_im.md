@@ -92,7 +92,7 @@ The graph changes: edge/node insertions and deletions arrive as a stream, and th
 | **Action** `a_t`   | the round-`t` seed batch, `b = k/r` nodes     | a **bag** of `add_node` ops: the same object `t = 0` already commits    |
 | **`T_exo`**        | mark the batch active                         | already deterministic, already implemented                               |
 | **`T_endo`**       | one IC/LT step (or the cascade to quiescence) | the structured head                                                      |
-| **Objective**      | `E[\|⋃ activated\|]` over the policy          | final `\|infected\|`, MC-replayed by `--compare`                         |
+| **Objective**      | `E[\|⋃ activated\|]` over the policy          | final `\|infected\|`, MC-replayed by `--referee` (with `--mc-agreement` for the NDlib replay)                         |
 | **Metric**         | adaptivity gap, spread vs non-adaptive        | needs a multi-round evaluation loop (§9)                                 |
 
 ### 2.2 Our generator already emits adaptive-IM transitions
@@ -475,7 +475,7 @@ Two readings of this matrix:
 
 | Needed                                  | Have it? | Where                                                                                                                                                    |
 | --------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| expected spread, ground-truth MC replay | yes       | `--compare`, `--mc-runs` (default 200)                                                                                                                   |
+| expected spread, ground-truth MC replay | yes       | `--referee` (with `--mc-agreement` for the NDlib replay), `--mc-runs` (default 200)                                                                                                                   |
 | per-condition cost accounting           | yes       | `real_env_episodes`, `evaluator_calls`, `evaluator_seconds`, `forward_passes` per arm, in `summary.csv` and the report                                    |
 | adaptivity gap                          | yes       | `pipeline/conditions.py::adaptivity_gaps`, pairing each `adaptive_*@E` arm with `evolve_*@E` at matched `k` on the shared ground-truth replay             |
 | `(k, b, r)` reported together           | yes       | `rounds` / `round_batches` / `round_gap` in the results JSON and `summary.csv`                                                                            |
@@ -519,7 +519,7 @@ So the transitions an adaptive-IM policy would need are **already in the trainin
 
 | #   | Item                                                                                                                             | Status | Where it landed                                                                                                                                                                                   |
 | --- | -------------------------------------------------------------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | **MC-call + wall-clock counter per arm**                                                                                         | yes done | `evaluator_calls` / `evaluator_seconds` / `forward_passes` / `real_env_episodes` on every arm, captured before the `--credit` and `--compare` replays. §2.3's cost claim is now a column          |
+| 1   | **MC-call + wall-clock counter per arm**                                                                                         | yes done | `evaluator_calls` / `evaluator_seconds` / `forward_passes` / `real_env_episodes` on every arm, captured before the `--credit` and `--referee` (with `--mc-agreement` for the NDlib replay) replays. §2.3's cost claim is now a column          |
 | 2   | **Multi-round evaluation loop**: `--rounds r`, `--per-round-budget b`, policy re-queries `f_θ` each round on the realized `s_t` | yes done | `coding_agent/rounds.py` + the `adaptive` method. `--rounds` is Han's k-sweep, `--per-round-budget` his b-sweep, `--round-gap` sets the diffusion between rounds                                  |
 | 3   | **Non-adaptive control arm at matched `k = r·b`**                                                                                | yes done | the task's registry `default_arms` pair `adaptive_free@E` with `evolve_free@E` for all four evaluators; `pipeline/conditions.py::adaptivity_gaps` divides them on the shared ground-truth replay  |
 | 4   | **Report `(k, b)` alongside `--budget-pcts`**                                                                                    | yes done | `rounds`, `round_batches`, `round_gap`, `feedback_model`, `round_spreads` in the results JSON, `summary.csv`, and the report's adaptivity table                                                   |
@@ -580,7 +580,7 @@ Warning: **A registry error this surfaced and fixed.** The existing `oim` entry 
 **Two bugs these branches surfaced, both found by running them rather than by reading:**
 
 1. `static_split` requested a static ranking of exactly `k`, so under multi-round campaign 2 started with campaign 1's `k` activations already in `active`, found no fresh candidates, and seeded nothing. Measured as `campaign_rewards [33.0, 0.0, 0.0]`. The ranking now accounts for the active set.
-2. The `--compare` ground-truth referee was not wrapped for multi-round, so an arm reported a 3-campaign union while the shared referee reported a 1-campaign spread and the report put the two in one column. The referee now runs the same number of campaigns.
+2. The `--referee` (with `--mc-agreement` for the NDlib replay) ground-truth referee was not wrapped for multi-round, so an arm reported a 3-campaign union while the shared referee reported a 1-campaign spread and the report put the two in one column. The referee now runs the same number of campaigns.
 
 **The one design decision this file did not anticipate.** Under myopic feedback the policy cannot see `state.infected`, so it cannot tell that a candidate is already active. Erroring on a re-seed would make the myopic arm unrunnable; letting it through would be worse, because `add_node` writes NDlib status `1` over status `2` and hands a spent IC spreader a second round of transmission. The seed is therefore **dropped**: the slot is spent, nothing activates, and blind re-seeding costs the policy budget. That is the price of the weaker observation, and it is the mechanism by which the feedback model does any work at all. Under full-adoption the same proposal raises, because the policy was handed the set it failed to filter.
 

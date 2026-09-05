@@ -492,7 +492,7 @@ GraphWorldModel/
 │   ├── eval_planning.py        # recompute planning regret on a checkpoint
 │   ├── eval_rollout_ensemble.py# recompute ensemble rollout on a checkpoint
 │   ├── eval_structured_oracle.py# IC structural-form oracle check
-│   ├── model/                  # 5 backbone encoders + model_utils (encoder files also retain unused legacy *ForwardModel classes)
+│   ├── model/                  # 5 backbone encoders
 │   ├── checkpoints/            # historical RESULTS.md (new runs write to results/)
 │   └── README.md               # ← world-model technical reference
 ├── coding_agent/               # ← outer-loop coding agent (see its README)
@@ -510,4 +510,4 @@ GraphWorldModel/
 └── requirements.txt
 ```
 
-> **Legacy.** The original seed→outcome inverse-problem world-model training and the VAE joint-training pipeline have been removed (`world_model/old/`, `world_model/model/vae.py`), and so have the diffusion-only CND/IM/SL data generators that were archived under `data/old/`: nothing imported them, they predated the absolute-import convention and no longer ran, and `wm_metrics.connectivity_profile` had already superseded the one function worth keeping. The encoder files in `world_model/model/` still contain the old `*ForwardModel` classes, now unused. The action-conditioned world model above is the only active path.
+> **Legacy.** The original seed→outcome inverse-problem world-model training and the VAE joint-training pipeline have been removed (`world_model/old/`, `world_model/model/vae.py`), and so have the diffusion-only CND/IM/SL data generators that were archived under `data/old/`: nothing imported them, they predated the absolute-import convention and no longer ran, and `wm_metrics.connectivity_profile` had already superseded the one function worth keeping.The action-conditioned world model above is the only active path.

@@ -34,8 +34,8 @@
 #   the head         the structured heads are what make the model invertible in
 #                    practice. ICTransmissionHead composes p_new from per-edge
 #                    transmission and cannot saturate by construction, and it is
-#                    also what makes `wm_sl.soft_rollout` differentiable in the
-#                    relaxed source vector with no custom backward code. A
+#                    also what kept the since-removed arm-A inversion (condition
+#                    8, deleted 2026-09-04) differentiable without custom backward code. A
 #                    `--head linear` checkpoint will train fine and invert badly.
 
 set -euo pipefail

@@ -30,7 +30,7 @@
 #                   that is the entire point (9.1)
 #   6 @world_model  one batched matmul per kernel evaluation
 #
-# --compare adds the number 9.1 is actually about: the MODELLING error of each arm's
+# --mc-agreement adds the number 9.1 is actually about: the MODELLING error of each arm's
 # own forward model with no program in the loop. The gap between that column and the
 # arm's own error is what the SEARCH bought; the LEVEL is how far an
 # Independent-Cascade-shaped kernel is from a real adoption process. Expect to lose

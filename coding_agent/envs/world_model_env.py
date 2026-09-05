@@ -35,6 +35,11 @@ edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 oracle_hidden_dim = 8
 oracle_n_layers = 1
 
+# Arcs per forward pass. The message gather materializes E x hidden per layer, so
+# a 200-sample block of a 4M-arc graph would need tens of gigabytes; samples are
+# advanced in chunks of at most this many arcs and the pass is repeated per chunk
+default_max_block_arcs = 16_000_000
+
 
 class WorldModelEnvironment:
     def __init__(
@@ -51,6 +56,7 @@ class WorldModelEnvironment:
         epidemic: bool = False,
         hide_edge_weights: bool = False,
         action_encoding: str = basic_encoding,
+        max_block_arcs: int = default_max_block_arcs,
     ) -> None:
         self.model = model.to(device).eval()
         self.graph = graph
@@ -79,6 +85,7 @@ class WorldModelEnvironment:
         # sample. Recomputing it was 11% of rollout time for a constant. Keyed by
         # id() of the edge array, holding the array itself alongside so its id
         # cannot be recycled while the entry lives, and cleared per rollout.
+        self.max_block_arcs = max_block_arcs
         self._degree_cache = {}
         # Filled by every rollout: final infected count per sample block, and the
         # per-step count curve per sample block. The curves are what lets a
@@ -388,7 +395,13 @@ class WorldModelEnvironment:
         base_arrays = edges_to_arrays(self.base_edges)
         sample_edges = [self.base_edges] * num_samples
         sample_arrays = [base_arrays] * num_samples
-        block_input = self._block_graph_input(sample_arrays)
+        chunk = max(1, self.max_block_arcs // max(1, int(base_arrays[0].shape[1])))
+        chunks = [
+            range(first, min(first + chunk, num_samples))
+            for first in range(0, num_samples, chunk)
+        ]
+        # One block input per chunk, built lazily and dropped when a member edits
+        block_inputs = [None] * len(chunks)
 
         # Per-sample state. Under competition every sample starts with S_N already
         # committed and spreading, which is the premise of the task rather than an
@@ -442,10 +455,7 @@ class WorldModelEnvironment:
                         sample_edges[sample], bag_dicts[sample]
                     )
                     sample_arrays[sample] = edges_to_arrays(sample_edges[sample])
-                    block_input = None
-
-            if block_input is None:
-                block_input = self._block_graph_input(sample_arrays)
+                    block_inputs[sample // chunk] = None
 
             x_parts = []
             for sample in range(num_samples):
@@ -501,18 +511,31 @@ class WorldModelEnvironment:
 
                 x_parts.append(X)
 
-            features = torch.from_numpy(np.concatenate(x_parts, axis=0))
+            features = np.concatenate(x_parts, axis=0)  # shape: (n_samples * N, C)
 
-            # One forward pass of the model given the block graph
-            # Get probabilities with the sigmoid activation function
+            # One forward pass per chunk of samples given that chunk's block graph
             columns = 5 if self.epidemic else 4 if self.competitive else 2
-            probabilities = (
-                torch.sigmoid(self.model(features.to(self.device), block_input))
-                .cpu()
-                .numpy()
-                .reshape(num_samples, num_nodes, columns)
-            )  # shape: (n_samples, N, 2 or 4)
-            self.forward_passes += 1
+            outputs = []
+            for index, members in enumerate(chunks):
+                if block_inputs[index] is None:
+                    block_inputs[index] = self._block_graph_input(
+                        [sample_arrays[sample] for sample in members]
+                    )
+                rows = slice(members.start * num_nodes, members.stop * num_nodes)
+                outputs.append(
+                    torch.sigmoid(
+                        self.model(
+                            torch.from_numpy(features[rows]).to(self.device),
+                            block_inputs[index],
+                        )
+                    )
+                    .cpu()
+                    .numpy()
+                )
+                self.forward_passes += 1
+            probabilities = np.concatenate(outputs, axis=0).reshape(
+                num_samples, num_nodes, columns
+            )  # shape: (n_samples, N, 2, 4 or 5)
 
             # Coupled sampling: draw the new infections once from the frontier
             # marginal, then derive both channels (frontier = new wave, infected

@@ -9,7 +9,6 @@ import os
 import tarfile
 import urllib.request
 import zipfile
-from collections import defaultdict
 from pathlib import Path
 import numpy as np
 import scipy.sparse as sp
@@ -216,61 +215,3 @@ def build_edge_index(
     edge_index = np.stack([sources, destinations], axis=0)  # (2, E)
 
     return edge_index, ic_probs, lt_weights
-
-
-def build_adjacency_lists(
-    sources: np.ndarray,
-    destinations: np.ndarray,
-    ic_probs: np.ndarray,
-    lt_weights: np.ndarray,
-) -> tuple[dict, dict]:
-    """
-    Build adjacency list dicts for fast simulation.
-
-    Returns
-    -------
-    out_adj: dict[int, list[tuple[int, float]]] out_adj[u] = [(v, p), ...]  used by Independent Cascade (IC)
-    in_adj: dict[int, list[tuple[int, float]]] in_adj[v] = [(u, w), ...]  used by Linear Threshold (LT)
-    """
-    # in_adjacency[v] = list of (neighbor_u, prob_u_v) incoming edges
-    in_adjacency = defaultdict(list)  # in_adjacency[v]  = [(u, p), ...] used by LT
-    out_adjacency = defaultdict(list)  # out_adjacency[u] = [(v, p), ...] used by IC
-
-    for edge, (source, destination) in enumerate(zip(sources, destinations)):
-        # Outgoing edges from the source (used by IC)
-        out_adjacency[int(source)].append((int(destination), float(ic_probs[edge])))
-
-        # Incoming edges to the destination (used by LT)
-        in_adjacency[int(destination)].append((int(source), float(lt_weights[edge])))
-
-    return dict(out_adjacency), dict(in_adjacency)
-
-
-def save_graph(
-    out_dir: Path,
-    edge_index: np.ndarray,
-    ic_probs: np.ndarray,
-    lt_weights: np.ndarray,
-    node_feats: np.ndarray,
-    node_labels: np.ndarray,
-) -> Path:
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = out_dir / "graph_data.npz"
-    np.savez_compressed(
-        out_path,
-        edge_index=edge_index,
-        ic_probs=ic_probs,
-        lt_weights=lt_weights,
-        node_feats=node_feats,
-        node_labels=node_labels,
-    )
-    print(f"[ok] Saved graph data to {out_path}")
-
-    return out_path
-
-
-def load_graph(data_dir: Path) -> dict:
-    """Load graph data. Returns dict with numpy arrays."""
-    data = np.load(data_dir / "graph_data.npz")
-
-    return {key: data[key] for key in data.files}

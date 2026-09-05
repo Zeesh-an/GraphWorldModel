@@ -1,18 +1,13 @@
 """
-Graph Transformer: Forward Diffusion Model
+Graph Transformer encoder
 
-Replaces the SpGAT in DeepIM with a proper Graph Transformer.
+A Graph Transformer world-model backbone: forward(X: (N, C), graph) -> (N, hidden_dim).
 
 Key differences from GAT:
     - Scaled dot-product attention  (Q·K / sqrt(d_k)) vs additive LeakyReLU attention
     - Pre-LayerNorm residual blocks (more stable training)
     - Position-wise FFN after attention
-    - Degree-based positional encoding injected into node features
-
-Architecture: GraphTransformerForwardModel
-    Inputs: x (N, 1) binary seed indicator per node, adj sparse COO tensor (N, N)
-    Layers: node input projection → L x GTLayer → output projection → sigmoid
-    Output: (N, 1) predicted activation probability per node
+    - Degree information enters through the degree feature channel
 """
 
 import math
@@ -20,7 +15,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from world_model.model.model_utils import degree_encoding
 
 # Floors the attention log-bias and softmax denominator
 numerical_eps = 1e-9
@@ -168,92 +162,6 @@ class GraphTransformerLayer(nn.Module):
 
 
 # Full Forward Model (Graph Transformer)
-class GraphTransformerForwardModel(nn.Module):
-    """
-    Graph Transformer-based differentiable diffusion simulator.
-
-    Mirrors the role of SpGAT in DeepIM:
-        Input: seed_vec - soft seed probabilities from VAE decoder (N, 1),
-                adj - sparse COO graph adjacency (symmetric, normalised)
-        Output: predicted activation probability per node (N, 1)
-
-    Architecture:
-        1. Input projection: 1 → d_model, concatenated with degree PE
-        2. L Graph Transformer layers
-        3. Output projection: d_model → 1 → sigmoid
-    """
-
-    def __init__(
-        self,
-        d_model: int = 64,
-        n_heads: int = 4,
-        n_layers: int = 3,
-        ffn_dim: int = 128,
-        dropout: float = 0.1,
-    ) -> None:
-        super().__init__()
-
-        self.d_model = d_model
-
-        # Project scalar node feature (seed prob) + PE → d_model
-        self.input_proj = nn.Sequential(
-            nn.Linear(in_features=1 + d_model, out_features=d_model),
-            nn.GELU(),
-        )
-
-        self.layers = nn.ModuleList(
-            [
-                GraphTransformerLayer(
-                    d_model=d_model, n_heads=n_heads, ffn_dim=ffn_dim, dropout=dropout
-                )
-                for _ in range(n_layers)
-            ]
-        )
-
-        self.output_proj = nn.Sequential(
-            nn.LayerNorm(d_model),
-            nn.Linear(in_features=d_model, out_features=1),
-        )
-
-        self._reset_parameters()
-
-    def _reset_parameters(self) -> None:
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
-    def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
-        """
-        seed_vec: (N, 1) soft seed probabilities
-        adjacency: sparse COO (N, N) or dense (N, N)
-        returns: (N, 1) influence probabilities in [0, 1]
-        """
-        device = seed_vec.device
-
-        # Build edge_index from the adjacency
-        if adjacency.is_sparse:
-            edge_index = adjacency.coalesce().indices()  # (2, E)
-        else:
-            edge_index = adjacency.nonzero(as_tuple=False).t()  # (2, E)
-
-        # Compute degree positional encodings
-        positional_encoding = degree_encoding(
-            adjacency, self.d_model, device
-        )  # (N, d_model)
-
-        # Input projection: cat(seed_vec, PE) → d_model
-        features = self.input_proj(
-            torch.cat([seed_vec, positional_encoding], dim=-1)
-        )  # (N, d_model)
-
-        # Graph Transformer layers
-        for layer in self.layers:
-            features = layer(features, edge_index)
-
-        # Output projection
-        return torch.sigmoid(self.output_proj(features))  # (N, 1)
 
 
 class GraphTransformerEncoder(nn.Module):

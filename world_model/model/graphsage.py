@@ -1,7 +1,7 @@
 """
-GraphSAGE Forward Model
+GraphSAGE encoder
 
-GraphSAGE with mean aggregator adapted to the forward diffusion task.
+GraphSAGE with mean aggregator as a world-model backbone: forward(X: (N, C), graph) -> (N, hidden_dim).
 Uses the concat variant:
 
     h_N(v) = mean({ h_u : u ∈ N(v) })          # neighbor mean, no self
@@ -9,16 +9,12 @@ Uses the concat variant:
 
 The neighbor mean excludes self (self-loops coming from adj_process are
 filtered out of edge_index) since the self term is concatenated separately.
-
-Interface matches GraphTransformerForwardModel:
-    forward(seed_vec: (N, 1), adj: sparse COO (N, N)) -> (N, 1)
 """
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from world_model.model.model_utils import degree_encoding
 
 # Prevent division-by-zero for isolated nodes (degree 0 -> mean 0)
 degree_floor = 1e-9
@@ -88,94 +84,6 @@ class GraphSAGELayer(nn.Module):
         output = self.dropout(output)
 
         return features + output  # residual
-
-
-class GraphSAGEForwardModel(nn.Module):
-    """
-    GraphSAGE-based forward diffusion model.
-
-    Architecture:
-        1. Input projection: cat(seed_vec, degree_PE) -> hidden_dim
-        2. n_layers x GraphSAGELayer (pre-norm residual mean-aggregator blocks)
-        3. Output head: LayerNorm -> Linear(hidden_dim, 1) -> Sigmoid
-    """
-
-    def __init__(
-        self,
-        hidden_dim: int = 64,
-        n_layers: int = 3,
-        dropout: float = 0.1,
-        use_pe: bool = True,
-    ) -> None:
-        super().__init__()
-
-        self.hidden_dim = hidden_dim
-        self.use_pe = use_pe
-
-        in_features = 1 + hidden_dim if use_pe else 1
-        self.input_proj = nn.Sequential(
-            nn.Linear(in_features=in_features, out_features=hidden_dim),
-            nn.GELU(),
-        )
-
-        self.layers = nn.ModuleList(
-            [
-                GraphSAGELayer(hidden_dim=hidden_dim, dropout=dropout)
-                for _ in range(n_layers)
-            ]
-        )
-
-        self.output_proj = nn.Sequential(
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(in_features=hidden_dim, out_features=1),
-        )
-
-        self._reset_parameters()
-
-    def _reset_parameters(self) -> None:
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-
-    def forward(self, seed_vec: torch.Tensor, adjacency: torch.Tensor) -> torch.Tensor:
-        """
-        seed_vec: (N, 1) soft action probabilities in [0, 1]
-        adjacency: sparse COO (N, N), normalized D^-1/2 (A+I) D^-1/2 (self-loops added)
-        returns: (N, 1) predicted outcome probabilities in [0, 1]
-        """
-        device = seed_vec.device
-
-        # Build edge_index from the adjacency, stripping self-loops so GraphSAGE
-        # mean aggregates over true neighbors only (self term enters via concat).
-        if adjacency.is_sparse:
-            edge_index = adjacency.coalesce().indices()  # shape: (2, E)
-        else:
-            edge_index = adjacency.nonzero(as_tuple=False).t()  # shape: (2, E)
-
-        sources, destinations = edge_index[0], edge_index[1]
-        mask = sources != destinations
-        edge_index = torch.stack(
-            [sources[mask], destinations[mask]], dim=0
-        )  # shape: (2, E')
-
-        if self.use_pe:
-            positional_encoding = degree_encoding(
-                adjacency, self.hidden_dim, device
-            )  # shape: (N, H)
-            features = torch.cat(
-                [seed_vec, positional_encoding], dim=-1
-            )  # shape: (N, 1 + H)
-        else:
-            features = seed_vec  # shape: (N, 1)
-
-        features = self.input_proj(features)  # shape: (N, H)
-
-        for layer in self.layers:
-            features = layer(features, edge_index)  # shape: (N, H)
-
-        return torch.sigmoid(self.output_proj(features))  # shape: (N, 1)
 
 
 class GraphSAGEEncoder(nn.Module):

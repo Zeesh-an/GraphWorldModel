@@ -858,12 +858,6 @@ ACTION RULES:
 - what remove_node does is stated below; read it before using the op.
 """
 
-
-# The influence-maximization preamble, kept as a module-level name because the
-# system_prompts table below is built from it. build_system_prompt swaps in the
-# containment variant per task.
-common_rules = _common_rules(None)
-
 # What remove_node means is a property of the dataset, so it cannot be baked into
 # the module-level preamble. build_system_prompt appends the matching one.
 remove_semantics_notes = {
@@ -1982,9 +1976,6 @@ def build_outbreak_block(task: TaskSpec) -> str:
     )
 
 
-max_listed_episodes = 6
-
-
 setting_notes = {
     "partial_times": (
         "PARTIAL TIMESTAMPS. Each infected node was reported independently with "
@@ -2656,9 +2647,6 @@ RULES:
 REPLY SHAPE (adapt the logic: improve on it, do not return it unchanged):
 {example}
 """
-
-
-scored_system = _scored_system(None)
 
 
 def build_system_prompt(

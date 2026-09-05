@@ -104,12 +104,6 @@ policies = {
     "block_hubs": block_hubs_policy,
 }
 
-# Which policies make sense for which objective sense. Seeding a node is a
-# spreading intervention; blocking one is a containment intervention. Running the
-# wrong family produces a number, just not a meaningful one.
-spread_policies = ("null", "degree_seed", "random_seed")
-containment_policies = ("null", "block_hubs", "random_seed")
-
 
 def resolve(names: list[str]) -> dict:
     """Look up policies by name, failing loudly on a typo rather than silently skipping."""

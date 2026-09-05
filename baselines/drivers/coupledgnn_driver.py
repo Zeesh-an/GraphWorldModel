@@ -79,8 +79,6 @@ max_epochs = 20
 
 # The embedding width the repo's filename hardcodes (`.emb_32`)
 embedding_dim = 32
-# The per-node feature width its shipped example uses
-feature_dim = 6
 
 
 def load_instances(work_dir: Path) -> dict:

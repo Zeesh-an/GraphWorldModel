@@ -60,13 +60,6 @@ forward_dynamics = "FORWARD_DYNAMICS"
 mechanism_only = "MECHANISM_ONLY"
 incompatible = "INCOMPATIBLE"
 
-transfer_levels = (
-    exact_checkpoint,
-    forward_dynamics,
-    mechanism_only,
-    incompatible,
-)
-
 
 def world_family(task: Task) -> str:
     """Which state/dynamics world a task lives in."""

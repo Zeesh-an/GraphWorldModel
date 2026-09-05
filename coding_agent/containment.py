@@ -289,7 +289,7 @@ def removal_set(actions: list[list[ActionOp]]) -> list[int]:
     The distinct nodes a finished trajectory removed, in the order it removed them.
 
     Read back from the executed bags rather than re-planning, for the same reason
-    `--compare` replays them: a randomized strategy returns a different set on a
+    the referee replays them: a randomized strategy returns a different set on a
     second call, and the structural metrics have to describe the set that
     actually earned the reward.
     """
