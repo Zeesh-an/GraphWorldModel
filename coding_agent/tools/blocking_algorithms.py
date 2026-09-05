@@ -88,7 +88,7 @@ betweenness_exact_nodes = 3_000
 
 
 def _candidate_pool(
-    graph: GraphInfo, negative_seeds, budget: int
+    graph: GraphInfo, negative_seeds: tuple[int, ...] | list[int], budget: int
 ) -> list[int]:
     """
     Nodes worth spending budget on: the rumour's reachable region, sources excluded.
@@ -117,7 +117,7 @@ def _candidate_pool(
     ]
 
 
-def _pad(chosen: list[int], graph: GraphInfo, budget: int, protected=()) -> list[int]:
+def _pad(chosen: list[int], graph: GraphInfo, budget: int, protected: tuple[int, ...] | list[int]=()) -> list[int]:
     """
     Top up a short blocker set with the highest-degree nodes not already in it.
 
@@ -268,7 +268,7 @@ def dominator_tree(
 
 def _dominator_scores(
     graph: GraphInfo,
-    negative_seeds,
+    negative_seeds: tuple[int, ...] | list[int],
     samples: int,
     seed: int = 0,
     removed: set | None = None,
@@ -298,7 +298,7 @@ def proximity(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     **kwargs: object,
 ) -> list[int]:
     """Seed the rumour's own out-neighbours, highest degree first (CLDAG's strong cheap baseline)."""
@@ -311,7 +311,7 @@ def multi_hop_proximity(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     hops: int = 4,
     **kwargs: object,
 ) -> list[int]:
@@ -335,7 +335,7 @@ def degree_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     **kwargs: object,
 ) -> list[int]:
     """Top-degree nodes, ignoring the rumour entirely: CLDAG reports this fails outright."""
@@ -353,7 +353,7 @@ def pagerank_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     **kwargs: object,
 ) -> list[int]:
     """Top PageRank nodes inside the rumour's reachable region."""
@@ -368,7 +368,7 @@ def betweenness_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     **kwargs: object,
 ) -> list[int]:
     """Top betweenness nodes in the reachable region (the cheap centrality floor)."""
@@ -384,7 +384,7 @@ def forward_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     samples: int = forward_samples,
     seed: int = 0,
     **kwargs: object,
@@ -411,7 +411,7 @@ def forward_blocking(
 
 def _prevention_sets(
     graph: GraphInfo,
-    negative_seeds,
+    negative_seeds: tuple[int, ...] | list[int],
     theta: int,
     tie_break: str,
     seed: int = 0,
@@ -490,7 +490,7 @@ def rps(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     tie_break: str = "positive",
     seed: int = 0,
     **kwargs: object,
@@ -525,7 +525,7 @@ def reverse_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     seed: int = 0,
     **kwargs: object,
 ) -> list[int]:
@@ -607,7 +607,7 @@ def cmia_o(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     tie_break: str = "positive",
     **kwargs: object,
 ) -> list[int]:
@@ -718,7 +718,7 @@ def cldag(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "LT",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     **kwargs: object,
 ) -> list[int]:
     """
@@ -765,7 +765,7 @@ def random_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     seed: int = 0,
     **kwargs: object,
 ) -> list[int]:
@@ -785,7 +785,7 @@ def greedy_prevention(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     n_candidates: int = greedy_prevention_candidates,
     mc_runs: int = greedy_prevention_mc_runs,
     horizon: int = greedy_prevention_horizon,
@@ -837,7 +837,7 @@ def imin_lhga(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     **kwargs: object,
 ) -> list[int]:
     """
@@ -858,7 +858,7 @@ def imin_lsbm(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     seed: int = 0,
     **kwargs: object,
 ) -> list[int]:
@@ -909,7 +909,7 @@ def advanced_greedy(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     samples: int = percolation_samples,
     seed: int = 0,
     **kwargs: object,
@@ -959,7 +959,7 @@ def greedy_replace(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     samples: int = percolation_samples,
     seed: int = 0,
     **kwargs: object,
@@ -1002,7 +1002,7 @@ def kimura_link_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     samples: int = percolation_samples,
     seed: int = 0,
     **kwargs: object,
@@ -1042,7 +1042,7 @@ def out_edge_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     **kwargs: object,
 ) -> list[tuple]:
     """Cut the highest `exposure(u) * p(u,v)` arcs: the cheapest sensible edge floor."""
@@ -1063,7 +1063,7 @@ def edge_betweenness_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     seed: int = 0,
     **kwargs: object,
 ) -> list[tuple]:
@@ -1106,7 +1106,7 @@ def random_edge_blocking(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    negative_seeds=(),
+    negative_seeds: tuple[int, ...] | list[int]=(),
     seed: int = 0,
     **kwargs: object,
 ) -> list[tuple]:

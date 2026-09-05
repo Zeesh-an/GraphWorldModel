@@ -14,7 +14,7 @@ So the tests below are mostly about what must FAIL, not what must load.
 """
 
 import json
-
+from pathlib import Path
 import pytest
 import torch
 
@@ -50,7 +50,7 @@ def spec() -> ModelSpec:
 
 
 @pytest.fixture
-def checkpoint(tmp_path, spec):
+def checkpoint(tmp_path: Path, spec: ModelSpec) -> Path:
     model = build_model(spec)
     path = tmp_path / "wm_sage_IC.pt"
     save_checkpoint(model, path, spec, train_meta={"split_mode": "graph_disjoint",
@@ -64,7 +64,7 @@ def checkpoint(tmp_path, spec):
 # ---------------------------------------------------------------------------
 
 
-def test_checkpoint_round_trips_without_any_external_config(checkpoint, spec):
+def test_checkpoint_round_trips_without_any_external_config(checkpoint: Path, spec: ModelSpec) -> None:
     """The whole point: the file alone is enough."""
     model, loaded, meta = load_checkpoint(checkpoint)
 
@@ -73,14 +73,14 @@ def test_checkpoint_round_trips_without_any_external_config(checkpoint, spec):
     assert model.head_type == spec.head
 
 
-def test_saved_checkpoint_declares_its_format(checkpoint):
+def test_saved_checkpoint_declares_its_format(checkpoint: Path) -> None:
     assert read_checkpoint(checkpoint)["format"] == checkpoint_format
 
 
-def test_weights_survive_the_round_trip(tmp_path, spec):
+def test_weights_survive_the_round_trip(tmp_path: Path, spec: ModelSpec) -> None:
     model = build_model(spec)
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for parameter in model.parameters():
             parameter.add_(0.5)
 
@@ -93,7 +93,7 @@ def test_weights_survive_the_round_trip(tmp_path, spec):
         assert torch.allclose(before, after)
 
 
-def test_train_meta_never_affects_reconstruction(tmp_path, spec):
+def test_train_meta_never_affects_reconstruction(tmp_path: Path, spec: ModelSpec) -> None:
     """Provenance is provenance: a garbage meta block must not change the model."""
     model = build_model(spec)
     clean = tmp_path / "clean.pt"
@@ -105,7 +105,7 @@ def test_train_meta_never_affects_reconstruction(tmp_path, spec):
 
 
 @pytest.mark.parametrize("backbone", ["gcn", "sage", "gat", "gt", "gcnii"])
-def test_every_backbone_round_trips(tmp_path, backbone):
+def test_every_backbone_round_trips(tmp_path: Path, backbone) -> None:
     spec = ModelSpec(backbone=backbone, head="structured", diffusion_model="IC",
                      hidden_dim=16, n_layers=2)
     path = tmp_path / f"{backbone}.pt"
@@ -114,7 +114,7 @@ def test_every_backbone_round_trips(tmp_path, backbone):
     assert load_checkpoint(path)[1].backbone == backbone
 
 
-def test_lt_checkpoint_rebuilds_the_lt_head(tmp_path):
+def test_lt_checkpoint_rebuilds_the_lt_head(tmp_path: Path) -> None:
     spec = ModelSpec(backbone="sage", head="structured", diffusion_model="LT",
                      hidden_dim=16, n_layers=2)
     path = tmp_path / "lt.pt"
@@ -130,7 +130,7 @@ def test_lt_checkpoint_rebuilds_the_lt_head(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_disagreeing_config_is_refused_rather_than_silently_preferred(checkpoint, spec):
+def test_disagreeing_config_is_refused_rather_than_silently_preferred(checkpoint: Path, spec: ModelSpec) -> None:
     """
     A `spent` checkpoint and a `blocked` config both "work". Refuse.
 
@@ -143,20 +143,20 @@ def test_disagreeing_config_is_refused_rather_than_silently_preferred(checkpoint
         load_checkpoint(checkpoint, config=lying)
 
 
-def test_override_is_possible_but_must_be_explicit(checkpoint, spec):
+def test_override_is_possible_but_must_be_explicit(checkpoint: Path, spec: ModelSpec) -> None:
     lying = ModelSpec(**{**spec.to_dict(), "remove_semantics": "blocked"})
     _, loaded, _ = load_checkpoint(checkpoint, config=lying, strict_spec=False)
 
     assert loaded.remove_semantics == "blocked"
 
 
-def test_matching_config_is_accepted(checkpoint, spec):
+def test_matching_config_is_accepted(checkpoint: Path, spec: ModelSpec) -> None:
     _, loaded, _ = load_checkpoint(checkpoint, config=spec)
 
     assert loaded == spec
 
 
-def test_hide_edge_weights_travels_with_the_checkpoint(tmp_path):
+def test_hide_edge_weights_travels_with_the_checkpoint(tmp_path: Path) -> None:
     """
     A w-hidden model rolled out against true weights was a real past bug. The
     flag now lives in the file, so the rollout cannot disagree with training.
@@ -169,7 +169,7 @@ def test_hide_edge_weights_travels_with_the_checkpoint(tmp_path):
     assert load_checkpoint(path)[1].hide_edge_weights is True
 
 
-def test_action_encoding_travels_with_the_checkpoint(tmp_path):
+def test_action_encoding_travels_with_the_checkpoint(tmp_path: Path) -> None:
     spec = ModelSpec(backbone="sage", head="linear", diffusion_model="IC",
                      hidden_dim=16, n_layers=2, action_encoding="typed")
     path = tmp_path / "typed.pt"
@@ -180,7 +180,7 @@ def test_action_encoding_travels_with_the_checkpoint(tmp_path):
     assert loaded.in_channels == 9
 
 
-def test_unknown_backbone_and_head_are_rejected_at_spec_construction():
+def test_unknown_backbone_and_head_are_rejected_at_spec_construction() -> None:
     with pytest.raises(ValueError, match="unknown backbone"):
         ModelSpec(backbone="nope", head="linear", diffusion_model="IC")
 
@@ -197,7 +197,7 @@ def test_unknown_backbone_and_head_are_rejected_at_spec_construction():
 # ---------------------------------------------------------------------------
 
 
-def test_legacy_bare_state_dict_is_recognised(tmp_path, spec):
+def test_legacy_bare_state_dict_is_recognised(tmp_path: Path, spec: ModelSpec) -> None:
     path = tmp_path / "legacy.pt"
     torch.save(build_model(spec).state_dict(), path)
 
@@ -207,7 +207,7 @@ def test_legacy_bare_state_dict_is_recognised(tmp_path, spec):
     assert blob["spec"] is None
 
 
-def test_legacy_checkpoint_without_config_raises_an_actionable_error(tmp_path, spec):
+def test_legacy_checkpoint_without_config_raises_an_actionable_error(tmp_path: Path, spec: ModelSpec) -> None:
     path = tmp_path / "legacy.pt"
     torch.save(build_model(spec).state_dict(), path)
 
@@ -215,7 +215,7 @@ def test_legacy_checkpoint_without_config_raises_an_actionable_error(tmp_path, s
         load_checkpoint(path)
 
 
-def test_legacy_checkpoint_loads_when_given_its_config(tmp_path, spec):
+def test_legacy_checkpoint_loads_when_given_its_config(tmp_path: Path, spec: ModelSpec) -> None:
     path = tmp_path / "legacy.pt"
     torch.save(build_model(spec).state_dict(), path)
     model, loaded, _ = load_checkpoint(path, config=spec)
@@ -224,7 +224,7 @@ def test_legacy_checkpoint_loads_when_given_its_config(tmp_path, spec):
     assert model.head_type == spec.head
 
 
-def test_legacy_checkpoint_loads_from_a_results_json(tmp_path, spec):
+def test_legacy_checkpoint_loads_from_a_results_json(tmp_path: Path, spec: ModelSpec) -> None:
     """The path every pre-v2 checkpoint on the cluster has to come back through."""
     checkpoint_dir = tmp_path / "world_model"
     checkpoint_dir.mkdir()
@@ -260,7 +260,7 @@ def test_legacy_checkpoint_loads_from_a_results_json(tmp_path, spec):
     assert scorer.spec.remove_semantics == "spent"
 
 
-def test_results_json_defaults_reproduce_pre_flag_runs(tmp_path):
+def test_results_json_defaults_reproduce_pre_flag_runs(tmp_path: Path) -> None:
     """A config from before --remove-semantics / --action-encoding existed."""
     results = tmp_path / "old.json"
     results.write_text(
@@ -288,14 +288,14 @@ def test_results_json_defaults_reproduce_pre_flag_runs(tmp_path):
     assert spec.hide_edge_weights is False
 
 
-def test_describe_never_raises_on_a_legacy_file(tmp_path, spec):
+def test_describe_never_raises_on_a_legacy_file(tmp_path: Path, spec: ModelSpec) -> None:
     path = tmp_path / "legacy.pt"
     torch.save(build_model(spec).state_dict(), path)
 
     assert legacy_format in describe(path)
 
 
-def test_a_file_that_is_not_a_checkpoint_is_rejected(tmp_path):
+def test_a_file_that_is_not_a_checkpoint_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "junk.pt"
     torch.save(["not", "a", "checkpoint"], path)
 
@@ -303,7 +303,7 @@ def test_a_file_that_is_not_a_checkpoint_is_rejected(tmp_path):
         read_checkpoint(path)
 
 
-def test_missing_checkpoint_raises_file_not_found(tmp_path):
+def test_missing_checkpoint_raises_file_not_found(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
         read_checkpoint(tmp_path / "absent.pt")
 
@@ -313,7 +313,7 @@ def test_missing_checkpoint_raises_file_not_found(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_scorer_loads_from_a_self_describing_checkpoint(checkpoint):
+def test_scorer_loads_from_a_self_describing_checkpoint(checkpoint: Path) -> None:
     scorer = WorldModelScorer.load(checkpoint)
 
     assert scorer.spec.backbone == "sage"
@@ -321,7 +321,7 @@ def test_scorer_loads_from_a_self_describing_checkpoint(checkpoint):
     assert scorer.train_meta["seed"] == 42
 
 
-def test_scorer_predicts_a_transition(checkpoint):
+def test_scorer_predicts_a_transition(checkpoint: Path) -> None:
     """One forward pass through the public API, from a non-empty state."""
     import numpy as np
 
@@ -346,7 +346,7 @@ def test_scorer_predicts_a_transition(checkpoint):
     assert prediction["infected"][0] > 0.99
 
 
-def test_scorer_rejects_a_bad_sense(checkpoint):
+def test_scorer_rejects_a_bad_sense(checkpoint: Path) -> None:
     scorer = WorldModelScorer.load(checkpoint)
 
     with pytest.raises(ValueError, match="maximize or minimize"):
@@ -358,7 +358,7 @@ def test_scorer_rejects_a_bad_sense(checkpoint):
 # ---------------------------------------------------------------------------
 
 
-def test_a_plan_becomes_an_action_fn():
+def test_a_plan_becomes_an_action_fn() -> None:
     from data.wm_simulator import ActionOp, State
 
     plan = [[ActionOp("add_node", 0)], [ActionOp("add_node", 1)]]
@@ -378,7 +378,7 @@ def test_a_callable_candidate_passes_through():
     assert as_action_fn(candidate) is candidate
 
 
-def test_a_non_candidate_is_rejected():
+def test_a_non_candidate_is_rejected() -> None:
     with pytest.raises(TypeError, match="neither callable"):
         as_action_fn(42)
 
@@ -391,7 +391,7 @@ def test_candidate_name_prefers_a_declared_name():
     assert candidate_name(object(), 3) == "candidate_3"
 
 
-def test_scoring_context_coerces_a_dict_and_ignores_extras():
+def test_scoring_context_coerces_a_dict_and_ignores_extras() -> None:
     context = ScoringContext.coerce({"horizon": 5, "budget": 2, "junk": 1})
 
     assert context.horizon == 5

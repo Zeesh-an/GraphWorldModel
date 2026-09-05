@@ -46,7 +46,6 @@ import json
 import os
 import sys
 from types import SimpleNamespace
-
 import networkx as nx
 import numpy as np
 
@@ -66,7 +65,7 @@ def patch_int32_indices():
     """
     from cosasi.utils import estimators
 
-    def adjacency_matrix(graph, *args, **kwargs):
+    def adjacency_matrix(graph, *args: object, **kwargs: object):
         matrix = nx.adjacency_matrix(graph, *args, **kwargs).tocsr()
         matrix.indices = matrix.indices.astype(np.int32)
         matrix.indptr = matrix.indptr.astype(np.int32)
@@ -159,7 +158,7 @@ def infer(method, infected_graph, graph, budget, horizon):
     return cosasi.single_source.rumor_centrality(infected_graph, graph)
 
 
-def main() -> int:
+if __name__ == "__main__":
     work_dir = sys.argv[1]
     method = os.environ.get("GWM_COSASI_METHOD", "jordan").lower()
 
@@ -205,9 +204,3 @@ def main() -> int:
         json.dump({"method": method, "sources": predictions}, handle)
 
     print(f"[cosasi] wrote {len(predictions)} predictions", flush=True)
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -51,7 +51,7 @@ class Finding:
         return f"[{self.severity.upper():7s}] {self.check}: {self.message}"
 
 
-@dataclass
+@dataclass()
 class ConsistencyReport:
     findings: list[Finding] = field(default_factory=list)
 

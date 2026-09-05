@@ -148,7 +148,7 @@ default_arms = (
 )
 
 
-@dataclass
+@dataclass()
 class Arm:
     spec: str  # exactly what the user typed
     name: str  # filesystem-safe; becomes <budget>/<name>.json

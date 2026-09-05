@@ -20,7 +20,7 @@ def seed_policy(state, timestep):
     return [ActionOp("add_node", 0), ActionOp("add_node", 7)] if timestep == 0 else []
 
 
-def test_chunked_rollout_matches_the_single_block():
+def test_chunked_rollout_matches_the_single_block() -> None:
     graph = ring_graph(16)
     whole = WorldModelEnvironment.oracle(graph, "IC", n_samples=10, base_seed=3)
     # 32 arcs per graph, so a 70-arc cap advances two samples per forward pass

@@ -40,10 +40,10 @@ Arms differ ONLY in what plays the forward model:
 
 import argparse
 import json
+import os
 import time
 from collections import defaultdict
 from pathlib import Path
-
 import numpy as np
 import torch
 
@@ -213,7 +213,7 @@ def greedy_invert(forward, observed, num_nodes, budget, candidates, rng):
     if len(pool) > candidates:
         pool = [int(v) for v in rng.choice(pool, size=candidates, replace=False)]
 
-    chosen: list[int] = []
+    chosen = []
 
     for _ in range(min(budget, len(pool))):
         best, best_score = None, -float("inf")
@@ -235,7 +235,7 @@ def greedy_invert(forward, observed, num_nodes, budget, candidates, rng):
     return chosen
 
 
-def degree_baseline(observed, store_entry, budget, **_):
+def degree_baseline(observed, store_entry, budget, **_: object):
     degrees = np.zeros(store_entry["num_nodes"])
     np.add.at(degrees, store_entry["edge_index"][0], 1)
     np.add.at(degrees, store_entry["edge_index"][1], 1)
@@ -262,20 +262,20 @@ def score_recovery(predicted: list[int], true: list[int]) -> dict:
     }
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Q5 IM -> Source Localization")
-    parser.add_argument("--results", type=Path, required=True)
-    parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--n-episodes", type=int, default=60)
-    parser.add_argument("--candidates", type=int, default=25)
-    parser.add_argument("--horizon", type=int, default=15)
-    parser.add_argument("--oracle-mc", type=int, default=16)
-    parser.add_argument("--n-samples", type=int, default=20)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--threads", type=int, default=default_threads)
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+    parser.add_argument("--results", type=Path, required=True, help="train_wm.py results JSON of the model to evaluate (default: None).")
+    parser.add_argument("--data-dir", type=Path, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--n-episodes", type=int, default=60, help="episodes to evaluate (default: 60).")
+    parser.add_argument("--candidates", type=int, default=25, help="shortlist size per greedy pick (default: 25).")
+    parser.add_argument("--horizon", type=int, default=15, help="rollout horizon in timesteps (default: 15).")
+    parser.add_argument("--oracle-mc", type=int, default=16, help="simulator rollouts per oracle score (default: 16).")
+    parser.add_argument("--n-samples", type=int, default=20, help="world-model ensemble size (default: 20).")
+    parser.add_argument("--seed", type=int, default=0, help="master random seed (default: 0).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
+    parser.add_argument("--threads", type=int, default=default_threads, help=f"torch intra-op threads (default: {default_threads}).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
     torch.set_num_threads(args.threads)
 
     config = json.loads(args.results.read_text())["config"]
@@ -410,7 +410,7 @@ def main(argv=None) -> int:
         "per_episode": {name: scores[name] for name in arms},
         "runtime_seconds": round(time.perf_counter() - started, 1),
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2, default=str))
 
     print(f"\n[sl] frozen parameters unchanged: {frozen_ok}")
@@ -424,9 +424,3 @@ def main(argv=None) -> int:
               f"{costs[name]['calls']:14d}")
 
     print(f"\n-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

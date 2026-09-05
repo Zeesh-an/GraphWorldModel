@@ -39,17 +39,17 @@ Reading the result:
 
 import argparse
 import json
+import os
 from pathlib import Path
-
 import torch
 import torch.nn as nn
 
 from world_model.wm_data import (
     GraphInput,
+    basic_encoding,
     ch_add,
     ch_infected,
     ch_remove,
-    basic_encoding,
     load_graph_store,
 )
 from world_model.wm_eval import rollout_ensemble
@@ -114,18 +114,18 @@ class LTMarginalOracle(nn.Module):
         return torch.log(probs) - torch.log1p(-probs)
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="LT analytic-oracle rollout diagnostic (Workstream F)"
     )
-    parser.add_argument("--data-dir", type=str, required=True)
-    parser.add_argument("--split", type=str, default="test")
-    parser.add_argument("--n-samples", type=int, default=20)
-    parser.add_argument("--max-episodes", type=int, default=50)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+    parser.add_argument("--data-dir", type=str, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--split", type=str, default="test", help="dataset split to evaluate (default: test).")
+    parser.add_argument("--n-samples", type=int, default=20, help="world-model ensemble size (default: 20).")
+    parser.add_argument("--max-episodes", type=int, default=50, help="episodes per split to roll out (default: 50).")
+    parser.add_argument("--seed", type=int, default=0, help="master random seed (default: 0).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
 
     device = torch.device(args.device)
     store = load_graph_store(args.data_dir)
@@ -155,7 +155,7 @@ def main(argv=None) -> int:
         "split": args.split,
         "rollout": rollout,
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2, default=str))
 
     print(f"  ens_marg_mae         {rollout['ens_marg_mae']:.4f}")
@@ -164,9 +164,3 @@ def main(argv=None) -> int:
     print(f"  final model / true   {rollout['ens_final_count_model']:.2f} / "
           f"{rollout['ens_final_count_true']:.2f}")
     print(f"\n-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

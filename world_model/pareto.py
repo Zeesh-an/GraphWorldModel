@@ -21,7 +21,6 @@ be run on a finished results tree without a GPU or a rerun.
 """
 
 from dataclasses import dataclass, field
-
 import numpy as np
 
 # Objective sense. `minimize` covers error and cost columns, `maximize` covers
@@ -45,7 +44,7 @@ class Objective:
         return first <= second if self.sense == minimize else first >= second
 
 
-@dataclass
+@dataclass()
 class Point:
     """One configuration and its objective values."""
 

@@ -51,7 +51,6 @@ import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-
 import numpy as np
 from tqdm import tqdm
 
@@ -200,8 +199,8 @@ def bin_events(
     elapsed time, because a cascade with no adopter at `t = 0` has no seed commit
     and `load_episode_endpoints` would skip the episode entirely.
     """
-    waves: list[list[int]] = [[] for _ in range(horizon + 1)]
-    parents: dict[int, int | None] = {}
+    waves = [[] for _ in range(horizon + 1)]
+    parents = {}
     placed = set()
 
     for adopter, elapsed, parent in cascade.events:
@@ -249,8 +248,8 @@ def replay_records(
     episode_id = f"{bundle.graph_id}|{diffusion_model}|observed|{cascade.cascade_id}"
     records = []
 
-    infected: list[int] = []
-    frontier: list[int] = []
+    infected = []
+    frontier = []
 
     for timestep, wave in enumerate(waves):
         state = State(infected=list(infected), frontier=list(frontier))

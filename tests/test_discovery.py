@@ -8,7 +8,7 @@ algorithm_discovery_baselines.md) as a fixture directory.
 """
 
 import json
-
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -40,7 +40,7 @@ from pipeline.run import expand_baselines
 
 
 @pytest.fixture()
-def graph(edge_index) -> GraphInfo:
+def graph(edge_index: np.ndarray) -> GraphInfo:
     return GraphInfo(
         num_nodes=6,
         edge_index=edge_index,
@@ -58,7 +58,7 @@ def _strategy(task: str, budget_op: str = "add_node", lever: str | None = None, 
     return strategy
 
 
-def test_seed_wrapper_emits_budget_distinct_add_node_ops(graph):
+def test_seed_wrapper_emits_budget_distinct_add_node_ops(graph: GraphInfo) -> None:
     plan = _strategy("influence_maximization").plan_horizon(graph, 2, 3)
 
     assert len(plan) == 4
@@ -68,7 +68,7 @@ def test_seed_wrapper_emits_budget_distinct_add_node_ops(graph):
     assert plan[1:] == [[], [], []]
 
 
-def test_removal_wrapper_never_removes_an_outbreak_source(graph):
+def test_removal_wrapper_never_removes_an_outbreak_source(graph: GraphInfo) -> None:
     plan = _strategy(
         "critical_node_detection", "remove_node", outbreak=(1,)
     ).plan_horizon(graph, 2, 1)
@@ -79,7 +79,7 @@ def test_removal_wrapper_never_removes_an_outbreak_source(graph):
     assert all(op.op == "remove_node" for op in plan[0])
 
 
-def test_blocking_wrapper_switches_to_arcs_under_an_edge_lever(graph):
+def test_blocking_wrapper_switches_to_arcs_under_an_edge_lever(graph: GraphInfo) -> None:
     plan = _strategy(
         "influence_blocking", "remove_edge", "edge_block", outbreak=(0,)
     ).plan_horizon(graph, 2, 1)
@@ -89,7 +89,7 @@ def test_blocking_wrapper_switches_to_arcs_under_an_edge_lever(graph):
     ]
 
 
-def test_epidemic_wrapper_zeroes_the_weight_under_contact_reduction(graph):
+def test_epidemic_wrapper_zeroes_the_weight_under_contact_reduction(graph: GraphInfo) -> None:
     plan = _strategy(
         "epidemic_control", "set_edge_weight", "contact_reduce", outbreak=(0,)
     ).plan_horizon(graph, 1, 1)
@@ -98,20 +98,20 @@ def test_epidemic_wrapper_zeroes_the_weight_under_contact_reduction(graph):
     assert (op.op, op.target, op.destination, op.weight) == ("set_edge_weight", 0, 1, 0.0)
 
 
-def test_localize_wrapper_ranks_by_observation_times_degree(graph):
+def test_localize_wrapper_ranks_by_observation_times_degree(graph: GraphInfo) -> None:
     observation = np.array([0.0, 1.0, 1.0, 0.0, 0.5, 0.0])
 
     assert _strategy("source_localization").localize(graph, observation, 2) == [1, 2]
 
 
-def test_reconstruct_wrapper_round_trips_the_history(graph):
+def test_reconstruct_wrapper_round_trips_the_history(graph: GraphInfo) -> None:
     observation = Observation(reported={1: 0, 2: 1, 4: None}, horizon=5, num_nodes=6)
     history = _strategy("cascade_reconstruction").reconstruct(graph, observation, 5)
 
     assert history == {1: (0, None), 2: (1, 1), 4: (1, 1)}
 
 
-def test_predict_wrapper_returns_a_float(graph):
+def test_predict_wrapper_returns_a_float(graph: GraphInfo) -> None:
     observation = CascadeObservation(
         cascade_id="c", root=0, num_nodes=6, adopters={0: 0, 1: 1}, frontier=(1,),
         observed_steps=2, horizon=5,
@@ -120,7 +120,7 @@ def test_predict_wrapper_returns_a_float(graph):
     assert _strategy("cascade_prediction").predict(graph, observation, 5) == 3.0
 
 
-def test_wrapper_resolves_the_versioned_name_reevo_and_mcts_ahd_emit(graph):
+def test_wrapper_resolves_the_versioned_name_reevo_and_mcts_ahd_emit(graph: GraphInfo) -> None:
     program = (
         "import networkx as nx\n\n"
         "def select_seeds_v2(graph, k):\n"
@@ -132,7 +132,7 @@ def test_wrapper_resolves_the_versioned_name_reevo_and_mcts_ahd_emit(graph):
     assert [op.target for op in strategy.plan_horizon(graph, 2, 0)[0]] == [5, 0]
 
 
-def test_wrapper_names_a_missing_contract_function(graph):
+def test_wrapper_names_a_missing_contract_function(graph: GraphInfo) -> None:
     strategy = build_strategy(program_script("x = 1\n", "influence_maximization"))
     strategy.outbreak = ()
 
@@ -140,19 +140,19 @@ def test_wrapper_names_a_missing_contract_function(graph):
         strategy.plan_horizon(graph, 1, 0)
 
 
-def test_wrapper_keeps_the_executor_import_whitelist():
+def test_wrapper_keeps_the_executor_import_whitelist() -> None:
     with pytest.raises(StrategyError):
         build_strategy(program_script("import os\n", "influence_maximization"))
 
 
-def test_oriented_fitness_is_non_negative_and_higher_is_better():
+def test_oriented_fitness_is_non_negative_and_higher_is_better() -> None:
     assert oriented_fitness("influence_maximization", "maximize", 41.5, 100) == 41.5
     assert oriented_fitness("critical_node_detection", "minimize", 30.0, 100) == 70.0
     assert oriented_fitness("cascade_prediction", "minimize", 1.0, 100) == 0.5
     assert oriented_fitness("epidemic_control", "minimize", 500.0, 100) == 0.0
 
 
-def test_context_round_trips_through_json(graph, tmp_path):
+def test_context_round_trips_through_json(graph: GraphInfo, tmp_path: Path) -> None:
     experiment = ExperimentConfig(
         task="influence_blocking", evaluator=monte_carlo, blocking_lever="edge_block"
     )
@@ -168,20 +168,20 @@ def test_context_round_trips_through_json(graph, tmp_path):
     assert "edge_block" in problem_statement(loaded)
 
 
-def test_run_uid_is_unique_per_task_dataset_run_and_budget(tmp_path):
+def test_run_uid_is_unique_per_task_dataset_run_and_budget(tmp_path: Path) -> None:
     work = tmp_path / "critical_node_detection" / "jazz" / "r1" / "baselines" / "_runs" / "reevo" / "pct10"
 
     assert run_uid(work) == "d_critical_node_detection_jazz_r1_pct10"
 
 
-def _work(tmp_path, framework: str):
+def _work(tmp_path: Path, framework: str):
     work = tmp_path / "t" / "d" / "r" / "baselines" / "_runs" / framework / "k5"
     work.mkdir(parents=True)
 
     return work
 
 
-def test_openevolve_parse_reads_best_program(tmp_path):
+def test_openevolve_parse_reads_best_program(tmp_path: Path) -> None:
     work = _work(tmp_path, "openevolve")
     best = work / "out" / "best"
     best.mkdir(parents=True)
@@ -194,7 +194,7 @@ def test_openevolve_parse_reads_best_program(tmp_path):
     assert info["best_iteration"] == 7
 
 
-def test_codeevolve_parse_follows_run_metadata_to_the_island(tmp_path):
+def test_codeevolve_parse_follows_run_metadata_to_the_island(tmp_path: Path) -> None:
     work = _work(tmp_path, "codeevolve")
     out = work / "out"
     (out / "island_1").mkdir(parents=True)
@@ -211,7 +211,7 @@ def test_codeevolve_parse_follows_run_metadata_to_the_island(tmp_path):
     assert info["island_found"] == 1
 
 
-def test_driver_parsers_read_best_program_py(tmp_path):
+def test_driver_parsers_read_best_program_py(tmp_path: Path) -> None:
     for name in ("llamea", "eoh", "llm4ad_funsearch", "llm4ad_hillclimb"):
         work = _work(tmp_path, name)
         (work / "best_program.py").write_text("def localize(graph, observation, k):\n    return []\n")
@@ -223,7 +223,7 @@ def test_driver_parsers_read_best_program_py(tmp_path):
         assert info == {"score": 0.5}
 
 
-def test_reevo_parse_follows_main_log(tmp_path):
+def test_reevo_parse_follows_main_log(tmp_path: Path) -> None:
     work = _work(tmp_path, "reevo")
     hydra = work / "hydra"
     hydra.mkdir()
@@ -238,7 +238,7 @@ def test_reevo_parse_follows_main_log(tmp_path):
     assert info["best_path"].endswith("problem_iter3_code2.py")
 
 
-def test_mcts_ahd_parse_reads_the_last_best_population(tmp_path):
+def test_mcts_ahd_parse_reads_the_last_best_population(tmp_path: Path) -> None:
     work = _work(tmp_path, "mcts_ahd")
     hydra = work / "hydra"
     hydra.mkdir()
@@ -253,7 +253,7 @@ def test_mcts_ahd_parse_reads_the_last_best_population(tmp_path):
     assert info["evaluations"] == 12
 
 
-def test_deepevolve_parse_takes_main_py_only(tmp_path):
+def test_deepevolve_parse_takes_main_py_only(tmp_path: Path) -> None:
     work = _work(tmp_path, "deepevolve")
     best = work / "problems" / run_uid(work) / "ckpt" / "best"
     best.mkdir(parents=True)
@@ -267,7 +267,7 @@ def test_deepevolve_parse_takes_main_py_only(tmp_path):
     assert info["iteration"] == 3
 
 
-def test_every_adapter_is_a_wired_discovery_entry_serving_every_task():
+def test_every_adapter_is_a_wired_discovery_entry_serving_every_task() -> None:
     for name in adapters:
         spec = external_baselines[name]
         assert spec.kind == discovery.discovery
@@ -281,7 +281,7 @@ def test_every_adapter_is_a_wired_discovery_entry_serving_every_task():
     assert external_baselines["llm4ad_next"].status == "blocked"
 
 
-def test_discovery_arms_parse_to_condition_nine_and_fan_out_per_model():
+def test_discovery_arms_parse_to_condition_nine_and_fan_out_per_model() -> None:
     arm = parse_arm("discovery:eoh")
 
     assert (arm.condition, arm.name, arm.external, arm.method, arm.evaluator) == (
@@ -294,7 +294,7 @@ def test_discovery_arms_parse_to_condition_nine_and_fan_out_per_model():
     assert [a.llm_model for a in fanned] == ["gpt-5.6-luna", "gpt-5.6-sol"]
 
 
-def test_expand_baselines_keeps_discovery_out_of_all_external():
+def test_expand_baselines_keeps_discovery_out_of_all_external() -> None:
     assert expand_baselines(("discovery:eoh",), "source_localization") == ["discovery:eoh"]
 
     with pytest.raises(ValueError, match="discovery:eoh"):

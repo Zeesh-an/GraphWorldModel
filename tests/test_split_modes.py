@@ -17,7 +17,7 @@ So the tests are about the SPLIT LABELS, not about the data being loadable:
 """
 
 import json
-
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -39,7 +39,7 @@ ratios = (0.7, 0.15, 0.15)
 
 
 @pytest.mark.parametrize("graph_count", [3, 4, 5, 10, 20, 40, 137])
-def test_every_graph_gets_exactly_one_split(graph_count):
+def test_every_graph_gets_exactly_one_split(graph_count) -> None:
     plan = _graph_split_plan(graph_count, ratios, seed=0)
 
     assert len(plan) == graph_count
@@ -47,7 +47,7 @@ def test_every_graph_gets_exactly_one_split(graph_count):
 
 
 @pytest.mark.parametrize("graph_count", [3, 4, 5, 10, 20, 40, 137])
-def test_no_split_is_ever_empty(graph_count):
+def test_no_split_is_ever_empty(graph_count) -> None:
     """
     An empty val split silently disables early stopping; an empty test split
     makes the reported test metrics come from nowhere. Both are worse than a
@@ -59,7 +59,7 @@ def test_no_split_is_ever_empty(graph_count):
         assert plan.count(split) >= 1, f"{split} empty at graph_count={graph_count}"
 
 
-def test_proportions_are_honoured_for_a_realistic_graph_count():
+def test_proportions_are_honoured_for_a_realistic_graph_count() -> None:
     plan = _graph_split_plan(20, ratios, seed=0)
 
     assert plan.count("train") == 14
@@ -67,18 +67,18 @@ def test_proportions_are_honoured_for_a_realistic_graph_count():
     assert plan.count("test") == 3
 
 
-def test_the_plan_is_deterministic_given_the_seed():
+def test_the_plan_is_deterministic_given_the_seed() -> None:
     assert _graph_split_plan(20, ratios, 7) == _graph_split_plan(20, ratios, 7)
 
 
-def test_a_different_seed_gives_a_different_assignment():
+def test_a_different_seed_gives_a_different_assignment() -> None:
     """Otherwise a multi-seed sweep would train on the same split five times."""
     plans = {tuple(_graph_split_plan(20, ratios, seed)) for seed in range(5)}
 
     assert len(plans) > 1
 
 
-def test_plan_is_stratified_not_sampled():
+def test_plan_is_stratified_not_sampled() -> None:
     """
     Independent per-graph draws would let train_count wander. Stratification
     pins it, which is the difference between a reproducible split and a lucky one.
@@ -95,7 +95,7 @@ def test_plan_is_stratified_not_sampled():
 # ---------------------------------------------------------------------------
 
 
-def test_episode_random_is_unchanged():
+def test_episode_random_is_unchanged() -> None:
     """
     Byte-for-byte the historical function. If this drifts, no pre-2026-08-22
     dataset can be regenerated, and every comparison against those numbers
@@ -116,7 +116,7 @@ def test_episode_random_is_unchanged():
     assert observed == expected
 
 
-def test_all_split_modes_are_registered():
+def test_all_split_modes_are_registered() -> None:
     """
     Three, and each answers a different question: graph_disjoint for a source
     dataset, episode_random for reproducing a pre-2026-08-22 result, eval_only
@@ -134,7 +134,7 @@ def test_all_split_modes_are_registered():
 # ---------------------------------------------------------------------------
 
 
-def _generate(tmp_path, split_mode: str, num_graphs: int = 4):
+def _generate(tmp_path: Path, split_mode: str, num_graphs: int = 4):
     """A tiny real generation run — the only way to test the writer's behaviour."""
     from data.generate_wm_data import GenConfig, run_generation
 
@@ -170,7 +170,7 @@ def _generate(tmp_path, split_mode: str, num_graphs: int = 4):
 
 
 @pytest.mark.slow
-def test_graph_disjoint_generation_leaks_no_graph(tmp_path):
+def test_graph_disjoint_generation_leaks_no_graph(tmp_path: Path) -> None:
     from world_model.wm_data import graphs_straddling_splits
 
     metadata, config = _generate(tmp_path, graph_disjoint_split)
@@ -183,7 +183,7 @@ def test_graph_disjoint_generation_leaks_no_graph(tmp_path):
 
 
 @pytest.mark.slow
-def test_episode_random_generation_still_works_and_is_flagged(tmp_path):
+def test_episode_random_generation_still_works_and_is_flagged(tmp_path: Path) -> None:
     """
     Legacy mode must keep producing data — and must announce that it leaks.
 
@@ -205,7 +205,7 @@ def test_episode_random_generation_still_works_and_is_flagged(tmp_path):
 
 
 @pytest.mark.slow
-def test_the_two_modes_differ_only_in_split_labels(tmp_path):
+def test_the_two_modes_differ_only_in_split_labels(tmp_path: Path):
     """
     Same graphs, same budgets, same simulator seeds — only the labels move.
 
@@ -244,7 +244,7 @@ def test_the_two_modes_differ_only_in_split_labels(tmp_path):
     assert transitions(disjoint_config.out_dir) == transitions(legacy_config.out_dir)
 
 
-def test_single_graph_dataset_refuses_a_disjoint_split(tmp_path):
+def test_single_graph_dataset_refuses_a_disjoint_split(tmp_path: Path) -> None:
     """
     One graph cannot be split disjointly. Failing loudly beats emitting a
     train-only dataset that looks like a valid three-way split.
@@ -284,7 +284,7 @@ def test_single_graph_dataset_refuses_a_disjoint_split(tmp_path):
         run_generation(config)
 
 
-def test_unknown_split_mode_is_rejected(tmp_path):
+def test_unknown_split_mode_is_rejected(tmp_path: Path) -> None:
     from data.generate_wm_data import GenConfig, run_generation
 
     config = GenConfig(
@@ -305,7 +305,7 @@ def test_unknown_split_mode_is_rejected(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_train_reads_the_split_mode_from_metadata(tmp_path):
+def test_train_reads_the_split_mode_from_metadata(tmp_path: Path) -> None:
     from world_model.train_wm import TrainConfig, dataset_split_mode
 
     (tmp_path / "metadata.json").write_text(
@@ -317,7 +317,7 @@ def test_train_reads_the_split_mode_from_metadata(tmp_path):
     )
 
 
-def test_a_dataset_from_before_the_flag_reads_as_episode_random(tmp_path):
+def test_a_dataset_from_before_the_flag_reads_as_episode_random(tmp_path: Path) -> None:
     """Every pre-2026-08-22 dataset used the per-episode draw and says nothing."""
     from world_model.train_wm import TrainConfig, dataset_split_mode
 
@@ -328,7 +328,7 @@ def test_a_dataset_from_before_the_flag_reads_as_episode_random(tmp_path):
     )
 
 
-def test_training_on_a_leaky_dataset_warns(tmp_path, capsys):
+def test_training_on_a_leaky_dataset_warns(tmp_path: Path, capsys) -> None:
     from world_model.train_wm import TrainConfig, check_split_mode
 
     (tmp_path / "metadata.json").write_text(
@@ -339,7 +339,7 @@ def test_training_on_a_leaky_dataset_warns(tmp_path, capsys):
     assert "optimistic" in capsys.readouterr().out
 
 
-def test_training_on_a_clean_dataset_is_silent(tmp_path, capsys):
+def test_training_on_a_clean_dataset_is_silent(tmp_path: Path, capsys) -> None:
     from world_model.train_wm import TrainConfig, check_split_mode
 
     (tmp_path / "metadata.json").write_text(
@@ -356,7 +356,7 @@ def test_training_on_a_clean_dataset_is_silent(tmp_path, capsys):
 
 
 @pytest.mark.slow
-def test_eval_only_puts_every_graph_in_test(tmp_path):
+def test_eval_only_puts_every_graph_in_test(tmp_path: Path) -> None:
     """
     An OOD target set exists to be SCORED by a model trained elsewhere. Giving it
     a train split would invite exactly the accident it is built to rule out, so
@@ -379,7 +379,7 @@ def test_eval_only_puts_every_graph_in_test(tmp_path):
 
 
 @pytest.mark.slow
-def test_eval_only_writes_no_train_or_val_files(tmp_path):
+def test_eval_only_writes_no_train_or_val_files(tmp_path: Path) -> None:
     from pathlib import Path
 
     from data.generate_wm_data import eval_only_split
@@ -392,7 +392,7 @@ def test_eval_only_writes_no_train_or_val_files(tmp_path):
 
 
 @pytest.mark.slow
-def test_eval_only_works_with_a_single_graph(tmp_path):
+def test_eval_only_works_with_a_single_graph(tmp_path: Path) -> None:
     """
     The mode graph_disjoint cannot serve: one real graph admits no disjoint
     three-way split, but it is a perfectly good held-out transfer target.

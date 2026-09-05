@@ -6,15 +6,14 @@ This is the baseline the world-model environment is compared against.
 
 import time
 from dataclasses import replace
-
 import numpy as np
 
-from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
 from coding_agent.tools.primitives import (
     build_competitive_simulator,
     build_epidemic_simulator,
     build_simulator,
 )
+from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
 from data.wm_competitive import CompetitiveConfig
 from data.wm_epidemic import EpidemicConfig
 from data.wm_simulator import spent

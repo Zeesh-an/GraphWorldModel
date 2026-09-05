@@ -38,7 +38,6 @@ not (§11).
 import time
 from dataclasses import dataclass, field
 from functools import partial
-
 import numpy as np
 
 from coding_agent.credit import planned_action

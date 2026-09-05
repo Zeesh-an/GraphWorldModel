@@ -23,13 +23,13 @@ def _trajectory(reward: float, se: float) -> Trajectory:
     return Trajectory(states=[], actions=[], reward=reward, infected_counts=[], cost={"reward_se": se})
 
 
-def test_exploration_decays_with_the_remaining_budget_and_stagnation_adds_back():
+def test_exploration_decays_with_the_remaining_budget_and_stagnation_adds_back() -> None:
     assert exploration_weight(0, 20, 0) > exploration_weight(10, 20, 0) > exploration_weight(19, 20, 0)
     assert exploration_weight(19, 20, 0) < 0.1
     assert exploration_weight(19, 20, 4) > exploration_weight(19, 20, 0)
 
 
-def test_operator_schedule_explores_early_exploits_late_and_respects_the_population():
+def test_operator_schedule_explores_early_exploits_late_and_respects_the_population() -> None:
     early = [choose_operator(np.random.default_rng(i), 0, 20, 0, 5, 2) for i in range(200)]
     late = [choose_operator(np.random.default_rng(i), 19, 20, 0, 5, 0) for i in range(200)]
     early_explore = sum(op in explore_operators for op in early) / len(early)
@@ -49,7 +49,7 @@ def test_operator_schedule_explores_early_exploits_late_and_respects_the_populat
     )
 
 
-def test_acceptance_needs_the_delta_to_clear_the_noise_band():
+def test_acceptance_needs_the_delta_to_clear_the_noise_band() -> None:
     incumbent = _trajectory(10.0, 0.5)
 
     assert accepts(_trajectory(11.0, 0.5), incumbent, "maximize")
@@ -58,7 +58,7 @@ def test_acceptance_needs_the_delta_to_clear_the_noise_band():
     assert accepts(_trajectory(10.3, 0.5), None, "maximize")
 
 
-def test_simplify_may_replace_a_shorter_program_within_the_band():
+def test_simplify_may_replace_a_shorter_program_within_the_band() -> None:
     incumbent = _trajectory(10.0, 0.5)
     shorter, longer = "a = 1\n", "a = 1\nb = 2\n"
 
@@ -68,7 +68,7 @@ def test_simplify_may_replace_a_shorter_program_within_the_band():
     assert not accepts(_trajectory(9.8, 0.5), incumbent, "maximize", "refine", shorter, longer)
 
 
-def test_mechanism_line_and_tables_and_compaction():
+def test_mechanism_line_and_tables_and_compaction() -> None:
     script = "# MECHANISM: degree-weighted reverse reachable coverage\nclass S: pass\n"
     assert mechanism_of(script) == "degree-weighted reverse reachable coverage"
     assert mechanism_of("class S: pass") == ""
@@ -95,7 +95,7 @@ def test_mechanism_line_and_tables_and_compaction():
     assert compact_turn(script, None, "seed").endswith("```python\n" + script + "\n```")
 
 
-def test_reflection_and_idea_replies_are_parsed_leniently():
+def test_reflection_and_idea_replies_are_parsed_leniently() -> None:
     hint, memory = parse_reflection('Sure: {"hint": "prefer  hubs", "memory": "rule one"}', "old")
     assert (hint, memory) == ("prefer hubs", "rule one")
     assert parse_reflection("not json", "old") == ("", "old")
@@ -106,7 +106,7 @@ def test_reflection_and_idea_replies_are_parsed_leniently():
     assert parse_ideas("garbage") == ([], "")
 
 
-def test_evolve_prompt_carries_the_search_state_for_every_operator():
+def test_evolve_prompt_carries_the_search_state_for_every_operator() -> None:
     parent = {"iteration": 1, "reward": 10.0, "script": "# MECHANISM: p\n", "summary": "diag", "mechanism": "p"}
     partner = {"iteration": 2, "reward": 9.0, "script": "# MECHANISM: q\n", "summary": "diag2", "mechanism": "q"}
     for operator in ("refine", "parameters", "simplify", "crossover", "synthesize", "from_scratch"):

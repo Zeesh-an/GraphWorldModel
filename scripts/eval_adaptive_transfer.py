@@ -41,9 +41,9 @@ is what scores the candidates.
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
-
 import numpy as np
 import torch
 
@@ -76,7 +76,7 @@ def _susceptible(state: State, num_nodes: int) -> list[int]:
 # It also makes the experiment the right shape. The question is whether the world
 # model can ORDER candidates, not whether it can search; giving every arm the
 # same candidates isolates the ordering.
-def degree_policy(state, graph, batch, store_entry, rng, shortlist=None, **_):
+def degree_policy(state, graph, batch, store_entry, rng, shortlist=None, **_: object):
     degrees = np.zeros(store_entry["num_nodes"])
     np.add.at(degrees, store_entry["edge_index"][0], 1)
     np.add.at(degrees, store_entry["edge_index"][1], 1)
@@ -84,7 +84,7 @@ def degree_policy(state, graph, batch, store_entry, rng, shortlist=None, **_):
     return sorted(shortlist, key=lambda node: -degrees[node])[:batch]
 
 
-def random_policy(state, graph, batch, store_entry, rng, shortlist=None, **_):
+def random_policy(state, graph, batch, store_entry, rng, shortlist=None, **_: object):
     return [int(node) for node in rng.choice(shortlist,
                                              size=min(batch, len(shortlist)),
                                              replace=False)]
@@ -92,7 +92,7 @@ def random_policy(state, graph, batch, store_entry, rng, shortlist=None, **_):
 
 def oracle_policy(state, graph, batch, store_entry, rng, shortlist=None,
                   horizon=20, mc_runs=8, live=None, cost=None,
-                  diffusion_model="IC", remove_semantics=spent, **_):
+                  diffusion_model="IC", remove_semantics=spent, **_: object):
     """
     Greedy marginal gain under the TRUE simulator, with COMMON RANDOM NUMBERS.
 
@@ -116,7 +116,7 @@ def oracle_policy(state, graph, batch, store_entry, rng, shortlist=None,
     if not shortlist:
         return []
 
-    chosen: list[int] = []
+    chosen = []
     # One seed per draw, shared by every candidate at this greedy step.
     crn = [int(rng.integers(seed_upper_bound)) for _ in range(mc_runs)]
 
@@ -165,7 +165,7 @@ def oracle_policy(state, graph, batch, store_entry, rng, shortlist=None,
 @torch.inference_mode()
 def world_model_policy(state, graph, batch, store_entry, rng, shortlist=None,
                        model=None, spec=None, device=None, horizon=20,
-                       n_samples=20, cost=None, **_):
+                       n_samples=20, cost=None, **_: object):
     """
     The same greedy loop as the oracle, with the frozen world model in place of
     the simulator. Identical shortlist size and identical batch construction, so
@@ -181,7 +181,7 @@ def world_model_policy(state, graph, batch, store_entry, rng, shortlist=None,
 
     scorer = WorldModelScorer(model, spec, device=str(device))
     graph_info = GraphInfo.from_store_entry(store_entry)
-    chosen: list[int] = []
+    chosen = []
 
     for _ in range(min(batch, len(shortlist))):
         best, best_score = None, -float("inf")
@@ -219,7 +219,7 @@ def world_model_policy(state, graph, batch, store_entry, rng, shortlist=None,
 
 
 def static_policy(state, graph, batch, store_entry, rng, shortlist=None,
-                  all_at_once=None, **_):
+                  all_at_once=None, **_: object):
     """
     Commits the WHOLE budget at t=0 using the degree heuristic, nothing later.
 
@@ -294,27 +294,27 @@ def run_episode(policy, store_entry, diffusion_model, batches, round_gap, horizo
     return float(len(state.infected)), spent_budget
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Q5 IM -> Adaptive IM zero-shot")
-    parser.add_argument("--results", type=Path, required=True)
-    parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--n-graphs", type=int, default=15)
-    parser.add_argument("--budget-pct", type=float, default=5.0)
-    parser.add_argument("--rounds", type=int, default=3)
-    parser.add_argument("--round-gap", type=int, default=2)
-    parser.add_argument("--horizon", type=int, default=20)
+    parser.add_argument("--results", type=Path, required=True, help="train_wm.py results JSON of the model to evaluate (default: None).")
+    parser.add_argument("--data-dir", type=Path, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--n-graphs", type=int, default=15, help="graphs to evaluate (default: 15).")
+    parser.add_argument("--budget-pct", type=float, default=5.0, help="seed budget as percent of nodes (default: 5.0).")
+    parser.add_argument("--rounds", type=int, default=3, help="adaptive rounds (default: 3).")
+    parser.add_argument("--round-gap", type=int, default=2, help="diffusion timesteps between rounds (default: 2).")
+    parser.add_argument("--horizon", type=int, default=20, help="rollout horizon in timesteps (default: 20).")
     parser.add_argument("--episodes", type=int, default=8,
-                        help="campaigns per graph per arm; the spread is their mean")
+                        help="campaigns per graph per arm; the spread is their mean (default: 8).")
     parser.add_argument("--candidates", type=int, default=20,
                         help="shortlist size per greedy pick, identical for the "
-                             "oracle and the world model")
-    parser.add_argument("--oracle-mc", type=int, default=8)
-    parser.add_argument("--n-samples", type=int, default=20)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--threads", type=int, default=default_threads)
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+                             "oracle and the world model (default: 20).")
+    parser.add_argument("--oracle-mc", type=int, default=8, help="simulator rollouts per oracle score (default: 8).")
+    parser.add_argument("--n-samples", type=int, default=20, help="world-model ensemble size (default: 20).")
+    parser.add_argument("--seed", type=int, default=0, help="master random seed (default: 0).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
+    parser.add_argument("--threads", type=int, default=default_threads, help=f"torch intra-op threads (default: {default_threads}).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
     torch.set_num_threads(args.threads)
 
     config = json.loads(args.results.read_text())["config"]
@@ -440,7 +440,7 @@ def main(argv=None) -> int:
         "per_graph": per_graph,
         "runtime_seconds": round(time.perf_counter() - started, 1),
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2, default=str))
 
     print(f"\n[q5] frozen parameters unchanged: {frozen_ok}")
@@ -453,9 +453,3 @@ def main(argv=None) -> int:
               f"{costs[name]['calls']:14d}")
 
     print(f"\n-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

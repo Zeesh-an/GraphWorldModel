@@ -30,8 +30,8 @@ here, so the two never collide in the `--baselines` namespace.
 
 import numpy as np
 
-from coding_agent.types import GraphInfo, State
 from coding_agent.tools import algorithms, primitives
+from coding_agent.types import GraphInfo, State
 
 # AdaptGreedy re-estimates every candidate's marginal gain from scratch each
 # round, which is the cost this whole task exists to measure. These keep one
@@ -69,7 +69,7 @@ def adapt_random(
     batch: int,
     diffusion_model: str = "IC",
     seed: int = 0,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Random susceptible nodes each round: the adaptive floor."""
     candidates = _susceptible(state, graph)
@@ -83,21 +83,21 @@ def adapt_random(
 
 
 def adapt_degree(
-    state: State, graph: GraphInfo, batch: int, diffusion_model: str = "IC", **_
+    state: State, graph: GraphInfo, batch: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-degree susceptible nodes each round (adaptive Degree heuristic)."""
     return _top_susceptible(primitives.compute_degree(graph), state, graph, batch)
 
 
 def adapt_pagerank(
-    state: State, graph: GraphInfo, batch: int, diffusion_model: str = "IC", **_
+    state: State, graph: GraphInfo, batch: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-PageRank susceptible nodes each round."""
     return _top_susceptible(primitives.compute_pagerank(graph), state, graph, batch)
 
 
 def adapt_degree_discount(
-    state: State, graph: GraphInfo, batch: int, diffusion_model: str = "IC", **_
+    state: State, graph: GraphInfo, batch: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """
     DegreeDiscount restricted to susceptibles, discounted by the REALIZED state.
@@ -140,7 +140,7 @@ def adapt_greedy(
     mc_runs: int = adapt_greedy_mc_runs,
     horizon: int = adapt_greedy_horizon,
     n_candidates: int = adapt_greedy_candidates,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     AdaptGreedy (Golovin & Krause 2011; Han et al. PVLDB 2018): greedy marginal
@@ -196,7 +196,7 @@ def adapt_epic(
     batch: int,
     diffusion_model: str = "IC",
     seed: int = 0,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     EPIC (Han et al. PVLDB 2018): AdaptGreedy instantiated with an RIS selector
@@ -234,7 +234,7 @@ def static_split(
     diffusion_model: str = "IC",
     total_budget: int | None = None,
     base_algorithm: str = "degree_discount",
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     A single STATIC seed set, dealt out one batch per round. The control.

@@ -1,8 +1,8 @@
 """One-step eval, action-specific metrics, free-running rollout, planning."""
 
 import json
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 from typing import Callable
 import networkx as nx
 import numpy as np
@@ -10,6 +10,9 @@ import torch
 import torch.nn as nn
 from scipy.stats import wasserstein_distance
 
+from data.wm_competitive import CompetitiveConfig, CompetitiveSimulator
+from data.wm_epidemic import EpidemicConfig, EpidemicSimulator
+from data.wm_simulator import ActionOp, Simulator, State, blocked, spent
 from world_model.wm_data import (
     TransitionDataset,
     apply_edge_ops,
@@ -33,10 +36,6 @@ from world_model.wm_metrics import (
     reliability_bins,
     score_predictions,
 )
-
-from data.wm_competitive import CompetitiveConfig, CompetitiveSimulator
-from data.wm_epidemic import EpidemicConfig, EpidemicSimulator
-from data.wm_simulator import ActionOp, Simulator, State, blocked, spent
 
 seed_upper_bound = 1 << 30
 
@@ -1861,8 +1860,8 @@ def _model_spread(
     totals = []
 
     for _ in range(n_samples):
-        infected: set[int] = set()
-        frontier: set[int] = set()
+        infected = set()
+        frontier = set()
 
         for step in range(horizon + 1):
             action = (
@@ -1992,7 +1991,7 @@ def planning_regret_budget(
     model.eval()
 
     def greedy(score) -> list[int]:
-        chosen: list[int] = []
+        chosen = []
         for _ in range(k):
             pool = [node for node in candidates if node not in chosen]
             if not pool:
@@ -2151,7 +2150,7 @@ def planning_regret_budget_multi(
     seed: int = 0,
     out_dir: str | Path | None = None,
     planning_split: str = planning_split_test,
-    **kwargs,
+    **kwargs: object,
 ) -> dict[str, float]:
     """
     Average `planning_regret_budget` over held-out graphs, with a std.

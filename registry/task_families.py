@@ -309,7 +309,7 @@ def transfer_matrix(task_names: list[str] | None = None) -> list[Compatibility]:
 
 def families() -> dict[str, list[str]]:
     """World family -> the tasks living in it."""
-    grouped: dict[str, list[str]] = {}
+    grouped = {}
 
     for name, task in sorted(tasks.items()):
         if task.objective is None:

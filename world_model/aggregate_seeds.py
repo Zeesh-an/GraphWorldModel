@@ -25,7 +25,6 @@ comparison the report makes can be checked against the spread.
 import argparse
 import json
 from pathlib import Path
-
 import numpy as np
 
 from world_model.pareto import (
@@ -153,20 +152,20 @@ def separated(summary: dict, first: str, second: str) -> dict | None:
     }
 
 
-def main() -> None:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Aggregate world-model results JSONs across seeds, "
         "and/or build a Pareto front over configurations"
     )
-    parser.add_argument("results", nargs="+", help="results JSON paths")
+    parser.add_argument("results", nargs="+", help="results JSON paths (default: required).")
     parser.add_argument(
-        "--out", type=str, default=None, help="write the aggregate JSON here"
+        "--out", type=str, default=None, help="write the aggregate JSON here (default: None)."
     )
     parser.add_argument(
         "--pareto",
         action="store_true",
         help="treat each input as a distinct CONFIGURATION and report the "
-        "fidelity/cost Pareto front instead of a seed aggregate",
+        "fidelity/cost Pareto front instead of a seed aggregate (default: False).",
     )
     parser.add_argument(
         "--fidelity",
@@ -201,7 +200,3 @@ def main() -> None:
     if args.out:
         Path(args.out).write_text(text)
         print(f"[aggregate] -> {args.out}")
-
-
-if __name__ == "__main__":
-    main()

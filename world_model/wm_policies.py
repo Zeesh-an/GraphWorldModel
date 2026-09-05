@@ -35,7 +35,7 @@ def _degrees(store_entry: dict) -> np.ndarray:
     return degrees
 
 
-def null_policy(store_entry: dict, episode_records: list[dict], rng) -> list[list]:
+def null_policy(store_entry: dict, episode_records: list[dict], rng: np.random.Generator) -> list[list]:
     """No actions at all: pure diffusion from the episode's own starting state.
 
     The floor case. If fidelity collapses here, the model is leaning on the action
@@ -45,7 +45,7 @@ def null_policy(store_entry: dict, episode_records: list[dict], rng) -> list[lis
 
 
 def degree_seed_policy(
-    store_entry: dict, episode_records: list[dict], rng
+    store_entry: dict, episode_records: list[dict], rng: np.random.Generator
 ) -> list[list]:
     """Seed the t-th highest-degree node at every step — the agent-like extreme.
 
@@ -62,7 +62,7 @@ def degree_seed_policy(
 
 
 def random_seed_policy(
-    store_entry: dict, episode_records: list[dict], rng
+    store_entry: dict, episode_records: list[dict], rng: np.random.Generator
 ) -> list[list]:
     """Seed a uniformly random node every step.
 
@@ -79,7 +79,7 @@ def random_seed_policy(
 
 
 def block_hubs_policy(
-    store_entry: dict, episode_records: list[dict], rng
+    store_entry: dict, episode_records: list[dict], rng: np.random.Generator
 ) -> list[list]:
     """Remove the t-th highest-degree node at every step (containment's extreme).
 

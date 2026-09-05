@@ -45,7 +45,6 @@ import os
 import tarfile
 import urllib.request
 from pathlib import Path
-
 import numpy as np
 import scipy.sparse as sp
 
@@ -130,7 +129,7 @@ def load_digg_cascades_raw(path: Path) -> tuple[list[Cascade], dict[int, int]]:
     Topo-LSTM's own preprocessing uses.
     """
     votes = _read_konect(path)
-    by_story: dict[int, list[tuple[int, int]]] = {}
+    by_story = {}
 
     for user, story, when in votes:
         by_story.setdefault(story, []).append((user, when))

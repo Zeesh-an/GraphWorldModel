@@ -15,7 +15,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # Floors the attention log-bias and softmax denominator
 numerical_eps = 1e-9
 
@@ -115,7 +114,7 @@ class GraphTransformerLayer(nn.Module):
         if edge_weight is not None:
             scores = scores + torch.log(
                 edge_weight.clamp(min=numerical_eps)
-            ).unsqueeze(1)
+            ).unsqueeze(dim=1)
 
         # Compute softmax over incoming edges per node per head
         # Use scatter softmax: subtract max per (dst, head) for stability
@@ -124,7 +123,7 @@ class GraphTransformerLayer(nn.Module):
         )
         scores_max.scatter_reduce_(
             0,
-            destinations.unsqueeze(1).expand(-1, self.n_heads),
+            destinations.unsqueeze(dim=1).expand(-1, self.n_heads),
             scores,
             reduce="amax",
             include_self=True,
@@ -133,7 +132,7 @@ class GraphTransformerLayer(nn.Module):
 
         scores_sum = torch.zeros(num_nodes, self.n_heads, device=features.device)
         scores_sum.scatter_add_(
-            0, destinations.unsqueeze(1).expand(-1, self.n_heads), scores_exp
+            0, destinations.unsqueeze(dim=1).expand(-1, self.n_heads), scores_exp
         )
         attention = scores_exp / (scores_sum[destinations] + numerical_eps)  # (E, H)
         attention = self.dropout(attention)
@@ -144,8 +143,8 @@ class GraphTransformerLayer(nn.Module):
         )
         aggregated.scatter_add_(
             0,
-            destinations.unsqueeze(1).unsqueeze(2).expand(-1, self.n_heads, self.d_k),
-            attention.unsqueeze(-1) * edge_values,
+            destinations.unsqueeze(dim=1).unsqueeze(dim=2).expand(-1, self.n_heads, self.d_k),
+            attention.unsqueeze(dim=-1) * edge_values,
         )  # (N, H, d_k)
 
         # Reshape multiple attention heads and output projection
@@ -178,7 +177,7 @@ class GraphTransformerEncoder(nn.Module):
         n_heads: int = 4,
         ffn_dim: int = 128,
         dropout: float = 0.1,
-        **_,
+        **_: object,
     ) -> None:
         super().__init__()
 

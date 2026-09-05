@@ -161,7 +161,7 @@ degree_floor = 1e-12
 # └─────┴─────────────┴────────────────────────────────────────────────────────────────────────────────────┴──────────────────┴───────────────────────────────────────────┘
 
 
-@dataclass
+@dataclass()
 class GraphInput:
     num_nodes: int
     adj_norm: (
@@ -534,7 +534,7 @@ def split_membership(out_dir: Path, diffusion_model: str) -> dict[str, set[str]]
     the FILES rather than the generator's claim about them. A graph mapping to
     more than one split is leakage.
     """
-    membership: dict[str, set[str]] = defaultdict(set)
+    membership = defaultdict(set)
 
     for split in ("train", "val", "test"):
         path = Path(out_dir) / f"transitions_{diffusion_model}_{split}.jsonl"

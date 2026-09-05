@@ -20,7 +20,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-
 class GCNIILayer(nn.Module):
     """
     One GCNII layer with initial residual + identity mapping.
@@ -92,7 +91,7 @@ class GCNIIEncoder(nn.Module):
         alpha: float = 0.1,
         lamda: float = 0.5,
         dropout: float = 0.1,
-        **_,
+        **_: object,
     ) -> None:
         super().__init__()
 

@@ -40,10 +40,10 @@ difference.
 
 import argparse
 import json
+import os
 import time
 from collections import defaultdict
 from pathlib import Path
-
 import numpy as np
 import torch
 
@@ -202,19 +202,19 @@ def score_hidden_step(predicted, truth, anchor, num_nodes) -> dict | None:
     }
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Q5 IM -> Cascade Reconstruction")
-    parser.add_argument("--results", type=Path, required=True)
-    parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--n-episodes", type=int, default=60)
-    parser.add_argument("--mask-fraction", type=float, default=0.5)
-    parser.add_argument("--oracle-mc", type=int, default=32)
-    parser.add_argument("--n-samples", type=int, default=20)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--threads", type=int, default=default_threads)
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+    parser.add_argument("--results", type=Path, required=True, help="train_wm.py results JSON of the model to evaluate (default: None).")
+    parser.add_argument("--data-dir", type=Path, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--n-episodes", type=int, default=60, help="episodes to evaluate (default: 60).")
+    parser.add_argument("--mask-fraction", type=float, default=0.5, help="fraction of the infected set hidden from the decoder (default: 0.5).")
+    parser.add_argument("--oracle-mc", type=int, default=32, help="simulator rollouts per oracle score (default: 32).")
+    parser.add_argument("--n-samples", type=int, default=20, help="world-model ensemble size (default: 20).")
+    parser.add_argument("--seed", type=int, default=0, help="master random seed (default: 0).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
+    parser.add_argument("--threads", type=int, default=default_threads, help=f"torch intra-op threads (default: {default_threads}).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
     torch.set_num_threads(args.threads)
 
     from world_model.scorer import WorldModelScorer
@@ -352,7 +352,7 @@ def main(argv=None) -> int:
         "summary": summary,
         "runtime_seconds": round(time.perf_counter() - started, 1),
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2, default=str))
 
     print(f"\n[recon] frozen parameters unchanged: {frozen_ok}")
@@ -368,9 +368,3 @@ def main(argv=None) -> int:
               f"{block['n_hidden_steps']:7d} {costs[name]['calls']:9d}")
 
     print(f"\n-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

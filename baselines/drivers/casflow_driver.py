@@ -36,7 +36,6 @@ import os
 import pickle
 import sys
 from pathlib import Path
-
 import numpy as np
 
 # The repo's own modules resolve as `utils.graphwave...` from its source directory,
@@ -141,9 +140,8 @@ def build_embeddings(work_dir: Path, observation: int) -> None:
     structural embedding CasFlow's contribution is built on. `absl` flags are set
     programmatically so no CLI is involved.
     """
-    from absl import flags
-
     import gene_emb
+    from absl import flags
 
     flags.FLAGS([""])
     flags.FLAGS.input = f"{work_dir}{os.sep}"
@@ -166,7 +164,6 @@ def build_model():
     function, which is the same treatment `ditto_driver.py` gives DITTO's own CLI.
     """
     import tensorflow as tf
-
     from utils.tools import Sampling2D, Sampling3D, nf_transformations
 
     embedding_dim = cascade_embedding_dim + global_embedding_dim
@@ -233,9 +230,9 @@ def build_model():
     return model
 
 
-def main(work_dir: Path) -> None:
+if __name__ == "__main__":
+    work_dir = Path(sys.argv[1])
     import tensorflow as tf
-
     from utils.tools import Generator
 
     data = load_instances(work_dir)
@@ -309,7 +306,3 @@ def main(work_dir: Path) -> None:
         json.dumps({"popularities": predictions})
     )
     print(f"[casflow_driver] wrote {len(predictions)} predictions")
-
-
-if __name__ == "__main__":
-    main(Path(sys.argv[1]))

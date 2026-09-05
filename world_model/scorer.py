@@ -22,7 +22,6 @@ ships; nothing here is imported by generated strategy code.
 
 from dataclasses import dataclass
 from pathlib import Path
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -287,7 +286,7 @@ class WorldModelScorer:
         about however many happened to run.
         """
         context = ScoringContext.coerce(context)
-        scores: list[CandidateScore] = []
+        scores = []
 
         for index, candidate in enumerate(candidates):
             name = candidate_name(candidate, index)

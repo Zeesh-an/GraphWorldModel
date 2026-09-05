@@ -26,8 +26,8 @@ Stating the achieved value lets a reader check the matching rather than trust it
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
-
 import numpy as np
 
 from world_model.wm_data import load_graph_store
@@ -174,15 +174,15 @@ def check_disjoint(source: dict, target: dict) -> dict:
     }
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stage-B OOD manifest + disjointness proof")
     parser.add_argument("--source", type=Path, required=True,
-                        help="the dataset the frozen world model was TRAINED on")
-    parser.add_argument("--targets", type=Path, nargs="+", required=True)
-    parser.add_argument("--out", type=Path, required=True)
+                        help="the dataset the frozen world model was TRAINED on (default: None).")
+    parser.add_argument("--targets", type=Path, nargs="+", required=True, help="OOD target dataset directories (default: None).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
     parser.add_argument("--strict", action="store_true",
-                        help="exit non-zero if any target overlaps the source")
-    args = parser.parse_args(argv)
+                        help="exit non-zero if any target overlaps the source (default: False).")
+    args = parser.parse_args()
 
     source = describe_dataset(args.source)
     targets, checks = {}, []
@@ -201,7 +201,7 @@ def main(argv=None) -> int:
         "disjointness": checks,
         "all_disjoint": all(check["disjoint"] for check in checks),
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(manifest, indent=2, default=str))
 
     source_degree = source["measured"]["mean_avg_degree"]
@@ -229,10 +229,4 @@ def main(argv=None) -> int:
     print(f"-> {args.out}")
 
     if args.strict and not manifest["all_disjoint"]:
-        return 1
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+        raise SystemExit(1)

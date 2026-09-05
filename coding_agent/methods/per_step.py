@@ -13,7 +13,14 @@ from coding_agent.methods.base import (
     wrap_exogenous,
 )
 from coding_agent.prompts import build_system_prompt, build_user_prompt
-from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
+from coding_agent.types import (
+    ActionOp,
+    GraphInfo,
+    State,
+    Strategy,
+    TaskSpec,
+    Trajectory,
+)
 
 
 class PerStepReprompt(OuterLoopMethod):

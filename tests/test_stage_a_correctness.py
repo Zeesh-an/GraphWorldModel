@@ -21,12 +21,14 @@ training would be testing the fit instead of the semantics.
 """
 
 import json
-
+from pathlib import Path
 import numpy as np
 import pytest
 import torch
 
+from coding_agent.types import GraphInfo
 from world_model.wm_data import (
+    GraphInput,
     build_graph_input,
     ch_add,
     ch_infected,
@@ -40,14 +42,13 @@ from world_model.wm_eval import (
 )
 from world_model.wm_model import WorldModel
 
-
 # ---------------------------------------------------------------------------
 # LT exogenous semantics
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def lt_model():
+def lt_model() -> WorldModel:
     return WorldModel(
         "sage",
         hidden_dim=8,
@@ -59,7 +60,7 @@ def lt_model():
 
 
 @pytest.fixture
-def path_graph():
+def path_graph() -> GraphInput:
     """0 - 1 - 2 - 3, both directions, unit weights."""
     edge_index = np.array([[0, 1, 2, 1, 2, 3], [1, 2, 3, 0, 1, 2]], dtype=np.int64)
 
@@ -68,7 +69,7 @@ def path_graph():
     )
 
 
-def _probs(model, graph, infected, add=None, remove=None, num_nodes=4):
+def _probs(model: WorldModel, graph: GraphInfo, infected, add=None, remove=None, num_nodes: int=4):
     features = torch.zeros(num_nodes, 6)
 
     for node in infected:
@@ -80,11 +81,11 @@ def _probs(model, graph, infected, add=None, remove=None, num_nodes=4):
     if remove is not None:
         features[remove, ch_remove] = 1.0
 
-    with torch.no_grad():
+    with torch.inference_mode():
         return torch.sigmoid(model(features, graph)).numpy()
 
 
-def test_lt_removed_node_leaves_the_frontier(lt_model, path_graph):
+def test_lt_removed_node_leaves_the_frontier(lt_model: WorldModel, path_graph: GraphInput) -> None:
     """
     The bug this file exists for. Measured before the fix: 0.92.
 
@@ -96,7 +97,7 @@ def test_lt_removed_node_leaves_the_frontier(lt_model, path_graph):
     assert probs[0, 1] < 1e-3
 
 
-def test_lt_seeded_node_enters_the_frontier(lt_model, path_graph):
+def test_lt_seeded_node_enters_the_frontier(lt_model: WorldModel, path_graph: GraphInput) -> None:
     """
     The same bug in the other direction, and the one no metric was watching:
     `add_seed_success` only checks the INFECTED channel, so a seeded node
@@ -108,14 +109,14 @@ def test_lt_seeded_node_enters_the_frontier(lt_model, path_graph):
     assert probs[2, 1] > 0.99
 
 
-def test_lt_already_active_node_is_not_in_the_frontier(lt_model, path_graph):
+def test_lt_already_active_node_is_not_in_the_frontier(lt_model: WorldModel, path_graph: GraphInput) -> None:
     probs = _probs(lt_model, path_graph, infected=[0])
 
     assert probs[0, 0] > 0.99
     assert probs[0, 1] < 1e-3
 
 
-def test_lt_plain_new_activation_has_frontier_equal_to_infected(lt_model, path_graph):
+def test_lt_plain_new_activation_has_frontier_equal_to_infected(lt_model: WorldModel, path_graph: GraphInput) -> None:
     """A susceptible node's two channels must agree: becoming active IS new."""
     probs = _probs(lt_model, path_graph, infected=[0])
 
@@ -123,7 +124,7 @@ def test_lt_plain_new_activation_has_frontier_equal_to_infected(lt_model, path_g
 
 
 @pytest.mark.parametrize("scale", [1.0, 50.0, -50.0, 0.0])
-def test_lt_exogenous_semantics_survive_weight_perturbation(path_graph, scale):
+def test_lt_exogenous_semantics_survive_weight_perturbation(path_graph: GraphInput, scale) -> None:
     """
     Structural, not learned. If any of these moved under a x(-50) perturbation
     the property would be a fitting artefact rather than a guarantee.
@@ -133,7 +134,7 @@ def test_lt_exogenous_semantics_survive_weight_perturbation(path_graph, scale):
         head_type="structured", diffusion_model="LT",
     ).eval()
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for parameter in model.parameters():
             parameter.mul_(scale)
 
@@ -144,7 +145,7 @@ def test_lt_exogenous_semantics_survive_weight_perturbation(path_graph, scale):
     assert removed[0, 1] < 1e-3
 
 
-def test_ic_frontier_semantics_are_unchanged(path_graph):
+def test_ic_frontier_semantics_are_unchanged(path_graph: GraphInput) -> None:
     """
     IC must NOT get the LT treatment. Its frontier is the set of status-1
     spreaders after the step, so a seeded node is correctly OUT of it — the
@@ -173,7 +174,7 @@ def test_ic_frontier_semantics_are_unchanged(path_graph):
 
 
 @pytest.fixture
-def dataset_dir(tmp_path):
+def dataset_dir(tmp_path: Path) -> Path:
     """Five graphs, split 3/1/1, written in the on-disk transition format."""
     membership = {
         "g0": "train", "g1": "train", "g2": "train", "g3": "val", "g4": "test",
@@ -193,16 +194,16 @@ def dataset_dir(tmp_path):
 
 
 @pytest.fixture
-def store():
+def store() -> dict:
     return {f"g{i}": {"num_nodes": 10} for i in range(5)}
 
 
-def test_graphs_in_split_reads_the_files(dataset_dir):
+def test_graphs_in_split_reads_the_files(dataset_dir: Path) -> None:
     assert graphs_in_split(dataset_dir, "IC", "train") == ["g0", "g1", "g2"]
     assert graphs_in_split(dataset_dir, "IC", "test") == ["g4"]
 
 
-def test_test_mode_selects_only_test_graphs(store, dataset_dir):
+def test_test_mode_selects_only_test_graphs(store, dataset_dir: Path) -> None:
     graph_ids, provenance = select_planning_graphs(store, 5, dataset_dir, "IC")
 
     assert graph_ids == ["g4"]
@@ -212,7 +213,7 @@ def test_test_mode_selects_only_test_graphs(store, dataset_dir):
     assert provenance["n_planning_graphs"] == 1
 
 
-def test_legacy_mode_reproduces_the_old_selection(store, dataset_dir):
+def test_legacy_mode_reproduces_the_old_selection(store, dataset_dir: Path) -> None:
     """The historical behaviour stays reachable — under its own name."""
     graph_ids, provenance = select_planning_graphs(
         store, 3, dataset_dir, "IC", planning_split_legacy
@@ -222,7 +223,7 @@ def test_legacy_mode_reproduces_the_old_selection(store, dataset_dir):
     assert provenance["planning_split"] == planning_split_legacy
 
 
-def test_legacy_mode_reports_unknown_overlap_not_zero(store, dataset_dir):
+def test_legacy_mode_reports_unknown_overlap_not_zero(store, dataset_dir: Path) -> None:
     """
     Reporting 0 would assert something never checked. None says "not measured",
     which is the honest value for a selection that ignores splits.
@@ -235,7 +236,7 @@ def test_legacy_mode_reports_unknown_overlap_not_zero(store, dataset_dir):
     assert provenance["val_overlap"] is None
 
 
-def test_the_old_selection_would_have_leaked(store, dataset_dir):
+def test_the_old_selection_would_have_leaked(store, dataset_dir: Path) -> None:
     """
     States the bug directly: the historical first-n choice picks training graphs,
     so its planning regret was never a held-out number.
@@ -248,7 +249,7 @@ def test_the_old_selection_would_have_leaked(store, dataset_dir):
     assert set(legacy_ids) & train_graphs
 
 
-def test_missing_out_dir_falls_back_to_legacy_and_says_so(store):
+def test_missing_out_dir_falls_back_to_legacy_and_says_so(store) -> None:
     """Split membership is not knowable from the store alone."""
     _, provenance = select_planning_graphs(store, 3, None, "IC")
 
@@ -256,7 +257,7 @@ def test_missing_out_dir_falls_back_to_legacy_and_says_so(store):
     assert provenance["train_overlap"] is None
 
 
-def test_no_test_graphs_raises_rather_than_silently_using_train(store, tmp_path):
+def test_no_test_graphs_raises_rather_than_silently_using_train(store, tmp_path: Path) -> None:
     """
     A single-graph or episode_random dataset has no held-out graphs. Falling back
     to training graphs would produce a number that reads as held-out.
@@ -270,19 +271,19 @@ def test_no_test_graphs_raises_rather_than_silently_using_train(store, tmp_path)
         select_planning_graphs(store, 3, tmp_path, "IC")
 
 
-def test_unknown_planning_split_is_rejected(store, dataset_dir):
+def test_unknown_planning_split_is_rejected(store, dataset_dir: Path) -> None:
     with pytest.raises(ValueError, match="unknown planning_split"):
         select_planning_graphs(store, 3, dataset_dir, "IC", "whatever")
 
 
-def test_selection_is_deterministic(store, dataset_dir):
+def test_selection_is_deterministic(store, dataset_dir: Path) -> None:
     first = select_planning_graphs(store, 5, dataset_dir, "IC")[0]
     second = select_planning_graphs(store, 5, dataset_dir, "IC")[0]
 
     assert first == second
 
 
-def test_train_config_defaults_to_the_test_split():
+def test_train_config_defaults_to_the_test_split() -> None:
     """A run that forgets the flag must get the held-out metric, not the leaky one."""
     from world_model.train_wm import TrainConfig
 
@@ -294,17 +295,17 @@ def test_train_config_defaults_to_the_test_split():
 # ---------------------------------------------------------------------------
 
 
-def _already_active_survival(model, graph, num_nodes=40, active=12):
+def _already_active_survival(model: WorldModel, graph: GraphInfo, num_nodes: int=40, active=12):
     """P(still infected next step) for nodes that are ALREADY infected."""
     features = torch.zeros(num_nodes, 6)
     features[:active, ch_infected] = 1.0
 
-    with torch.no_grad():
+    with torch.inference_mode():
         return torch.sigmoid(model(features, graph))[:active, 0].numpy()
 
 
 @pytest.fixture
-def line_graph_lt():
+def line_graph_lt() -> GraphInput:
     num_nodes = 40
     src = list(range(num_nodes - 1))
     dst = list(range(1, num_nodes))
@@ -319,7 +320,7 @@ def line_graph_lt():
     )
 
 
-def test_structured_head_cannot_forget_an_infected_node(line_graph_lt):
+def test_structured_head_cannot_forget_an_infected_node(line_graph_lt: GraphInput) -> None:
     """
     Monotonicity is structural: y_inf = active + (1 - active) * p_new, so an
     already-active node comes out at 1 whatever the parameters say.
@@ -339,20 +340,20 @@ def test_structured_head_cannot_forget_an_infected_node(line_graph_lt):
 
 
 @pytest.mark.parametrize("scale", [1.0, 20.0, -20.0])
-def test_structured_monotonicity_survives_perturbation(line_graph_lt, scale):
+def test_structured_monotonicity_survives_perturbation(line_graph_lt: GraphInput, scale) -> None:
     model = WorldModel(
         "sage", hidden_dim=8, n_layers=1, dropout=0.0,
         head_type="structured", diffusion_model="LT",
     ).eval()
 
-    with torch.no_grad():
+    with torch.inference_mode():
         for parameter in model.parameters():
             parameter.mul_(scale)
 
     assert _already_active_survival(model, line_graph_lt).min() > 0.999
 
 
-def test_linear_head_has_no_monotonicity_guarantee(line_graph_lt):
+def test_linear_head_has_no_monotonicity_guarantee(line_graph_lt: GraphInput) -> None:
     """
     The control. A free head CAN forget an infected node — nothing stops it —
     which is why a good `ens_count_bias` from a linear head has to be read
@@ -371,7 +372,7 @@ def test_linear_head_has_no_monotonicity_guarantee(line_graph_lt):
             head_type="linear", diffusion_model="LT",
         ).eval()
 
-        with torch.no_grad():
+        with torch.inference_mode():
             for parameter in model.parameters():
                 parameter.mul_(5.0)
 

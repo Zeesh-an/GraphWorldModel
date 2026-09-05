@@ -62,7 +62,6 @@ deviations are shared widely enough to name up front:
 """
 
 import math
-
 import numpy as np
 
 from coding_agent.types import GraphInfo

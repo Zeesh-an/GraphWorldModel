@@ -13,7 +13,6 @@ would assert configurations that were never run.
 import argparse
 import json
 from pathlib import Path
-
 import matplotlib
 
 matplotlib.use("Agg")
@@ -140,19 +139,19 @@ def plot(points: list, fidelity: str, cost: str, out: Path, title: str | None) -
     return front
 
 
-def main() -> None:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fidelity/cost Pareto figure")
-    parser.add_argument("results", nargs="+", help="train_wm.py results JSON paths")
-    parser.add_argument("--out", type=str, default="pareto.png")
+    parser.add_argument("results", nargs="+", help="train_wm.py results JSON paths (default: required).")
+    parser.add_argument("--out", type=str, default="pareto.png", help="figure path (default: pareto.png).")
     parser.add_argument(
-        "--fidelity", type=str, default="ens_marg_mae", choices=sorted(fidelity_objectives)
+        "--fidelity", type=str, default="ens_marg_mae", choices=sorted(fidelity_objectives), help="fidelity objective of the Pareto front (default: ens_marg_mae)."
     )
     parser.add_argument(
-        "--cost", type=str, default="train_seconds", choices=sorted(cost_objectives)
+        "--cost", type=str, default="train_seconds", choices=sorted(cost_objectives), help="cost objective of the Pareto front (default: train_seconds)."
     )
-    parser.add_argument("--title", type=str, default=None)
+    parser.add_argument("--title", type=str, default=None, help="figure title (default: None).")
     parser.add_argument(
-        "--front-json", type=str, default=None, help="also write the front as JSON"
+        "--front-json", type=str, default=None, help="also write the front as JSON (default: None)."
     )
     args = parser.parse_args()
 
@@ -165,7 +164,3 @@ def main() -> None:
     if args.front_json:
         Path(args.front_json).write_text(json.dumps(front, indent=2))
         print(f"[pareto] front -> {args.front_json}")
-
-
-if __name__ == "__main__":
-    main()

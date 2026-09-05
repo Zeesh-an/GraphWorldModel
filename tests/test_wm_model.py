@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import torch
 
+from coding_agent.types import GraphInfo
 from data.wm_simulator import blocked, spent
 from world_model.wm_data import (
     build_graph_input,
@@ -21,15 +22,15 @@ from world_model.wm_data import (
     ch_infected,
     ch_remove,
     in_channels,
-    typed_encoding,
     num_input_channels,
+    typed_encoding,
 )
 from world_model.wm_model import WorldModel, backbones
 
 torch.manual_seed(0)
 
 
-def _graph(edge_index, num_nodes=6, weight=0.5, diffusion_model="IC"):
+def _graph(edge_index: np.ndarray, num_nodes: int=6, weight=0.5, diffusion_model="IC"):
     return build_graph_input(
         edge_index,
         np.full(edge_index.shape[1], weight, dtype=np.float32),
@@ -39,7 +40,7 @@ def _graph(edge_index, num_nodes=6, weight=0.5, diffusion_model="IC"):
     )
 
 
-def _features(infected=(), frontier=(), add=(), remove=(), num_nodes=6, channels=None):
+def _features(infected=(), frontier=(), add=(), remove=(), num_nodes: int=6, channels=None):
     X = torch.zeros(num_nodes, channels or in_channels)
     for node in infected:
         X[node, ch_infected] = 1.0
@@ -52,18 +53,18 @@ def _features(infected=(), frontier=(), add=(), remove=(), num_nodes=6, channels
     return X
 
 
-def _probs(model, X, graph):
+def _probs(model: WorldModel, X, graph: GraphInfo):
     return torch.sigmoid(model(X, graph)).detach().numpy()
 
 
 class TestICStructuredHead:
     @pytest.fixture
-    def model(self):
+    def model(self) -> WorldModel:
         return WorldModel(
             "sage", hidden_dim=8, n_layers=2, head_type="structured", dropout=0.0
         ).eval()
 
-    def test_no_active_frontier_means_no_new_infection(self, model, edge_index):
+    def test_no_active_frontier_means_no_new_infection(self, model: WorldModel, edge_index: np.ndarray) -> None:
         """The self-termination property. This is what stops a rollout saturating."""
         graph = _graph(edge_index)
         X = _features(infected=(1,), frontier=())  # infected but nobody spreading
@@ -76,7 +77,7 @@ class TestICStructuredHead:
         assert np.max(probs[susceptible, 0]) == pytest.approx(0.0, abs=1e-5)
         assert np.max(probs[:, 1]) == pytest.approx(0.0, abs=1e-5)
 
-    def test_infection_is_local_to_the_frontier(self, model, edge_index):
+    def test_infection_is_local_to_the_frontier(self, model: WorldModel, edge_index: np.ndarray) -> None:
         """p_new > 0 only for in-neighbours of an active node — the locality bound."""
         graph = _graph(edge_index)
         X = _features(infected=(0,), frontier=(0,))
@@ -88,14 +89,14 @@ class TestICStructuredHead:
         for far in (2, 3, 4, 5):
             assert probs[far, 1] == pytest.approx(0.0, abs=1e-5)
 
-    def test_seeding_a_node_forces_it_infected(self, model, edge_index):
+    def test_seeding_a_node_forces_it_infected(self, model: WorldModel, edge_index: np.ndarray) -> None:
         """T_exo is exact, not learned: add_node -> P(infected) = 1."""
         graph = _graph(edge_index)
         probs = _probs(model, _features(add=(3,)), graph)
 
         assert probs[3, 0] == pytest.approx(1.0, abs=1e-5)
 
-    def test_monotone_in_infection(self, model, edge_index):
+    def test_monotone_in_infection(self, model: WorldModel, edge_index: np.ndarray) -> None:
         """IC never de-infects: an already-infected node stays at P = 1."""
         graph = _graph(edge_index)
         probs = _probs(model, _features(infected=(2, 3), frontier=(3,)), graph)
@@ -105,7 +106,7 @@ class TestICStructuredHead:
         # An already-infected node is not in the NEW frontier
         assert probs[2, 1] == pytest.approx(0.0, abs=1e-5)
 
-    def test_spent_removal_keeps_the_node_counted(self, edge_index):
+    def test_spent_removal_keeps_the_node_counted(self, edge_index: np.ndarray) -> None:
         """IM semantics: a spent spreader stops spreading but stays in the count."""
         model = WorldModel(
             "sage",
@@ -124,7 +125,7 @@ class TestICStructuredHead:
         for neighbour in (0, 2, 4):
             assert probs[neighbour, 1] == pytest.approx(0.0, abs=1e-5)
 
-    def test_blocked_removal_drops_the_node_from_the_count(self, edge_index):
+    def test_blocked_removal_drops_the_node_from_the_count(self, edge_index: np.ndarray) -> None:
         """Containment semantics: a blocked node leaves the graph entirely.
 
         This is the asymmetry the `spent`/`blocked` split exists for. Getting it
@@ -145,8 +146,8 @@ class TestICStructuredHead:
         assert probs[1, 0] == pytest.approx(0.0, abs=1e-5)
 
     def test_more_active_in_neighbours_never_lowers_infection_risk(
-        self, model, edge_index
-    ):
+        self, model: WorldModel, edge_index: np.ndarray
+    ) -> None:
         """Monotonicity in the frontier: 1 - prod(1 - q) is increasing in the set."""
         graph = _graph(edge_index)
 
@@ -155,7 +156,7 @@ class TestICStructuredHead:
 
         assert two >= one - 1e-6
 
-    def test_disconnected_graph_produces_no_spread(self, model):
+    def test_disconnected_graph_produces_no_spread(self, model: WorldModel) -> None:
         graph = _graph(np.zeros((2, 0), dtype=np.int64))
         probs = _probs(model, _features(infected=(0,), frontier=(0,)), graph)
 
@@ -163,7 +164,7 @@ class TestICStructuredHead:
 
 
 class TestOracleHead:
-    def test_oracle_reproduces_the_ic_form_exactly(self, edge_index):
+    def test_oracle_reproduces_the_ic_form_exactly(self, edge_index: np.ndarray) -> None:
         """q = w with no MLP, so p_new is computable in closed form by hand."""
         model = WorldModel(
             "gcn",
@@ -185,7 +186,7 @@ class TestOracleHead:
         # Node 3 has two in-neighbours (2 and 4) but neither is active
         assert probs[3, 1] == pytest.approx(0.0, abs=1e-5)
 
-    def test_two_active_in_neighbours_compose_independently(self, edge_index):
+    def test_two_active_in_neighbours_compose_independently(self, edge_index: np.ndarray) -> None:
         model = WorldModel(
             "gcn",
             hidden_dim=4,
@@ -203,7 +204,7 @@ class TestOracleHead:
 
 class TestLTStructuredHead:
     @pytest.fixture
-    def model(self):
+    def model(self) -> WorldModel:
         return WorldModel(
             "sage",
             hidden_dim=8,
@@ -213,13 +214,13 @@ class TestLTStructuredHead:
             dropout=0.0,
         ).eval()
 
-    def test_zero_active_fraction_gate_holds(self, model, edge_index):
+    def test_zero_active_fraction_gate_holds(self, model: WorldModel, edge_index: np.ndarray) -> None:
         graph = _graph(edge_index, diffusion_model="LT")
         probs = _probs(model, _features(infected=(), frontier=()), graph)
 
         assert np.max(probs[:, 1]) == pytest.approx(0.0, abs=1e-5)
 
-    def test_lt_removal_returns_the_node_to_susceptible(self, model, edge_index):
+    def test_lt_removal_returns_the_node_to_susceptible(self, model: WorldModel, edge_index: np.ndarray) -> None:
         """Unlike spent IC, LT has no Removed state: the node resets to 0."""
         graph = _graph(edge_index, diffusion_model="LT")
         probs = _probs(
@@ -228,7 +229,7 @@ class TestLTStructuredHead:
 
         assert probs[1, 0] < 1.0
 
-    def test_lt_rejects_the_residual_head(self):
+    def test_lt_rejects_the_residual_head(self) -> None:
         with pytest.raises(ValueError, match="IC-only"):
             WorldModel(
                 "gcn", head_type="structured_residual", diffusion_model="LT"
@@ -236,7 +237,7 @@ class TestLTStructuredHead:
 
 
 class TestResidualHead:
-    def test_zero_correction_equals_the_oracle(self, edge_index):
+    def test_zero_correction_equals_the_oracle(self, edge_index: np.ndarray) -> None:
         """The anchor's defining property: q = sigmoid(logit(w) + 0) = w.
 
         Zeroing the MLP's last layer makes the correction exactly 0, so the
@@ -264,7 +265,7 @@ class TestResidualHead:
 
 
 class TestLinearHead:
-    def test_linear_head_has_no_structural_bound(self, edge_index):
+    def test_linear_head_has_no_structural_bound(self, edge_index: np.ndarray) -> None:
         """The contrast case. The linear head CAN infect a node with no active
         in-neighbour — which is exactly why its free-running rollout saturates."""
         model = WorldModel(
@@ -282,7 +283,7 @@ class TestLinearHead:
 
 class TestBackbones:
     @pytest.mark.parametrize("backbone", sorted(backbones))
-    def test_every_backbone_runs_and_shapes_match(self, backbone, edge_index):
+    def test_every_backbone_runs_and_shapes_match(self, backbone, edge_index: np.ndarray) -> None:
         model = WorldModel(
             backbone, hidden_dim=8, n_layers=2, head_type="structured", dropout=0.0
         ).eval()
@@ -293,7 +294,7 @@ class TestBackbones:
         assert logits.shape == (6, 2)
         assert torch.isfinite(logits).all()
 
-    def test_typed_encoding_widens_the_input_projection(self, edge_index):
+    def test_typed_encoding_widens_the_input_projection(self, edge_index: np.ndarray) -> None:
         channels = num_input_channels(typed_encoding)
         model = WorldModel(
             "sage",
@@ -310,7 +311,7 @@ class TestBackbones:
 
         assert logits.shape == (6, 2)
 
-    def test_unknown_backbone_and_head_are_rejected(self):
+    def test_unknown_backbone_and_head_are_rejected(self) -> None:
         with pytest.raises(ValueError, match="unknown backbone"):
             WorldModel("gnn")
 

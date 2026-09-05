@@ -12,7 +12,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-
 class GCNLayer(nn.Module):
     """
     Pre-norm residual GCN block:
@@ -52,7 +51,7 @@ class GCNEncoder(nn.Module):
         hidden_dim: int = 64,
         n_layers: int = 3,
         dropout: float = 0.1,
-        **_,
+        **_: object,
     ) -> None:
         super().__init__()
 

@@ -46,7 +46,7 @@ def _probs(model: WorldModel, X: torch.Tensor, graph: GraphInput) -> torch.Tenso
 
 
 class TestHazardForm:
-    def test_survivor_with_unchanged_fraction_has_zero_hazard(self):
+    def test_survivor_with_unchanged_fraction_has_zero_hazard(self) -> None:
         graph = _line_graph()
         X = torch.zeros(4, 6)
         # Node 0 active since an EARLIER step (infected, not frontier): node 1
@@ -57,7 +57,7 @@ class TestHazardForm:
 
         assert float(probs[1, 1]) == pytest.approx(0.0, abs=1e-5)
 
-    def test_fresh_frontier_carries_the_full_marginal(self):
+    def test_fresh_frontier_carries_the_full_marginal(self) -> None:
         graph = _line_graph()
         X = torch.zeros(4, 6)
         # Node 0 activated THIS step (infected and frontier): node 1 has survived
@@ -69,7 +69,7 @@ class TestHazardForm:
 
         assert float(probs[1, 1]) == pytest.approx(0.5, abs=1e-4)
 
-    def test_rising_fraction_pays_only_the_increment(self):
+    def test_rising_fraction_pays_only_the_increment(self) -> None:
         # Star: 1, 2, 3 all point at 0. With 1 active earlier and 2 newly
         # active, node 0 survived theta > 1/3 and faces f = 2/3:
         # hazard = (2/3 - 1/3) / (1 - 1/3) = 1/2
@@ -87,7 +87,7 @@ class TestHazardForm:
 
 
 class TestOracleDistribution:
-    def test_hazard_targets_match_simulated_lt_frequencies(self):
+    def test_hazard_targets_match_simulated_lt_frequencies(self) -> None:
         # The generator's closed-form LT marginals against brute force: one
         # graph, one mid-cascade state, hazards vs 3000 fresh-threshold draws
         rng = np.random.default_rng(0)
@@ -124,12 +124,12 @@ class TestOracleDistribution:
 
 
 class TestCompetitiveHazard:
-    def test_clt_oracle_rollout_matches_the_simulator_in_distribution(self):
+    def test_clt_oracle_rollout_matches_the_simulator_in_distribution(self) -> None:
         import networkx as nx
 
+        from coding_agent.envs.world_model_env import WorldModelEnvironment
         from coding_agent.types import GraphInfo
         from data.wm_competitive import CompetitiveConfig, CompetitiveSimulator
-        from coding_agent.envs.world_model_env import WorldModelEnvironment
 
         g = nx.barabasi_albert_graph(60, 3, seed=5)
         edges = [(u, v) for u, v in g.edges()] + [(v, u) for u, v in g.edges()]

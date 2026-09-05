@@ -8,7 +8,7 @@ import networkx as nx
 import numpy as np
 
 from data.wm_graphs import GraphBundle
-from data.wm_simulator import ActionOp, State, Simulator, blocked, spent
+from data.wm_simulator import ActionOp, Simulator, State, blocked, spent
 
 spine_algorithms = (
     "random",

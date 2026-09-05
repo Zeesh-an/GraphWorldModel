@@ -16,8 +16,8 @@ the dataclass or the readers that print it.
 from dataclasses import dataclass
 
 from data.wm_simulator import (
-    default_action_ops,
     blocked,
+    default_action_ops,
     epidemic_dynamics,
     spent,
     valid_action_ops,

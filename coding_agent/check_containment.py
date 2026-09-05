@@ -12,10 +12,10 @@ worst arm as the winner.
 """
 
 import inspect
-
 import networkx as nx
 import numpy as np
 
+import coding_agent.run
 from coding_agent.containment import (
     Outbreak,
     delete_node_ops,
@@ -33,7 +33,6 @@ from coding_agent.methods.base import (
     evaluate_strategy,
     validate_plan,
 )
-import coding_agent.run
 from coding_agent.tools.dismantling_algorithms import (
     dismantling_algorithms,
     frontier_removal,
@@ -43,7 +42,11 @@ from coding_agent.types import ActionOp, GraphInfo, State, TaskSpec, best_by, im
 from data.wm_simulator import blocked
 from pipeline.conditions import result_sense
 from pipeline.tasks import get_task, minimize
-from world_model.wm_metrics import containment_metrics, dismantling_curve, adjacency_sets
+from world_model.wm_metrics import (
+    adjacency_sets,
+    containment_metrics,
+    dismantling_curve,
+)
 
 # 0 -> 1 -> 2 -> 3 with certain transmission: an outbreak at 0 takes the whole
 # path unless something in the middle is cut

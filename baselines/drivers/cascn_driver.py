@@ -46,7 +46,6 @@ import os
 import pickle
 import sys
 from pathlib import Path
-
 import numpy as np
 
 repository_root = Path(os.environ.get("GWM_CASCN_ROOT", os.getcwd())).resolve()
@@ -186,7 +185,8 @@ def run_preprocessing() -> None:
     )
 
 
-def main(work_dir: Path) -> None:
+if __name__ == "__main__":
+    work_dir = Path(sys.argv[1])
     import tensorflow as tf
 
     data = load_instances(work_dir)
@@ -273,7 +273,3 @@ def main(work_dir: Path) -> None:
         json.dumps({"popularities": predictions})
     )
     print(f"[cascn_driver] wrote {len(predictions)} predictions")
-
-
-if __name__ == "__main__":
-    main(Path(sys.argv[1]))

@@ -29,6 +29,8 @@ disagreement §8.2 trap 1 predicts.
 import numpy as np
 import torch
 
+from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
+from coding_agent.envs.world_model_env import WorldModelEnvironment
 from coding_agent.epidemic import (
     build_immunization,
     contact_reduce,
@@ -42,8 +44,6 @@ from coding_agent.epidemic import (
     vaccinate,
     valid_levers,
 )
-from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
-from coding_agent.envs.world_model_env import WorldModelEnvironment
 from coding_agent.executor import StrategyError, build_strategy, validate_actions
 from coding_agent.methods.base import evaluate_strategy, validate_plan
 from coding_agent.tools.immunization_algorithms import (

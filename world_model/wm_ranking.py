@@ -30,7 +30,6 @@ Two things this module refuses to do:
 
 from dataclasses import asdict, dataclass, field
 from itertools import combinations
-
 import numpy as np
 import torch
 import torch.nn as nn
@@ -48,7 +47,7 @@ default_tie_epsilon = 1e-6
 margin_buckets = ((0.0, 0.5), (0.5, 1.0), (1.0, 2.0), (2.0, float("inf")))
 
 
-@dataclass
+@dataclass()
 class CandidateSet:
     """
     Candidates to be ordered, plus where they came from.
@@ -71,7 +70,7 @@ class CandidateSet:
             )
 
 
-@dataclass
+@dataclass()
 class RankingResult:
     graph_id: str
     n_candidates: int
@@ -130,9 +129,8 @@ def model_spreads(
 ) -> list[float]:
     """Predicted expected final spread per candidate, under the frozen model."""
     from coding_agent.types import GraphInfo
-
-    from world_model.scorer import ScoringContext, WorldModelScorer
     from world_model.checkpoint import ModelSpec
+    from world_model.scorer import ScoringContext, WorldModelScorer
 
     spec = ModelSpec(
         backbone="gcn",  # unused: the module is supplied, not rebuilt
@@ -182,8 +180,8 @@ def preference_accuracy(
     predicted = np.asarray(predicted, dtype=float)
     true = np.asarray(true, dtype=float)
     correct = evaluated = model_ties = oracle_ties = 0
-    margins: list[float] = []
-    per_bucket: dict[tuple, list[int]] = {bucket: [] for bucket in margin_buckets}
+    margins = []
+    per_bucket = {bucket: [] for bucket in margin_buckets}
 
     for first, second in combinations(range(len(true)), 2):
         margin = abs(true[first] - true[second])

@@ -35,7 +35,6 @@ labelled as such rather than being passed off as the expectation.
 """
 
 import time
-
 import numpy as np
 
 from coding_agent.types import ActionFn, State, Trajectory

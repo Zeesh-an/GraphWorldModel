@@ -20,9 +20,9 @@ import torch
 import torch.nn as nn
 
 from data.wm_simulator import spent
+from world_model.checkpoint import LegacyCheckpointError, load_checkpoint
 from world_model.wm_data import basic_encoding, load_graph_store
 from world_model.wm_eval import planning_regret_multi
-from world_model.checkpoint import LegacyCheckpointError, load_checkpoint
 
 
 def load_trained_model(config: dict, device: torch.device) -> nn.Module:

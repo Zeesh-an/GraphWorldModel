@@ -245,7 +245,7 @@ def _normalized_adjacency(graph: GraphInfo) -> tuple[np.ndarray, np.ndarray, np.
 
 
 # Label propagation ----------------------------------------------------------
-def lpsi_scores(graph: GraphInfo, observation: np.ndarray, alpha: float = lpsi_alpha, **_kw) -> np.ndarray:
+def lpsi_scores(graph: GraphInfo, observation: np.ndarray, alpha: float = lpsi_alpha, **_kw: object) -> np.ndarray:
     """LPSI's converged label field F = (1 - a) (I - a S)^-1 Y, by iteration."""
     sources, targets, values = _normalized_adjacency(graph)
     # +1 infected, -1 uninfected: the paper's label encoding, and the reason the
@@ -271,7 +271,7 @@ def lpsi_scores(graph: GraphInfo, observation: np.ndarray, alpha: float = lpsi_a
 
 
 def lpsi(
-    graph: GraphInfo, observation: np.ndarray, budget: int, alpha: float = lpsi_alpha, **_kw
+    graph: GraphInfo, observation: np.ndarray, budget: int, alpha: float = lpsi_alpha, **_kw: object
 ) -> list[int]:
     """LPSI (AAAI 2017): sources are LOCAL MAXIMA of a converged label field."""
     field = lpsi_scores(graph, observation, alpha=alpha)
@@ -349,7 +349,7 @@ def _submatrix_eigenvector(
     return np.abs(vector)
 
 
-def netsleuth_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
+def netsleuth_scores(graph: GraphInfo, observation: np.ndarray, **_kw: object) -> np.ndarray:
     """NETSLEUTH: submatrix-Laplacian eigenvector entry per infected node."""
     neighbours = neighbour_sets(graph)
     infected = infected_set(observation)
@@ -364,7 +364,7 @@ def netsleuth_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.nda
 
 
 def netsleuth(
-    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw
+    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object
 ) -> list[int]:
     """
     NETSLEUTH (ICDM 2012): submatrix-Laplacian eigenvector, seeds picked by deflation.
@@ -407,7 +407,7 @@ def netsleuth(
 
 
 # Jordan centre / sample path ------------------------------------------------
-def jordan_center_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
+def jordan_center_scores(graph: GraphInfo, observation: np.ndarray, **_kw: object) -> np.ndarray:
     """Negative eccentricity within the infected subgraph (higher = more central)."""
     neighbours = neighbour_sets(graph)
     infected = set(infected_set(observation))
@@ -426,7 +426,7 @@ def jordan_center_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np
 
 
 def jordan_center(
-    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw
+    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object
 ) -> list[int]:
     """
     Jordan centre (Zhu & Ying, ToN 2016): the eccentricity minimizer of the
@@ -456,7 +456,7 @@ def jordan_center(
 
 # Rumor centrality -----------------------------------------------------------
 def rumor_centrality_scores(
-    graph: GraphInfo, observation: np.ndarray, **_kw
+    graph: GraphInfo, observation: np.ndarray, **_kw: object
 ) -> np.ndarray:
     """
     Shah & Zaman's rumor centrality, in logs, over a BFS tree per infected
@@ -525,7 +525,7 @@ def rumor_centrality_scores(
 
 
 def rumor_centrality(
-    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw
+    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object
 ) -> list[int]:
     """
     Rumor centrality (Shah & Zaman, SIGMETRICS 2010): the paper that founded the field.
@@ -552,7 +552,7 @@ def _cover_number(neighbours: list[set[int]], infected: set[int]) -> int:
     return max(counts) if counts else 0
 
 
-def ojc_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
+def ojc_scores(graph: GraphInfo, observation: np.ndarray, **_kw: object) -> np.ndarray:
     """OJC: negative eccentricity to the infected set, over the full graph."""
     neighbours = neighbour_sets(graph)
     infected = set(infected_set(observation))
@@ -579,7 +579,7 @@ def ojc_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
     return np.where(np.isfinite(scores), scores, floor)
 
 
-def ojc(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[int]:
+def ojc(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object) -> list[int]:
     """
     OJC (AAAI 2017): cover the observed infected nodes with balls, then take the
     Jordan centre of the cover.
@@ -675,7 +675,7 @@ def _leading_eigenvalue(neighbours: list[set[int]], members: list[int]) -> float
 
 
 def dynamic_age_scores(
-    graph: GraphInfo, observation: np.ndarray, n_candidates: int = dynamic_age_candidates, **_kw
+    graph: GraphInfo, observation: np.ndarray, n_candidates: int = dynamic_age_candidates, **_kw: object
 ) -> np.ndarray:
     """Fioriti-Chinnici: drop in the infected subgraph's leading eigenvalue when v is removed."""
     neighbours = neighbour_sets(graph)
@@ -699,7 +699,7 @@ def dynamic_age_scores(
 
 
 def dynamic_age(
-    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw
+    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object
 ) -> list[int]:
     """Dynamical age (Fioriti & Chinnici 2012): the spectral multi-source estimator."""
     return _top_k(_restricted(dynamic_age_scores(graph, observation), observation), budget)
@@ -707,7 +707,7 @@ def dynamic_age(
 
 # Effective distance ---------------------------------------------------------
 def effective_distance_scores(
-    graph: GraphInfo, observation: np.ndarray, **_kw
+    graph: GraphInfo, observation: np.ndarray, **_kw: object
 ) -> np.ndarray:
     """
     Brockmann-Helbing: negative spread of effective distance to the infected set.
@@ -771,7 +771,7 @@ def effective_distance_scores(
 
 
 def effective_distance(
-    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw
+    graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object
 ) -> list[int]:
     """Effective distance (Brockmann & Helbing, Science 2013): the wave-centre estimator."""
     return _top_k(
@@ -821,7 +821,7 @@ def dmp_scores(
     observation: np.ndarray,
     n_candidates: int = dmp_candidates,
     steps: int = dmp_steps,
-    **_kw,
+    **_kw: object,
 ) -> np.ndarray:
     """DMP likelihood of the observation, per single-source hypothesis."""
     observation = np.clip(np.asarray(observation, dtype=np.float64), 0.0, 1.0)
@@ -849,7 +849,7 @@ def dmp_localize(
     budget: int,
     n_candidates: int = dmp_candidates,
     steps: int = dmp_steps,
-    **_kw,
+    **_kw: object,
 ) -> list[int]:
     """
     Dynamic message passing (Lokhov et al. 2014): greedy MAP over the DMP likelihood.
@@ -992,42 +992,42 @@ def _infected_centrality(
     return scores
 
 
-def infected_degree_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
+def infected_degree_scores(graph: GraphInfo, observation: np.ndarray, **_kw: object) -> np.ndarray:
     return _infected_centrality(graph, observation, "degree")
 
 
-def infected_degree(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[int]:
+def infected_degree(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object) -> list[int]:
     """Comin-Costa: degree within the infected subgraph, the cheap-heuristic floor."""
     return _top_k(_restricted(infected_degree_scores(graph, observation), observation), budget)
 
 
-def infected_betweenness_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
+def infected_betweenness_scores(graph: GraphInfo, observation: np.ndarray, **_kw: object) -> np.ndarray:
     return _infected_centrality(graph, observation, "betweenness")
 
 
-def infected_betweenness(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[int]:
+def infected_betweenness(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object) -> list[int]:
     """Comin-Costa: betweenness within the infected subgraph."""
     return _top_k(
         _restricted(infected_betweenness_scores(graph, observation), observation), budget
     )
 
 
-def infected_closeness_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
+def infected_closeness_scores(graph: GraphInfo, observation: np.ndarray, **_kw: object) -> np.ndarray:
     return _infected_centrality(graph, observation, "closeness")
 
 
-def infected_closeness(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[int]:
+def infected_closeness(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object) -> list[int]:
     """Comin-Costa: closeness within the infected subgraph."""
     return _top_k(
         _restricted(infected_closeness_scores(graph, observation), observation), budget
     )
 
 
-def infected_eigenvector_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
+def infected_eigenvector_scores(graph: GraphInfo, observation: np.ndarray, **_kw: object) -> np.ndarray:
     return _infected_centrality(graph, observation, "eigenvector")
 
 
-def infected_eigenvector(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw) -> list[int]:
+def infected_eigenvector(graph: GraphInfo, observation: np.ndarray, budget: int, **_kw: object) -> list[int]:
     """Comin-Costa: eigenvector centrality within the infected subgraph."""
     return _top_k(
         _restricted(infected_eigenvector_scores(graph, observation), observation), budget
@@ -1036,7 +1036,7 @@ def infected_eigenvector(graph: GraphInfo, observation: np.ndarray, budget: int,
 
 # Floors and the simulation-based member ------------------------------------
 def random_sources_scores(
-    graph: GraphInfo, observation: np.ndarray, seed: int = 0, **_kw
+    graph: GraphInfo, observation: np.ndarray, seed: int = 0, **_kw: object
 ) -> np.ndarray:
     rng = np.random.default_rng(seed)
 
@@ -1044,7 +1044,7 @@ def random_sources_scores(
 
 
 def random_sources(
-    graph: GraphInfo, observation: np.ndarray, budget: int, seed: int = 0, **_kw
+    graph: GraphInfo, observation: np.ndarray, budget: int, seed: int = 0, **_kw: object
 ) -> list[int]:
     """Uniformly random nodes from the infected set: the floor every number is read against."""
     return _top_k(
@@ -1052,7 +1052,7 @@ def random_sources(
     )
 
 
-def resim_greedy_scores(graph: GraphInfo, observation: np.ndarray, **_kw) -> np.ndarray:
+def resim_greedy_scores(graph: GraphInfo, observation: np.ndarray, **_kw: object) -> np.ndarray:
     """Ranking proxy for `resim_greedy`; the selection itself re-simulates."""
     return lpsi_scores(graph, observation)
 
@@ -1067,7 +1067,7 @@ def resim_greedy(
     mc_runs: int = resim_mc_runs,
     horizon: int = resim_horizon,
     seed: int = 0,
-    **_kw,
+    **_kw: object,
 ) -> list[int]:
     """
     Greedy minimization of the re-simulation error ||y - f(x_hat)||^2.

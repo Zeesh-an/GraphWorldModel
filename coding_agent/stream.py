@@ -31,7 +31,6 @@ Two consequences worth stating before reading any number:
 """
 
 from dataclasses import dataclass, field
-
 import numpy as np
 
 from coding_agent.types import ActionFn, ActionOp, GraphInfo, State

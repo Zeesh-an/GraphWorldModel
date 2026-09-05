@@ -49,7 +49,6 @@ import os
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-
 import numpy as np
 import scipy.sparse as sp
 
@@ -183,7 +182,7 @@ def parse_casflow_line(line: str) -> Cascade | None:
     )
 
 
-_identifier_cache: dict[str, int] = {}
+_identifier_cache = {}
 
 
 def _identifier(token: str) -> int:
@@ -331,7 +330,7 @@ def relabel_cascades(
     deterministic in the corpus alone and two runs cannot disagree about which
     graph they are on.
     """
-    counts: dict[int, int] = {}
+    counts = {}
 
     for cascade in cascades:
         for adopter, _, parent in cascade.events:

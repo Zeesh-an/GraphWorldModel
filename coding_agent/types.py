@@ -66,7 +66,7 @@ def pad_counts(counts: list[float], horizon: int) -> list[float]:
     return counts + [counts[-1]] * (horizon + 2 - len(counts))
 
 
-@dataclass
+@dataclass()
 class GraphInfo:
     """Read-only graph view handed to the library and to strategies."""
 
@@ -133,7 +133,7 @@ class GraphInfo:
         return int(self._degrees[int(node)])
 
 
-@dataclass
+@dataclass()
 class TaskSpec:
     """Experiment problem statement and task specification details"""
 
@@ -424,7 +424,7 @@ class TaskSpec:
         return self.campaigns > 1
 
 
-@dataclass
+@dataclass()
 class Trajectory:
     """What a rollout returns"""
 

@@ -9,6 +9,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
+from data.wm_competitive import auto_dominance, shared_positive_prob
+from data.wm_simulator import blocked, spent
+from world_model.checkpoint import load_checkpoint
 from world_model.wm_data import (
     GraphInput,
     apply_edge_ops,
@@ -21,12 +25,8 @@ from world_model.wm_data import (
     edges_to_arrays,
     log_degree,
 )
-from world_model.checkpoint import load_checkpoint
 from world_model.wm_eval import sample_competitive_step, sample_epidemic_step
 from world_model.wm_model import WorldModel
-from coding_agent.types import ActionFn, GraphInfo, State, Trajectory, pad_counts
-from data.wm_competitive import auto_dominance, shared_positive_prob
-from data.wm_simulator import blocked, spent
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 

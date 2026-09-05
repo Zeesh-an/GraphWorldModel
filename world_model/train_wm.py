@@ -29,8 +29,16 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from data.wm_competitive import auto_dominance
+from data.wm_competitive import CompetitiveConfig, auto_dominance, shared_positive_prob
+from data.wm_epidemic import EpidemicConfig, default_burn_in
 from data.wm_simulator import epidemic_dynamics, spent, valid_remove_semantics
+from world_model.checkpoint import (
+    ModelSpec,
+    checkpoint_format,
+    load_checkpoint,
+    save_checkpoint,
+)
+from world_model.wm_action_eval import action_conditioning_report
 from world_model.wm_data import (
     TransitionDataset,
     basic_encoding,
@@ -42,29 +50,20 @@ from world_model.wm_data import (
     num_input_channels,
     valid_action_encodings,
 )
-from world_model.checkpoint import (
-    ModelSpec,
-    checkpoint_format,
-    load_checkpoint,
-    save_checkpoint,
-)
-from world_model.wm_model import WorldModel, backbones
-from world_model.wm_action_eval import action_conditioning_report
-from world_model.wm_policies import resolve as resolve_policies
-from data.wm_competitive import CompetitiveConfig, shared_positive_prob
-from data.wm_epidemic import EpidemicConfig, default_burn_in
 from world_model.wm_eval import (
     blocking_regret_multi,
     competitive_rollout_ensemble,
     epidemic_rollout_ensemble,
     evaluate_one_step,
     immunization_regret_multi,
-    planning_split_test,
-    valid_planning_splits,
     planning_regret_budget_multi,
     planning_regret_multi,
+    planning_split_test,
     rollout_ensemble,
+    valid_planning_splits,
 )
+from world_model.wm_model import WorldModel, backbones
+from world_model.wm_policies import resolve as resolve_policies
 
 pos_weight_min = 1.0
 pos_weight_max = 50.0
@@ -72,7 +71,7 @@ pos_weight_max = 50.0
 history_flush_epochs = 5
 
 
-@dataclass
+@dataclass()
 class TrainConfig:
     """Field names are the results-JSON `config` schema that world_model_env reads back."""
 
@@ -872,7 +871,7 @@ if __name__ == "__main__":
         help="which graphs the planning evaluators score. `test` (default) uses "
         "held-out graphs only and reports train_overlap/val_overlap so that can "
         "be checked; `legacy` reproduces the old list(store)[:n] selection, which "
-        "mixes splits and is NOT a held-out number.",
+        "mixes splits and is NOT a held-out number (default: {planning_split_test}).",
     )
     parser.add_argument(
         "--plan-budget-graphs",

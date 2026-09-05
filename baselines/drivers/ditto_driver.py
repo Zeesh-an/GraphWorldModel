@@ -52,7 +52,6 @@ the tree with the same rule every library decoder uses.
 import json
 import os
 import sys
-
 import numpy as np
 import torch
 import torch_geometric as pyg

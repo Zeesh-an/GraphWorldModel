@@ -13,6 +13,7 @@ mix two experiments, which is worse than losing the work.
 """
 
 import json
+import os
 from pathlib import Path
 
 from coding_agent.types import ActionOp, State, Trajectory
@@ -148,8 +149,7 @@ def save(path: str | Path | None, payload: dict) -> None:
         return
 
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
+    os.makedirs(path.parent, exist_ok=True)
     # Write-then-rename: a kill mid-write must not leave a truncated file that
     # the next resume would reject (or worse, half-read)
     staging = path.with_suffix(".tmp")

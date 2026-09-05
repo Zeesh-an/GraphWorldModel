@@ -56,11 +56,11 @@ influence maximization.
 
 import numpy as np
 
-from coding_agent.containment import core_numbers, neighbour_sets
-from coding_agent.tools import primitives
 # Brandes over the residual graph, sampled on a large graph. Shared with the
 # dismantling pool rather than reimplemented: it is the same functional, and two
 # copies would drift into two different `betweenness` rows across two tables.
+from coding_agent.containment import core_numbers, neighbour_sets
+from coding_agent.tools import primitives
 from coding_agent.tools.dismantling_algorithms import _betweenness
 from coding_agent.types import GraphInfo
 
@@ -91,7 +91,7 @@ def _undirected(graph: GraphInfo) -> list[set[int]]:
     return neighbour_sets(graph)
 
 
-def _excluded(graph: GraphInfo, outbreak) -> set[int]:
+def _excluded(graph: GraphInfo, outbreak: tuple[int, ...] | list[int]) -> set[int]:
     """The outbreak's own sources, which no member may return."""
     return {int(node) for node in (outbreak or ()) if 0 <= int(node) < graph.num_nodes}
 
@@ -175,7 +175,7 @@ def _rank_arcs(
 
 # The physics line (§3.1) --------------------------------------------------------
 def degree_immunization(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     Targeted immunization (Pastor-Satorras & Vespignani, PRE 65:036104, 2002).
@@ -195,7 +195,7 @@ def degree_immunization(
 
 
 def adaptive_degree_immunization(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     Recalculated-degree immunization (Holme, Kim, Yoon & Han, PRE 65:056109, 2002).
@@ -234,9 +234,9 @@ def acquaintance_immunization(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "SIR",
-    outbreak=(),
+    outbreak: tuple[int, ...] | list[int]=(),
     seed: int = 0,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     Acquaintance immunization (Cohen, Havlin & ben-Avraham, PRL 91:247901, 2003).
@@ -275,7 +275,7 @@ def acquaintance_immunization(
 
 
 def pagerank_immunization(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """Top-k PageRank: the centrality control NetShield's Fig 1 reports beside `Eigs`."""
     scores = primitives.compute_pagerank(graph)
@@ -285,7 +285,7 @@ def pagerank_immunization(
 
 
 def eigenvector_immunization(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     Top-k eigenvector centrality: NetShield's `Eigs` row and RLGN's `Eigenvector`.
@@ -303,7 +303,7 @@ def eigenvector_immunization(
 
 
 def betweenness_immunization(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """Top-k betweenness: the `IB` arm of Holme et al.'s taxonomy."""
     scores = _betweenness(_undirected(graph), set())
@@ -313,7 +313,7 @@ def betweenness_immunization(
 
 
 def kshell_immunization(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     Top-k by k-core number (Kitsak et al., Nature Physics 2010).
@@ -332,9 +332,9 @@ def random_immunization(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "SIR",
-    outbreak=(),
+    outbreak: tuple[int, ...] | list[int]=(),
     seed: int = 42,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     Uniform random doses: the control Pastor-Satorras & Vespignani's whole line exists to beat.
@@ -357,7 +357,7 @@ def random_immunization(
 
 # The spectral line (§3.2) -------------------------------------------------------
 def netshield(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     NetShield (Tong, Prakash, Tsourakakis, Eliassi-Rad, Faloutsos & Chau, ICDM 2010).
@@ -411,7 +411,7 @@ def netshield(
 
 
 def netshield_plus(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     NetShield+ (Chen, Tong, Prakash, Tsourakakis, Eliassi-Rad, Faloutsos & Chau, TKDE 2015).
@@ -475,7 +475,7 @@ def _reduced_graph(graph: GraphInfo, removed: set[int]) -> GraphInfo:
 
 
 def greedy_walk(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     GreedyWalk, node variant (SRMN): Saha, Adiga, Prakash & Vullikanti, SDM 2015.
@@ -540,7 +540,7 @@ def _closed_walks(graph: GraphInfo, removed: set[int]) -> np.ndarray:
 
 
 def preciado_allocation(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     Optimal resource allocation, discretized (Preciado, Zargham, Enyioha, Jadbabaie
@@ -589,9 +589,9 @@ def dava(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "SIR",
-    outbreak=(),
+    outbreak: tuple[int, ...] | list[int]=(),
     fast: bool = False,
-    **_,
+    **_: object,
 ) -> list[tuple] | list[int]:
     """
     DAVA (Zhang & Prakash, SDM 2014): data-aware vaccine allocation.
@@ -669,7 +669,7 @@ def dava(
 
 
 def dava_fast(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """DAVA-fast: one dominator tree, top `k` children. The near-linear variant."""
     return dava(graph, budget, diffusion_model, outbreak=outbreak, fast=True)
@@ -840,7 +840,7 @@ def _subtree_benefit(children: dict, weights: dict, node: int) -> float:
 
 
 def frontier_immunization(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     Dose the susceptible boundary of the observed outbreak, highest-degree first.
@@ -884,12 +884,12 @@ def mc_greedy_immunization(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "SIR",
-    outbreak=(),
+    outbreak: tuple[int, ...] | list[int]=(),
     n_candidates: int = mc_greedy_candidates,
     mc_runs: int = mc_greedy_runs,
     horizon: int = mc_greedy_horizon,
     seed: int = 0,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     Greedy on the SIMULATED attack rate: add the dose that lowers it most, repeat.
@@ -944,7 +944,7 @@ def mc_greedy_immunization(
 
 # The edge levers (§1.1 / §3.2) --------------------------------------------------
 def netmelt(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[tuple[int, int]]:
     """
     NetMelt (Tong, Prakash, Eliassi-Rad, Faloutsos & Faloutsos, CIKM 2012 best paper).
@@ -963,7 +963,7 @@ def netmelt(
 
 
 def product_degree(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[tuple[int, int]]:
     """
     ProductDegree (Van Mieghem et al., PRE 84:016101, 2011): score arc `(u, v)` by `deg(u) * deg(v)`.
@@ -980,7 +980,7 @@ def product_degree(
 
 
 def eigen_score(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[tuple[int, int]]:
     """
     EigenScore (Van Mieghem et al., PRE 84:016101, 2011): score arc `(u, v)` by `|x(u) * x(v)|`.
@@ -999,7 +999,7 @@ def eigen_score(
 
 
 def greedy_walk_edge(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[tuple[int, int]]:
     """
     GreedyWalk, edge variant (SRME): Saha et al., SDM 2015.
@@ -1037,7 +1037,7 @@ def greedy_walk_edge(
 
 
 def edge_betweenness_cut(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[tuple[int, int]]:
     """
     Cut the highest edge-betweenness arcs: the bridges, approximated by endpoint betweenness.
@@ -1057,7 +1057,7 @@ def edge_betweenness_cut(
 
 
 def frontier_edge_cut(
-    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[tuple[int, int]]:
     """
     Cut the arcs LEAVING the observed outbreak, highest-degree destination first.
@@ -1096,9 +1096,9 @@ def random_edge_cut(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "SIR",
-    outbreak=(),
+    outbreak: tuple[int, ...] | list[int]=(),
     seed: int = 42,
-    **_,
+    **_: object,
 ) -> list[tuple[int, int]]:
     """Uniform random arc cuts: the edge levers' floor."""
     arcs = _arc_list(graph)

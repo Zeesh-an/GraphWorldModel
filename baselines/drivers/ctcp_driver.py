@@ -38,7 +38,6 @@ import json
 import os
 import sys
 from pathlib import Path
-
 import numpy as np
 
 # `run_baseline` sets the subprocess CWD to the clone, so the repo root is simply
@@ -186,15 +185,14 @@ def predict_all(model, dataset, param, observed: dict) -> dict:
     return predictions
 
 
-def main(work_dir: Path) -> None:
+if __name__ == "__main__":
+    work_dir = Path(sys.argv[1])
+    import argparse
+    import logging
     import torch
-
     from model.CTCP import CTCP
     from utils.data_processing import get_data
     from utils.my_utils import set_config
-
-    import argparse
-    import logging
 
     data = load_instances(work_dir)
     observation = int(data["observation"])
@@ -259,7 +257,3 @@ def main(work_dir: Path) -> None:
         json.dumps({"popularities": predictions})
     )
     print(f"[ctcp_driver] wrote {len(predictions)} predictions")
-
-
-if __name__ == "__main__":
-    main(Path(sys.argv[1]))

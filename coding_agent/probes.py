@@ -15,10 +15,9 @@ wall time for the results JSON.
 import json
 import re
 import time
-
-from tqdm import tqdm
 from dataclasses import replace
 from functools import partial
+from tqdm import tqdm
 
 from coding_agent.credit import (
     batched_environment,

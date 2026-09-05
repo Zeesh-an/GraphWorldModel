@@ -17,12 +17,14 @@ from data.wm_actions import (
     blocking_selectors,
     counterfactual_actions,
     delete_node_bag,
-    immunizer_selectors as default_immunizer_selectors,
     sample_injection,
     select_blockers,
     select_immunizers,
     select_seeds,
     spine_algorithms,
+)
+from data.wm_actions import (
+    immunizer_selectors as default_immunizer_selectors,
 )
 from data.wm_competitive import (
     CompetitiveConfig,
@@ -44,10 +46,10 @@ from data.wm_graphs import (
     real_directed,
 )
 from data.wm_simulator import (
-    default_action_ops,
     ActionOp,
     Simulator,
     State,
+    default_action_ops,
     epidemic_dynamics,
     spent,
     valid_action_ops,
@@ -267,7 +269,7 @@ class TransitionWriter:
 
 
 # Generation
-@dataclass
+@dataclass()
 class GenConfig:
     dataset: str
     num_graphs: int
@@ -1504,7 +1506,8 @@ def parse_args() -> GenConfig:
         f"keeps every episode of a graph in one split, so no graph straddles the "
         f"boundary. {episode_random_split} draws per episode and is LEGACY: it "
         f"leaks a graph across splits and makes test metrics optimistic. Use it "
-        f"only to reproduce a dataset generated before 2026-08-22.",
+        f"only to reproduce a dataset generated before 2026-08-22 "
+        f"(default: {graph_disjoint_split}).",
     )
     parser.add_argument(
         "--weight-lo",

@@ -47,7 +47,6 @@ cause.
 import json
 import os
 import sys
-
 import networkx as nx
 
 # The five solvers, and which of the repo's classes each one is

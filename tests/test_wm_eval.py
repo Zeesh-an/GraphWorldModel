@@ -10,6 +10,7 @@ do with the model. `TestRemoveSemanticsPropagation` is the test that fails if it
 comes back.
 """
 
+from pathlib import Path
 import numpy as np
 import pytest
 import torch
@@ -29,12 +30,12 @@ device = torch.device("cpu")
 
 
 @pytest.fixture
-def store(dataset_dir):
+def store(dataset_dir: Path) -> dict:
     return load_graph_store(dataset_dir)
 
 
 @pytest.fixture
-def model():
+def model() -> WorldModel:
     torch.manual_seed(0)
     return WorldModel(
         "sage", hidden_dim=8, n_layers=2, head_type="structured", dropout=0.0
@@ -42,17 +43,17 @@ def model():
 
 
 class TestRemoveSemanticsPropagation:
-    def test_rebuild_simulator_defaults_to_spent(self, store):
+    def test_rebuild_simulator_defaults_to_spent(self, store) -> None:
         simulator = rebuild_simulator(store["g0"], "IC")
 
         assert simulator.remove_semantics == spent
 
-    def test_rebuild_simulator_honours_blocked(self, store):
+    def test_rebuild_simulator_honours_blocked(self, store) -> None:
         simulator = rebuild_simulator(store["g0"], "IC", remove_semantics=blocked)
 
         assert simulator.remove_semantics == blocked
 
-    def test_blocked_node_leaves_the_count_and_spent_does_not(self, store):
+    def test_blocked_node_leaves_the_count_and_spent_does_not(self, store) -> None:
         """The +k the bug was silently introducing, demonstrated directly."""
         from data.wm_simulator import ActionOp
 
@@ -65,7 +66,7 @@ class TestRemoveSemanticsPropagation:
         assert 1 not in blocked_sim.advance(bag).infected
 
     def test_rollout_ensemble_threads_semantics_into_the_ground_truth(
-        self, model, dataset_dir, store, monkeypatch
+        self, model: WorldModel, dataset_dir: Path, store, monkeypatch
     ):
         """The regression proper: whatever rollout_ensemble is told must reach the
         simulator it scores against, not just the model rollout."""
@@ -74,7 +75,7 @@ class TestRemoveSemanticsPropagation:
 
         original = wm_eval.rebuild_simulator
 
-        def spy(*args, **kwargs):
+        def spy(*args: object, **kwargs: object):
             seen.append(kwargs.get("remove_semantics", spent))
             return original(*args, **kwargs)
 
@@ -96,14 +97,14 @@ class TestRemoveSemanticsPropagation:
         assert set(seen) == {blocked}
 
     def test_planning_regret_threads_semantics_too(
-        self, model, store, monkeypatch
+        self, model: WorldModel, store, monkeypatch
     ):
         seen = []
         import world_model.wm_eval as wm_eval
 
         original = wm_eval.rebuild_simulator
 
-        def spy(*args, **kwargs):
+        def spy(*args: object, **kwargs: object):
             seen.append(kwargs.get("remove_semantics", spent))
             return original(*args, **kwargs)
 
@@ -124,7 +125,7 @@ class TestRemoveSemanticsPropagation:
 
 
 class TestOneStep:
-    def test_returns_the_documented_metric_suite(self, model, dataset_dir):
+    def test_returns_the_documented_metric_suite(self, model: WorldModel, dataset_dir: Path) -> None:
         dataset = TransitionDataset(dataset_dir, "IC", "test")
         results = evaluate_one_step(model, dataset, "IC", device)
 
@@ -140,14 +141,14 @@ class TestOneStep:
             assert key in results
 
     def test_add_seed_success_is_perfect_for_a_structured_head(
-        self, model, dataset_dir
-    ):
+        self, model: WorldModel, dataset_dir: Path
+    ) -> None:
         dataset = TransitionDataset(dataset_dir, "IC", "test")
         results = evaluate_one_step(model, dataset, "IC", device)
 
         assert results["add_seed_success"] == pytest.approx(1.0)
 
-    def test_action_override_changes_the_score(self, model, dataset_dir):
+    def test_action_override_changes_the_score(self, model: WorldModel, dataset_dir: Path) -> None:
         dataset = TransitionDataset(dataset_dir, "IC", "test")
 
         baseline = evaluate_one_step(model, dataset, "IC", device)
@@ -165,7 +166,7 @@ class TestOneStep:
 
 
 class TestRolloutEnsemble:
-    def test_reports_the_documented_metrics(self, model, dataset_dir, store):
+    def test_reports_the_documented_metrics(self, model: WorldModel, dataset_dir: Path, store) -> None:
         results = rollout_ensemble(
             model, dataset_dir, "IC", store, device, "test", n_samples=3, max_episodes=1
         )
@@ -179,7 +180,7 @@ class TestRolloutEnsemble:
         ):
             assert key in results and np.isfinite(results[key])
 
-    def test_recorded_policy_is_the_default_path(self, model, dataset_dir, store):
+    def test_recorded_policy_is_the_default_path(self, model: WorldModel, dataset_dir: Path, store) -> None:
         """Passing no policy must be byte-identical to the pre-existing behaviour."""
         common = dict(n_samples=3, max_episodes=1, seed=7)
 
@@ -202,7 +203,7 @@ class TestRolloutEnsemble:
 
 class TestActionPolicies:
     @pytest.mark.parametrize("name", sorted(policies))
-    def test_policy_emits_one_bag_per_step_and_only_node_ops(self, name, store):
+    def test_policy_emits_one_bag_per_step_and_only_node_ops(self, name, store) -> None:
         rng = np.random.default_rng(0)
         episode_records = [{"t": step} for step in range(4)]
 
@@ -214,20 +215,20 @@ class TestActionPolicies:
                 assert action_op["op"] in ("add_node", "remove_node")
                 assert 0 <= action_op["target"] < store["g0"]["num_nodes"]
 
-    def test_degree_policy_targets_the_hub_first(self, store):
+    def test_degree_policy_targets_the_hub_first(self, store) -> None:
         rng = np.random.default_rng(0)
         sequence = policies["degree_seed"](store["g0"], [{"t": 0}], rng)
 
         # Nodes 1 and 4 both have degree 3 in the fixture; the hub must be one of them
         assert sequence[0][0]["target"] in (1, 4)
 
-    def test_null_policy_emits_nothing(self, store):
+    def test_null_policy_emits_nothing(self, store) -> None:
         rng = np.random.default_rng(0)
         sequence = policies["null"](store["g0"], [{"t": 0}, {"t": 1}], rng)
 
         assert sequence == [[], []]
 
-    def test_off_policy_rollout_runs_end_to_end(self, model, dataset_dir, store):
+    def test_off_policy_rollout_runs_end_to_end(self, model: WorldModel, dataset_dir: Path, store) -> None:
         results = rollout_ensemble(
             model,
             dataset_dir,
@@ -242,6 +243,6 @@ class TestActionPolicies:
 
         assert np.isfinite(results["ens_marg_mae"])
 
-    def test_unknown_policy_name_is_rejected(self):
+    def test_unknown_policy_name_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="unknown action policy"):
             resolve(["greedy_celf"])

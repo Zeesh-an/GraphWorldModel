@@ -14,7 +14,7 @@ def _triangle_plus_tail() -> np.ndarray:
     return np.asarray([[0, 1, 2, 2], [1, 2, 0, 3]], dtype=np.int64)
 
 
-def test_features_follow_gdm_extractor_formulas():
+def test_features_follow_gdm_extractor_formulas() -> None:
     features = gdm_node_features(4, _triangle_plus_tail())
 
     degree = np.asarray([2, 2, 3, 1]) / 3.0
@@ -27,14 +27,14 @@ def test_features_follow_gdm_extractor_formulas():
     assert np.allclose(features, expected)
 
 
-def test_features_ignore_direction_and_self_loops():
+def test_features_ignore_direction_and_self_loops() -> None:
     both_ways = np.asarray([[0, 1, 1, 2, 2, 0, 2, 3, 3, 3], [1, 0, 2, 1, 0, 2, 3, 2, 3, 3]])
 
     assert np.allclose(gdm_node_features(4, both_ways), gdm_node_features(4, _triangle_plus_tail()))
 
 
 @pytest.mark.parametrize("projection", ["lin.weight", "lin_src.weight"])
-def test_legacy_conversion_transposes_and_splits(projection):
+def test_legacy_conversion_transposes_and_splits(projection) -> None:
     weight = torch.arange(8.0).view(4, 2)  # in=4, heads*out=2
     att = torch.arange(4.0).view(1, 1, 4)  # heads=1, 2*out
     legacy = {
@@ -59,14 +59,14 @@ def test_legacy_conversion_transposes_and_splits(projection):
     assert torch.equal(converted["convolutional_layers.0.att_src"], att[..., 2:])
 
 
-def test_legacy_conversion_refuses_a_mismatched_model():
+def test_legacy_conversion_refuses_a_mismatched_model() -> None:
     legacy = {"convolutional_layers.0.weight": torch.zeros(4, 2)}
 
     with pytest.raises(KeyError, match="none of"):
         convert_legacy_gat_state(legacy, ["convolutional_layers.0.something_else"])
 
 
-def test_undirected_edge_index_has_both_arcs_once():
+def test_undirected_edge_index_has_both_arcs_once() -> None:
     edge_index = undirected_edge_index(np.asarray([[0, 1, 1], [1, 0, 2]]))
 
     assert edge_index.shape == (2, 4)

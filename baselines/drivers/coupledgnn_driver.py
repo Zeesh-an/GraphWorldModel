@@ -52,7 +52,6 @@ import os
 import pickle
 import sys
 from pathlib import Path
-
 import numpy as np
 
 repository_root = Path(os.environ.get("GWM_COUPLEDGNN_ROOT", os.getcwd())).resolve()
@@ -242,9 +241,9 @@ def write_repo_inputs(work_dir: Path, data: dict) -> tuple[dict, dict, int]:
     return order, observed, num_nodes
 
 
-def main(work_dir: Path) -> None:
+if __name__ == "__main__":
+    work_dir = Path(sys.argv[1])
     import tensorflow as tf
-
     from models import CoupledGNN
     from utils import construct_feed_dict, load_data, preprocess_adj
 
@@ -355,7 +354,3 @@ def main(work_dir: Path) -> None:
         json.dumps({"popularities": predictions})
     )
     print(f"[coupledgnn_driver] wrote {len(predictions)} predictions")
-
-
-if __name__ == "__main__":
-    main(Path(sys.argv[1]))

@@ -21,11 +21,11 @@ rows is a difference between two search loops and nothing else.
 import json
 import os
 import sys
-import numpy as np
 from dataclasses import asdict, dataclass
 from functools import partial
 from pathlib import Path
 from urllib.parse import urlparse
+import numpy as np
 
 discovery = "discovery"
 # `task` value of a registry entry that serves every task
@@ -864,7 +864,7 @@ def run_uid(work_dir: Path) -> str:
     return "d_" + "".join(char if char.isalnum() else "_" for char in raw).lower()
 
 
-def launch_command(work_dir: Path, *_args) -> list[str]:
+def launch_command(work_dir: Path, *_args: object) -> list[str]:
     """Registry `command`: the launcher the export wrote."""
     return ["python", str(Path(work_dir) / launcher_filename)]
 

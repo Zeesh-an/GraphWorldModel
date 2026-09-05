@@ -16,11 +16,11 @@ from coding_agent.blocking import (
     proximity_ring,
 )
 from coding_agent.containment import build_outbreak, removal_plan, removal_set
+from coding_agent.credit import planned_action
 from coding_agent.epidemic import (
     build_immunization,
     immunization_plan,
 )
-from coding_agent.credit import planned_action
 from coding_agent.executor import (
     StrategyError,
     budget_key,

@@ -10,12 +10,11 @@ default) or `blocked` (the containment reading). See the constants below.
 """
 
 from dataclasses import dataclass, field
-
 import future.utils
+import ndlib.models.epidemics as epidemics  # IC, LT
+import ndlib.models.ModelConfig as model_config_module
 import networkx as nx
 import numpy as np
-import ndlib.models.ModelConfig as model_config_module
-import ndlib.models.epidemics as epidemics  # IC, LT
 
 valid_action_ops = (
     "add_node",
@@ -60,7 +59,7 @@ blocked = "blocked"
 valid_remove_semantics = (spent, blocked)
 
 
-@dataclass
+@dataclass()
 class ActionOp:
     op: str  # valid_action_ops
     target: int  # Target node ID (edge source u for edge operations)
@@ -79,7 +78,7 @@ class ActionOp:
         return action_dict
 
 
-@dataclass
+@dataclass()
 class State:
     """
     Diffusion state s_t as sorted node-id lists.

@@ -14,6 +14,7 @@ These are the Phase-1 regression tests. What they defend:
     equals the factorization) rather than values.
 """
 
+from pathlib import Path
 import pytest
 
 from registry import (
@@ -36,18 +37,17 @@ from registry import (
 )
 from registry.core import ACTION_REGISTRY
 
-
 # ---------------------------------------------------------------------------
 # Registry consistency (§27 "coding-agent algorithms == registered algorithms")
 # ---------------------------------------------------------------------------
 
 
-def test_registry_consistency_has_no_errors():
+def test_registry_consistency_has_no_errors() -> None:
     report = validate_registry_consistency()
     assert report.ok, "\n".join(str(finding) for finding in report.errors)
 
 
-def test_every_world_model_spine_algorithm_is_emittable_by_the_coding_agent():
+def test_every_world_model_spine_algorithm_is_emittable_by_the_coding_agent() -> None:
     """
     The §4 alignment property, stated directly.
 
@@ -64,7 +64,7 @@ def test_every_world_model_spine_algorithm_is_emittable_by_the_coding_agent():
         assert planner_tool in ALGORITHM_REGISTRY[alias].roles
 
 
-def test_spine_aliases_are_not_silently_dropped():
+def test_spine_aliases_are_not_silently_dropped() -> None:
     """§4: 'Do not silently drop algorithms.' Every alias target keeps both roles."""
     spine_entries = [
         entry for entry in ALGORITHM_REGISTRY.values() if wm_spine in entry.roles
@@ -79,13 +79,13 @@ def test_spine_aliases_are_not_silently_dropped():
         assert "data.wm_actions.spine_algorithms" in entry.source
 
 
-def test_every_task_declares_executable_action_ops():
+def test_every_task_declares_executable_action_ops() -> None:
     for name, task in TASK_REGISTRY.items():
         unknown = set(task.action_ops) - set(ACTION_REGISTRY)
         assert not unknown, f"task {name} declares unexecutable ops {unknown}"
 
 
-def test_every_implemented_task_has_a_simulated_dynamics():
+def test_every_implemented_task_has_a_simulated_dynamics() -> None:
     for name in implemented_tasks():
         simulated = [
             d for d in TASK_REGISTRY[name].dynamics if DYNAMICS_REGISTRY[d].simulated
@@ -93,7 +93,7 @@ def test_every_implemented_task_has_a_simulated_dynamics():
         assert simulated, f"implemented task {name} has no simulated dynamics"
 
 
-def test_every_external_baseline_targets_a_registered_task():
+def test_every_external_baseline_targets_a_registered_task() -> None:
     from baselines.discovery import any_task
 
     for name, baseline in BASELINE_REGISTRY.items():
@@ -105,7 +105,7 @@ def test_every_external_baseline_targets_a_registered_task():
         assert baseline.task in TASK_REGISTRY, f"{name} -> unknown task {baseline.task}"
 
 
-def test_task_baseline_pools_reference_registered_algorithms():
+def test_task_baseline_pools_reference_registered_algorithms() -> None:
     """A rename in coding_agent/tools must not leave a task's pool dangling."""
     from pipeline.conditions import default_baselines as fallback
 
@@ -124,7 +124,7 @@ def test_task_baseline_pools_reference_registered_algorithms():
 # ---------------------------------------------------------------------------
 
 
-def test_manifest_counts_match_the_live_registries():
+def test_manifest_counts_match_the_live_registries() -> None:
     """
     No count in the manifest may be independent of the registry it describes.
 
@@ -148,14 +148,14 @@ def test_manifest_counts_match_the_live_registries():
     assert reported == counts()
 
 
-def test_manifest_digest_is_stable_across_calls():
+def test_manifest_digest_is_stable_across_calls() -> None:
     assert (
         build_manifest(include_backbones=False)["digest"]
         == build_manifest(include_backbones=False)["digest"]
     )
 
 
-def test_manifest_digest_ignores_consistency_findings():
+def test_manifest_digest_ignores_consistency_findings() -> None:
     """
     The digest identifies the VOCABULARY, so a job that records it is recording
     what the names meant — not how many warnings the checker happened to emit.
@@ -186,7 +186,7 @@ def config() -> dict:
     }
 
 
-def test_group_count_equals_the_factorization(config):
+def test_group_count_equals_the_factorization(config: dict) -> None:
     """2 graphs x 2 dynamics x 2 arms x 5 seeds = 20, computed, never typed in."""
     groups = enumerate_groups(config)
     expected = (
@@ -200,46 +200,46 @@ def test_group_count_equals_the_factorization(config):
     assert str(expected) in explain_group_count(config)
 
 
-def test_groups_are_unique_and_sorted(config):
+def test_groups_are_unique_and_sorted(config: dict) -> None:
     groups = enumerate_groups(config)
     assert len(set(groups)) == len(groups)
     assert groups == sorted(groups)
 
 
-def test_duplicate_seeds_do_not_launch_duplicate_runs(config):
+def test_duplicate_seeds_do_not_launch_duplicate_runs(config: dict) -> None:
     config["seeds"] = [0, 0, 1]
     groups = enumerate_groups(config)
     assert len({group.seed for group in groups}) == 2
     assert len(groups) == len(set(groups))
 
 
-def test_run_id_is_unique_per_group(config):
+def test_run_id_is_unique_per_group(config: dict) -> None:
     groups = enumerate_groups(config)
     assert len({group.run_id for group in groups}) == len(groups)
 
 
-def test_run_id_is_filesystem_safe(config):
+def test_run_id_is_filesystem_safe(config: dict) -> None:
     for group in enumerate_groups(config):
         assert "@" not in group.run_id
         assert "/" not in group.run_id
         assert ":" not in group.run_id
 
 
-def test_unknown_graph_is_rejected(config):
+def test_unknown_graph_is_rejected(config: dict) -> None:
     config["datasets"]["influence_maximization"] = ["not_a_graph"]
 
     with pytest.raises(UnknownGroupField, match="datasets"):
         enumerate_groups(config)
 
 
-def test_unknown_task_is_rejected(config):
+def test_unknown_task_is_rejected(config: dict) -> None:
     config["tasks"] = ["not_a_task"]
 
     with pytest.raises(UnknownGroupField, match="tasks"):
         enumerate_groups(config)
 
 
-def test_dynamics_the_task_does_not_declare_is_rejected(config):
+def test_dynamics_the_task_does_not_declare_is_rejected(config: dict) -> None:
     """
     Running SIR under influence_maximization would produce a results row filed
     under a task whose research doc never claimed that dynamics.
@@ -250,14 +250,14 @@ def test_dynamics_the_task_does_not_declare_is_rejected(config):
         enumerate_groups(config)
 
 
-def test_empty_sweep_is_rejected(config):
+def test_empty_sweep_is_rejected(config: dict) -> None:
     config["seeds"] = []
 
     with pytest.raises(UnknownGroupField):
         enumerate_groups(config)
 
 
-def test_experiment_group_is_hashable_and_ordered():
+def test_experiment_group_is_hashable_and_ordered() -> None:
     first = ExperimentGroup("influence_maximization", "ba", "IC", "a", 0)
     second = ExperimentGroup("influence_maximization", "ba", "IC", "a", 1)
 
@@ -265,10 +265,9 @@ def test_experiment_group_is_hashable_and_ordered():
     assert first < second
 
 
-def test_shipped_config_enumerates(tmp_path):
+def test_shipped_config_enumerates(tmp_path: Path) -> None:
     """configs/wm_main.yaml must stay loadable and expandable."""
     import pathlib
-
     import yaml
 
     path = pathlib.Path(__file__).resolve().parent.parent / "configs" / "wm_main.yaml"
@@ -284,7 +283,7 @@ def test_shipped_config_enumerates(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_split_group_key_buckets_by_graph_not_episode():
+def test_split_group_key_buckets_by_graph_not_episode() -> None:
     """
     Two episodes on the same graph share structure and edge probabilities, so
     they belong to ONE split bucket. `_assign_split` currently draws per episode;

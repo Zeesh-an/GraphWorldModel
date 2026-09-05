@@ -39,7 +39,6 @@ import csv
 import json
 from datetime import date
 from pathlib import Path
-
 import numpy as np
 import scipy.sparse as sp
 
@@ -133,7 +132,7 @@ def load_aps_pair(
     published = _publication_days()
     cutoff = (date(cutoff_year, 12, 31) - date(1970, 1, 1)).days
 
-    citers: dict[str, list[tuple[str, int]]] = {}
+    citers = {}
     dropped = 0
 
     with open(path, newline="") as handle:

@@ -8,7 +8,6 @@ import os
 import re
 import time
 from typing import Protocol
-
 from openai import OpenAI, OpenAIError
 
 gateway_retries = 3

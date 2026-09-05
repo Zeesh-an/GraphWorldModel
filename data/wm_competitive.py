@@ -45,7 +45,6 @@ whether `p_positive == p_negative`, which is exactly what `positive_prob` sets.
 """
 
 from dataclasses import dataclass
-
 import networkx as nx
 import numpy as np
 

@@ -36,7 +36,6 @@ than `|S_P| / |V|`. The task registry therefore ships `default_budgets` instead 
 """
 
 from dataclasses import dataclass
-
 import numpy as np
 
 from coding_agent.containment import expand_removals

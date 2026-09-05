@@ -43,7 +43,6 @@ expensive to discover was false three stages into a sweep:
 """
 
 import math
-
 import numpy as np
 
 from coding_agent.executor import StrategyError
@@ -64,8 +63,8 @@ from coding_agent.tools.prediction_algorithms import (
     szabo_huberman,
 )
 from coding_agent.types import GraphInfo
-from data.wm_cascades import ReplayConfig, assign_splits, bin_events, replay_records
 from data.datasets.cascade_common import Cascade, filter_cascades
+from data.wm_cascades import ReplayConfig, assign_splits, bin_events, replay_records
 from world_model.wm_metrics import (
     coverage_at_k,
     doubling_accuracy,

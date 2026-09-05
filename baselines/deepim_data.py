@@ -158,8 +158,8 @@ def build_sg_file(
     if graph is not None:
         nx_graph, ic_prob_map = _bundle_from_graph(graph)
     else:
-        from data.wm_graphs import make_real_bundle, make_synthetic_bundle
         from data.generate_wm_data import synthetic_families
+        from data.wm_graphs import make_real_bundle, make_synthetic_bundle
 
         store = load_graph_store(data_dir)
         key = graph_id or next(iter(store))

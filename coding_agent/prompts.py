@@ -1,13 +1,8 @@
 import difflib
 import json
 import re
-
 import numpy as np
 
-from coding_agent.probes import max_probes_per_generation
-from coding_agent.rounds import round_batches, round_schedule
-from coding_agent.types import GraphInfo, TaskSpec, myopic
-from data.wm_simulator import blocked, spent
 from coding_agent.executor import (
     allowed_imports,
     mc_blocked_algorithms,
@@ -19,10 +14,10 @@ from coding_agent.executor import (
     mc_blocked_reconstruction,
     scored_blocked_primitives,
 )
+from coding_agent.probes import max_probes_per_generation
+from coding_agent.rounds import round_batches, round_schedule
 from coding_agent.tools.graph_profile import build_graph_profile
 from coding_agent.tools.library_api import (
-    build_immunization_menu,
-    build_immunization_reference,
     build_adaptive_reference,
     build_algorithm_menu,
     build_algorithm_sources,
@@ -31,6 +26,8 @@ from coding_agent.tools.library_api import (
     build_blocking_reference,
     build_dismantling_menu,
     build_dismantling_reference,
+    build_immunization_menu,
+    build_immunization_reference,
     build_localization_menu,
     build_localization_reference,
     build_prediction_menu,
@@ -39,6 +36,8 @@ from coding_agent.tools.library_api import (
     build_reconstruction_menu,
     build_reconstruction_reference,
 )
+from coding_agent.types import GraphInfo, TaskSpec, myopic
+from data.wm_simulator import blocked, spent
 
 edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 

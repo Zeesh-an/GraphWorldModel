@@ -115,7 +115,7 @@ def enumerate_groups(config: dict) -> list[ExperimentGroup]:
 
     datasets_by_task = config.get("datasets", {})
     dynamics_by_task = config.get("dynamics", {})
-    groups: list[ExperimentGroup] = []
+    groups = []
 
     for task in tasks:
         graphs = _validated(

@@ -47,9 +47,9 @@ import argparse
 import json
 import os
 import time
-from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from dotenv import load_dotenv
 from tqdm import tqdm
 
@@ -78,42 +78,17 @@ from coding_agent.agent import (
     reasoning_efforts,
     verify_gateway_model,
 )
-from coding_agent.run import ExperimentConfig, run_experiment
-from data.generate_wm_data import (
-    GenConfig,
-    default_budget_pct_range,
-    run_generation,
-    synthetic_families,
-)
-from data.wm_actions import blocking_selectors, spine_algorithms
-from data.wm_competitive import (
-    auto_dominance,
-    shared_positive_prob,
-    tie_break_choices,
-)
-from coding_agent.tools.adaptive_algorithms import adaptive_algorithm_names
-from coding_agent.tools.blocking_algorithms import (
-    blocking_algorithm_names,
-    default_blocking_baselines,
-)
-from coding_agent.tools.dismantling_algorithms import dismantling_algorithm_names
-from coding_agent.tools.immunization_algorithms import (
-    default_immunization_baselines,
-    immunization_algorithm_names,
-)
-from coding_agent.tools.localization_algorithms import localization_algorithm_names
-from coding_agent.tools.reconstruction_algorithms import (
-    reconstruction_algorithm_names,
-)
-from coding_agent.tools.prediction_algorithms import prediction_algorithm_names
-from coding_agent.tools.library_api import algorithm_names
 from coding_agent.blocking import counter_seed, resolve_lever, valid_levers
 from coding_agent.containment import outbreak_selectors, select_outbreak
 from coding_agent.epidemic import (
     default_contact_reduction,
-    resolve_lever as resolve_epidemic_lever,
-    valid_levers as valid_epidemic_levers,
     vaccinate,
+)
+from coding_agent.epidemic import (
+    resolve_lever as resolve_epidemic_lever,
+)
+from coding_agent.epidemic import (
+    valid_levers as valid_epidemic_levers,
 )
 from coding_agent.localization import (
     episode_budget,
@@ -133,37 +108,64 @@ from coding_agent.reconstruction import (
     valid_settings,
 )
 from coding_agent.rounds import round_batches
+from coding_agent.run import ExperimentConfig, run_experiment
+from coding_agent.tools.adaptive_algorithms import adaptive_algorithm_names
+from coding_agent.tools.blocking_algorithms import (
+    blocking_algorithm_names,
+    default_blocking_baselines,
+)
+from coding_agent.tools.dismantling_algorithms import dismantling_algorithm_names
+from coding_agent.tools.immunization_algorithms import (
+    default_immunization_baselines,
+    immunization_algorithm_names,
+)
+from coding_agent.tools.library_api import algorithm_names
+from coding_agent.tools.localization_algorithms import localization_algorithm_names
+from coding_agent.tools.prediction_algorithms import prediction_algorithm_names
+from coding_agent.tools.reconstruction_algorithms import (
+    reconstruction_algorithm_names,
+)
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
+from data.generate_wm_data import (
+    GenConfig,
+    default_budget_pct_range,
+    episode_random_split,
+    graph_disjoint_split,
+    min_graphs_for_disjoint,
+    run_generation,
+    synthetic_families,
+    valid_split_modes,
+)
+from data.wm_actions import blocking_selectors, spine_algorithms
 from data.wm_cascades import (
     chronological_split,
     corpus_defaults,
-    resolve_step,
     increment_target,
+    resolve_step,
     valid_graphs,
     valid_splits,
     valid_targets,
 )
-from data.generate_wm_data import (
-    episode_random_split,
-    graph_disjoint_split,
-    min_graphs_for_disjoint,
-    valid_split_modes,
+from data.wm_competitive import (
+    auto_dominance,
+    shared_positive_prob,
+    tie_break_choices,
 )
-from data.wm_graphs import cascade_corpora, kronecker_seeds
 from data.wm_epidemic import default_burn_in
+from data.wm_graphs import cascade_corpora, kronecker_seeds
 from data.wm_simulator import (
     epidemic_dynamics,
     valid_action_ops,
     valid_remove_semantics,
 )
 from pipeline.conditions import (
-    discovery_condition,
-    expand_llm_models,
     Arm,
     condition_names,
-    ground_truth_reward,
     default_arms,
     default_baselines,
+    discovery_condition,
+    expand_llm_models,
+    ground_truth_reward,
     native,
     needs_world_model,
     parse_arm,
@@ -171,10 +173,10 @@ from pipeline.conditions import (
     valid_evaluators,
 )
 from pipeline.layout import Layout, budget_label, skip_marker_suffix
-from pipeline.tasks import default_run, get_task, require_runnable, task_names
 from pipeline.plots import build_plots
 from pipeline.report import write_report
 from pipeline.summary import write_environment, write_summary
+from pipeline.tasks import default_run, get_task, require_runnable, task_names
 from world_model.train_wm import TrainConfig, train_world_model
 from world_model.wm_data import (
     basic_encoding,
@@ -198,7 +200,7 @@ adaptive_n_samples = 50
 referee_samples_default = 1000
 
 
-@dataclass
+@dataclass()
 class PipelineConfig:
     dataset: str
     task: str = "influence_maximization"
@@ -2469,7 +2471,7 @@ if __name__ == "__main__":
         "aliases 'all' / 'all-classical' / 'all-external' / 'all-discovery'. 'all' "
         "includes only external baselines already installed and never the "
         "discovery systems. Unset = the task registry's own pool "
-        f"(default for influence_maximization: {' '.join(default_baselines)}).",
+        f"which for influence_maximization is {' '.join(default_baselines)} (default: None).",
     )
     parser.add_argument(
         "--baseline-timeout",

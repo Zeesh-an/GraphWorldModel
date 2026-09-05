@@ -302,14 +302,14 @@ def _reinsert_and_refill(
 
 
 def degree_removal(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k highest-degree nodes, computed ONCE (the one-pass degree control)."""
     return primitives.get_top_degree_nodes(graph, budget)
 
 
 def adaptive_degree(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """HDA: remove the highest-degree node, recompute degrees, repeat, the baseline that hurts."""
     neighbours = neighbour_sets(graph)
@@ -336,7 +336,7 @@ def adaptive_degree(
 
 
 def pagerank_removal(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k PageRank nodes, computed once."""
     scores = primitives.compute_pagerank(graph)
@@ -345,7 +345,7 @@ def pagerank_removal(
 
 
 def kshell_removal(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k by k-core number, degree breaking ties (Kitsak et al. 2010)."""
     core = core_numbers(graph)
@@ -421,7 +421,7 @@ def _betweenness(neighbours: list[set[int]], removed: set[int]) -> np.ndarray:
 
 
 def betweenness_removal(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k betweenness nodes, computed ONCE (the one-pass betweenness control)."""
     scores = _betweenness(neighbour_sets(graph), set())
@@ -430,7 +430,7 @@ def betweenness_removal(
 
 
 def iterative_betweenness(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """BI (Wandelt et al. 2018): remove the highest-betweenness node, RECOMPUTE, repeat, best in 70-80% of their cases."""
     neighbours = neighbour_sets(graph)
@@ -456,7 +456,7 @@ def approx_iterative_betweenness(
     budget: int,
     diffusion_model: str = "IC",
     blocks: int = abi_blocks,
-    **_,
+    **_: object,
 ) -> list[int]:
     """ABI (Wandelt et al. 2018): BI recomputing every k/blocks removals, their quality/time tradeoff."""
     neighbours = neighbour_sets(graph)
@@ -480,7 +480,7 @@ def approx_iterative_betweenness(
 
 
 def collective_influence_removal(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", radius: int = 2, **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", radius: int = 2, **_: object
 ) -> list[int]:
     """CI (Morone & Makse, Nature 2015): (k_i-1) * sum of (k_j-1) over the ball boundary at `radius`, removed adaptively."""
     neighbours = neighbour_sets(graph)
@@ -527,7 +527,7 @@ def collective_influence_r(
     diffusion_model: str = "IC",
     radius: int = 2,
     threshold: float = 0.01,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     CI as Morone & Makse actually publish it: the adaptive removal above, PLUS the
@@ -547,7 +547,7 @@ def collective_influence_r(
 
 
 def corehd(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """
     CoreHD (Zdeborová, Zhang, Zhou, Sci. Rep. 2016): take the 2-core, delete its
@@ -581,7 +581,7 @@ def corehd_r(
     budget: int,
     diffusion_model: str = "IC",
     threshold: float = 0.01,
-    **_,
+    **_: object,
 ) -> list[int]:
     """CoreHD plus the paper's reverse-greedy reinsertion pass, refilled to budget."""
     return _reinsert_and_refill(
@@ -688,7 +688,7 @@ def bpd(
     diffusion_model: str = "IC",
     reweight: float = bpd_reweight,
     fraction: float = bpd_fraction,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     BPD (Mugisha & Zhou, Phys. Rev. E 94:012305, 2016): belief-propagation-guided
@@ -739,7 +739,7 @@ def bpd_r(
     budget: int,
     diffusion_model: str = "IC",
     threshold: float = 0.01,
-    **_,
+    **_: object,
 ) -> list[int]:
     """BPD plus the greedy reinsertion the paper runs after tree breaking."""
     return _reinsert_and_refill(
@@ -748,7 +748,7 @@ def bpd_r(
 
 
 def decycling(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """
     Greedy decycling then tree breaking: the Min-Sum / BPD pipeline with a greedy
@@ -792,7 +792,7 @@ def decycling_r(
     budget: int,
     diffusion_model: str = "IC",
     threshold: float = 0.01,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Greedy decycling plus stage 3, the reverse-greedy reinsertion, refilled to budget."""
     return _reinsert_and_refill(
@@ -801,7 +801,7 @@ def decycling_r(
 
 
 def articulation_removal(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """
     Articulation points, ranked by how much of the giant component each one splits off.
@@ -903,7 +903,7 @@ def gnd(
     min_component: int = 8,
     cost: str = "unit",
     split_quantile: float = 0.5,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     GND (Ren, Gleinig, Helbing, Antulov-Fantulin, PNAS 2019): spectral bisection of
@@ -981,7 +981,7 @@ def gndr(
     budget: int,
     diffusion_model: str = "IC",
     threshold: float = 0.01,
-    **_,
+    **_: object,
 ) -> list[int]:
     """GND plus reinsertion (GNDR): a different method from `gnd`, with different numbers."""
     return _reinsert_and_refill(
@@ -994,7 +994,7 @@ def egnd(
     budget: int,
     diffusion_model: str = "IC",
     ensemble: int = egnd_ensemble,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     EGND: an ensemble of GND cuts, keeping the one that damages the graph most.
@@ -1034,7 +1034,7 @@ def explosive_immunization(
     diffusion_model: str = "IC",
     candidates: int = ei_candidates,
     seed: int = 0,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     Explosive Immunization (Clusella, Grassberger, Perez-Reche, Politi, PRL 2016).
@@ -1110,7 +1110,7 @@ def explosive_immunization(
 
 
 def netshield(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """
     NetShield (Tong et al. ICDM 2010): greedily maximize the drop in the adjacency
@@ -1162,7 +1162,7 @@ def netshield(
 
 
 def acquaintance_immunization(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 0, **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 0, **_: object
 ) -> list[int]:
     """
     Acquaintance immunization (Cohen, Havlin, ben-Avraham, PRL 2003): pick a random
@@ -1197,7 +1197,7 @@ def acquaintance_immunization(
 
 
 def frontier_removal(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", outbreak=(), **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
     """
     Delete the susceptible boundary of the observed outbreak, highest-degree first.
@@ -1216,7 +1216,7 @@ def frontier_removal(
 
 
 def random_removal(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 42, **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 42, **_: object
 ) -> list[int]:
     """Uniform random removal set: the trivial floor."""
     rng = np.random.default_rng(seed)
@@ -1236,7 +1236,7 @@ def greedy_blocking(
     horizon: int = greedy_blocking_horizon,
     n_candidates: int = greedy_blocking_candidates,
     seed: int = 0,
-    **_,
+    **_: object,
 ) -> list[int]:
     """
     Greedy marginal blocking: add the node whose deletion most reduces the SIMULATED

@@ -8,26 +8,27 @@ cases whose answer is known by hand.
 import networkx as nx
 import numpy as np
 
+from baselines.run_baseline import round_seed_script
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
 from coding_agent.executor import StrategyError, _namespace
 from coding_agent.methods.base import _AdaptiveAnchor, evaluate_strategy
 from coding_agent.prompts import build_round_block, build_system_prompt
-from coding_agent.tools.adaptive_algorithms import (
-    adapt_degree,
-    mc_adaptive_algorithms,
-    adapt_degree_discount,
-    adaptive_algorithms,
-    static_split,
-)
-from coding_agent.stream import build_stream
 from coding_agent.rounds import (
     adaptive_action_fn,
     observed_state,
     round_batches,
     round_schedule,
     round_spreads,
+)
+from coding_agent.stream import build_stream
+from coding_agent.tools.adaptive_algorithms import (
+    adapt_degree,
+    adapt_degree_discount,
+    adaptive_algorithms,
+    mc_adaptive_algorithms,
+    static_split,
 )
 from coding_agent.types import (
     ActionOp,
@@ -40,7 +41,6 @@ from coding_agent.types import (
 )
 from data.wm_graphs import kronecker_graph, make_synthetic_bundle
 from pipeline.conditions import adaptivity_gaps, parse_arm
-from baselines.run_baseline import round_seed_script
 from pipeline.run import expand_baselines
 
 

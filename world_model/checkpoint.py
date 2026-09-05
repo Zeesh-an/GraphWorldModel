@@ -28,9 +28,9 @@ rather than guessing defaults that would quietly reproduce the wrong model.
 """
 
 import json
+import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
-
 import torch
 import torch.nn as nn
 
@@ -241,8 +241,7 @@ def save_checkpoint(
     missing or malformed entry can never change which model comes back.
     """
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
+    os.makedirs(path.parent, exist_ok=True)
     torch.save(
         {
             "format": checkpoint_format,

@@ -28,7 +28,6 @@ state between calls delivers different outbreaks under the two.
 """
 
 from dataclasses import dataclass
-
 import numpy as np
 
 from coding_agent.tools import primitives
@@ -119,7 +118,7 @@ def neighbour_sets(graph: GraphInfo) -> list[set[int]]:
     return groups
 
 
-def ring_size(graph: GraphInfo, outbreak) -> int:
+def ring_size(graph: GraphInfo, outbreak: tuple[int, ...] | list[int]) -> int:
     """
     |N_1(S) \\ S|: how many deletions wall the outbreak off completely.
 

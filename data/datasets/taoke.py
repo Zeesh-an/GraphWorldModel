@@ -48,7 +48,6 @@ import os
 import urllib.request
 import zipfile
 from pathlib import Path
-
 import numpy as np
 import scipy.sparse as sp
 
@@ -145,7 +144,7 @@ def load_taoke_pair(path: Path) -> tuple[list[Cascade], int]:
     """
     rows = _read_relations(Path(path).parent)
 
-    by_item: dict[str, list[tuple[int, int, int]]] = {}
+    by_item = {}
     for item, source, target, when in rows:
         by_item.setdefault(item, []).append((source, target, when))
 

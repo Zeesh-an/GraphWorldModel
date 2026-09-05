@@ -33,7 +33,6 @@ Two shapes, because two kinds of task:
 
 import argparse
 import json
-import numpy as np
 import os
 import subprocess
 import sys
@@ -41,6 +40,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+import numpy as np
 
 from baselines.discovery import discovery, write_context
 from baselines.registry import external_baselines, negative_seeds_filename
@@ -54,7 +54,7 @@ class BaselineError(RuntimeError):
     """Raised when an external baseline cannot run or produced no usable seeds."""
 
 
-@dataclass
+@dataclass()
 class _Completed:
     """The subset of CompletedProcess the caller uses."""
 

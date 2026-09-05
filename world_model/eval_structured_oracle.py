@@ -12,8 +12,8 @@ python -m world_model.eval_structured_oracle \
 import argparse
 import json
 import os
-import torch
 from pathlib import Path
+import torch
 
 from data.wm_simulator import spent, valid_remove_semantics
 from world_model.wm_data import in_channels, load_graph_store

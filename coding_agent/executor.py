@@ -262,7 +262,7 @@ def check_script_imports(script: str) -> None:
                 )
 
 
-def _blocked_algorithm(name: str, *_args, **_kwargs) -> None:
+def _blocked_algorithm(name: str, *_args: object, **_kwargs: object) -> None:
     """
     Stand-in for a blocked algorithm.
 
@@ -285,7 +285,7 @@ def _blocked_algorithm(name: str, *_args, **_kwargs) -> None:
     )
 
 
-def _blocked_dismantler(name: str, *_args, **_kwargs) -> None:
+def _blocked_dismantler(name: str, *_args: object, **_kwargs: object) -> None:
     raise StrategyError(
         f"dismantling_algorithms.{name} is not available: it simulates the "
         f"contained cascade once per candidate per pick, which bypasses the "
@@ -296,7 +296,7 @@ def _blocked_dismantler(name: str, *_args, **_kwargs) -> None:
     )
 
 
-def _blocked_blocker(name: str, *_args, **_kwargs) -> None:
+def _blocked_blocker(name: str, *_args: object, **_kwargs: object) -> None:
     raise StrategyError(
         f"blocking_algorithms.{name} is not available: it simulates the whole "
         f"competitive cascade once per candidate per pick, which bypasses the "
@@ -307,7 +307,7 @@ def _blocked_blocker(name: str, *_args, **_kwargs) -> None:
     )
 
 
-def _blocked_immunizer(name: str, *_args, **_kwargs) -> None:
+def _blocked_immunizer(name: str, *_args: object, **_kwargs: object) -> None:
     raise StrategyError(
         f"immunization_algorithms.{name} is not available: it simulates the whole "
         f"compartmental outbreak once per candidate per dose, which bypasses the "
@@ -318,7 +318,7 @@ def _blocked_immunizer(name: str, *_args, **_kwargs) -> None:
     )
 
 
-def _blocked_localizer(name: str, *_args, **_kwargs) -> None:
+def _blocked_localizer(name: str, *_args: object, **_kwargs: object) -> None:
     raise StrategyError(
         f"localization_algorithms.{name} is not available: it re-simulates every "
         f"candidate on its own private simulator, which bypasses the metered "
@@ -329,7 +329,7 @@ def _blocked_localizer(name: str, *_args, **_kwargs) -> None:
     )
 
 
-def _blocked_decoder(name: str, *_args, **_kwargs) -> None:
+def _blocked_decoder(name: str, *_args: object, **_kwargs: object) -> None:
     raise StrategyError(
         f"reconstruction_algorithms.{name} is not available: it evaluates the "
         f"transition kernel proposals x horizon times per instance, which "
@@ -340,7 +340,7 @@ def _blocked_decoder(name: str, *_args, **_kwargs) -> None:
     )
 
 
-def _blocked_predictor(name: str, *_args, **_kwargs) -> None:
+def _blocked_predictor(name: str, *_args: object, **_kwargs: object) -> None:
     raise StrategyError(
         f"prediction_algorithms.{name} is not available: it unrolls the forward "
         f"model steps x forecast_samples times per cascade, which dominates wall "
@@ -610,7 +610,7 @@ def build_strategy(
     return strategy
 
 
-def call_strategy(method: Callable, *args, allow_none: bool = False) -> object:
+def call_strategy(method: Callable, *args: object, allow_none: bool = False) -> object:
     """
     Invoke generated-strategy code, converting any runtime failure into a
     StrategyError repair turn.

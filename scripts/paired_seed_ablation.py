@@ -23,14 +23,14 @@ what the structured-vs-linear rollout comparison does.
 import argparse
 import json
 import math
+import os
 from pathlib import Path
-
 import numpy as np
 
 # t_{0.975, df} for the small df we actually hit; no scipy dependency.
-T975 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365}
+t_975 = {1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365}
 
-METRICS = [
+metric_specs = [
     ("test.delta_f1", "delta_f1", True),
     ("test.new_infection_f1", "new_inf_f1", True),
     ("test.brier_infected", "brier_inf", False),
@@ -59,19 +59,19 @@ def ci95(values: np.ndarray) -> tuple[float, float]:
     if n < 2:
         return float(values.mean()), float("nan")
     sem = values.std(ddof=1) / math.sqrt(n)
-    return float(values.mean()), float(T975.get(n - 1, 1.96) * sem)
+    return float(values.mean()), float(t_975.get(n - 1, 1.96) * sem)
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Paired multi-seed ablation comparison")
-    parser.add_argument("--root", type=Path, default=Path("results/seeds"))
+    parser.add_argument("--root", type=Path, default=Path("results/seeds"), help="root directory holding one results folder per seed (default: results/seeds).")
     parser.add_argument("--arms", nargs="+",
-                        default=["structured", "linear", "hidew"])
-    parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4])
+                        default=["structured", "linear", "hidew"], type=str, help="ablation arms to pair (default: ['structured', 'linear', 'hidew']).")
+    parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2, 3, 4], help="seeds to aggregate over (default: [0, 1, 2, 3, 4]).")
     parser.add_argument("--baseline", type=str, default="structured",
-                        help="arm every other arm is paired against")
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+                        help="arm every other arm is paired against (default: structured).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
 
     runs, provenance = {}, {}
     for arm in args.arms:
@@ -94,7 +94,7 @@ def main(argv=None) -> int:
 
     for arm in args.arms:
         per_arm[arm] = {}
-        for dotted, short, _ in METRICS:
+        for dotted, short, _ in metric_specs:
             values = np.array(
                 [v for s in args.seeds
                  if (v := dig(runs[arm].get(s, {}), dotted)) is not None],
@@ -110,7 +110,7 @@ def main(argv=None) -> int:
         if arm == base:
             continue
         paired[f"{base}_minus_{arm}"] = {}
-        for dotted, short, higher_better in METRICS:
+        for dotted, short, higher_better in metric_specs:
             pairs = [
                 (a, b) for s in args.seeds
                 if (a := dig(runs[base].get(s, {}), dotted)) is not None
@@ -139,7 +139,7 @@ def main(argv=None) -> int:
         "per_arm": per_arm,
         "paired_vs_" + base: paired,
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2))
 
     print("\nprovenance")
@@ -147,7 +147,7 @@ def main(argv=None) -> int:
         print(f"  {arm:12s} head={info['head']:10s} "
               f"hide_w={str(info['hide_edge_weights']):5s} {info['data_dir']}")
 
-    shorts = [s for _, s, _ in METRICS if s in per_arm.get(args.arms[0], {})]
+    shorts = [s for _, s, _ in metric_specs if s in per_arm.get(args.arms[0], {})]
     print(f"\n{'metric':>16s} " + " ".join(f"{a:>21s}" for a in args.arms))
     print("-" * (17 + 22 * len(args.arms)))
     for short in shorts:
@@ -177,8 +177,3 @@ def main(argv=None) -> int:
                   f"{str(cell['excludes_zero']):>8s} {favours:>10s}")
 
     print(f"\n-> {args.out}")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

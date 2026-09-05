@@ -11,6 +11,7 @@ them: an estimate in this table would be indistinguishable from a measurement.
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from pipeline.tasks import tasks
@@ -36,11 +37,11 @@ eight_tasks = [
 ]
 
 
-def main() -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Task transfer matrix")
-    parser.add_argument("--out", type=Path, default=default_out)
+    parser.add_argument("--out", type=Path, default=default_out, help=f"output path (default: {default_out}).")
     parser.add_argument("--source", type=str, default=None,
-                        help="print only rows with this source task")
+                        help="print only rows with this source task (default: None).")
     args = parser.parse_args()
 
     matrix = transfer_matrix(eight_tasks)
@@ -100,12 +101,6 @@ def main() -> int:
             for cell in matrix
         ],
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(manifest, indent=2, default=str))
     print(f"\nmanifest -> {args.out}  ({len(matrix)} ordered pairs)")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

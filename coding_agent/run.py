@@ -83,17 +83,22 @@ from coding_agent.containment import (
     select_outbreak,
 )
 from coding_agent.credit import augment_solo, counterfactual_credit, planned_action
-from coding_agent.epidemic import (
-    default_contact_reduction,
-    epidemic_metrics,
-    resolve_lever as resolve_epidemic_lever,
-    unprotected_reference,
-    valid_levers as valid_epidemic_levers,
-    vaccinate,
-)
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
+from coding_agent.epidemic import (
+    default_contact_reduction,
+    epidemic_metrics,
+    unprotected_reference,
+    vaccinate,
+)
+from coding_agent.epidemic import lever_shape as epidemic_lever_shape
+from coding_agent.epidemic import (
+    resolve_lever as resolve_epidemic_lever,
+)
+from coding_agent.epidemic import (
+    valid_levers as valid_epidemic_levers,
+)
 from coding_agent.localization import (
     episode_budget,
     evaluate_localizer,
@@ -103,11 +108,11 @@ from coding_agent.localization import (
     valid_budget_modes,
     valid_observations,
 )
-from data.wm_cascades import increment_target, valid_targets
-from world_model.wm_metrics import (
-    default_prediction_metric,
-    valid_prediction_metrics,
-)
+from coding_agent.methods.base import OuterLoopMethod, summarize
+from coding_agent.methods.evolve import EvolveSearch
+from coding_agent.methods.one_shot import OneShotSuperAlgorithm, default_max_repairs
+from coding_agent.methods.per_step import PerStepReprompt
+from coding_agent.methods.windowed import WindowedOnline
 from coding_agent.prediction import (
     default_forecast_samples,
     evaluate_predictor,
@@ -117,31 +122,24 @@ from coding_agent.prediction import (
     resolve_target,
     trivial_predictor_error,
 )
+from coding_agent.prompts import (
+    build_explanation_prompt,
+    build_routing_prompt,
+    build_routing_system,
+)
 from coding_agent.reconstruction import (
     default_hidden_rate,
     default_observation_rate,
     evaluate_reconstructor,
     load_cascades,
     partial_times,
+    reconstruction_label_metrics,
+    referee_likelihood,
+    trivial_decoder_reward,
     valid_settings,
 )
 from coding_agent.reconstruction import (
     referee_resimulation_error as referee_reconstruction_error,
-)
-from coding_agent.reconstruction import (
-    reconstruction_label_metrics,
-    referee_likelihood,
-    trivial_decoder_reward,
-)
-from coding_agent.methods.base import OuterLoopMethod, summarize
-from coding_agent.methods.evolve import EvolveSearch
-from coding_agent.methods.one_shot import OneShotSuperAlgorithm, default_max_repairs
-from coding_agent.methods.per_step import PerStepReprompt
-from coding_agent.methods.windowed import WindowedOnline
-from coding_agent.prompts import (
-    build_explanation_prompt,
-    build_routing_prompt,
-    build_routing_system,
 )
 from coding_agent.rounds import (
     describe_schedule,
@@ -157,15 +155,14 @@ from coding_agent.tools.blocking_algorithms import (
     emittable,
     lever_shape,
 )
-from coding_agent.epidemic import lever_shape as epidemic_lever_shape
 from coding_agent.tools.dismantling_algorithms import dismantling_algorithms
+from coding_agent.tools.immunization_algorithms import (
+    emittable as immunization_emittable,
+)
 from coding_agent.tools.immunization_algorithms import (
     immunization_algorithms,
     immunization_levers,
     immunization_shape,
-)
-from coding_agent.tools.immunization_algorithms import (
-    emittable as immunization_emittable,
 )
 from coding_agent.tools.library_api import (
     algorithm_names,
@@ -183,6 +180,7 @@ from coding_agent.tools.prediction_algorithms import (
 )
 from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
 from coding_agent.types import GraphInfo, TaskSpec, full_adoption, valid_feedback_models
+from data.wm_cascades import increment_target, valid_targets
 from data.wm_competitive import (
     CompetitiveConfig,
     auto_dominance,
@@ -202,7 +200,12 @@ from pipeline.conditions import parse_arm
 from pipeline.layout import budget_label, checkpoint_suffix
 from pipeline.tasks import get_task, maximize, task_names
 from world_model.wm_data import load_graph_store
-from world_model.wm_metrics import containment_metrics, epidemic_curve_metrics
+from world_model.wm_metrics import (
+    containment_metrics,
+    default_prediction_metric,
+    epidemic_curve_metrics,
+    valid_prediction_metrics,
+)
 
 world_model = "world_model"
 monte_carlo = "monte_carlo"
@@ -220,7 +223,7 @@ wm_reeval_seeds = 3
 max_serialized_marginals = 200_000
 
 
-@dataclass
+@dataclass()
 class ExperimentConfig:
     # Key of pipeline.tasks.tasks; reaches the agent through TaskSpec, so the
     # prompt names the problem the arm is actually being scored on

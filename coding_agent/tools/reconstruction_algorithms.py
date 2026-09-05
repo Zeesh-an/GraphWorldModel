@@ -68,7 +68,6 @@ Two conventions everything here obeys:
 
 import heapq
 import math
-
 import networkx as nx
 import numpy as np
 
@@ -373,7 +372,7 @@ def _merge_observed(
 
 
 def observed_only(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Report exactly what was observed and infer nothing: Rozenshtein's `Reports`.
@@ -395,7 +394,7 @@ def observed_only(
 
 
 def one_hop(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     The reports plus their one-hop neighbourhood: Rozenshtein's `Baseline`.
@@ -419,7 +418,7 @@ def one_hop(
 
 
 def random_reconstruction(
-    graph: GraphInfo, observation, horizon: int, seed: int = 0, **_kw
+    graph: GraphInfo, observation, horizon: int, seed: int = 0, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """Random times over the reports and a random sample around them: the floor."""
     rng = np.random.default_rng(seed)
@@ -453,7 +452,7 @@ def _terminal_order(observation, members: set[int]) -> list[int]:
 
 
 def delayed_bfs(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Xiao SDM'18's `delayed-bfs`: a `k`-approximate ordered Steiner tree in O(m + k log k).
@@ -532,7 +531,7 @@ def _multi_source_dijkstra(view: nx.DiGraph, sources: set[int]) -> tuple[dict, d
 
 
 def ordered_steiner_closure(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Xiao SDM'18's `closure`: the O(sqrt(k)) metric-closure variant.
@@ -584,7 +583,7 @@ def ordered_steiner_closure(
 
 
 def greedy_ordered(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Xiao SDM'18's `greedy`: attach whichever terminal is CLOSEST to the tree next.
@@ -633,7 +632,7 @@ def greedy_ordered(
 
 
 def steiner_tree(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Plain minimum Steiner tree over the reports, ignoring the observed ORDER.
@@ -674,7 +673,7 @@ def steiner_tree(
 
 def tree_sampling(
     graph: GraphInfo, observation, horizon: int, n_trees: int = sampled_trees,
-    seed: int = 0, **_kw
+    seed: int = 0, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Xiao ICDM'18: SAMPLE Steiner trees and read off per-node marginal probabilities.
@@ -731,7 +730,7 @@ def tree_sampling(
 
 
 def personalized_pagerank(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Personalized PageRank from the reported nodes: the assortativity trap.
@@ -786,7 +785,7 @@ def personalized_pagerank(
 
 
 def netfill(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Sundareisan SDM'15 (NetFill): fill in the MISSING nodes of a partial epidemic.
@@ -826,7 +825,7 @@ def netfill(
 
 
 def dhrec(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Sefer & Kingsford ICDM'14 (DHREC), and DITTO's own MLE baseline.
@@ -905,7 +904,7 @@ def dhrec(
 
 
 def cri(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Chen TNSE'16 (CRI): cluster the infected subgraph, then reverse-infect.
@@ -1036,7 +1035,7 @@ def _consistent_tree(
 
 
 def consistent_tree_wpct(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Zong ICDM'12 WPCT: the weighted PATH-consistent tree, and the paper's winner.
@@ -1051,7 +1050,7 @@ def consistent_tree_wpct(
 
 
 def consistent_tree_wbct(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Zong ICDM'12 WBCT: the weaker BOUNDED variant, and the control WPCT beats.
@@ -1064,7 +1063,7 @@ def consistent_tree_wbct(
 
 
 def cult(
-    graph: GraphInfo, observation, horizon: int, alpha: float = 1.0, **_kw
+    graph: GraphInfo, observation, horizon: int, alpha: float = 1.0, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Rozenshtein KDD'16 (CulT): an alpha-TempSteinerTree forest, assuming NO propagation model.
@@ -1140,7 +1139,7 @@ def cult(
 
 
 def jordan_backward(
-    graph: GraphInfo, observation, horizon: int, **_kw
+    graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
     Greedy backward decode from the Jordan centres: the cheap first cut of §2.11.
@@ -1201,7 +1200,7 @@ def mcmc_decode(
     predict: object = None,
     proposals: int = mcmc_proposals,
     seed: int = 0,
-    **_kw,
+    **_kw: object,
 ) -> dict[int, tuple[int, int | None]]:
     """
     Metropolis-Hastings over HISTORIES, scored under the transition kernel: DITTO, minus the learned proposal.
@@ -1294,7 +1293,7 @@ def forward_backward(
     predict: object = None,
     particles: int = smoothing_particles,
     seed: int = 0,
-    **_kw,
+    **_kw: object,
 ) -> dict[int, tuple[int, int | None]]:
     """
     Forward-filter / backward-sample smoothing against the transition kernel.

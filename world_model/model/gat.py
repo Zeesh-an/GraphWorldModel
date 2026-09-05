@@ -16,7 +16,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # Floors the attention log-bias and softmax denominator
 numerical_eps = 1e-9
 
@@ -99,12 +98,12 @@ class GATLayer(nn.Module):
             self_projection[destinations] + neighbor_projection[sources]
         )  # (E, n_heads, d_head)
         edge_projection = self.leaky_relu(edge_projection)
-        scores = (edge_projection * self.a.unsqueeze(0)).sum(dim=-1)  # (E, n_heads)
+        scores = (edge_projection * self.a.unsqueeze(dim=0)).sum(dim=-1)  # (E, n_heads)
 
         if edge_weight is not None:
             scores = scores + torch.log(
                 edge_weight.clamp(min=numerical_eps)
-            ).unsqueeze(1)
+            ).unsqueeze(dim=1)
 
         # Scatter softmax over incoming edges per destination, per head
         scores_max = torch.full(
@@ -112,7 +111,7 @@ class GATLayer(nn.Module):
         )
         scores_max.scatter_reduce_(
             0,
-            destinations.unsqueeze(1).expand(-1, self.n_heads),
+            destinations.unsqueeze(dim=1).expand(-1, self.n_heads),
             scores,
             reduce="amax",
             include_self=True,
@@ -121,7 +120,7 @@ class GATLayer(nn.Module):
 
         scores_sum = torch.zeros(num_nodes, self.n_heads, device=features.device)
         scores_sum.scatter_add_(
-            0, destinations.unsqueeze(1).expand(-1, self.n_heads), scores_exp
+            0, destinations.unsqueeze(dim=1).expand(-1, self.n_heads), scores_exp
         )
         attention = scores_exp / (
             scores_sum[destinations] + numerical_eps
@@ -134,8 +133,8 @@ class GATLayer(nn.Module):
         )
         aggregated.scatter_add_(
             0,
-            destinations.unsqueeze(1).unsqueeze(2).expand(-1, self.n_heads, self.d_head),
-            attention.unsqueeze(-1) * neighbor_projection[sources],
+            destinations.unsqueeze(dim=1).unsqueeze(dim=2).expand(-1, self.n_heads, self.d_head),
+            attention.unsqueeze(dim=-1) * neighbor_projection[sources],
         )  # (N, n_heads, d_head)
 
         # Concatenate heads and project
@@ -158,7 +157,7 @@ class GATEncoder(nn.Module):
         n_layers: int = 3,
         n_heads: int = 4,
         dropout: float = 0.1,
-        **_,
+        **_: object,
     ) -> None:
         super().__init__()
 

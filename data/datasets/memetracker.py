@@ -45,7 +45,6 @@ import os
 import urllib.request
 from pathlib import Path
 from urllib.parse import urlsplit
-
 import numpy as np
 import scipy.sparse as sp
 
@@ -124,8 +123,8 @@ def stream_phrase_adoptions(path: Path) -> dict[str, list[tuple[str, int]]]:
     carries a phrase twice keeps its first time, which is the progressive-cascade
     assumption every method in §3 and §4 makes.
     """
-    adoptions: dict[str, list[tuple[str, int]]] = {}
-    seen: dict[str, set[str]] = {}
+    adoptions = {}
+    seen = {}
     host = ""
     when = -1
     full = False

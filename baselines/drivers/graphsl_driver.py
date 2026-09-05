@@ -49,7 +49,6 @@ Environment:
 import json
 import os
 import sys
-
 import numpy as np
 import scipy.sparse as sp
 import torch
@@ -193,8 +192,8 @@ def _gcnsi_features(adjacency, dataset, alpha=0.01):
         v4[v4 == 0] = -1
         # GCNSI's paper stacks the raw state, its sign flip, and two LPSI fields
         channels = [
-            torch.tensor(diff, dtype=torch.float).unsqueeze(1),
-            torch.tensor(v3, dtype=torch.float).unsqueeze(1),
+            torch.tensor(diff, dtype=torch.float).unsqueeze(dim=1),
+            torch.tensor(v3, dtype=torch.float).unsqueeze(dim=1),
             torch.tensor(
                 lpsi.predict(
                     torch.tensor(laplacian, dtype=torch.float32, device=lpsi.device),
@@ -203,7 +202,7 @@ def _gcnsi_features(adjacency, dataset, alpha=0.01):
                     torch.tensor(v3, dtype=torch.float32, device=lpsi.device),
                 ).cpu(),
                 dtype=torch.float,
-            ).unsqueeze(1),
+            ).unsqueeze(dim=1),
             torch.tensor(
                 lpsi.predict(
                     torch.tensor(laplacian, dtype=torch.float32, device=lpsi.device),
@@ -212,7 +211,7 @@ def _gcnsi_features(adjacency, dataset, alpha=0.01):
                     torch.tensor(v4, dtype=torch.float32, device=lpsi.device),
                 ).cpu(),
                 dtype=torch.float,
-            ).unsqueeze(1),
+            ).unsqueeze(dim=1),
         ]
         features.append(torch.cat(channels, dim=1))
 
@@ -264,7 +263,7 @@ def predict_ivgd(adjacency, train_dataset, all_datasets, _payload, epochs, seed)
     scores = []
     with torch.no_grad():
         for mat in all_datasets:
-            influ_vec = mat[:, -1].unsqueeze(-1).to(model.device)
+            influ_vec = mat[:, -1].unsqueeze(dim=-1).to(model.device)
             seed_preds = diffusion.backward(adjacency, influ_vec).to(model.device)
 
             correction = ivgd_model(seed_preds, seed_preds, lamda)
@@ -294,7 +293,7 @@ def predict_slvae(adjacency, train_dataset, all_datasets, _payload, epochs, seed
     for parameter in slvae_model.parameters():
         parameter.requires_grad = False
 
-    seed_mean = torch.mean(seed_vae_train, 0).unsqueeze(-1).to(model.device)
+    seed_mean = torch.mean(seed_vae_train, dim=0).unsqueeze(dim=-1).to(model.device)
     seed_infer = []
     for _ in range(len(all_datasets)):
         seed_hat, _, _, _ = slvae_model(seed_mean, False)
@@ -306,7 +305,7 @@ def predict_slvae(adjacency, train_dataset, all_datasets, _payload, epochs, seed
     optimizer = Adam(seed_infer, lr=1e-4)
     for _ in range(max(10, epochs // 10)):
         for index, mat in enumerate(all_datasets):
-            influ_vec = mat[:, -1].unsqueeze(-1).float().to(model.device)
+            influ_vec = mat[:, -1].unsqueeze(dim=-1).float().to(model.device)
             optimizer.zero_grad()
             seed_hat, _, _, influ_hat = slvae_model(seed_infer[index], False)
             loss = slvae_model.infer_loss(
@@ -332,7 +331,7 @@ predictors = {
 }
 
 
-def main() -> int:
+if __name__ == "__main__":
     work_dir = sys.argv[1]
     method = os.environ.get("GWM_GRAPHSL_METHOD", "lpsi").lower()
     epochs = int(os.environ.get("GWM_GRAPHSL_EPOCHS", "50"))
@@ -369,9 +368,3 @@ def main() -> int:
         json.dump({"method": method, "info": info, "sources": predictions}, handle)
 
     print(f"[graphsl] wrote {len(predictions)} predictions ({info})", flush=True)
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

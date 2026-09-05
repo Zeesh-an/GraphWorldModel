@@ -15,7 +15,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # Prevent division-by-zero for isolated nodes (degree 0 -> mean 0)
 degree_floor = 1e-9
 
@@ -69,8 +68,8 @@ class GraphSAGELayer(nn.Module):
         )
         neighbor_mean.scatter_add_(
             0,
-            destinations.unsqueeze(1).expand(-1, hidden_dim),
-            hidden[sources] * weights.unsqueeze(1),
+            destinations.unsqueeze(dim=1).expand(-1, hidden_dim),
+            hidden[sources] * weights.unsqueeze(dim=1),
         )
         degrees = torch.zeros(num_nodes, device=features.device, dtype=hidden.dtype)
         degrees.scatter_add_(0, destinations, weights)
@@ -98,7 +97,7 @@ class GraphSAGEEncoder(nn.Module):
         hidden_dim: int = 64,
         n_layers: int = 3,
         dropout: float = 0.1,
-        **_,
+        **_: object,
     ) -> None:
         super().__init__()
 

@@ -38,9 +38,9 @@ file is flipped relative to the influence-maximization scripts.
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
-
 import numpy as np
 import torch
 
@@ -119,7 +119,7 @@ def model_spread_after_removal(scorer, graph_info, outbreak_seeds, removals,
 
 def greedy_min_spread(score, shortlist, budget):
     """Greedy removal set: at each step take the node that MINIMISES spread."""
-    chosen: list[int] = []
+    chosen = []
 
     for _ in range(min(budget, len(shortlist))):
         best, best_value = None, float("inf")
@@ -141,26 +141,26 @@ def greedy_min_spread(score, shortlist, budget):
     return chosen
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Q5 IM -> CND mechanism transfer")
     parser.add_argument("--source-results", type=Path, required=True,
-                        help="IM-trained results JSON (spent semantics)")
+                        help="IM-trained results JSON (spent semantics) (default: None).")
     parser.add_argument("--target-results", type=Path, default=None,
-                        help="CND-trained results JSON (blocked); the ceiling")
-    parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--n-graphs", type=int, default=10)
-    parser.add_argument("--episodes", type=int, default=5)
-    parser.add_argument("--budget-pct", type=float, default=5.0)
-    parser.add_argument("--outbreak-pct", type=float, default=5.0)
-    parser.add_argument("--candidates", type=int, default=20)
-    parser.add_argument("--horizon", type=int, default=15)
-    parser.add_argument("--oracle-mc", type=int, default=16)
-    parser.add_argument("--n-samples", type=int, default=10)
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--threads", type=int, default=default_threads)
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+                        help="CND-trained results JSON (blocked); the ceiling (default: None).")
+    parser.add_argument("--data-dir", type=Path, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--n-graphs", type=int, default=10, help="graphs to evaluate (default: 10).")
+    parser.add_argument("--episodes", type=int, default=5, help="campaigns per graph per arm (default: 5).")
+    parser.add_argument("--budget-pct", type=float, default=5.0, help="seed budget as percent of nodes (default: 5.0).")
+    parser.add_argument("--outbreak-pct", type=float, default=5.0, help="outbreak size as percent of nodes (default: 5.0).")
+    parser.add_argument("--candidates", type=int, default=20, help="shortlist size per greedy pick (default: 20).")
+    parser.add_argument("--horizon", type=int, default=15, help="rollout horizon in timesteps (default: 15).")
+    parser.add_argument("--oracle-mc", type=int, default=16, help="simulator rollouts per oracle score (default: 16).")
+    parser.add_argument("--n-samples", type=int, default=10, help="world-model ensemble size (default: 10).")
+    parser.add_argument("--seed", type=int, default=0, help="master random seed (default: 0).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
+    parser.add_argument("--threads", type=int, default=default_threads, help=f"torch intra-op threads (default: {default_threads}).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
     torch.set_num_threads(args.threads)
 
     from world_model.scorer import WorldModelScorer
@@ -329,7 +329,7 @@ def main(argv=None) -> int:
         "per_episode": spreads,
         "runtime_seconds": round(time.perf_counter() - started, 1),
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2, default=str))
 
     print(f"\n{'arm':16s} {'spread':>9s} {'std':>7s} {'span closed':>12s} "
@@ -341,9 +341,3 @@ def main(argv=None) -> int:
               f"{block['span_recovered']:12.3f} {costs[name]['calls']:9d}")
 
     print(f"\n-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

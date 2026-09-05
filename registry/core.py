@@ -24,7 +24,7 @@ from data.generate_wm_data import synthetic_families
 from data.wm_actions import spine_algorithms
 from data.wm_graphs import real_directed
 from data.wm_simulator import valid_action_ops, valid_remove_semantics
-from pipeline.tasks import Task, tasks
+from pipeline.tasks import tasks
 
 # ---------------------------------------------------------------------------
 # Tasks
@@ -34,7 +34,7 @@ from pipeline.tasks import Task, tasks
 #: experiment tooling uses. It is not a copy: `pipeline.tasks` validates action
 #: ops, remove semantics and budget ops at import time, and `Layout` keys the
 #: results tree off the same dict.
-TASK_REGISTRY: dict[str, Task] = tasks
+TASK_REGISTRY = tasks
 
 
 def implemented_tasks() -> list[str]:
@@ -78,7 +78,7 @@ class AlgorithmEntry:
 #:
 #: `celf_local_search` is deliberately NOT the alias for `local_search`: it
 #: refines a CELF seed set, whereas the spine refines a DEGREE seed set.
-wm_spine_aliases: dict[str, str] = {
+wm_spine_aliases = {
     "random": "random_seeds",
     "degree": "high_degree",
     "pagerank": "pagerank_seeds",
@@ -144,7 +144,7 @@ def _coding_agent_pools() -> dict[str, tuple[dict, tuple[str, ...]]]:
 def _build_algorithm_registry() -> dict[str, AlgorithmEntry]:
     import inspect
 
-    entries: dict[str, AlgorithmEntry] = {}
+    entries = {}
 
     for source, (pool, pool_tasks) in _coding_agent_pools().items():
         for name, function in pool.items():
@@ -203,7 +203,7 @@ def _build_algorithm_registry() -> dict[str, AlgorithmEntry]:
     return dict(sorted(entries.items()))
 
 
-ALGORITHM_REGISTRY: dict[str, AlgorithmEntry] = _build_algorithm_registry()
+ALGORITHM_REGISTRY = _build_algorithm_registry()
 
 
 def algorithms_for_task(task: str) -> list[str]:
@@ -262,7 +262,7 @@ def _build_graph_registry() -> dict[str, GraphEntry]:
     return dict(sorted(entries.items()))
 
 
-GRAPH_REGISTRY: dict[str, GraphEntry] = _build_graph_registry()
+GRAPH_REGISTRY = _build_graph_registry()
 
 
 def graphs_of_kind(kind: str) -> list[str]:
@@ -304,7 +304,7 @@ _dynamics_summaries = {
 
 
 def _build_dynamics_registry() -> dict[str, DynamicsEntry]:
-    by_name: dict[str, set[str]] = {}
+    by_name = {}
 
     for name, task in TASK_REGISTRY.items():
         for dynamics in task.dynamics:
@@ -321,7 +321,7 @@ def _build_dynamics_registry() -> dict[str, DynamicsEntry]:
     }
 
 
-DYNAMICS_REGISTRY: dict[str, DynamicsEntry] = _build_dynamics_registry()
+DYNAMICS_REGISTRY = _build_dynamics_registry()
 
 
 # ---------------------------------------------------------------------------
@@ -359,7 +359,7 @@ def _build_baseline_registry() -> dict[str, BaselineEntry]:
     }
 
 
-BASELINE_REGISTRY: dict[str, BaselineEntry] = _build_baseline_registry()
+BASELINE_REGISTRY = _build_baseline_registry()
 
 
 def baselines_for_task(task: str) -> list[str]:
@@ -386,9 +386,9 @@ def runnable_baselines() -> list[str]:
 #: The world model's action vocabulary, straight from the simulator that has to
 #: execute each op. Listed here so `validate_registry_consistency` can hold every
 #: task's declared ops against it from one place.
-ACTION_REGISTRY: tuple[str, ...] = tuple(valid_action_ops)
+ACTION_REGISTRY = tuple(valid_action_ops)
 
-REMOVE_SEMANTICS: tuple[str, ...] = tuple(valid_remove_semantics)
+REMOVE_SEMANTICS = tuple(valid_remove_semantics)
 
 
 def evaluator_modes() -> tuple[str, ...]:

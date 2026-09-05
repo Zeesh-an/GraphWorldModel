@@ -10,7 +10,7 @@ be updated to match, and the tests around it say what that change broke.
 """
 
 import json
-
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -31,12 +31,12 @@ def arcs() -> list[tuple]:
 
 
 @pytest.fixture(scope="session")
-def edge_index(arcs) -> np.ndarray:
+def edge_index(arcs: list[tuple]) -> np.ndarray:
     return np.array(arcs, dtype=np.int64).T
 
 
 @pytest.fixture(scope="session")
-def base_edges(arcs) -> dict:
+def base_edges(arcs: list[tuple]) -> dict:
     return {arc: ic_probability for arc in arcs}
 
 
@@ -113,7 +113,7 @@ def _records() -> list[dict]:
 
 
 @pytest.fixture
-def dataset_dir(tmp_path, edge_index):
+def dataset_dir(tmp_path: Path, edge_index: np.ndarray) -> Path:
     """A results/<...>/data directory the loaders accept."""
     out_dir = tmp_path / "data"
     (out_dir / "graphs").mkdir(parents=True)

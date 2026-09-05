@@ -18,7 +18,7 @@ from pipeline.conditions import (
     reward_name,
 )
 from pipeline.layout import Layout
-from pipeline.plots import pretty_arm, prettify, wm_metric_name
+from pipeline.plots import prettify, pretty_arm, wm_metric_name
 from pipeline.tasks import minimize
 
 # The agent writes its own `##` headings; demoting them one level keeps the

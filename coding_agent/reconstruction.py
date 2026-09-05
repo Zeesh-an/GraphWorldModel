@@ -42,11 +42,17 @@ analogue), which is the column no paper in this literature reports.
 
 import time
 from dataclasses import dataclass, field
-
 import numpy as np
 
 from coding_agent.executor import StrategyError, call_strategy
-from coding_agent.types import ActionOp, GraphInfo, State, Strategy, TaskSpec, Trajectory
+from coding_agent.types import (
+    ActionOp,
+    GraphInfo,
+    State,
+    Strategy,
+    TaskSpec,
+    Trajectory,
+)
 from world_model.wm_data import load_episode_trajectories
 from world_model.wm_metrics import (
     default_tree_weight,
@@ -240,7 +246,7 @@ def transition_logprob(
 
 
 def mask_observation(
-    episode: dict, setting: str, observation_rate: float, hidden_rate: float, rng
+    episode: dict, setting: str, observation_rate: float, hidden_rate: float, rng: np.random.Generator
 ) -> tuple[Observation, np.ndarray | None]:
     """
     One episode's stored history, masked into the observation a decoder gets.

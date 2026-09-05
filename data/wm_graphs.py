@@ -7,7 +7,6 @@ Edge probabilities reuse graph_utils.build_edge_index
 import importlib
 import zlib
 from dataclasses import dataclass, field
-
 import networkx as nx
 import numpy as np
 import scipy.sparse as sp
@@ -200,7 +199,7 @@ corpus_time_unit = {
 }
 
 
-@dataclass
+@dataclass()
 class GraphBundle:
     graph_id: str
     nx_graph: nx.Graph | nx.DiGraph

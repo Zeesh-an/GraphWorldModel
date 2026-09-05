@@ -22,9 +22,9 @@ the test split and the run refuses if any of them appear in train or val.
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
-
 import numpy as np
 import torch
 
@@ -105,29 +105,29 @@ def build_candidates(graph_id, store_entry, pool, budget, diffusion_model):
     )
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Q4 candidate-ranking evaluation")
     parser.add_argument("--results", type=Path, required=True,
-                        help="train_wm.py results JSON of the model to score")
-    parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--n-graphs", type=int, default=10)
-    parser.add_argument("--budget-pct", type=float, default=5.0)
+                        help="train_wm.py results JSON of the model to score (default: None).")
+    parser.add_argument("--data-dir", type=Path, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--n-graphs", type=int, default=10, help="graphs to evaluate (default: 10).")
+    parser.add_argument("--budget-pct", type=float, default=5.0, help="seed budget as percent of nodes (default: 5.0).")
     parser.add_argument("--mc-runs", type=int, default=32,
-                        help="simulator rollouts per oracle score")
-    parser.add_argument("--horizon", type=int, default=20)
+                        help="simulator rollouts per oracle score (default: 32).")
+    parser.add_argument("--horizon", type=int, default=20, help="rollout horizon in timesteps (default: 20).")
     parser.add_argument("--n-samples", type=int, default=20,
-                        help="world-model ensemble size")
+                        help="world-model ensemble size (default: 20).")
     parser.add_argument("--win-quantile", type=float, default=0.8,
                         help="oracle quantile a candidate must reach to count as "
-                             "a win; recorded in the output")
-    parser.add_argument("--pool", nargs="*", default=list(default_pool))
-    parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--device", type=str, default="cpu")
+                             "a win; recorded in the output (default: 0.8).")
+    parser.add_argument("--pool", nargs="*", default=list(default_pool), type=str, help=f"candidate policies to rank (default: {list(default_pool)}).")
+    parser.add_argument("--seed", type=int, default=0, help="master random seed (default: 0).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
     parser.add_argument("--threads", type=int, default=default_threads,
-                        help=f"torch intra-op threads (default {default_threads}; "
-                             f"more is much slower on small graphs)")
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+                        help=f"torch intra-op threads; more is much slower on small graphs "
+                             f"(default: {default_threads}).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
     torch.set_num_threads(args.threads)
 
     results = json.loads(args.results.read_text())
@@ -234,7 +234,7 @@ def main(argv=None) -> int:
         "per_graph": [report.to_dict() for report in reports],
         "runtime_seconds": round(time.perf_counter() - started, 1),
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2, default=str))
 
     print(f"\n[rank] {len(reports)} graphs | trusted calls {trusted_calls}")
@@ -248,9 +248,3 @@ def main(argv=None) -> int:
                   f"(n={summary.get(key + '_n', 0)})")
 
     print(f"\n-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

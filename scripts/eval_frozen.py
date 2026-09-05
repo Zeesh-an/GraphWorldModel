@@ -28,9 +28,9 @@ Two things it reports that a same-distribution eval does not need:
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
-
 import torch
 
 from world_model.checkpoint import describe, load_checkpoint
@@ -47,32 +47,32 @@ from world_model.wm_eval import evaluate_one_step, rollout_ensemble
 default_threads = 1
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Full evaluation suite for a frozen checkpoint on any dataset"
     )
-    parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--data-dir", type=str, required=True)
-    parser.add_argument("--split", type=str, default="test")
+    parser.add_argument("--checkpoint", type=Path, required=True, help="checkpoint .pt path (default: None).")
+    parser.add_argument("--data-dir", type=str, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--split", type=str, default="test", help="dataset split to evaluate (default: test).")
     parser.add_argument("--config", type=Path, default=None,
-                        help="results JSON, only needed for a legacy checkpoint")
-    parser.add_argument("--n-samples", type=int, default=20)
-    parser.add_argument("--max-episodes", type=int, default=50)
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--skip-rollout", action="store_true")
-    parser.add_argument("--skip-action", action="store_true")
+                        help="results JSON, only needed for a legacy checkpoint (default: None).")
+    parser.add_argument("--n-samples", type=int, default=20, help="world-model ensemble size (default: 20).")
+    parser.add_argument("--max-episodes", type=int, default=50, help="episodes per split to roll out (default: 50).")
+    parser.add_argument("--seed", type=int, default=42, help="master random seed (default: 42).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
+    parser.add_argument("--skip-rollout", action="store_true", help="skip the ensemble rollout evaluation (default: False).")
+    parser.add_argument("--skip-action", action="store_true", help="skip the action-conditioning suite (default: False).")
     parser.add_argument(
         "--allow-trained-target",
         action="store_true",
         help="permit a target dataset that has a train split. Off by default: an "
-             "OOD number measured where the model could have trained is not one.",
+             "OOD number measured where the model could have trained is not one (default: False).",
     )
     parser.add_argument("--threads", type=int, default=default_threads,
-                        help=f"torch intra-op threads (default {default_threads}; "
-                             f"more is much slower on small graphs)")
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+                        help=f"torch intra-op threads; more is much slower on small graphs "
+                             f"(default: {default_threads}).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
     torch.set_num_threads(args.threads)
 
     device = torch.device(args.device)
@@ -167,7 +167,7 @@ def main(argv=None) -> int:
         )
 
     results["runtime_seconds"] = round(time.perf_counter() - started, 1)
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(results, indent=2, default=str))
 
     test = results["test"]
@@ -192,9 +192,3 @@ def main(argv=None) -> int:
         print(f"  verdict               {results['action_conditioning']['verdict'][:70]}")
 
     print(f"\n-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

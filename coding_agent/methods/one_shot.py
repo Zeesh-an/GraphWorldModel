@@ -6,26 +6,25 @@ from tqdm import tqdm
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.credit import credit_feedback
-from coding_agent.probes import answer_probes, parse_probe_request
 from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.methods.base import (
-    accepts,
     OuterLoopMethod,
+    accepts,
     baseline_anchor,
     evaluate_strategy,
-    rescore,
     paired_delta,
     reference_diff,
+    rescore,
     summarize,
 )
+from coding_agent.probes import answer_probes, parse_probe_request
 from coding_agent.prompts import (
     build_feedback_prompt,
-    probe_contract,
     build_system_prompt,
     build_user_prompt,
+    probe_contract,
 )
 from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
-
 
 # A script that fails to build or run teaches the next turn something, but it is
 # not an evaluation: charging it against --outer-iters silently turns a 5-round

@@ -24,16 +24,16 @@ adapter exists to drive it is `wired`; `available_baselines()` combines them.
 
 import csv
 import json
-import random
-import struct
-from functools import partial
 import os
 import pickle
+import random
 import re
 import shutil
+import struct
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
+from functools import partial
 from pathlib import Path
 import networkx as nx
 
@@ -122,7 +122,7 @@ finder_checkpoint = "nrange_30_50_iter_78000.ckpt"
 review_default_method = "GDM"
 
 
-@dataclass
+@dataclass()
 class ExternalBaseline:
     name: str
     kind: str  # classical | learned
@@ -2878,7 +2878,7 @@ def _graphsl_entry(method: str, title: str, venue: str, notes: str) -> ExternalB
 
 # Registry -------------------------------------------------------------------
 
-external_baselines: dict[str, ExternalBaseline] = {
+external_baselines = {
     "moeim": ExternalBaseline(
         name="moeim",
         kind=learned,

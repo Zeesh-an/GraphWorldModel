@@ -13,7 +13,7 @@ wrong about the code rather than the other way round.
 
 import argparse
 import json
-import sys
+import os
 from pathlib import Path
 
 from registry import (
@@ -63,7 +63,7 @@ def _print_algorithms() -> None:
         f"{len(spine)} used for world-model training trajectories)"
     )
 
-    by_task: dict[str, list[str]] = {}
+    by_task = {}
 
     for name, entry in ALGORITHM_REGISTRY.items():
         for task in entry.tasks:
@@ -98,7 +98,7 @@ def _print_dynamics() -> None:
 
 def _print_baselines() -> None:
     _rule(f"EXTERNAL BASELINES ({len(BASELINE_REGISTRY)})")
-    by_task: dict[str, list] = {}
+    by_task = {}
 
     for entry in BASELINE_REGISTRY.values():
         by_task.setdefault(entry.task, []).append(entry)
@@ -159,7 +159,7 @@ def _print_config(path: Path) -> int:
     return 1 if report.errors else 0
 
 
-def main(argv: list[str] | None = None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Print the canonical registries and write a JSON manifest"
     )
@@ -167,26 +167,26 @@ def main(argv: list[str] | None = None) -> int:
         "--out",
         type=Path,
         default=default_out,
-        help=f"manifest path (default: {default_out})",
+        help=f"manifest path (default: {default_out}).",
     )
     parser.add_argument(
         "--config",
         type=Path,
         default=None,
-        help="also validate an experiment config and explain its group count",
+        help="also validate an experiment config and explain its group count (default: None).",
     )
     parser.add_argument(
         "--no-backbones",
         action="store_true",
-        help="skip reading world-model backbones (avoids importing torch)",
+        help="skip reading world-model backbones (avoids importing torch) (default: False).",
     )
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="exit non-zero if any consistency check reports an error",
+        help="exit non-zero if any consistency check reports an error (default: False).",
     )
-    parser.add_argument("--quiet", action="store_true", help="write the manifest only")
-    args = parser.parse_args(argv)
+    parser.add_argument("--quiet", action="store_true", help="write the manifest only (default: False).")
+    args = parser.parse_args()
 
     manifest = build_manifest(include_backbones=not args.no_backbones)
 
@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
 
         _print_consistency(manifest)
 
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(manifest, indent=2, default=str))
 
     if not args.quiet:
@@ -224,8 +224,4 @@ def main(argv: list[str] | None = None) -> int:
     if args.strict and manifest["consistency"]["n_errors"]:
         exit_code |= 1
 
-    return exit_code
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(exit_code)

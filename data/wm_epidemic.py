@@ -53,7 +53,6 @@ graded contact reduction expressible at all.
 """
 
 from dataclasses import dataclass
-
 import networkx as nx
 import numpy as np
 

@@ -29,9 +29,9 @@ The null is not "greater than zero" — it is 1.0, and it is reachable.
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
-
 import torch
 import torch.nn as nn
 
@@ -87,16 +87,16 @@ class StateOnlyModel(nn.Module):
         return self.inner(blinded, graph)
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Action ablation results table")
-    parser.add_argument("--results", type=Path, required=True)
-    parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--split", type=str, default="test")
-    parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--threads", type=int, default=default_threads)
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+    parser.add_argument("--results", type=Path, required=True, help="train_wm.py results JSON of the model to evaluate (default: None).")
+    parser.add_argument("--data-dir", type=Path, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--split", type=str, default="test", help="dataset split to evaluate (default: test).")
+    parser.add_argument("--seed", type=int, default=42, help="master random seed (default: 42).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
+    parser.add_argument("--threads", type=int, default=default_threads, help=f"torch intra-op threads (default: {default_threads}).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
     torch.set_num_threads(args.threads)
 
     config = json.loads(args.results.read_text())["config"]
@@ -188,7 +188,7 @@ def main(argv=None) -> int:
         "verdict": verdict,
         "runtime_seconds": round(time.perf_counter() - started, 1),
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2, default=str))
 
     print(f"\n{'arm':14s} {'delta_f1':>9s} {'brier':>9s} {'effect_mae_norm':>17s} "
@@ -208,9 +208,3 @@ def main(argv=None) -> int:
           f"{'drop=':>9s}{rows['null_actions']['delta_f1_drop_vs_full']:.4f}")
     print(f"\nverdict: {'PASS' if verdict['passes'] else 'FAIL'}  {verdict}")
     print(f"-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

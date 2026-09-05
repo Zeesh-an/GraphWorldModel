@@ -10,8 +10,8 @@ import heapq
 import networkx as nx
 import numpy as np
 
-from coding_agent.types import GraphInfo
 from coding_agent.tools import primitives
+from coding_agent.types import GraphInfo
 
 min_temperature = 1e-6
 
@@ -21,21 +21,21 @@ def _top_k_by_score(scores: np.ndarray, count: int) -> list[int]:
 
 
 def high_degree(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k highest total-degree nodes (Degree heuristic)."""
     return primitives.get_top_degree_nodes(graph, budget)
 
 
 def weighted_degree(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k by summed outgoing IC transmission probability."""
     return _top_k_by_score(primitives.compute_weighted_degree(graph), budget)
 
 
 def degree_discount(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """
     DegreeDiscount (Chen, Wang, Yang, KDD 2009, Algorithm 4).
@@ -78,7 +78,7 @@ def degree_discount(
 
 
 def pagerank_seeds(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k PageRank nodes."""
     return _top_k_by_score(primitives.compute_pagerank(graph), budget)
@@ -90,7 +90,7 @@ def vanilla_greedy(
     diffusion_model: str = "IC",
     mc_runs: int = 30,
     horizon: int = 20,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Greedy marginal-gain (Kempe et al. 2003)."""
     seeds = []
@@ -119,7 +119,7 @@ def celf(
     diffusion_model: str = "IC",
     mc_runs: int = 30,
     horizon: int = 20,
-    **_,
+    **_: object,
 ) -> list[int]:
     """CELF (Leskovec et al. 2007): lazy-forward greedy with a max-heap of marginal gains."""
     seeds = []
@@ -152,7 +152,7 @@ def ris_basic(
     budget: int,
     diffusion_model: str = "IC",
     theta: int = 2000,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Basic Reverse Influence Sampling (Borgs et al. 2014). IC only."""
     rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=0)
@@ -173,7 +173,7 @@ def community_im(
     graph: GraphInfo,
     budget: int,
     diffusion_model: str = "IC",
-    **_,
+    **_: object,
 ) -> list[int]:
     """Community-IM: split budget across label-propagation communities, degree within each."""
     communities = primitives.detect_communities(graph)
@@ -200,7 +200,7 @@ def pagerank_greedy(
     pool: int = 30,
     mc_runs: int = 30,
     horizon: int = 20,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Hybrid: narrow to top PageRank candidates, then greedy marginal-gain over them."""
     candidates = _top_k_by_score(
@@ -234,7 +234,7 @@ def hill_climbing(
     mc_runs: int = 30,
     horizon: int = 20,
     rounds: int = 3,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Local search: start from degree, 1-swap while spread improves."""
     seeds = primitives.get_top_degree_nodes(graph, budget)
@@ -309,7 +309,7 @@ def celf_pp(
     diffusion_model: str = "IC",
     mc_runs: int = 30,
     horizon: int = 20,
-    **_,
+    **_: object,
 ) -> list[int]:
     """CELF++ (Goyal et al. 2011): CELF with a secondary cache (simplified; selection = CELF)."""
     seeds = []
@@ -345,7 +345,7 @@ def adaptive_greedy(
     refine_mc: int = 40,
     horizon: int = 20,
     refine_top: int = 5,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Adaptive Greedy: coarse MC to rank, refined MC on the top few (adaptive sample count)."""
     seeds = []
@@ -382,14 +382,14 @@ def adaptive_greedy(
 
 # Centrality (additions)
 def eigenvector_seeds(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k eigenvector-centrality nodes."""
     return _top_k_by_score(primitives.compute_centrality(graph, "eigenvector"), budget)
 
 
 def closeness_seeds(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k closeness-centrality nodes."""
     return _top_k_by_score(primitives.compute_centrality(graph, "closeness"), budget)
@@ -401,7 +401,7 @@ def tim(
     budget: int,
     diffusion_model: str = "IC",
     epsilon: float = 0.2,
-    **_,
+    **_: object,
 ) -> list[int]:
     """TIM/TIM+ (Tang et al. 2014): RIS with an estimated sample size."""
     theta = primitives.estimate_sample_size(graph, budget, epsilon=epsilon)
@@ -417,7 +417,7 @@ def imm(
     budget: int,
     diffusion_model: str = "IC",
     epsilon: float = 0.2,
-    **_,
+    **_: object,
 ) -> list[int]:
     """IMM (Tang et al. 2015): two-phase sample-size refinement over RIS (simplified)."""
     initial_theta = primitives.estimate_sample_size(graph, budget, epsilon=epsilon * 2)
@@ -444,7 +444,7 @@ def ssa(
     initial_theta: int = 500,
     max_doublings: int = 4,
     stability: float = 0.9,
-    **_,
+    **_: object,
 ) -> list[int]:
     """SSA/D-SSA (Nguyen et al. 2016): doubling RIS until the top-k stabilizes (simplified)."""
     theta = initial_theta
@@ -473,7 +473,7 @@ def filtered_ris(
     diffusion_model: str = "IC",
     theta: int = 2000,
     min_size: int = 2,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Filtered RIS: drop tiny RR sets before coverage selection."""
     rr_sets = [
@@ -496,7 +496,7 @@ def sp1m(
     budget: int,
     diffusion_model: str = "IC",
     max_hops: int = 3,
-    **_,
+    **_: object,
 ) -> list[int]:
     """SP1M/SPM (Kimura & Saito 2006): top-k by shortest-path influence (truncated path-sum)."""
     return _top_k_by_score(
@@ -509,7 +509,7 @@ def mia_pmia(
     budget: int,
     diffusion_model: str = "IC",
     max_hops: int = 2,
-    **_,
+    **_: object,
 ) -> list[int]:
     """MIA/PMIA (Chen et al. 2010): local-influence-tree score (simplified), discounted selection."""
     return _greedy_discount_select(
@@ -522,7 +522,7 @@ def ldag(
     budget: int,
     diffusion_model: str = "IC",
     max_hops: int = 3,
-    **_,
+    **_: object,
 ) -> list[int]:
     """LDAG (Chen et al. 2010): local-DAG influence (simplified deeper path-sum), discounted selection."""
     return _greedy_discount_select(
@@ -536,7 +536,7 @@ def static_greedy(
     budget: int,
     diffusion_model: str = "IC",
     snapshots: int = 20,
-    **_,
+    **_: object,
 ) -> list[int]:
     """StaticGreedy (Cheng et al. 2014): greedy over a fixed set of live-edge snapshots."""
     rng = np.random.default_rng(0)
@@ -576,7 +576,7 @@ def skim(
     budget: int,
     diffusion_model: str = "IC",
     snapshots: int = 32,
-    **_,
+    **_: object,
 ) -> list[int]:
     """SKIM (Cohen et al. 2014): rank by average single-seed reachability over sketches (simplified)."""
     rng = np.random.default_rng(0)
@@ -603,7 +603,7 @@ def skim(
 
 
 # Community (additions)
-def cofim(graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_) -> list[int]:
+def cofim(graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object) -> list[int]:
     """CoFIM (Zhang et al. 2014): per-community budget + degree with cross-community bridge bonus."""
     communities = primitives.detect_communities(graph)
     allocation = primitives.allocate_budget(communities, budget)
@@ -636,7 +636,7 @@ def community_ris(
     budget: int,
     diffusion_model: str = "IC",
     theta: int = 2000,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Community-RIS hybrid: RR-set coverage selection restricted to per-community budgets."""
     communities = primitives.detect_communities(graph)
@@ -680,7 +680,7 @@ def simulated_annealing(
     horizon: int = 20,
     iters: int = 40,
     cooling: float = 0.9,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Simulated annealing over seed sets (degree init, swap moves, geometric cooling)."""
     rng = np.random.default_rng(0)
@@ -723,7 +723,7 @@ def genetic_algorithm(
     mc_runs: int = 15,
     horizon: int = 20,
     mutation_rate: float = 0.3,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Genetic algorithm over seed sets (degree-biased init, crossover + mutation, elitism)."""
     rng = np.random.default_rng(0)
@@ -792,7 +792,7 @@ def degree_ris_refine(
     budget: int,
     diffusion_model: str = "IC",
     theta: int = 2000,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Degree init refined by RR-set coverage swaps (Degree + RIS)."""
     seeds = primitives.get_top_degree_nodes(graph, budget)
@@ -827,7 +827,7 @@ def celf_local_search(
     diffusion_model: str = "IC",
     mc_runs: int = 30,
     horizon: int = 20,
-    **_,
+    **_: object,
 ) -> list[int]:
     """CELF seed set refined by 1-swap local search (CELF + LocalSearch)."""
     seeds = celf(graph, budget, diffusion_model, mc_runs, horizon)
@@ -859,7 +859,7 @@ def community_celf(
     diffusion_model: str = "IC",
     mc_runs: int = 20,
     horizon: int = 20,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Community-scoped marginal-gain greedy (no CELF lazy heap: simplified)."""
     communities = primitives.detect_communities(graph)
@@ -905,7 +905,7 @@ def _neighbor_sets(graph: GraphInfo) -> list[set[int]]:
 
 
 def voterank(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """VoteRank (Zhang et al. 2016): iterative voting where a winner's neighbors lose voting power, anti-overlap seed selection."""
     neighbors = _neighbor_sets(graph)
@@ -939,7 +939,7 @@ def voterank(
 
 
 def kshell_seeds(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """k-shell seeding (Kitsak et al. 2010): top-k by core number (degree breaks ties), core position beats raw degree for spreading."""
     neighbors = _neighbor_sets(graph)
@@ -978,7 +978,7 @@ def collective_influence(
     budget: int,
     diffusion_model: str = "IC",
     radius: int = 2,
-    **_,
+    **_: object,
 ) -> list[int]:
     """Collective Influence (Morone & Makse 2015): (k_i-1) * sum of (k_j-1) over the ball boundary at `radius`; adaptive removal."""
     neighbors = _neighbor_sets(graph)
@@ -1024,7 +1024,7 @@ def irie(
     diffusion_model: str = "IC",
     alpha: float = 0.7,
     iterations: int = 20,
-    **_,
+    **_: object,
 ) -> list[int]:
     """IRIE (Jung et al. 2012, simplified): influence-rank iteration r = (1-AP)(1 + a*sum p*r), no MC inside."""
     sources = graph.edge_index[0]
@@ -1055,7 +1055,7 @@ def irie(
 
 
 def random_seeds(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 42, **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", seed: int = 42, **_: object
 ) -> list[int]:
     """Uniform random seed set: the trivial floor baseline."""
     rng = np.random.default_rng(seed)
@@ -1065,7 +1065,7 @@ def random_seeds(
 
 
 def betweenness_seeds(
-    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_
+    graph: GraphInfo, budget: int, diffusion_model: str = "IC", **_: object
 ) -> list[int]:
     """Top-k betweenness-centrality nodes (bridge/broker positions between regions)."""
     nx_graph = nx.DiGraph() if graph.directed else nx.Graph()

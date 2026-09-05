@@ -16,6 +16,11 @@ from data.wm_simulator import (
     spent,
     valid_remove_semantics,
 )
+from world_model.model.gat import GATEncoder
+from world_model.model.gcn import GCNEncoder
+from world_model.model.gcnii import GCNIIEncoder
+from world_model.model.graph_transformer import GraphTransformerEncoder
+from world_model.model.graphsage import GraphSAGEEncoder
 from world_model.wm_data import (
     GraphInput,
     ch_add,
@@ -35,11 +40,6 @@ from world_model.wm_data import (
     ch_pos_infected,
     ch_remove,
 )
-from world_model.model.gcn import GCNEncoder
-from world_model.model.graphsage import GraphSAGEEncoder
-from world_model.model.gat import GATEncoder
-from world_model.model.graph_transformer import GraphTransformerEncoder
-from world_model.model.gcnii import GCNIIEncoder
 
 backbones = {
     "gcn": GCNEncoder,

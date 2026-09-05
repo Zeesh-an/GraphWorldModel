@@ -44,9 +44,9 @@ Reported as a CURVE over B = 1..K, because a single budget is a cherry-pick.
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
-
 import numpy as np
 import torch
 
@@ -65,25 +65,25 @@ def best_within_budget(order: list[int], true: list[float], budget: int) -> floa
     return float(max(true[index] for index in order[:budget]))
 
 
-def main(argv=None) -> int:
+if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fixed-budget closed-loop experiment")
-    parser.add_argument("--results", type=Path, required=True)
-    parser.add_argument("--data-dir", type=Path, required=True)
-    parser.add_argument("--split", type=str, default="test")
-    parser.add_argument("--n-graphs", type=int, default=15)
-    parser.add_argument("--budget-pct", type=float, default=5.0)
-    parser.add_argument("--mc-runs", type=int, default=32)
-    parser.add_argument("--horizon", type=int, default=20)
+    parser.add_argument("--results", type=Path, required=True, help="train_wm.py results JSON of the model to evaluate (default: None).")
+    parser.add_argument("--data-dir", type=Path, required=True, help="dataset directory holding graphs/ and the transition files (default: None).")
+    parser.add_argument("--split", type=str, default="test", help="dataset split to evaluate (default: test).")
+    parser.add_argument("--n-graphs", type=int, default=15, help="graphs to evaluate (default: 15).")
+    parser.add_argument("--budget-pct", type=float, default=5.0, help="seed budget as percent of nodes (default: 5.0).")
+    parser.add_argument("--mc-runs", type=int, default=32, help="simulator rollouts per oracle score (default: 32).")
+    parser.add_argument("--horizon", type=int, default=20, help="rollout horizon in timesteps (default: 20).")
     parser.add_argument("--n-samples", type=int, default=5,
                         help="world-model ensemble size; 5 is the operating point "
-                             "selected on validation graphs")
+                             "selected on validation graphs (default: 5).")
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2],
                         help="repeats; the random agent and the shortlist vary "
-                             "with it, so this is where the CI comes from")
-    parser.add_argument("--device", type=str, default="cpu")
-    parser.add_argument("--threads", type=int, default=default_threads)
-    parser.add_argument("--out", type=Path, required=True)
-    args = parser.parse_args(argv)
+                             "with it, so this is where the CI comes from (default: [0, 1, 2]).")
+    parser.add_argument("--device", type=str, default="cpu", help="torch device (default: cpu).")
+    parser.add_argument("--threads", type=int, default=default_threads, help=f"torch intra-op threads (default: {default_threads}).")
+    parser.add_argument("--out", type=Path, required=True, help="output path (default: None).")
+    args = parser.parse_args()
     torch.set_num_threads(args.threads)
 
     from scripts.eval_ranking import build_candidates, default_pool
@@ -243,7 +243,7 @@ def main(argv=None) -> int:
         },
         "curve": curve,
     }
-    args.out.parent.mkdir(parents=True, exist_ok=True)
+    os.makedirs(args.out.parent, exist_ok=True)
     args.out.write_text(json.dumps(blob, indent=2, default=str))
 
     print(f"\nfrozen parameters unchanged: {frozen_ok}")
@@ -262,9 +262,3 @@ def main(argv=None) -> int:
               f"{row['wm_vs_degree']:+11.3f} {row['wm_vs_degree_t']:7.2f}")
 
     print(f"\n-> {args.out}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

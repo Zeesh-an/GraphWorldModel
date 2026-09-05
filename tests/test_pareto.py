@@ -1,7 +1,7 @@
 """Pareto dominance, the fidelity/cost front, and the seed aggregator."""
 
 import json
-
+from pathlib import Path
 import numpy as np
 import pytest
 
@@ -26,42 +26,42 @@ score = Objective("score", maximize)
 
 
 class TestDominance:
-    def test_strictly_better_on_both_dominates(self):
+    def test_strictly_better_on_both_dominates(self) -> None:
         better = Point("a", {"error": 0.1, "cost": 1.0})
         worse = Point("b", {"error": 0.2, "cost": 2.0})
 
         assert dominates(better, worse, [error, cost])
         assert not dominates(worse, better, [error, cost])
 
-    def test_equal_points_do_not_dominate_each_other(self):
+    def test_equal_points_do_not_dominate_each_other(self) -> None:
         first = Point("a", {"error": 0.1, "cost": 1.0})
         second = Point("b", {"error": 0.1, "cost": 1.0})
 
         assert not dominates(first, second, [error, cost])
         assert not dominates(second, first, [error, cost])
 
-    def test_a_tradeoff_is_not_dominance(self):
+    def test_a_tradeoff_is_not_dominance(self) -> None:
         cheap = Point("cheap", {"error": 0.3, "cost": 1.0})
         accurate = Point("accurate", {"error": 0.1, "cost": 9.0})
 
         assert not dominates(cheap, accurate, [error, cost])
         assert not dominates(accurate, cheap, [error, cost])
 
-    def test_maximise_sense_is_honoured(self):
+    def test_maximise_sense_is_honoured(self) -> None:
         better = Point("a", {"score": 0.9})
         worse = Point("b", {"score": 0.5})
 
         assert dominates(better, worse, [score])
         assert not dominates(worse, better, [score])
 
-    def test_a_missing_value_never_dominates(self):
+    def test_a_missing_value_never_dominates(self) -> None:
         """An absent number is not evidence of a good one."""
         partial = Point("partial", {"error": 0.01})
         complete = Point("complete", {"error": 0.2, "cost": 5.0})
 
         assert not dominates(partial, complete, [error, cost])
 
-    def test_nan_never_dominates(self):
+    def test_nan_never_dominates(self) -> None:
         broken = Point("broken", {"error": float("nan"), "cost": 0.0})
         fine = Point("fine", {"error": 0.5, "cost": 5.0})
 
@@ -69,7 +69,7 @@ class TestDominance:
 
 
 class TestFront:
-    def test_front_keeps_tradeoffs_and_drops_dominated_points(self):
+    def test_front_keeps_tradeoffs_and_drops_dominated_points(self) -> None:
         points = [
             Point("cheap", {"error": 0.3, "cost": 1.0}),
             Point("accurate", {"error": 0.1, "cost": 9.0}),
@@ -81,7 +81,7 @@ class TestFront:
         assert set(front["front"]) == {"cheap", "accurate"}
         assert set(front["dominated"]) == {"dominated"}
 
-    def test_dominated_points_name_what_dominates_them(self):
+    def test_dominated_points_name_what_dominates_them(self) -> None:
         points = [
             Point("good", {"error": 0.1, "cost": 1.0}),
             Point("bad", {"error": 0.5, "cost": 5.0}),
@@ -91,18 +91,18 @@ class TestFront:
 
         assert front["dominated"]["bad"] == ["good"]
 
-    def test_single_point_is_its_own_front(self):
+    def test_single_point_is_its_own_front(self) -> None:
         front = pareto_front([Point("only", {"error": 1.0, "cost": 1.0})], [error, cost])
 
         assert front["front"] == ["only"]
 
-    def test_no_objectives_is_an_error(self):
+    def test_no_objectives_is_an_error(self) -> None:
         with pytest.raises(ValueError, match="at least one objective"):
             pareto_front([Point("a", {})], [])
 
 
 class TestHypervolume:
-    def test_a_better_front_dominates_more_area(self):
+    def test_a_better_front_dominates_more_area(self) -> None:
         weak = [Point("w", {"error": 0.4, "cost": 4.0})]
         strong = [Point("s", {"error": 0.1, "cost": 1.0})]
         reference = (1.0, 10.0)
@@ -111,12 +111,12 @@ class TestHypervolume:
             weak, error, cost, reference
         )
 
-    def test_a_point_beyond_the_reference_contributes_nothing(self):
+    def test_a_point_beyond_the_reference_contributes_nothing(self) -> None:
         beyond = [Point("b", {"error": 2.0, "cost": 20.0})]
 
         assert hypervolume_2d(beyond, error, cost, (1.0, 10.0)) == 0.0
 
-    def test_area_is_computed_exactly_for_one_point(self):
+    def test_area_is_computed_exactly_for_one_point(self) -> None:
         point = [Point("p", {"error": 0.5, "cost": 5.0})]
 
         assert hypervolume_2d(point, error, cost, (1.0, 10.0)) == pytest.approx(2.5)
@@ -134,14 +134,14 @@ class TestResultsIntegration:
             },
         }
 
-    def test_count_bias_is_folded_to_its_absolute_value(self):
+    def test_count_bias_is_folded_to_its_absolute_value(self) -> None:
         """-3 and +3 are equally unfaithful; a signed axis would rank one as best."""
         under = point_from_results("under", self._results(0.1, -3.0, 10.0))
         over = point_from_results("over", self._results(0.1, 3.0, 10.0))
 
         assert under.values["abs_count_bias"] == over.values["abs_count_bias"] == 3.0
 
-    def test_fidelity_cost_front_over_configurations(self):
+    def test_fidelity_cost_front_over_configurations(self) -> None:
         points = [
             point_from_results("fast_rough", self._results(0.30, 1.0, 5.0)),
             point_from_results("slow_exact", self._results(0.05, 0.1, 500.0)),
@@ -153,7 +153,7 @@ class TestResultsIntegration:
         assert set(front["front"]) == {"fast_rough", "slow_exact"}
         assert "worst" in front["dominated"]
 
-    def test_unknown_axis_names_are_rejected(self):
+    def test_unknown_axis_names_are_rejected(self) -> None:
         points = [point_from_results("a", self._results(0.1, 0.0, 1.0))]
 
         with pytest.raises(ValueError, match="unknown fidelity objective"):
@@ -162,13 +162,13 @@ class TestResultsIntegration:
         with pytest.raises(ValueError, match="unknown cost objective"):
             fidelity_cost_front(points, "ens_marg_mae", "dollars")
 
-    def test_every_named_objective_carries_a_sense(self):
+    def test_every_named_objective_carries_a_sense(self) -> None:
         for objective in {**fidelity_objectives, **cost_objectives}.values():
             assert objective.sense in (minimize, maximize)
 
 
 class TestSeedAggregation:
-    def _write(self, tmp_path, name, seed, delta_f1, regret):
+    def _write(self, tmp_path: Path, name, seed, delta_f1, regret):
         path = tmp_path / name
         path.write_text(
             json.dumps(
@@ -187,7 +187,7 @@ class TestSeedAggregation:
         )
         return path
 
-    def test_mean_and_std_across_seeds(self, tmp_path):
+    def test_mean_and_std_across_seeds(self, tmp_path: Path) -> None:
         paths = [
             self._write(tmp_path, "a.json", 1, 0.80, 0.24),
             self._write(tmp_path, "b.json", 2, 0.90, 0.28),
@@ -203,13 +203,13 @@ class TestSeedAggregation:
             np.std([0.8, 0.9], ddof=1)
         )
 
-    def test_single_run_is_flagged_as_unsupported(self, tmp_path):
+    def test_single_run_is_flagged_as_unsupported(self, tmp_path: Path) -> None:
         summary = aggregate([self._write(tmp_path, "a.json", 1, 0.8, 0.24)])
 
         assert summary["warning"] is not None
         assert summary["metrics"]["test.delta_f1"]["std"] == 0.0
 
-    def test_pass_rate_is_aggregated_not_collapsed(self, tmp_path):
+    def test_pass_rate_is_aggregated_not_collapsed(self, tmp_path: Path) -> None:
         paths = [
             self._write(tmp_path, "a.json", 1, 0.8, 0.24),
             self._write(tmp_path, "b.json", 2, 0.9, 0.28),
@@ -220,8 +220,8 @@ class TestSeedAggregation:
         assert summary["metrics"]["action_conditioning.pass"]["mean"] == 1.0
 
     def test_separation_reports_a_gap_inside_the_noise_as_not_separated(
-        self, tmp_path
-    ):
+        self, tmp_path: Path
+    ) -> None:
         """The exact situation in the published table: model 0.244 vs degree 0.269."""
         paths = [
             self._write(tmp_path, "a.json", 1, 0.8, 0.20),
@@ -237,7 +237,7 @@ class TestSeedAggregation:
         assert verdict["separated"] is False
         assert abs(verdict["gap"]) < 2.0 * verdict["pooled_se"]
 
-    def test_separation_returns_none_for_a_missing_metric(self, tmp_path):
+    def test_separation_returns_none_for_a_missing_metric(self, tmp_path: Path) -> None:
         summary = aggregate([self._write(tmp_path, "a.json", 1, 0.8, 0.24)])
 
         assert separated(summary, "planning.plan_regret_model", "nope") is None

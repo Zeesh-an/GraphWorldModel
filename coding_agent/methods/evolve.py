@@ -19,25 +19,24 @@ the library and the population, one chosen for implementation.
 
 import difflib
 from pathlib import Path
-
 import numpy as np
 from tqdm import tqdm
 
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
-from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.credit import credit_feedback
-from coding_agent.probes import answer_probes, parse_probe_request
+from coding_agent.executor import StrategyError, build_strategy
 from coding_agent.methods.base import (
     OuterLoopMethod,
     accepts,
     baseline_anchor,
     evaluate_strategy,
-    rescore,
     paired_delta,
     reference_diff,
+    rescore,
     summarize,
 )
+from coding_agent.probes import answer_probes, parse_probe_request
 from coding_agent.prompts import (
     build_attempts_table,
     build_evolve_prompt,

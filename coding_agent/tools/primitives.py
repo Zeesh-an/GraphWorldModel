@@ -59,7 +59,7 @@ def _nx_from_graph_info(graph: GraphInfo) -> tuple:
 def build_competitive_simulator(
     graph: GraphInfo,
     diffusion_model: str,
-    negative_seeds,
+    negative_seeds: tuple[int, ...] | list[int],
     seed: int = 0,
     config: CompetitiveConfig | None = None,
 ) -> CompetitiveSimulator:

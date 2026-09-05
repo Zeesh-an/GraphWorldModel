@@ -62,7 +62,6 @@ reports.
 import math
 import time
 from dataclasses import dataclass, field
-
 import numpy as np
 
 from coding_agent.executor import StrategyError, call_strategy
