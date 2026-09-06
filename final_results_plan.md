@@ -241,7 +241,7 @@ Baselines: `dava` (ours, byte-identical to `netimm_dava`, the best method row an
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | `casflow_weibo` | 119,313 | 6,738,040 | 0.5 h and 1 h observed, 24 h horizon | very large | the de-facto benchmark; the CasFlow bundle |
 | 2 | `casflow_aps` | 207,685 | 616,316 | citation years | very large | results exist; the corpus whose published band moves most under the leak-free split |
-| 3 | `taoke` | 2,862 | 29,711 | 3,600 s observed | large | CasTemp's own corpus, the only one with a published leak-free number; needs `--cp-min-size 3` |
+| 3 | `taoke` | 2,862 | 29,711 | 3,600 s observed | large | CasTemp's own corpus, the only one with a published leak-free number; needs `--cp-min-size 3`, and its only download source returned 404 on 2026-09-06, so the file has to be obtained by hand before this row runs |
 | 4 | `casflow_twitter` | 88,440 | 490,474 | 1 d and 2 d observed, 32 d horizon | very large | the third CasFlow corpus; where CasCN becomes the best baseline under the fix |
 | 5 | `digg_cascades` | 3,553 | 279,630 | votes | very large | Topo-LSTM's corpus; a graph-and-cascade pair rather than a bundle |
 

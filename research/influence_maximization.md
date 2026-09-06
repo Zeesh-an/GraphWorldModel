@@ -666,7 +666,7 @@ The contract is two files and one line. `--dataset` takes a free string; the reg
 
 2. **Add one line to `data/wm_graphs.py::real_directed`**: `"<name>": True|False`. This is the whole registration, `make_real_bundle` imports the module lazily by name and calls the two functions by convention.
 
-3. **Add the row** to §6.1 above, to `README.md`, and to `CLAUDE.md`.
+3. **Add the row** to §6.1 above, to `README.md`, and to the dataset catalogue in `final_results_plan.md` §3.
 
 Nothing else needs to change: `pipeline/run.py`, the simulator, the feature builder, and every baseline adapter all consume `GraphBundle`/`GraphInfo` and are dataset-agnostic.
 

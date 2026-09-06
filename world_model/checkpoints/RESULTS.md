@@ -29,6 +29,8 @@ Both runs used: `model=sage`, `head=structured`, `hidden_dim=64`, `n_layers=3`, 
 
 The only difference between the runs is `diffusion_model` (IC vs LT), which also switches the structured head (`ICTransmissionHead` vs `LTThresholdHead`).
 
+**The LT rows predate the current LT head.** They were produced by the marginal `LTThresholdHead` (a learned monotone function of the active-neighbour fraction, re-flipped every rollout step). The conditional-hazard head that replaced it on 2026-08-29, described in [`../README.md`](../README.md), predicts `(F̂(f_v) − F̂(f_prev))⁺ / (1 − F̂(f_prev))` instead, and this dataset has not been re-run under it, so the LT `test` and `rollout` blocks below, and their "partial-observability ceiling" reading, describe the head the hazard form was built to improve on rather than the head the pipeline trains today. The IC rows are unaffected.
+
 Two things about these runs predate the current defaults. The dataset was split **per episode** (`split_mode=episode_random`, the only mode that existed), so the same 20 graphs appear in train, val and test and the one-step and rollout numbers are in-graph rather than held-out. And the `planning` blocks were computed with the historical `list(store)[:5]` selection, which `--planning-split legacy` now reproduces; the default `test` selection scores held-out graphs only and records `train_overlap`. Neither number is comparable to a `--split-mode graph_disjoint` run.
 
 ---

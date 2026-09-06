@@ -622,7 +622,7 @@ Warning: **Netzschleuder's `num_edges` for these is the contact-event count, not
 | 6    | **PGP**                              | 10,680 / 24,316                   | Standard immunization benchmark; sparse (avg deg 4.55), which is where degree heuristics are weakest.                                    |
 |      | SFHH, HT09, InVS13/15, Malawi, Kenya | 92-403 nodes                      | cheap once one `tij` loader exists: they are the same format                                                                            |
 
-**The loader work is one parser, not six.** Every SocioPatterns file is `tij` (`timestamp node_i node_j`); aggregating to a static weighted graph is `groupby(pair).size()`. One `data/datasets/sociopatterns.py` with a `--sociopatterns-trace` argument covers rows 1, 2, 3, and the last row of the table above. Oregon / USAir97 / PGP are copy-edits of `ca_grqc.py`.
+**The loader work is one parser, not six.** Every SocioPatterns file is `tij` (`timestamp node_i node_j`); aggregating to a static weighted graph is `groupby(pair).size()`. One shared parser, `data/datasets/sociopatterns.py`, covers rows 1, 2, 3, and the last row of the table above (shipped as one thin loader module per trace over that helper rather than as a `--sociopatterns-trace` flag, so each trace stays its own `--dataset` name). Oregon / USAir97 / PGP are copy-edits of `ca_grqc.py`.
 
 **Warning: Downloads stall, they do not fail.** SocioPatterns, KONECT, SNAP and Netzschleuder all return HTTP 200 and then time out mid-transfer on files over ~10 MB. Loaders for these must use resume (`curl -C -` / a `.part` file), the pattern `data/datasets/cora_ml.py` already implements.
 

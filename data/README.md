@@ -8,7 +8,7 @@ Generates `(G, s_t, a_t, s_{t+1}, R)` transition data for training a graph **wor
 - **Next state** `s_{t+1}`: the realized next state, **plus** soft Monte-Carlo marginals `P(infected)` / `P(frontier)` per node (`--mc-marginals`), which are the actual training targets.
 - **Reward** `R`: spread gain (Δ activated-node count this step).
 
-Backbone simulator: **NDlib** IC/LT driven one step at a time, with mid-rollout `status` mutation (node ops) and live edge mutation (edge ops). Per-episode rollouts come from classical IM "spine" seed selectors plus random and counterfactual action injection (same-state / different-action coverage). See the design spec: `docs/superpowers/specs/2026-06-09-action-conditioned-wm-im-data-gen-design.md`.
+Backbone simulator: **NDlib** IC/LT driven one step at a time, with mid-rollout `status` mutation (node ops) and live edge mutation (edge ops). Per-episode rollouts come from classical IM "spine" seed selectors plus random and counterfactual action injection (same-state / different-action coverage).
 
 ---
 
@@ -196,7 +196,7 @@ Three rules, and each one is load-bearing:
 - **under IC there is exactly one parent, and it is biased.** NDlib iterates spreaders in NODE ORDER and skips any `v` already flipped this step, so the recorded parent is *the first successful `u` in node order* rather than a uniformly random one among the successes. Real, documentable, and stated wherever a tree number is.
 - **under LT the value is a SET.** Activation there is a threshold crossing over the whole active in-neighbourhood, so there is no single transmitting edge; the whole active neighbourhood is recorded and a predicted parent counts as correct if it is a member. That makes LT's path precision structurally easier than IC's, and the two are never compared.
 
-Tracing is off by default because it costs an append per successful flip and only one task scores it. `pipeline.run` turns it on from the task registry, so `--task cascade_reconstruction` gets it without a flag; `data.generate_wm_data --task cascade_reconstruction` does the same for a standalone invocation. A dataset generated without it makes `PathPrecision` unscoreable, and `coding_agent/reconstruction.py::load_cascades` **raises** rather than silently falling back to the node half, which is the exact failure the tree-weighted reward exists to prevent.
+Tracing is off by default because it costs an append per successful flip and only one task scores it. `pipeline.run` turns it on from the task registry, so `--task cascade_reconstruction` gets it without a flag; `data.generate_wm_data --task cascade_reconstruction` does the same for a standalone invocation. A dataset generated without it makes `PathPrecision` unscoreable, and `coding_agent/reconstruction.py::load_cascades` **raises** rather than silently falling back to the node half, which is the exact failure the tree-weighted score exists to catch.
 
 ### ...and REPLAYED FROM A REAL LOG (`--task cascade_prediction`)
 
@@ -213,7 +213,7 @@ Four differences, each forced rather than chosen (`research/cascade_prediction.m
 
 **The dynamics label names the KERNEL, not the source.** A replayed corpus is written under `--diffusion-model IC` and fits the IC head, and that is the experiment rather than a mislabelling: §2.2 records that the IC composition rule is a modelling commitment rather than a learned fact, so fitting it to real retweets is exactly the falsification test. Only ONE dynamics is written per replay, the transitions are identical whatever kernel label they carry, so writing both IC and LT would double the file for no second experiment.
 
-**A cascade corpus loader exposes three functions rather than two** (`data/datasets/cascade_common.py`): the usual `download_<name>()` and `load_<name>(path)`, plus `load_<name>_cascades(path) -> list[Cascade]`. Both halves come from one parse so a node id means the same thing in each, and the graph is built FROM the observed propagation paths for every corpus but Digg, which publishes a real friendship network and uses it. Eight are registered in `wm_graphs.cascade_corpora`: `casflow_weibo` / `casflow_twitter` / `casflow_aps` (one manual Drive bundle, three corpora, and the canonical five-field line format every repo in this literature reads), `weibo_cascades` and `aps` (the raw publisher routes, both manual), and `digg_cascades`, `memetracker` and `taoke` (auto-downloading).
+**A cascade corpus loader exposes three functions rather than two** (`data/datasets/cascade_common.py`): the usual `download_<name>()` and `load_<name>(path)`, plus `load_<name>_cascades(path) -> list[Cascade]`. Both halves come from one parse so a node id means the same thing in each, and the graph is built FROM the observed propagation paths for every corpus but Digg, which publishes a real friendship network and uses it. Eight are registered in `wm_graphs.cascade_corpora`: `casflow_weibo` / `casflow_twitter` / `casflow_aps` (one manual Drive bundle, three corpora, and the canonical five-field line format every repo in this literature reads), `weibo_cascades` and `aps` (the raw publisher routes, both manual), and `digg_cascades`, `memetracker` and `taoke` (auto-downloading in principle; `taoke`'s only source, `Lucas-PJ/CasTemp-ALGO`'s `Taoke.zip`, returned 404 when checked on 2026-09-06, so that loader raises until the file resurfaces).
 
 ---
 
@@ -362,6 +362,9 @@ This determinism difference is why IC averages over `--mc-marginals` draws while
 | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `wm_graphs.py`        | graph providers (real + synthetic) + edge probabilities → `GraphBundle`                                           |
 | `wm_simulator.py`     | `State` / `ActionOp` types + NDlib stepwise IC/LT sim with action injection, `advance_marginal`, snapshot/restore |
+| `wm_competitive.py`   | **IB**: the two-cascade IC/CLT simulator, the three tie-breaks, COICM vs MCICM |
+| `wm_epidemic.py`      | **EC**: the compartmental SIR/SIS/SEIR stepper with per-arc `beta`, written because NDlib's compartmental models carry no per-arc parameter |
+| `check_remove_semantics.py` | runnable self-check for the two `remove_node` semantics and the counterfactual-fork revert |
 | `wm_actions.py`       | spine seed selectors + MC spread oracle + injection schedule + counterfactual candidates                          |
 | `wm_cascades.py`      | **CP**: replay a REAL logged corpus as `(s_t, NULL, s_{t+1})`, the leak-free chronological split, the binning, hard targets, the `observed` metadata block |
 | `graph_utils.py`      | adjacency → `edge_index` + IC/LT edge probabilities (shared)                                                      |

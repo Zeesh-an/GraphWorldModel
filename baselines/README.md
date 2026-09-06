@@ -2,7 +2,7 @@
 
 Everything we compare against, in two layers:
 
-1. **Our own library** (`coding_agent/tools/algorithms.py`): 41 classical IM algorithms reimplemented in Python against our primitives. Fast, always available, no setup. These are **condition 1 (Pure GA)**.
+1. **Our own library** (`coding_agent/tools/algorithms.py`): 36 classical IM algorithms reimplemented in Python against our primitives. Fast, always available, no setup. These are **condition 1 (Pure GA)**.
 2. **External published repos** (this folder): the original authors' code for published methods, fetched into `baselines/external/`. These are **condition 7 (Published baseline)**.
 
 For the literature itself (what each method published, and which of their numbers are comparable to ours) see [`../research/influence_maximization.md`](../research/influence_maximization.md).
@@ -37,6 +37,9 @@ Every method is in exactly one of three states. **Some methods exist in both lay
 | **MOEIM**       | learned   | no            | `baselines/external/moeim/`     | setup (pure Python)        |
 | **ToupleGDD**   | learned   | no            | `baselines/external/touplegdd/` | setup (pretrained ckpt)    |
 | **DeepIM**      | learned   | no            | `baselines/external/deepim/`    | setup + `deepim_data.py`   |
+| **GLIE**        | learned   | no            | `baselines/external/glie/`      | setup (stored model, inference only) |
+| **LeNSE**       | learned   | no            |                                 | registered, no adapter (four-stage training pipeline, no README, no checkpoints) |
+| **HIM**         | learned   | no            |                                 | registered, no adapter (per-dataset config schema inside `configs.zip`) |
 | **GCOMB**       | learned   | no            |                                 | blocked: Python 2.7       |
 | **IMINFECTOR**  | learned   | no            |                                 | blocked: needs cascades   |
 | **PIANO**       | learned   | no            |                                 | blocked: no public code   |
@@ -62,11 +65,11 @@ Also in our Python library only (no external counterpart needed or available): C
 
 **SubSIM**: _Influence Maximization Revisited: Efficient Sampling with Bound Tightened_, SIGMOD 2020. Sublinear-time RIS, and the third of the three RIS methods in DeepIM's comparison table (IMM / OPIM / SubSIM). **Not in our Python library at all**, so this repo is the only way to run it. [paper](https://dl.acm.org/doi/10.1145/3318464.3389740) · [repo](https://github.com/qtguo/subsim)
 
-### Why five are blocked
+### Why three are blocked, and why six more have no adapter
 
 These are **not** "not done yet": each has a concrete, stated reason:
 
-**DeepIM** (ICML 2023): the public repo's `data/` folder **ships empty**. `main/utils.py` loads `data/<name>_25c.SG` pickles that were never published, and the model needs those preprocessed SparseGraph files plus a full training run before it can select seeds. Unblocking means obtaining the `.SG` files from the authors or reimplementing their preprocessing. **Its published tables are transcribed in `research/influence_maximization.md` §5.1 and are directly comparable on Jazz and Power Grid**, so a numeric comparison against DeepIM is available from the paper even while its code is blocked.
+**DeepIM** (ICML 2023) was blocked until its adapter built the missing inputs itself. The public repo's `data/` folder **ships empty**, but `genim.py`'s input is a pickled `{'adj', 'inverse_pairs'}` dict of seed and influenced vectors, which is exactly what our simulator produces, so `baselines/deepim_data.py` regenerates it from our graph store at export time. It then trains a VAE plus SpGAT per (dataset, dynamics, budget), so it is not inference-only and its runtime has to be budgeted (about 8,600 s per budget point on netscience). **Its published tables are transcribed in `research/influence_maximization.md` §5.1 and are directly comparable on Jazz and Power Grid.**
 
 **GCOMB** (NeurIPS 2020): requires **both** Python 2.7 and Python 3 environments (`requirements_python2.7.txt` + `requirements_python3.txt`) plus a multi-stage supervised-then-RL pipeline driven by shell scripts. Python 2.7 is end-of-life. Unblocking means containerising it.
 
@@ -74,13 +77,15 @@ These are **not** "not done yet": each has a concrete, stated reason:
 
 **PIANO** (IEEE TCSS 2022): **no public code release**. The paper advertises "pretrained PIANO models" but publishes no repository or download link, and no official implementation was found. Tellingly, ToupleGDD's authors state they had to _revise the S2V-DQN code themselves_ to obtain a PIANO baseline, which is why PIANO's numbers differ between papers. Unblocking means reimplementing from the paper.
 
-**OIM** (KDD 2015): **no public code release** (Lei, Maniu, Mo, Cheng & Senellart). It is also a _different problem setting_: OIM assumes repeated campaigns with feedback that updates edge weights between rounds, whereas ours is single-shot seeding. Even with code, the comparison would need care.
+**OIM** (KDD 2015): registered under `adaptive_online_im` (`oim`, `oim_lt`, with `timlinucb`) without an adapter, because it is a _different problem setting_ (Lei, Maniu, Mo, Cheng & Senellart): OIM assumes repeated campaigns with feedback that updates edge weights between rounds, whereas ours is single-shot seeding. Even with code, the comparison would need care.
 
-All five appear in DeepIM's published tables, which are transcribed in [`../research/influence_maximization.md`](../research/influence_maximization.md) §5.1, so numeric comparison against them is available from the paper on Jazz and Power Grid even with their code blocked.
+**LeNSE** (ICML 2022) and **HIM** (2025) are registered as learned IM methods without an adapter. LeNSE's `IM/` variant is a four-stage training pipeline (`embedding_training.py`, `guided_exploration_training.py`, `dqn_training.py`, `dqn_test.py`) with no README and no shipped checkpoints, so every stage's arguments would have to be reverse-engineered before an adapter could be written. HIM's data format is resolved (a pickled networkx graph plus a pickled cascade file, and a `seed_ratio` that is a percentage exactly like `--budget-pcts`), but its per-dataset model config lives in a `configs.zip` whose schema cannot be read without unpacking the repo, and it trains 200 epochs. **IMM** and **TIM** are registered without adapters for the tarball reason above; the library's Python `imm` and `tim` are the condition-1 stand-ins.
+
+GCOMB, IMINFECTOR, PIANO and OIM all appear in DeepIM's published tables, which are transcribed in [`../research/influence_maximization.md`](../research/influence_maximization.md) §5.1, so numeric comparison against them is available from the paper on Jazz and Power Grid even with their code blocked.
 
 ### Per-task registration
 
-`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. All eight tasks have entries today:
+`ExternalBaseline.task` names the graph task an entry solves, so one task's published baselines never join another's sweep and `--baselines all` under `--task X` expands to X's repos only. All eight tasks have entries today (110 task repos registered, 54 wired, 25 of those learned; the eleven condition-9 entries carry `task="*"`, nine of them wired, and are described in the last section of this file):
 
 | task | registered | wired |
 | --- | --- | --- |
@@ -121,7 +126,7 @@ Five compatibility patches are applied at setup, each a 2016-era API that no lon
 
 Warning: **`epilearn` is registered as blocked because it ships NO intervention code at all.** §3.2 and §11 of the research doc both claim a `NetShield` implementation ships in it; verified by listing the whole repository tree and grepping every module, that is wrong, EpiLearn is forecasting, detection, a `NetworkSIR` forward simulator and graph transforms. The correction is recorded in §0.0 of that file rather than edited away, because every secondary source repeating the claim traces back to it.
 
-**Four more arms, no new installs.** `finder_epi`, `collective_influence_epi`, `explosive_immunization_epi` and `dismantling_review_epi` re-register already-wired node-removal repos under this task, sharing their critical-node twin's clone, venv, build and adapter. §2.5 maps vaccination onto `remove_node`, so a dismantler's output IS an allocation under the `vaccinate` lever, and §4.2 lists FINDER under this task explicitly. Running one under BOTH tasks and reading the two rows against each other is a comparison neither literature makes: §8.2 trap 1 says a method can win the connectivity metric and lose the epidemic one.
+**Five more arms, no new installs.** `finder_epi`, `gdm_epi`, `collective_influence_epi`, `explosive_immunization_epi` and `dismantling_review_epi` re-register already-wired node-removal repos under this task, sharing their critical-node twin's clone, venv, build and adapter. §2.5 maps vaccination onto `remove_node`, so a dismantler's output IS an allocation under the `vaccinate` lever, and §4.2 lists FINDER under this task explicitly. Running one under BOTH tasks and reading the two rows against each other is a comparison neither literature makes: §8.2 trap 1 says a method can win the connectivity metric and lose the epidemic one.
 
 **Three wired arms, one install, for cascade reconstruction.** `ditto`, `ditto_dhrec` and `ditto_cri` are three entry points inside DITTO's single clone, sharing a venv through `install_name`. `ditto.py` is the KDD'23 method; `dhrec.py` and `cri.py` are that paper's own implementations of DHREC-PCDSVC and CRI: the first because the original code covers only SEIRS, the second because CRI's authors published none, so those two arms are **cross-checks on our own reimplementations** rather than new coverage:
 

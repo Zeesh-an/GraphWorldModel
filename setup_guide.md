@@ -70,7 +70,7 @@ chmod 600 .env
 
 The base URL must be exactly `https://<host>/v1` with no further path: two of the discovery systems (EoH, LLM4AD) hard-code `/v1/chat/completions` onto the host. The token is chosen by model family (`claude-*` uses the Claude token, everything else the ChatGPT token), and the default model everywhere is `gpt-6-astra` (`--llm-model`, `LLM_MODEL`; `--llm-models` / `LLM_MODELS` is the opt-in multi-model sweep). Verify without printing the token:
 
-The default model is `gpt-6-astra` (OpenAI's GPT-6 Astra: chat completions and responses endpoints, 1.05M context, $10 in and $50 out per 1M tokens). Every pipeline run preflights the gateway before its data stage and fails in seconds if the token cannot use the configured model, printing the served list. On 2026-09-04 the lab gateway served only `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini` and `gpt-5.3-codex-spark` and rejected `gpt-6-astra` with a 403, so until the gateway admin enables it, pass `LLM_MODEL=gpt-5.6-sol` (or another served name) to run at all.
+The default model is `gpt-6-astra` (OpenAI's GPT-6 Astra: chat completions and responses endpoints, 1.05M context, $10 in and $50 out per 1M tokens). Every pipeline run preflights the gateway before its data stage and fails in seconds if the token cannot use the configured model, printing the served list. The gateway did not serve it until 2026-09-06 (it returned 403 with the gpt-5.x family as the allowed list); it serves it now, verified with a real completion at reasoning effort `high`, so no `LLM_MODEL` override is needed. If the preflight ever fails again, pass `LLM_MODEL=<a served name>` and ask the gateway admin.
 
 ```bash
 set -a; . ./.env; set +a
@@ -117,7 +117,7 @@ Only `aps` is needed for the section 3 submission (`DATASET=casflow_aps`); copy 
 
 - `weibo` (the 1.8M-node follower graph, not the CasFlow cascades): AMiner requires registration. Register at https://www.aminer.cn/influencelocality, download `weibo_network.tar.gz`, extract `weibo_network.txt` into `data/raw/weibo/`.
 - `taoke`: its only source (`Lucas-PJ/CasTemp-ALGO`, `Taoke.zip`) returns 404; the loader stays for when the file resurfaces.
-- `digg`: `datasets.syr.edu` serves an expired TLS certificate, so `urlretrieve` fails. Fetch the zip by hand if you need it and place it where `data/datasets/digg.py` looks.
+- `digg`: `datasets.syr.edu`'s TLS certificate failed verification from the cluster in August 2026, so `urlretrieve` failed there; from a workstation the download returned 200 with a valid certificate on 2026-09-06. If it fails on your node, fetch the zip by hand and place it where `data/datasets/digg.py` looks.
 - `orkut`, `livejournal`, `pokec`, `higgs_twitter`, `youtube`, `twitter`, `weibo`: load fine but are far beyond what the NDlib rollout path simulates in reasonable time. Scalability targets, not day-one datasets.
 
 ## 6. External baselines: conditions 7 and 9
@@ -153,7 +153,7 @@ Re-running setup is idempotent: patches test their own marker, and a venv at the
 Run these once after setup; each is a few minutes on the login node and needs no GPU. The last two call the gateway.
 
 ```bash
-python -m pytest tests -q                       # 295 tests, about 5 s
+python -m pytest tests -q                       # 320 tests, about 10 s
 python -m coding_agent.check_containment        # critical node detection contract
 python -m coding_agent.check_source_localization
 python -m coding_agent.check_influence_blocking
@@ -229,7 +229,7 @@ Rules that decide whether a run is comparable and resumable:
 results/<task>/<dataset>/<run>/
 ├── data/                       transitions + graph store
 ├── world_model/                self-describing checkpoint + train results JSON
-├── agent/<budget>/<arm>.json   conditions 1-6 and 8
+├── agent/<budget>/<arm>.json   conditions 1-6
 ├── baselines/<budget>/<name>.json      conditions 7 and 9 (external_<name>, discovery_<name>)
 ├── baselines/_runs/<name>/<budget>/    each external repo's own stdout, artefacts, candidates
 ├── plots/*.png

@@ -331,7 +331,7 @@ These reload a `.pt` checkpoint named by a results JSON (from the checkpoint's o
 | File                        | Responsibility                                                                                                                                   |
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `train_wm.py`               | training loop, early stopping, results JSON                                                                                                      |
-| `wm_model.py`               | `WorldModel`, backbone registry, `ICTransmissionHead` / `LTThresholdHead` / linear head                                                          |
+| `wm_model.py`               | `WorldModel`, backbone registry, `ICTransmissionHead` / `LTThresholdHead` / linear head, plus `CompetitiveICHead` / `CompetitiveLTHead` (influence blocking) and `CompartmentTransitionHead` (epidemic control) |
 | `wm_data.py`                | feature builder (`X`, channels), `GraphInput`, per-episode adjacency, dataset + collate                                                          |
 | `wm_action_eval.py`         | the action-conditioning suite: counterfactual causal effect, action ablation, exact `T_exo` fidelity, and the pass/fail verdict |
 | `wm_policies.py`            | off-policy action policies for the OOD rollout (`null`, `degree_seed`, `random_seed`, `block_hubs`) |
@@ -344,11 +344,11 @@ These reload a `.pt` checkpoint named by a results JSON (from the checkpoint's o
 | `wm_eval.py`                | one-step eval, ensemble rollout, planning regret, simulator rebuild                                                                              |
 | `eval_planning.py`          | recompute planning regret on a checkpoint                                                                                                        |
 | `eval_rollout_ensemble.py`  | recompute ensemble rollout on a checkpoint                                                                                                       |
-| `eval_structured_oracle.py` | IC structural-form oracle check                                                                                                                  |
+| `eval_structured_oracle.py` | IC and LT structural-form oracle check                                                                                                           |
 | `../coding_agent/check_containment.py` | runnable self-check for the critical-node-detection contract (outbreak, removal budget, minimize sense, structural metrics) |
-| `../coding_agent/check_source_localization.py` | runnable self-check for the inverse contract (localize, the four oracle bindings, label extraction, PR/RE/F1/AUC, the differentiable inversion) |
+| `../coding_agent/check_source_localization.py` | runnable self-check for the inverse contract (localize, the four oracle bindings, label extraction, PR/RE/F1/AUC, the scored harness, an end-to-end generated program) |
 | `model/*.py`                | the five backbone encoders |
-| `checkpoints/`              | trained `.pt` weights, per-run results JSONs, and `RESULTS.md`                                                                                   |
+| `checkpoints/`              | `RESULTS.md` and, under `old/`, the BA-100 five-backbone results JSONs it reads; no weights are tracked, new runs write to `results/<task>/<dataset>/<run>/world_model/` |
 
 
 ## Compartmental heads (`--task epidemic_control`)

@@ -4,7 +4,7 @@ SLURM, one `sbatch/pipeline.sbatch` submission per task. Each runs **condition 1
 
 **No world model anywhere.** `SKIP_STAGES=train` is safe because `needs_world_model` returns `False` for every arm here, so no checkpoint is built or loaded. That is what keeps these cheap.
 
-The default model is `gpt-6-astra` at reasoning effort `high` (`REASONING_EFFORT`, `--reasoning-effort`; GPT-6 Astra takes no temperature and rejects effort `none`); every run preflights the gateway and fails in seconds if the token cannot use it (on 2026-09-04 the gateway still served only the gpt-5.x family, so `LLM_MODEL=gpt-5.6-sol` is the fallback until it is enabled). Every submission replays every arm on the shared oracle referee (`REFEREE=oracle`, `REFEREE_SAMPLES=1000`, the defaults), and that column is the only one that may be read across rows. `MC_AGREEMENT=1` adds the NDlib replay of every winner, the independent check on the oracle and the timing row; it is on for the section-6 ladders and off elsewhere.
+The default model is `gpt-6-astra` at reasoning effort `high` (`REASONING_EFFORT`, `--reasoning-effort`; GPT-6 Astra takes no temperature and rejects effort `none`); every run preflights the gateway and fails in seconds if the token cannot use it (the gateway has served `gpt-6-astra` since 2026-09-06; before that `LLM_MODEL=gpt-5.6-sol` was the fallback). Every submission replays every arm on the shared oracle referee (`REFEREE=oracle`, `REFEREE_SAMPLES=1000`, the defaults), and that column is the only one that may be read across rows. `MC_AGREEMENT=1` adds the NDlib replay of every winner, the independent check on the oracle and the timing row; it is on for the section-6 ladders and off elsewhere.
 
 ---
 
@@ -16,9 +16,9 @@ python -m baselines.setup_baselines --all      # clones, patches, builds, per-ba
 python -m baselines.setup_baselines --list     # confirm what is ready
 ```
 
-**55 of the 111 registered repos are wired** and appear below. The rest are `blocked` with a recorded reason (no public code, Python 2, wrong input object, wrong output type) and are not runnable by anyone. `setup_baselines --all` will report failures for repos whose upstream has drifted; those are safe to drop from a `BASELINES` string without changing anything else.
+**54 of the 110 registered task repos are wired** and appear below, plus 9 of the 11 condition-9 discovery systems (`diffim`'s deletion on 2026-09-04 took one from each count). The rest are `blocked` with a recorded reason (no public code, Python 2, wrong input object, wrong output type) and are not runnable by anyone. `setup_baselines --all` will report failures for repos whose upstream has drifted; those are safe to drop from a `BASELINES` string without changing anything else.
 
-### Setup status: 52 of 55
+### Setup status: 51 of 54
 
 Five rounds against real cluster runs took this from 13 failures to 3, all of them fixes to OUR harness rather than to the repos. The three that remain are environment-bound and are **already removed from the `BASELINES` lists below**, so the commands run clean as written.
 
@@ -44,16 +44,9 @@ Two more traps worth knowing:
 
 ---
 
-## 1. The gateway blocks the agent arm, not the baselines
+## 1. If the gateway blocks the agent arm
 
-Checked 2026-08-12:
-
-| Family                  | State                                                        |
-| ----------------------- | ------------------------------------------------------------ |
-| all 7 `gpt-*` models    | `429 model_cooldown`, reset ~146 h (about 2026-08-18)        |
-| all 7 `claude-*` models | `503 auth_unavailable: no auth available (providers=claude)` |
-
-Until one family answers, set `ARMS=none` and the submissions below run baselines only. Everything else is unaffected. When the gateway returns, re-submit the same line with the `ARMS` value shown and `START_STAGE=agent`; the `data/` stage is already on disk and only the agent arm runs.
+The gateway has had outages (on 2026-08-12 every `gpt-*` model was in a 146-hour cooldown and every `claude-*` model returned `503 auth_unavailable`; until 2026-09-06 it did not serve `gpt-6-astra` at all). As of 2026-09-06 both token families answer and the default model is served. If the preflight fails again, set `ARMS=none` and the submissions below run baselines only. Everything else is unaffected. When the gateway returns, re-submit the same line with the `ARMS` value shown and `START_STAGE=agent`; the `data/` stage is already on disk and only the agent arm runs.
 
 If a different model is live, set `LLM_MODEL=<name>`.
 
@@ -68,7 +61,7 @@ Chosen to finish in reasonable time while still being a graph the task's own lit
 | `influence_maximization`  | `netscience`     | 1,589 / 2,742  | your existing IM run's graph, so this is directly comparable                                                          |
 | `adaptive_online_im`      | `netscience`     | 1,589 / 2,742  | same graph, so the adaptivity gap divides against the IM row                                                          |
 | `critical_node_detection` | `power_grid`     | 4,941 / 6,594  | byte-identical to the file CoreHD, BPD and NIRM all report. §9.4 predicts we LOSE here, which is the informative case |
-| `source_localization`     | `jazz`           | 198 / 2,742    | SL-VAE's own graph; reward is exact F1, so no evaluator noise                                                         |
+| `source_localization`     | `jazz`           | 198 / 2,742    | SL-VAE's own graph; the label-free consistency reward is re-simulated on the arm's evaluator, and F1 is reported after the search |
 | `influence_blocking`      | `email_eu_core`  | 1,005 / 24,929 | SandIMIN Table 5                                                                                                      |
 | `cascade_reconstruction`  | `infectious`     | 410 / 2,765    | Xiao ICDM'18 Table I, digit for digit                                                                                 |
 | `epidemic_control`        | `primary_school` | 242            | SocioPatterns, 11 ground-truth classes, dense enough to test the DAVA/NetShield reversal                              |
@@ -275,7 +268,7 @@ GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
 ./sbatch/pipeline.sbatch
 ```
 
-**If you run `cascade_prediction` on `taoke` instead**, add `CP_MIN_SIZE=3`. At the shipped `10` the surviving pool publishes 85% of itself within 785 s of the first, so no `--cp-horizon` can both clear that gap and exceed the 3600 s observation window, and the generator raises rather than leaking.
+**If you run `cascade_prediction` on `taoke` instead**, add `CP_MIN_SIZE=3` (and obtain the file by hand first: its only source returned 404 on 2026-09-06, so the loader raises until it resurfaces). At the shipped `10` the surviving pool publishes 85% of itself within 785 s of the first, so no `--cp-horizon` can both clear that gap and exceed the 3600 s observation window, and the generator raises rather than leaking.
 
 ---
 
@@ -347,7 +340,7 @@ BUDGET_PCTS="1" HORIZON=10 MC_RUNS=200 CREDIT=1 FORCE=1 \
 STRATEGY_TIMEOUT=7200 MEM=64G TIME=6:00:00 ./sbatch/pipeline.sbatch
 ```
 
-**`BASELINE_TIMEOUT=21600` (6 h) is per external repo.** The learned ones train before they select: `finder`, `gdm`, `mind`, `rl4im`, `deepim` and `casflow` all fit a model first. With 11 externals on `critical_node_detection` the worst case is long, which is why `TIME=48:00:00`.
+**`BASELINE_TIMEOUT` is per external repo.** The learned ones train before they select: `finder`, `gdm`, `mind`, `rl4im`, `deepim` and `casflow` all fit a model first, and the discovery systems carry their own 6 to 12 hour floors that override a smaller value. That is why the section-3 submissions ask for `43200` and a week, and why the cheaper section-6 ladders without `all-discovery` use `21600` and `TIME=48:00:00`.
 
 ---
 
@@ -355,7 +348,7 @@ STRATEGY_TIMEOUT=7200 MEM=64G TIME=6:00:00 ./sbatch/pipeline.sbatch
 
 Everything above is the smoke test, and it leaves condition 6 unmeasured: `evolve_free@oracle` is the CEILING of model-based guidance (a perfect internal model), not our method. The method is `evolve_free@world_model`, and the claim is that it sits near the oracle's spread at a fraction of `@monte_carlo`'s cost. These submissions resume from the `data/` the smoke test wrote (no `FORCE`, `START_STAGE=train`), train the checkpoint the registry's head needs, and run the four agent arms that share one method and differ only in evaluator. Read the result as two columns: `spread` (shared referee replay, all four comparable) and `eval s` / `real episodes` (where `@monte_carlo` pays and `@world_model` does not).
 
-Six things changed under the loop since the smoke test, and each one moves these numbers: the search no longer scores every candidate on one fixed RNG draw (epidemic_control overfit a 50-sample rollout by 30 nodes at k=48); an adaptive policy gets one copy per ensemble member (the adaptive arm was scoring 50 cross-contaminated policies); `frontier_removal` sits in the CND pool as the outbreak-aware control and the CND outbreak defaults to 10% of N so the sweep sits below its ring; generated programs are offline (`self.score_plan` was removed on 2026-09-04): a program's own compute is what it can afford in numpy, and the arm's evaluator scores only the plan it returns.5 to 12 nodes across tasks) sat above the deltas the late iterations were deciding between. Adaptive arms are capped at 50 samples by the pipeline whatever the flag says, since their per-round `act()` runs once per ensemble member and 200 would turn one evaluation into half an hour. The CND smoke-test rows at k >= 247 are void and that block needs a re-run before its ladder means anything.
+Six things changed under the loop since the smoke test, and each one moves these numbers: the search no longer scores every candidate on one fixed RNG draw (epidemic_control overfit a 50-sample rollout by 30 nodes at k=48); an adaptive policy gets one copy per ensemble member (the adaptive arm was scoring 50 cross-contaminated policies); `frontier_removal` sits in the CND pool as the outbreak-aware control and the CND outbreak defaults to 10% of N so the sweep sits below its ring; generated programs are offline (`self.score_plan` was removed on 2026-09-04): a program's own compute is what it can afford in numpy, and the arm's evaluator scores only the plan it returns; and the ladder default is `N_SAMPLES=200`, because at 50 samples the reward standard error (2.5 to 12 nodes across tasks) sat above the deltas the late iterations were deciding between. Adaptive arms are capped at 50 samples by the pipeline whatever the flag says, since their per-round `act()` runs once per ensemble member and 200 would turn one evaluation into half an hour. The CND smoke-test rows at k >= 247 are void and that block needs a re-run before its ladder means anything.
 
 ```bash
 # ---------------------------------------------------------------- IM, submission 1 plus the world model, IC and LT
@@ -493,9 +486,9 @@ GRES=gpu:1 MEM=64G TIME=48:00:00 \
 | `influence_maximization`  | `spread_ground_truth`                                                       | `imm`, and `external:opim`                                                                                             | every arm within noise of `high_degree`: the graph is degree-trivial                                                                                                                                                         |
 | `adaptive_online_im`      | the adaptivity gap table, and `evaluator_seconds`                           | `static_split` at matched `k`                                                                                          | a gap far above 1.0. Theory caps the myopic gap at 4 and non-adaptive greedy is provably no worse, so a large spread win is a bug. **The claim is cost**                                                                     |
 | `critical_node_detection` | `spread_ground_truth`, plus the structural table and the ring note above it | `frontier_removal` (the known outbreak's one-hop ring); `adaptive_degree` (HDA) is the bar for the blind question only | an agent row at exactly the source count: the budget sat above the ring and the row measured information, not a method. `degree_rank_spearman` near 0.762: the arm re-derived the degree heuristic, MIND's finding about GDM |
-| `source_localization`     | `f1`, and `generalization_gap`                                              | `lpsi` / `external:graphsl_lpsi`                                                                                       | selection F1 far above held-out F1: the program memorized episodes                                                                                                                                                           |
+| `source_localization`     | `referee_reward` (consistency), then `f1` and `generalization_gap`          | `lpsi` / `external:graphsl_lpsi`                                                                                       | selection F1 far above held-out F1: the program memorized episodes                                                                                                                                                           |
 | `influence_blocking`      | `prevented_influence`                                                       | `proximity`, `external:sandimin`                                                                                       | `cldag` or `cmia_o` near `random_blocking`: that was a real bug, fixed 2026-08-12, pinned by `check_mia_scores_do_not_collapse_onto_the_periphery`                                                                           |
-| `cascade_reconstruction`  | tree-weighted reward, `path_precision` vs `event_f1`                        | `delayed_bfs`, `external:ditto`                                                                                        | reward near `trivial_decoder_reward`, or `path_recall` under half                                                                                                                                                            |
+| `cascade_reconstruction`  | `referee_reward` (kernel likelihood), then `tree_score`, `path_precision` vs `event_f1` | `delayed_bfs`, `external:ditto`                                                                                        | reward near `trivial_decoder_reward`, or `path_recall` under half                                                                                                                                                            |
 | `epidemic_control`        | attack rate, `eigendrop_vs_attack.png`                                      | `degree_immunization`, `external:netimm_dava`                                                                          | our `netshield` and `dava` disagreeing with `netimm_*`: they produce byte-identical node sets, so a difference is an adapter bug                                                                                             |
 | `cascade_prediction`      | `msle`, with `n_failed` beside it                                           | `szabo_huberman`; `mean_size` is the real floor                                                                        | any arm below `trivial_predictor_error`                                                                                                                                                                                      |
 
@@ -507,8 +500,8 @@ Nine LLM search loops (OpenEvolve, CodeEvolve, LLaMEA, EoH, ReEvo, MCTS-AHD, LLM
 
 ```bash
 cd ~/GraphWorldModel
-uv run python -m baselines.setup_baselines --only openevolve codeevolve llamea eoh reevo mcts_ahd llm4ad_funsearch deepevolve
-uv run python -m baselines.check_discovery --live eoh
+python -m baselines.setup_baselines --only openevolve codeevolve llamea eoh reevo mcts_ahd llm4ad_funsearch deepevolve
+python -m baselines.check_discovery --live eoh
 ```
 
 The section 6 submissions already include `all-discovery`. The split alternative below runs the discovery rows on their own, into the SAME `RUN` as the ladder, so the report and plots carry every condition in one table while the world-model ladder finishes first: submit it with `START_STAGE=agent` after the ladder job (no `FORCE`, so finished rows are reused and only the missing discovery rows run). Each system is a full search per budget at its published defaults (MCTS-AHD runs 1000 evaluations per budget; DeepEvolve retrieves and reflects), so give the job several days:

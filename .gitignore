@@ -54,3 +54,6 @@ docs/
 Thumbs.db
 .vscode/
 .idea/
+
+# ------------------------------------------------------------ Overleaf paper
+paper/
