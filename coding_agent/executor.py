@@ -35,6 +35,9 @@ from data.wm_simulator import valid_action_ops
 # --strategy-timeout; 0 disables. The signal only lands between bytecodes, so a
 # call stuck inside a long numpy/networkx C call overruns until it returns.
 strategy_timeout_seconds = 300.0
+# Outbreak sources shown in a rejection message; the prompt's own outbreak block
+# uses the same cap, and a 10% outbreak on a 117K-node graph is 11K ids
+max_listed_sources = 60
 
 # Third-party modules a generated script may import. numpy and networkx are the
 # point: without them the model writes pure-Python loops over the adjacency and
@@ -677,6 +680,14 @@ def budget_key(action) -> object:
     return (int(action.target), int(action.destination))
 
 
+def _listed_sources(guarded: set[int] | frozenset[int]) -> str:
+    sources = sorted(guarded)
+    listed = ", ".join(str(node) for node in sources[:max_listed_sources])
+    if len(sources) > max_listed_sources:
+        listed += f", … and {len(sources) - max_listed_sources} more (self.outbreak has them all)"
+    return f"[{listed}]"
+
+
 def validate_actions(
     bag: list,
     num_nodes: int,
@@ -749,8 +760,8 @@ def validate_actions(
                 f"node {action.target} is an OUTBREAK SOURCE and cannot be removed. "
                 f"Deleting a source ends the outbreak rather than containing it, "
                 f"which is not the problem you are being scored on. The sources are "
-                f"{sorted(guarded)}: filter them out of your candidates and spend "
-                f"the budget on the routes out of them instead."
+                f"{_listed_sources(guarded)}: filter them out of your candidates and "
+                f"spend the budget on the routes out of them instead."
             )
 
         if action.op in ("add_edge", "remove_edge", "set_edge_weight"):

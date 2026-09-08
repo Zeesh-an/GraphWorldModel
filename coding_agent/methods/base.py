@@ -78,6 +78,7 @@ reached_threshold = 0.50
 max_listed_nodes = 20
 max_listed_diff_nodes = 10
 max_listed_seeds = 40
+max_listed_pairs = 20
 max_listed_communities = 8
 
 # One rollout per name at the start of a refinement loop: the score table the
@@ -617,16 +618,32 @@ def summarize(
     if seeds:
         lines += _seed_lines(seeds, graph)
 
-    adjacent_pairs = [
-        (first, second)
-        for index, first in enumerate(seeds)
-        for second in seeds[index + 1 :]
-        if second in graph.out_neighbors(first) or first in graph.out_neighbors(second)
-    ]
+    # One pass over the seeds' out-neighbourhoods rather than a double loop over
+    # the seed set: at 20% of a 117K-node graph the plan holds 23K seeds, and the
+    # pairwise form did 273M membership tests per summary. The list is capped like
+    # every other list here, because printing it whole put one digg prompt past
+    # the model's context window
+    seed_set = set(seeds)
+    adjacent_pairs = sorted(
+        {
+            (min(first, second), max(first, second))
+            for first in seeds
+            for second in graph.out_neighbors(first)
+            if second != first and second in seed_set
+        }
+    )
     if adjacent_pairs:
+        listed = ", ".join(
+            f"({first}, {second})" for first, second in adjacent_pairs[:max_listed_pairs]
+        )
+        more = (
+            f", … and {len(adjacent_pairs) - max_listed_pairs} more"
+            if len(adjacent_pairs) > max_listed_pairs
+            else ""
+        )
         lines.append(
             f"adjacent seed pairs (overlapping neighborhoods, likely redundant "
-            f"budget): {adjacent_pairs}"
+            f"budget): {len(adjacent_pairs)} pairs: {listed}{more}"
         )
 
     if trajectory.final_marginals is not None:
