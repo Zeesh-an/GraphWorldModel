@@ -393,6 +393,9 @@ def run_external_baseline(
     return {
         "name": name,
         "seeds": seeds,
+        # Units of budget the repo left unspent (GLIE returns at most its
+        # top-out-degree candidate bin, 2,162 nodes on digg, whatever k is)
+        "seeds_short": budget - spent,
         # Selection order is meaningful for a rounds-aware baseline: slicing by
         # the schedule recovers which batch each seed belonged to
         "batches": batches if spec.rounds_aware else None,

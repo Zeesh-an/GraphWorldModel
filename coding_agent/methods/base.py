@@ -79,6 +79,7 @@ max_listed_nodes = 20
 max_listed_diff_nodes = 10
 max_listed_seeds = 40
 max_listed_pairs = 20
+max_anchor_reason_chars = 160
 max_listed_communities = 8
 
 # One rollout per name at the start of a refinement loop: the score table the
@@ -1207,6 +1208,49 @@ def accepts(
     )
 
 
+def _anchor_rollout(
+    name: str,
+    strategy: object,
+    environment: object,
+    task: TaskSpec,
+    graph: GraphInfo,
+    scored: list,
+    failed: list,
+) -> None:
+    # An anchor is context for the model, not the arm: one library member that
+    # times out or fails validation on a large graph (imm at 5% of digg exceeded
+    # the 1800 s cap) must cost the leaderboard one row, not the whole arm
+    try:
+        trajectory, _ = evaluate_strategy(strategy, environment, task, graph)
+    except StrategyError as error:
+        reason = str(error).splitlines()[0][:max_anchor_reason_chars]
+        print(f"[anchor] {name}: not run, {reason}")
+        failed.append((name, reason))
+        return
+
+    scored.append((name, trajectory))
+
+
+def _first_anchor(entries: list, failed: list) -> tuple:
+    if not entries:
+        raise StrategyError(
+            "every reference baseline failed, so no leaderboard can be built: "
+            + "; ".join(f"{name}: {reason}" for name, reason in failed)
+        )
+
+    return entries[0]
+
+
+def _anchor_text(lines: list[str], failed: list) -> str:
+    if failed:
+        lines.append(
+            "  not run (the bar above is the rows that ran): "
+            + "; ".join(f"{name}: {reason}" for name, reason in failed)
+        )
+
+    return "\n".join(lines)
+
+
 def baseline_anchor(
     environment: object, task: TaskSpec, graph: GraphInfo
 ) -> tuple[str, Trajectory, str]:
@@ -1217,6 +1261,8 @@ def baseline_anchor(
     The trajectory rides along because its per-node marginals are what
     reference_diff() compares against, which costs no further rollouts.
     """
+    failed = []
+
     if task.forecasts:
         # A forecasting task's floor is the classical POPULARITY-PREDICTOR library.
         # These go through `evaluate_strategy` like everything else, which routes
@@ -1226,11 +1272,10 @@ def baseline_anchor(
 
         for name in prediction_anchor_algorithms:
             predictor = PredictAnchor(name, prediction_algorithms[name], task)
-            trajectory, _ = evaluate_strategy(predictor, environment, task, graph)
-            scored.append((name, trajectory))
+            _anchor_rollout(name, predictor, environment, task, graph, scored, failed)
 
         scored = rank_by(scored, lambda entry: entry[1].reward, task.sense)
-        best_name, best_trajectory = scored[0]
+        best_name, best_trajectory = _first_anchor(scored, failed)
 
         lines = [
             f"REFERENCE SCORES: classical popularity-prediction baselines run on "
@@ -1256,7 +1301,7 @@ def baseline_anchor(
             for name, trajectory in scored
         ]
 
-        return "\n".join(lines), best_trajectory, best_name
+        return _anchor_text(lines, failed), best_trajectory, best_name
 
     if task.decodes:
         # A decoding task's floor is the classical TRAJECTORY-DECODER library.
@@ -1267,11 +1312,10 @@ def baseline_anchor(
 
         for name in reconstruction_anchor_algorithms:
             decoder = ReconstructAnchor(name, reconstruction_algorithms[name], task)
-            trajectory, _ = evaluate_strategy(decoder, environment, task, graph)
-            scored.append((name, trajectory))
+            _anchor_rollout(name, decoder, environment, task, graph, scored, failed)
 
         scored = rank_by(scored, lambda entry: entry[1].reward, task.sense)
-        best_name, best_trajectory = scored[0]
+        best_name, best_trajectory = _first_anchor(scored, failed)
 
         lines = [
             "REFERENCE SCORES: classical cascade-reconstruction baselines run on "
@@ -1293,7 +1337,7 @@ def baseline_anchor(
             for name, trajectory in scored
         ]
 
-        return "\n".join(lines), best_trajectory, best_name
+        return _anchor_text(lines, failed), best_trajectory, best_name
 
     if task.recovers:
         # An inverse task's floor is the classical SOURCE-LOCALIZATION library.
@@ -1306,11 +1350,10 @@ def baseline_anchor(
             localizer = LocalizeAnchor(
                 name, localization_algorithms[name], localization_scorers[name], task
             )
-            trajectory, _ = evaluate_strategy(localizer, environment, task, graph)
-            scored.append((name, trajectory))
+            _anchor_rollout(name, localizer, environment, task, graph, scored, failed)
 
         scored = rank_by(scored, lambda entry: entry[1].reward, task.sense)
-        best_name, best_trajectory = scored[0]
+        best_name, best_trajectory = _first_anchor(scored, failed)
 
         lines = [
             "REFERENCE SCORES: classical source-localization baselines run on THESE "
@@ -1329,7 +1372,7 @@ def baseline_anchor(
             for name, trajectory in scored
         ]
 
-        return "\n".join(lines), best_trajectory, best_name
+        return _anchor_text(lines, failed), best_trajectory, best_name
 
     if task.blocks:
         # An influence-blocking task's floor is the BLOCKING library, and the row
@@ -1345,12 +1388,11 @@ def baseline_anchor(
 
         for name in blocking_anchor_algorithms[lever]:
             anchor = _BlockingAnchor(all_blocking_algorithms[name], task, graph)
-            trajectory, _ = evaluate_strategy(anchor, environment, task, graph)
-            scored.append((name, trajectory))
+            _anchor_rollout(name, anchor, environment, task, graph, scored, failed)
 
         unopposed = scored[0][1].reward
         ranked = rank_by(scored, lambda entry: entry[1].reward, task.sense)
-        best_name, best_trajectory = ranked[0]
+        best_name, best_trajectory = _first_anchor(ranked, failed)
 
         lines = [
             f"REFERENCE SCORES: classical influence-blocking baselines for the "
@@ -1370,7 +1412,7 @@ def baseline_anchor(
             for name, trajectory in ranked
         ]
 
-        return "\n".join(lines), best_trajectory, best_name
+        return _anchor_text(lines, failed), best_trajectory, best_name
 
     if task.immunizes:
         # An epidemic-control task's floor is the IMMUNIZATION library, and the row
@@ -1386,12 +1428,11 @@ def baseline_anchor(
 
         for name in immunization_anchor_algorithms[lever]:
             anchor = _ImmunizationAnchor(immunization_algorithms[name], task, graph)
-            trajectory, _ = evaluate_strategy(anchor, environment, task, graph)
-            scored.append((name, trajectory))
+            _anchor_rollout(name, anchor, environment, task, graph, scored, failed)
 
         unprotected = scored[0][1].reward
         ranked = rank_by(scored, lambda entry: entry[1].reward, task.sense)
-        best_name, best_trajectory = ranked[0]
+        best_name, best_trajectory = _first_anchor(ranked, failed)
 
         lines = [
             f"REFERENCE SCORES: classical epidemic-control baselines for the "
@@ -1413,7 +1454,7 @@ def baseline_anchor(
             for name, trajectory in ranked
         ]
 
-        return "\n".join(lines), best_trajectory, best_name
+        return _anchor_text(lines, failed), best_trajectory, best_name
 
     if task.contains:
         # A containment task's floor is the DISMANTLING library: the IM anchors
@@ -1439,8 +1480,7 @@ def baseline_anchor(
 
     for name in names:
         selector = _PlanAnchor(pool[name], task, graph)
-        trajectory, _ = evaluate_strategy(selector, environment, static_task, graph)
-        scored.append((name, trajectory))
+        _anchor_rollout(name, selector, environment, static_task, graph, scored, failed)
 
     # Under an adaptive task the static table alone sets the wrong bar: it shows
     # what a one-shot algorithm gets and says nothing about what the published
@@ -1451,11 +1491,10 @@ def baseline_anchor(
     # every anchor rollout would fail validation.
     for name in adaptive_anchor_algorithms if task.adaptive and not task.contains else ():
         policy = _AdaptiveAnchor(adaptive_algorithms[name], task)
-        trajectory, _ = evaluate_strategy(policy, environment, task, graph)
-        scored.append((name, trajectory))
+        _anchor_rollout(name, policy, environment, task, graph, scored, failed)
 
     scored = rank_by(scored, lambda entry: entry[1].reward, task.sense)
-    best_name, best_trajectory = scored[0]
+    best_name, best_trajectory = _first_anchor(scored, failed)
 
     if task.contains:
         kind = "classical network-dismantling baselines"
@@ -1478,7 +1517,7 @@ def baseline_anchor(
         for name, trajectory in scored
     ]
 
-    return "\n".join(lines), best_trajectory, best_name
+    return _anchor_text(lines, failed), best_trajectory, best_name
 
 
 def _diff_node_list(

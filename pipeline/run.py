@@ -1520,6 +1520,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                         else None
                     ),
                     "instances_short": external_seeds.get("instances_short"),
+                    "seeds_short": external_seeds.get("seeds_short"),
                     # Time the external repo itself spent selecting; our scoring
                     # time is in elapsed_seconds as for every other arm
                     "selection_seconds": external_seeds["seconds"],

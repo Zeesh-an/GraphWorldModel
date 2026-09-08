@@ -858,39 +858,41 @@ def plot_evaluator_fidelity(
 
 
 def plot_runtime(results: list[dict], out_path: Path, title_prefix: str) -> Path | None:
-    """Per-rollout wall-clock by evaluator: the amortization claim for the model."""
-    timed = [result for result in results if result.get("cost", {}).get("rollout_seconds")]
-    if not timed:
-        return None
+    """
+    Seconds per rollout SAMPLE, world model against Monte Carlo: the cost claim.
 
-    # One bar per evaluator, averaged over the arms that used it
-    by_evaluator = {}
-    for result in timed:
-        by_evaluator.setdefault(result["evaluator"], []).append(
-            result["cost"]["rollout_seconds"]
-        )
+    The exact oracle is deliberately absent. It is a closed-form product per step
+    and cheaper than any learned model, and it exists only because IC has one;
+    the claim the model makes is against simulation. Per sample rather than per
+    rollout, because the two sides run at different ensemble sizes (the NDlib
+    agreement replay is often 50 episodes against 200 model samples).
+    """
+    per_sample = {"world model": [], "Monte Carlo (NDlib)": []}
 
-    # The referee replay is the same simulator every arm is judged on, and the
-    # NDlib agreement replay, when it ran, is the slow reference the claim is
-    # measured against
     for result in results:
-        if result.get("referee_rollout_seconds"):
-            by_evaluator.setdefault(
-                f"{result.get('referee', 'oracle')} (referee)", []
-            ).append(result["referee_rollout_seconds"])
-        if result.get("mc_rollout_seconds"):
-            by_evaluator.setdefault("monte_carlo (agreement)", []).append(
-                result["mc_rollout_seconds"]
+        cost = result.get("cost", {}) or {}
+        seconds = cost.get("rollout_seconds")
+
+        if seconds and result.get("evaluator") == "world_model" and cost.get("n_samples"):
+            per_sample["world model"].append(seconds / cost["n_samples"])
+        elif seconds and result.get("evaluator") == "monte_carlo" and cost.get("mc_runs"):
+            per_sample["Monte Carlo (NDlib)"].append(seconds / cost["mc_runs"])
+
+        # The agreement replay is the same NDlib simulator on the same bags, and on
+        # a scale row it is the only Monte Carlo timing that exists
+        if result.get("mc_rollout_seconds") and result.get("mc_agreement_runs"):
+            per_sample["Monte Carlo (NDlib)"].append(
+                result["mc_rollout_seconds"] / result["mc_agreement_runs"]
             )
 
-    if len(by_evaluator) < 2:
+    if not all(per_sample.values()):
         return None
 
-    labels = sorted(by_evaluator)
-    means = [sum(by_evaluator[label]) / len(by_evaluator[label]) for label in labels]
+    labels = list(per_sample)
+    means = [sum(per_sample[label]) / len(per_sample[label]) for label in labels]
 
-    figure, axes = plt.subplots(figsize=(max(5.5, 1.5 * len(labels)), 4.2))
-    bars = axes.bar(labels, means, color="#4C72B0", width=0.55)
+    figure, axes = plt.subplots(figsize=(5.5, 4.2))
+    bars = axes.bar(labels, means, color=["#4C72B0", "#DD8452"], width=0.55)
 
     for bar, value in zip(bars, means, strict=True):
         axes.text(
@@ -903,12 +905,12 @@ def plot_runtime(results: list[dict], out_path: Path, title_prefix: str) -> Path
         )
 
     axes.set_yscale("log")
-    axes.set_ylabel("seconds per rollout (log scale)")
+    axes.set_ylabel("seconds per rollout sample (log scale)")
     axes.set_title(
-        f"{title_prefix}: rollout cost, {max(means) / max(min(means), 1e-9):.0f}x spread"
+        f"{title_prefix}: rollout cost, "
+        f"{means[1] / max(means[0], 1e-9):.0f}x faster than Monte Carlo"
     )
     axes.grid(alpha=0.3, axis="y")
-    plt.setp(axes.get_xticklabels(), rotation=20, ha="right", fontsize=8)
 
     return _save(figure, out_path)
 
