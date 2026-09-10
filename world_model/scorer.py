@@ -221,6 +221,75 @@ class WorldModelScorer:
             "frontier": probabilities[:, 1],
         }
 
+    @torch.inference_mode()
+    def edge_transmission(self, graph, state, action) -> dict[str, np.ndarray]:
+        """
+        The learned per-arc transmission `q(u -> v)`, beside the true `w(u -> v)`.
+
+        The EDGE-level marginal that `predict_transition` aggregates away. Under
+        the IC structured head `q` is the entire learned content of the model —
+        everything else in the transition is hand-written — so this is the one
+        view that shows what the weights actually fit, and it is what a
+        bottleneck diagnostic over ARCS (rather than nodes) needs.
+
+        Returns `edge_index` (2, E), `q` (E,) and `w` (E,) so a caller can join
+        them; `q_minus_w` is the residual the learning is responsible for. IC
+        heads only — the LT head carries no per-arc transmission at all, and
+        raises rather than returning a number that does not mean this.
+        """
+        from data.wm_simulator import ActionOp
+        from world_model.wm_data import apply_edge_ops
+
+        head = getattr(self.model, "head", None)
+
+        if not hasattr(head, "transmission"):
+            raise ValueError(
+                f"head {type(head).__name__} carries no per-arc transmission; "
+                f"only the IC structured heads do"
+            )
+
+        bag = [op.to_dict() if isinstance(op, ActionOp) else dict(op) for op in action]
+        base_edges = {
+            (int(graph.edge_index[0, edge]), int(graph.edge_index[1, edge])): float(
+                graph.ic_probs[edge]
+            )
+            for edge in range(graph.edge_index.shape[1])
+        }
+        edge_index, weights = edges_to_arrays(apply_edge_ops(base_edges, bag))
+
+        record = {
+            "state": {
+                "infected": sorted(int(node) for node in state.infected),
+                "frontier": sorted(int(node) for node in state.frontier),
+            },
+            "action": bag,
+            "next_state": {"infected": [], "frontier": []},
+            "next_marginal_infected": {},
+            "next_marginal_frontier": {},
+        }
+        features, _, _ = build_features(
+            record, edge_index, graph.num_nodes, self.spec.action_encoding
+        )
+        graph_input = build_graph_input(
+            edge_index,
+            weights,
+            graph.num_nodes,
+            self.spec.diffusion_model,
+            torch.device(self.device),
+            self.spec.hide_edge_weights,
+        )
+        hidden = self.model.encoder(
+            torch.from_numpy(features).to(self.device), graph_input
+        )
+        q = head.transmission(hidden, graph_input).cpu().numpy()
+
+        return {
+            "edge_index": edge_index,
+            "q": q,
+            "w": weights,
+            "q_minus_w": q - weights,
+        }
+
     # -- rollout -------------------------------------------------------------
 
     def environment(self, graph, context: ScoringContext | None = None):
@@ -247,6 +316,40 @@ class WorldModelScorer:
             remove_semantics=self.spec.remove_semantics,
             hide_edge_weights=self.spec.hide_edge_weights,
             action_encoding=self.spec.action_encoding,
+        )
+
+    def diagnostics(
+        self,
+        graph,
+        context: ScoringContext | None = None,
+        region_scheme: str = "community",
+        paired: bool = True,
+        sense: str = "maximize",
+    ):
+        """
+        A `PlanDiagnostics` bound to this checkpoint and graph.
+
+            wm = WorldModelScorer.load(ckpt).diagnostics(graph, context)
+            wm.evaluate(plan); wm.probe_drop(plan, v); wm.explain_plan(plan)
+
+        The probe surface of research §Part 4, reached from a checkpoint rather
+        than from an already-built environment, which is what an offline analysis
+        script has. Imported lazily for the same reason `environment` is: the
+        `coding_agent` package imports `world_model`.
+        """
+        from coding_agent.diagnostics import PlanDiagnostics
+
+        context = ScoringContext.coerce(context)
+
+        return PlanDiagnostics(
+            self.environment(graph, context),
+            graph,
+            horizon=context.horizon,
+            budget=context.budget,
+            seed=context.seed,
+            region_scheme=region_scheme,
+            paired=paired,
+            sense=sense,
         )
 
     def rollout(self, graph, candidate, context: ScoringContext | None = None):
@@ -391,9 +494,9 @@ def candidate_name(candidate, index: int) -> str:
 
 
 __all__ = [
-    "WorldModelScorer",
-    "ScoringContext",
     "CandidateScore",
+    "ScoringContext",
+    "WorldModelScorer",
     "as_action_fn",
     "candidate_name",
     "describe",

@@ -432,6 +432,7 @@ python -m world_model.eval_structured_oracle \
 | `--plan-budget-k`                 | `0`           | k-seed **full-horizon** planning regret vs greedy-MC — the IM problem as posed. `0` disables |
 | `--ood-policies`                  | none          | off-policy rollout fidelity, e.g. `degree_seed null`. The recorded sequence is on-policy by construction |
 | `--action-encoding`               | `basic`       | `typed` adds 3 channels splitting `act_edge` by op, so `add_edge` and `remove_edge` on the same endpoints stop producing identical `X` |
+| `--action-conditioning`           | `none`        | where the action enters the LEARNED transition. `none` = the historical model (three input columns of `X`); `message` puts a global action embedding and a per-edge action-relevance vector inside the message function; `global` drops the per-edge part; `message_blind` is the capacity control. `sage` only. See [`research/action_conditioning_and_feedback.md`](research/action_conditioning_and_feedback.md) |
 
 ---
 

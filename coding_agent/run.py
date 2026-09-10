@@ -86,6 +86,8 @@ from coding_agent.credit import augment_solo, counterfactual_credit, planned_act
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
+from coding_agent.feedback import legacy as feedback_legacy
+from coding_agent.feedback import valid_tiers as valid_feedback_tiers
 from coding_agent.epidemic import (
     default_contact_reduction,
     epidemic_metrics,
@@ -368,6 +370,10 @@ class ExperimentConfig:
     graph_id: str | None = None  # which graph in the store (default: first)
     wm_results_json: str | None = None  # train_wm.py results JSON (for the WM env)
     credit: bool = True  # per-action counterfactual credit (feedback + results)
+    # Which feedback tier each refinement generation receives
+    # (coding_agent/feedback.py). `legacy` is the existing behaviour and the
+    # default; f0-f3 are the controlled ladder Experiment 3 varies.
+    feedback: str = feedback_legacy
     baseline: str | None = None  # library algorithm name; evaluates it with no LLM
     routing: bool = False  # GA routing: one LLM call picks a library algorithm
     allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
@@ -492,6 +498,7 @@ def build_method(
             checkpoint_fingerprint=checkpoint_fingerprint,
             credit=config.credit and config.evaluator != monte_carlo,
             probes=not config.native_arm,
+            feedback=config.feedback,
         )
 
     raise ValueError(
@@ -1621,6 +1628,12 @@ class Baseline(Strategy):
         "memory": getattr(method, "memory", ""),
         # Every answered probe, plus the totals the cost story is read on
         "probes": getattr(method, "probe_log", []),
+        # Which feedback tier ran, and every diagnostic block it produced. Each
+        # entry carries its own `cost` block splitting world-model rollouts from
+        # trusted-simulator episodes, which is what keeps the feedback experiment
+        # from quietly buying information with simulator calls.
+        "feedback_tier": config.feedback,
+        "diagnostics": getattr(method, "diagnostic_log", []),
         "probe_calls": sum(
             entry.get("rollouts", 0) for entry in getattr(method, "probe_log", [])
         ),
@@ -2943,6 +2956,20 @@ if __name__ == "__main__":
         action=argparse.BooleanOptionalAction,
         default=True,
         help="per-action counterfactual credit in every refinement iteration and the results JSON: leave-one-out delta per action, each action's solo cascade and when it stops growing, and the learned kernel's bottleneck nodes. Batched on the world-model and oracle evaluators; skipped with a notice under @monte_carlo, where one sequential rollout per action would add hours per arm. --no-credit turns it off (default: True).",
+    )
+    parser.add_argument(
+        "--feedback",
+        type=str,
+        default=feedback_legacy,
+        choices=list(valid_feedback_tiers),
+        help="what each refinement generation is told after its candidate is "
+        "scored. `legacy` (default) is the existing summarize() feedback and "
+        "leaves current runs unchanged. The f0-f3 ladder is the controlled "
+        "variable of the feedback experiment: f0 = scalar reward only, f1 = + "
+        "per-seed leave-one-out contribution, f2 = + regional coverage, f3 = + "
+        "seed overlap, bridge coverage and stagnation. Every ladder rung is "
+        "world-model work only and is counted in `diagnostics` "
+        "(default: legacy).",
     )
     parser.add_argument(
         "--out-json",

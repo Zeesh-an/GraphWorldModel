@@ -38,6 +38,10 @@ from world_model.checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
+from world_model.model.action_cond import (
+    no_conditioning,
+    valid_action_conditioning,
+)
 from world_model.wm_action_eval import action_conditioning_report
 from world_model.wm_data import (
     TransitionDataset,
@@ -109,6 +113,11 @@ class TrainConfig:
     # `basic` = the original 6 channels; `typed` adds 3 that split CH_EDGE by op,
     # so add_edge and remove_edge at the same endpoints stop producing identical X
     action_encoding: str = basic_encoding
+    # Which arm of the action-conditioning experiment to train. `none` is the
+    # historical model (the action reaches the encoder only as input columns);
+    # `message` adds the action to the message function itself. See
+    # world_model/model/action_cond.py for the four-arm table.
+    action_conditioning: str = no_conditioning
     # Off-policy rollout policies (world_model/wm_policies.py). Empty = skip.
     ood_policies: tuple = ()
     # k-seed full-horizon planning; 0 disables (it costs real simulator episodes)
@@ -351,6 +360,44 @@ def check_split_mode(config: TrainConfig) -> str:
     return mode
 
 
+#: Parameter-name fragments that identify the action-conditioning mechanism.
+#: Everything under them is excluded from weight decay; see `parameter_groups`.
+action_conditioning_fragments = ("modulator", "action_encoder")
+
+
+def parameter_groups(model: nn.Module, weight_decay: float) -> list[dict]:
+    """
+    Two Adam groups: the action-conditioning mechanism WITHOUT weight decay, and
+    everything else with it.
+
+    Not a tuning choice. `MessageModulator` is gated by a scalar initialised to
+    zero so that an untrained variant is bit-identical to the baseline, and its
+    MLP therefore starts with a near-zero effective magnitude. Decaying it is a
+    prior that the mechanism should be zero — which is precisely the hypothesis
+    the experiment exists to test, so leaving it in would let the optimiser
+    answer the question before the data does. Measured on the first sweep run,
+    which did decay it: every arm came back with `max|phi_out| = 0.00000` and
+    three architecturally different arms posted bit-identical metrics.
+
+    Same reasoning as the conventional exclusion of biases and normalisation
+    gains, applied to a gate.
+    """
+    conditioned, ordinary = [], []
+
+    for name, parameter in model.named_parameters():
+        if any(fragment in name for fragment in action_conditioning_fragments):
+            conditioned.append(parameter)
+        else:
+            ordinary.append(parameter)
+
+    groups = [{"params": ordinary, "weight_decay": weight_decay}]
+
+    if conditioned:
+        groups.append({"params": conditioned, "weight_decay": 0.0})
+
+    return groups
+
+
 def check_hide_edge_weights(config: TrainConfig) -> None:
     """
     Both anchored heads read w directly, so masking it is not an ablation of them
@@ -474,11 +521,12 @@ def train_world_model(config: TrainConfig) -> dict:
         epi_beta=config.beta_scale,
         epi_gamma=config.gamma,
         epi_alpha=config.alpha,
+        action_conditioning=config.action_conditioning,
         **backbone_kwargs,
     ).to(device)
 
     optimizer = torch.optim.Adam(
-        params=model.parameters(), lr=config.lr, weight_decay=config.weight_decay
+        params=parameter_groups(model, config.weight_decay), lr=config.lr
     )
 
     weights = (
@@ -844,6 +892,19 @@ if __name__ == "__main__":
         "by op, so add_edge and remove_edge on the same endpoints stop producing "
         "identical X. Changes in_channels, so a checkpoint is not portable across "
         "the two (default: basic).",
+    )
+    parser.add_argument(
+        "--action-conditioning",
+        type=str,
+        default=no_conditioning,
+        choices=list(valid_action_conditioning),
+        help="where the action enters the LEARNED transition. `none` (default) "
+        "is the historical model: the action is three input columns of X and the "
+        "GNN is otherwise ordinary. `message` puts a global action embedding and "
+        "a per-edge action-relevance vector inside the message function; "
+        "`global` drops the per-edge part (the locality ablation) and "
+        "`message_blind` keeps the extra MLP with its action inputs zeroed (the "
+        "capacity control). sage only (default: none).",
     )
     parser.add_argument(
         "--ood-policies",

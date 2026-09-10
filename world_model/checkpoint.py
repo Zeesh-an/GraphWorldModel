@@ -37,6 +37,10 @@ import torch.nn as nn
 from data.wm_competitive import auto_dominance
 from data.wm_simulator import spent, valid_remove_semantics
 from world_model.wm_data import basic_encoding, channels_for, num_input_channels
+from world_model.model.action_cond import (
+    no_conditioning,
+    valid_action_conditioning,
+)
 from world_model.wm_model import WorldModel, backbones
 
 #: Bumped when the blob layout changes. v1 is the historical bare state_dict,
@@ -76,6 +80,12 @@ class ModelSpec:
     remove_semantics: str = spent
     action_encoding: str = basic_encoding
     hide_edge_weights: bool = False
+    # Which arm of the action-conditioning experiment produced these weights. A
+    # variant checkpoint carries extra parameter tensors (the action encoder and
+    # one message modulator per layer), so loading it into a `none` model raises
+    # on missing keys rather than silently dropping the conditioning. Defaulted
+    # to `none`, which is what every pre-experiment checkpoint is.
+    action_conditioning: str = no_conditioning
     # Backbone-specific; ignored by backbones that do not read them, which is why
     # they can carry defaults rather than being optional.
     n_heads: int = 4
@@ -105,6 +115,12 @@ class ModelSpec:
         if self.head not in valid_heads:
             raise ValueError(
                 f"unknown head {self.head!r}; choose from {list(valid_heads)}"
+            )
+
+        if self.action_conditioning not in valid_action_conditioning:
+            raise ValueError(
+                f"unknown action_conditioning {self.action_conditioning!r}; "
+                f"choose from {list(valid_action_conditioning)}"
             )
 
         if self.remove_semantics not in valid_remove_semantics:
@@ -156,6 +172,9 @@ class ModelSpec:
             remove_semantics=config.remove_semantics,
             action_encoding=config.action_encoding,
             hide_edge_weights=config.hide_edge_weights,
+            action_conditioning=getattr(
+                config, "action_conditioning", no_conditioning
+            ),
             n_heads=config.n_heads,
             ffn_dim=config.ffn_dim,
             gcnii_alpha=config.gcnii_alpha,
@@ -191,6 +210,7 @@ class ModelSpec:
         blob.setdefault("remove_semantics", spent)
         blob.setdefault("action_encoding", basic_encoding)
         blob.setdefault("hide_edge_weights", False)
+        blob.setdefault("action_conditioning", no_conditioning)
         blob.setdefault("head", "linear")
 
         return cls.from_dict(blob)
@@ -220,6 +240,7 @@ def build_model(spec: ModelSpec, device: torch.device | str = "cpu") -> nn.Modul
         epi_beta=spec.beta_scale,
         epi_gamma=spec.gamma,
         epi_alpha=spec.alpha,
+        action_conditioning=spec.action_conditioning,
         n_heads=spec.n_heads,
         ffn_dim=spec.ffn_dim,
         alpha=spec.gcnii_alpha,

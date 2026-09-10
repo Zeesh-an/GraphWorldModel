@@ -16,6 +16,12 @@ from data.wm_simulator import (
     spent,
     valid_remove_semantics,
 )
+from world_model.model.action_cond import (
+    conditionable_backbones,
+    modulated_conditioning,
+    no_conditioning,
+    resolve_conditioning,
+)
 from world_model.model.gat import GATEncoder
 from world_model.model.gcn import GCNEncoder
 from world_model.model.gcnii import GCNIIEncoder
@@ -23,6 +29,7 @@ from world_model.model.graph_transformer import GraphTransformerEncoder
 from world_model.model.graphsage import GraphSAGEEncoder
 from world_model.wm_data import (
     GraphInput,
+    action_columns,
     ch_add,
     ch_comp_add,
     ch_comp_remove,
@@ -102,6 +109,53 @@ class ICTransmissionHead(nn.Module):
                     if module.bias is not None:
                         nn.init.zeros_(module.bias)
 
+    def transmission(self, hidden: torch.Tensor, graph: GraphInput) -> torch.Tensor:
+        """
+        `q(u -> v)` for every arc: the EDGE-LEVEL marginal, un-gated by who is
+        currently active.
+
+        Factored out of `forward` rather than duplicated because it is the whole
+        learned content of this head — everything else in the IC transition is
+        hand-written — and until now it existed only as an intermediate tensor
+        inside one forward pass, so nothing downstream could read the one number
+        the model actually fits. `WorldModelScorer.edge_transmission` is the
+        public route to it.
+
+        Returned WITHOUT the `frontier_u` gate, so it is a property of the arc
+        and the state-derived embeddings rather than of who happens to be
+        spreading this step.
+        """
+        edge_index, edge_weight = graph.edge_index, graph.edge_weight
+
+        if edge_index.numel() == 0:
+            return edge_weight.new_zeros(0)
+
+        if self.oracle:
+            # True edge transmission prob (no learning)
+            return edge_weight.clamp(0.0, 1.0)
+
+        sources, destinations = edge_index[0], edge_index[1]
+        edge_features = torch.cat(
+            [
+                hidden[sources],
+                hidden[destinations],
+                edge_weight.unsqueeze(dim=-1),
+            ],
+            dim=-1,
+        )  # shape: (E, 2H + 1)
+        transmission_logits = self.edge_mlp(edge_features).squeeze(dim=-1)  # (E,)
+
+        if self.residual:
+            # Anchor q on the true IC transmission prob: the MLP learns only
+            # a residual correction, so zero correction == the oracle head
+            # Removes the need for edge-weight-diverse training data to pin down the w -> q mapping
+            anchor = edge_weight.clamp(prob_epsilon, 1.0 - prob_epsilon)
+            transmission_logits = (
+                transmission_logits + torch.log(anchor) - torch.log1p(-anchor)
+            )
+
+        return torch.sigmoid(transmission_logits)  # shape: (E,)
+
     def forward(
         self, hidden: torch.Tensor, X: torch.Tensor, graph: GraphInput
     ) -> torch.Tensor:
@@ -123,38 +177,15 @@ class ICTransmissionHead(nn.Module):
             1.0 - X[:, ch_remove]
         )  # shape: (N,)
 
-        edge_index, edge_weight = graph.edge_index, graph.edge_weight
+        # `edge_weight` now reaches the transmission model through `graph`, so the
+        # forward pass needs only the endpoints
+        edge_index = graph.edge_index
 
         if edge_index.numel() == 0:
             p_new = torch.zeros(num_nodes, device=hidden.device)
         else:
             sources, destinations = edge_index[0], edge_index[1]
-            if self.oracle:
-                # True edge transmission prob (no learning)
-                transmission = edge_weight.clamp(0.0, 1.0)
-            else:
-                edge_features = torch.cat(
-                    [
-                        hidden[sources],
-                        hidden[destinations],
-                        edge_weight.unsqueeze(dim=-1),
-                    ],
-                    dim=-1,
-                )  # shape: (E, 2H + 1)
-                transmission_logits = self.edge_mlp(edge_features).squeeze(
-                    dim=-1
-                )  # shape: (E,)
-
-                if self.residual:
-                    # Anchor q on the true IC transmission prob: the MLP learns only
-                    # a residual correction, so zero correction == the oracle head
-                    # Removes the need for edge-weight-diverse training data to pin down the w -> q mapping
-                    anchor = edge_weight.clamp(prob_epsilon, 1.0 - prob_epsilon)
-                    transmission_logits = (
-                        transmission_logits + torch.log(anchor) - torch.log1p(-anchor)
-                    )
-
-                transmission = torch.sigmoid(transmission_logits)  # shape: (E,)
+            transmission = self.transmission(hidden, graph)  # shape: (E,)
 
             # Transmission gated by an active (frontier) source
             gated = (transmission * frontier[sources]).clamp(
@@ -972,6 +1003,10 @@ class WorldModel(nn.Module):
         epi_beta: float = 1.0,
         epi_gamma: float | None = None,
         epi_alpha: float | None = None,
+        # Which arm of the action-conditioning experiment this is. `none` is the
+        # historical model and the default, so an unflagged construction and every
+        # existing checkpoint are byte-identical to before.
+        action_conditioning: str = no_conditioning,
         **backbone_kwargs: object,
     ) -> None:
         super().__init__()
@@ -979,6 +1014,21 @@ class WorldModel(nn.Module):
         if backbone not in backbones:
             raise ValueError(
                 f"unknown backbone {backbone}; choose from {list(backbones)}"
+            )
+
+        self.action_conditioning = resolve_conditioning(action_conditioning)
+
+        # The other four backbones take **_ and would SILENTLY DROP the flag,
+        # producing a baseline model under a variant's name. Refused by name
+        # instead: the brief asks for the smallest defensible change on the
+        # backbone the project actually uses, not the same change five times.
+        if (
+            self.action_conditioning in modulated_conditioning
+            and backbone not in conditionable_backbones
+        ):
+            raise ValueError(
+                f"action_conditioning={self.action_conditioning!r} is implemented "
+                f"for {list(conditionable_backbones)} only, not {backbone!r}"
             )
 
         if remove_semantics not in valid_remove_semantics:
@@ -999,6 +1049,13 @@ class WorldModel(nn.Module):
         self.tie_break = (
             tie_break if epidemic else resolve_tie_break(tie_break, diffusion_model)
         )
+
+        if self.action_conditioning in modulated_conditioning:
+            backbone_kwargs = dict(backbone_kwargs)
+            backbone_kwargs["action_conditioning"] = self.action_conditioning
+            backbone_kwargs["action_channels"] = action_columns(
+                in_channels, competitive=competitive, epidemic=epidemic
+            )
 
         # Encoder produces (N, hidden_dim) node embeddings
         self.encoder = backbones[backbone](

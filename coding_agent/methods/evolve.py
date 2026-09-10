@@ -25,7 +25,10 @@ from tqdm import tqdm
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
 from coding_agent.credit import credit_feedback
+from coding_agent.diagnostics import PlanDiagnostics
 from coding_agent.executor import StrategyError, build_strategy
+from coding_agent.feedback import build_feedback
+from coding_agent.feedback import resolve as resolve_feedback
 from coding_agent.methods.base import (
     OuterLoopMethod,
     accepts,
@@ -165,14 +168,28 @@ class EvolveSearch(OuterLoopMethod):
         credit: bool = False,
         probes: bool = True,
         reflect: bool = True,
+        feedback: str | None = None,
     ) -> None:
         # ReEvo-style reflection call after every scored generation
         self.reflect = reflect
         self.outer_iters = outer_iters
         # Per-action counterfactual credit in every generation's feedback
         self.credit = credit
-        # False on the native arm: its whole definition is no forward model to ask
-        self.probes = probes
+        # Which feedback tier each generation gets (coding_agent/feedback.py).
+        # `legacy` (the default) is the repository's existing summarize() output
+        # and leaves every current run byte-identical; f0-f3 are the controlled
+        # ladder Experiment 3 varies.
+        self.feedback = resolve_feedback(feedback)
+        # False on the native arm: its whole definition is no forward model to
+        # ask, and on the lower ladder rungs, which are defined by NOT having the
+        # richer probes available
+        self.probes = probes and self.feedback.probes_allowed
+        # Per-generation diagnostic blocks, read back into the results JSON
+        self.diagnostic_log = []
+        # Regional coverage per generation, so the stagnation block can say WHICH
+        # part of the graph has stayed uncovered rather than only that the reward
+        # stopped moving
+        self.coverage_history = []
         # Every answered probe, read back into the results JSON by run.py
         self.probe_log = []
         self.strategy_mode = strategy_mode
@@ -478,16 +495,56 @@ class EvolveSearch(OuterLoopMethod):
                 if best is not None
                 else None
             )
+            # LEGACY takes the existing path untouched; a ladder tier takes the
+            # counted diagnostic blocks and NOTHING else, so its feedback content
+            # is exactly what the tier names
+            if self.feedback.is_legacy:
+                summary = (
+                    summarize(trajectory, graph, task)
+                    + (f"\n{last_delta}" if last_delta else "")
+                    + (f"\n{diff}" if diff else "")
+                    + (f"\n{credit_report}" if credit_report else "")
+                )
+            else:
+                diagnostics = PlanDiagnostics(
+                    environment,
+                    graph,
+                    horizon=task.horizon,
+                    budget=task.budget,
+                    seed=seed,
+                    budget_op=task.budget_op,
+                    # Containment and blocking MINIMIZE, and the contribution
+                    # signs have to follow or the feedback coaches the agent to
+                    # undo its own improvements
+                    sense=task.sense,
+                )
+                summary, diagnosis = build_feedback(
+                    self.feedback,
+                    diagnostics,
+                    trajectory.actions,
+                    history=[
+                        entry.get("reward")
+                        for entry in self.history
+                        if entry.get("reward") is not None
+                    ],
+                    sense=task.sense,
+                    coverage_history=list(self.coverage_history),
+                )
+
+                if diagnosis.coverage:
+                    self.coverage_history.append(diagnosis.coverage)
+                self.diagnostic_log.append(
+                    {"iteration": iteration + 1, "tier": self.feedback.tier}
+                    | diagnosis.to_dict()
+                )
+
             record = {
                 "iteration": iteration + 1,
                 "script": strategy.source_script,
                 "mechanism": mechanism_of(strategy.source_script),
                 "reward": trajectory.reward,
                 "plan_seconds": round(plan_seconds, 3),
-                "summary": summarize(trajectory, graph, task)
-                + (f"\n{last_delta}" if last_delta else "")
-                + (f"\n{diff}" if diff else "")
-                + (f"\n{credit_report}" if credit_report else ""),
+                "summary": summary,
             }
             population.append(record)
 

@@ -140,6 +140,36 @@ def num_input_channels(action_encoding: str = basic_encoding) -> int:
     return typed_in_channels if action_encoding == typed_encoding else in_channels
 
 
+def action_columns(
+    in_channels: int, competitive: bool = False, epidemic: bool = False
+) -> tuple[int, ...]:
+    """
+    Which columns of X encode `a_t` under one layout.
+
+    Every layout ends with the same three action flags, but at different indices,
+    and `typed` appends three more that split CH_EDGE by op. Spelled out per
+    layout rather than derived from the width, because `typed` and the
+    compartmental layout are both 9 wide and mean different things there.
+    """
+    if epidemic:
+        return (ch_epi_add, ch_epi_remove, ch_epi_edge)
+
+    if competitive:
+        return (ch_comp_add, ch_comp_remove, ch_comp_edge)
+
+    if in_channels == typed_in_channels:
+        return (
+            ch_add,
+            ch_remove,
+            ch_edge,
+            ch_edge_add,
+            ch_edge_del,
+            ch_edge_reweight,
+        )
+
+    return (ch_add, ch_remove, ch_edge)
+
+
 # Numerical floor for the symmetric renormalization (avoids 0^-0.5)
 degree_floor = 1e-12
 
@@ -169,6 +199,13 @@ class GraphInput:
     )  # sparse (N, N): adj[v, u] = normalized weight of arc u -> v + self-loops
     edge_index: torch.Tensor  # (2, E) [src, dst]
     edge_weight: torch.Tensor  # (E)
+    # (N,) which graph of a block-diagonal batch each node belongs to, or None
+    # for a single graph. Optional and defaulted so every existing four-argument
+    # construction is unchanged; it exists because an action-conditioned encoder
+    # pools a per-GRAPH action embedding and a batch-wide pool would leak one
+    # episode's intervention into another's messages. Every consumer that does
+    # not pool (the heads, the four unmodified backbones) ignores it.
+    batch_index: torch.Tensor | None = None
 
 
 def build_graph_input(
@@ -178,6 +215,7 @@ def build_graph_input(
     diffusion_model: str,
     device: torch.device,
     hide_edge_weights: bool = False,
+    batch_index: torch.Tensor | None = None,
 ) -> GraphInput:
     edge_index_tensor = torch.as_tensor(edge_index, dtype=torch.long, device=device)
 
@@ -229,6 +267,7 @@ def build_graph_input(
         adj_norm=adjacency,
         edge_index=edge_index_tensor,
         edge_weight=weights,
+        batch_index=(None if batch_index is None else batch_index.to(device)),
     )
 
 
@@ -1044,6 +1083,11 @@ def collate_transitions(
         if edge_weight_parts
         else torch.zeros(0, dtype=torch.float32)
     )
+    batch_index = (
+        torch.cat(batch_index_parts)
+        if batch_index_parts
+        else torch.zeros(0, dtype=torch.long)
+    )
     graph_input = build_graph_input(
         edge_index.numpy(),
         edge_weight.numpy(),
@@ -1051,6 +1095,7 @@ def collate_transitions(
         diffusion_model,
         device,
         hide_edge_weights,
+        batch_index=batch_index,
     )
 
     return {
@@ -1059,6 +1104,6 @@ def collate_transitions(
         "y_inf": y_inf,
         "y_fr": y_fr,
         "graph": graph_input,
-        "batch_index": torch.cat(batch_index_parts).to(device),
+        "batch_index": batch_index.to(device),
         "records": [item["record"] for item in batch],
     }

@@ -276,6 +276,13 @@ class WorldModelEnvironment:
             self.diffusion_model,
             self.device,
             self.hide_edge_weights,
+            # Which block each node belongs to. Only an action-conditioned encoder
+            # reads it, and it MUST: the blocks are separate rollouts (and under
+            # the batched candidate form, separate CANDIDATES), so a batch-wide
+            # action pool would mix one candidate's seeds into another's messages.
+            batch_index=torch.arange(
+                len(sample_arrays), device=self.device
+            ).repeat_interleave(num_nodes),
         )
 
     @torch.inference_mode()

@@ -667,6 +667,46 @@ Timing semantics: `cost.rollout_seconds` vs `mc_rollout_seconds` is the WM-vs-MC
 
 ---
 
+## 9b. Feedback tiers (`--feedback`)
+
+What a refinement generation is TOLD after its candidate is scored, as a
+controlled variable rather than a fixed format. `legacy` is the default and is
+this document's existing `summarize()` output, unchanged.
+
+| tier     | blocks                                          | extra world-model rollouts / turn |
+| -------- | ----------------------------------------------- | --------------------------------- |
+| `f0`     | scalar reward                                    | 0                                 |
+| `f1`     | + per-seed drop attribution `V(S) - V(S\{v})`   | k                                 |
+| `f2`     | + regional coverage `sum_{v in R} p_v`           | k                                 |
+| `f3`     | + seed overlap, bridge coverage, stagnation      | 2k                                |
+| `legacy` | the existing feedback (default)                  | 0                                 |
+
+The blocks come from `coding_agent/diagnostics.py`, which also backs the
+agent-initiated `drop` / `swap` / `region` probes. Two properties matter for any
+comparison across tiers, and both are asserted in `tests/test_diagnostics.py`:
+
+- **no tier spends a trusted-simulator episode.** Every block is the graph, the
+  bound evaluator, or arithmetic on its output, and `ProbeCost` reports which by
+  reading the environment's own meters — the same probe on an `@monte_carlo` arm
+  correctly reports `simulator_episodes`.
+- **`legacy` is not a rung of the ladder.** It carries community reach and
+  adjacent-seed hints (richer than `f2` in places) and it reads
+  `graph.ic_probs` through its reverse-reachable residual gains, so it is not a
+  clean "world-model feedback only" arm. Use f0-f3 for feedback-content claims.
+
+A third property matters for the tasks that MINIMIZE (containment, influence
+blocking, immunization): every reported difference is oriented by `task.sense`,
+so **positive always means "this helps the objective"**. A raw
+`V(S) - V(S\{v})` reads backwards under containment — the number that means "the
+removal worked" is negative — and unoriented feedback would coach the agent to
+undo its own improvements. `PlanDiagnostics(..., sense=task.sense)`; the report
+header also states the direction outright.
+
+Per-generation diagnostic blocks, with their costs, land in the results JSON
+under `diagnostics`. Background: `research/action_conditioning_and_feedback.md`.
+
+---
+
 ## 10. Practical notes
 
 - **BA graphs are degree-trivial.** On BA-100, degree ≈ CELF ≈ any portfolio; a strong agent will _find the ceiling_ (≈ the classical baselines), not beat it. Separation comes from community-structured graphs (WS/SBM/real), from temporal scheduling, and (once budgeted) from edge ops that no classical baseline uses.
