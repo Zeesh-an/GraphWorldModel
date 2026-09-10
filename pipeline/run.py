@@ -393,6 +393,14 @@ class PipelineConfig:
     mc_agreement: bool = False
     mc_agreement_runs: int | None = None
     credit: bool = True
+    # The search-protocol knobs (coding_agent/run.py): the probe turn before each
+    # generation, the flat-curve early stop, calibration steering of the operator
+    # schedule, and the post-search rediscovery distance
+    probe_turn: bool = True
+    stop_when_flat: int = 0
+    calibration_steering: bool = False
+    provenance: bool = True
+    provenance_timeout: float = 60.0
     graph_id: str | None = None
     # driver
     seed: int = 42
@@ -1362,6 +1370,11 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 graph_id=config.graph_id,
                 wm_results_json=str(wm_results) if wm_results.exists() else None,
                 credit=config.credit,
+                probe_turn=config.probe_turn,
+                stop_when_flat=config.stop_when_flat,
+                calibration_steering=config.calibration_steering,
+                provenance=config.provenance,
+                provenance_timeout=config.provenance_timeout,
                 baseline=arm.baseline,
                 routing=arm.routing,
                 allowed_ops=resolve_allowed_ops(config),
@@ -2937,6 +2950,36 @@ if __name__ == "__main__":
         help="per-action counterfactual credit for each arm; skipped with a notice on @monte_carlo arms, where it would cost (k+1) real rollouts per action. --no-credit turns it off (default: True).",
     )
     parser.add_argument(
+        "--probe-turn",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="one trace-free probe aside before every evolve generation, about the incumbent's plan, answered before the model writes; one extra LLM call per generation. --no-probe-turn turns it off (default: True).",
+    )
+    parser.add_argument(
+        "--stop-when-flat",
+        type=int,
+        default=0,
+        help="stop an evolve search once its unbiased incumbent estimate has been flat for this many generations; 0 runs every generation (default: 0).",
+    )
+    parser.add_argument(
+        "--calibration-steering",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="count a run of wrong-signed edit forecasts as a stalled generation in the operator schedule (default: False).",
+    )
+    parser.add_argument(
+        "--provenance",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="after each agent arm's search, run the task's library pool on the same instance and record each member's similarity to the winner (the rediscovery distance). --no-provenance skips it (default: True).",
+    )
+    parser.add_argument(
+        "--provenance-timeout",
+        type=float,
+        default=60.0,
+        help="seconds one library member may take in the provenance check (default: 60.0).",
+    )
+    parser.add_argument(
         "--graph-id",
         type=str,
         default=None,
@@ -3098,6 +3141,11 @@ if __name__ == "__main__":
         mc_agreement=args.mc_agreement,
         mc_agreement_runs=args.mc_agreement_runs,
         credit=args.credit,
+        probe_turn=args.probe_turn,
+        stop_when_flat=args.stop_when_flat,
+        calibration_steering=args.calibration_steering,
+        provenance=args.provenance,
+        provenance_timeout=args.provenance_timeout,
         graph_id=args.graph_id,
         wm_results_json=args.wm_results_json,
         seed=args.seed,

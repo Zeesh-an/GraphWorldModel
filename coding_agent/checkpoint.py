@@ -121,6 +121,7 @@ def trajectory_to_dict(trajectory: Trajectory) -> dict:
         "final_marginals": trajectory.final_marginals,
         "spread_curve": trajectory.spread_curve,
         "prevalence_curve": trajectory.prevalence_curve,
+        "sample_rewards": trajectory.sample_rewards,
     }
 
 
@@ -141,6 +142,7 @@ def trajectory_from_dict(record: dict) -> Trajectory:
         final_marginals=record["final_marginals"],
         spread_curve=record.get("spread_curve"),
         prevalence_curve=record.get("prevalence_curve"),
+        sample_rewards=record.get("sample_rewards"),
     )
 
 

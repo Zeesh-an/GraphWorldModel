@@ -115,6 +115,7 @@ from coding_agent.methods.evolve import EvolveSearch
 from coding_agent.methods.one_shot import OneShotSuperAlgorithm, default_max_repairs
 from coding_agent.methods.per_step import PerStepReprompt
 from coding_agent.methods.windowed import WindowedOnline
+from coding_agent.provenance import compute_provenance
 from coding_agent.prediction import (
     default_forecast_samples,
     evaluate_predictor,
@@ -370,6 +371,17 @@ class ExperimentConfig:
     graph_id: str | None = None  # which graph in the store (default: first)
     wm_results_json: str | None = None  # train_wm.py results JSON (for the WM env)
     credit: bool = True  # per-action counterfactual credit (feedback + results)
+    # The probe turn before each evolve generation (one extra LLM call per
+    # generation, answered immediately about the incumbent's plan)
+    probe_turn: bool = True
+    # Stop an evolve search once the unbiased incumbent estimate has been flat
+    # for this many generations; 0 runs every generation
+    stop_when_flat: int = 0
+    # Let a run of wrong-signed edit forecasts add exploration mass
+    calibration_steering: bool = False
+    # Post-search rediscovery distance against the task's library pool
+    provenance: bool = True
+    provenance_timeout: float = 60.0
     # Which feedback tier each refinement generation receives
     # (coding_agent/feedback.py). `legacy` is the existing behaviour and the
     # default; f0-f3 are the controlled ladder Experiment 3 varies.
@@ -499,6 +511,9 @@ def build_method(
             credit=config.credit and config.evaluator != monte_carlo,
             probes=not config.native_arm,
             feedback=config.feedback,
+            probe_turn=config.probe_turn,
+            stop_when_flat=config.stop_when_flat,
+            calibration_steering=config.calibration_steering,
         )
 
     raise ValueError(
@@ -769,6 +784,228 @@ def _parse_routing_choice(reply: str, menu: list[str] = algorithm_names) -> str:
         f"routing reply must name exactly one library algorithm, got {reply!r} "
         f"(matched: {mentioned})"
     )
+
+
+def canned_baseline_script(
+    config: ExperimentConfig, name: str, outbreak: tuple, batches: list | None
+) -> str:
+    """
+    The Strategy source that runs library member `name` through the identical
+    scoring path as every other arm. One template per pool; shared by the
+    condition-1 baseline arms and by the post-search provenance check, so a
+    "nearest library algorithm" is measured on exactly the call the baseline
+    row was.
+    """
+    if name in adaptive_algorithms:
+        if batches is None:
+            raise ValueError(
+                f"baseline {name!r} is a per-round adaptive policy, "
+                f"but this arm is not adaptive. parse_arm marks adaptive "
+                f"baselines with method='adaptive'; a hand-built "
+                f"ExperimentConfig must set method='adaptive' too."
+            )
+
+        # A published adaptive algorithm is a per-round POLICY: act() runs
+        # once per round on the realized state. The schedule is inlined rather
+        # than passed, because act() receives only the timestep and the batch
+        # size varies between rounds when k does not divide evenly by r.
+        # total_budget is for static_split, which needs to know how long its
+        # static ranking should be.
+        schedule = round_schedule(batches, config.round_gap, config.horizon)
+        script = f"""\
+class AdaptiveBaseline(Strategy):
+    def act(self, state, graph, timestep):
+        batch = {schedule!r}.get(timestep, 0)
+        if not batch:
+            return []
+        return [
+            ActionOp("add_node", node)
+            for node in adaptive_algorithms.{name}(
+                state,
+                graph,
+                batch,
+                "{config.diffusion_model}",
+                total_budget={config.budget},
+            )
+        ]
+"""
+    elif name in prediction_algorithms:
+        # A published predictor returns a NUMBER, which is what makes this pool
+        # different from every other one here. `fit_examples` is passed only to
+        # the members that fit a constant (the pool names them explicitly), so a
+        # label can never reach an unfitted member; `predict` is the metered
+        # forward model, which `mc_forward` reads and everything else ignores
+        # through **kw.
+        script = f"""\
+class PredictionBaseline(Strategy):
+    def predict(self, graph, observation, horizon):
+        return prediction_algorithms.{name}(
+            graph,
+            observation,
+            horizon,
+            fit_examples=(
+                list(getattr(self, "fit_examples", []))
+                if "{name}" in {tuple(fitted_prediction_algorithms)!r}
+                else None
+            ),
+            predict=getattr(self, "forecast_marginals", None),
+            seed={config.seed},
+        )
+"""
+    elif name in reconstruction_algorithms:
+        # A published decoder is a whole-TRAJECTORY inference: it is handed the
+        # masked observation and returns `{node: (time, parent)}`. `predict` is
+        # the metered kernel, which the kernel-using members read and the
+        # structural ones ignore through **kw.
+        script = f"""\
+class ReconstructionBaseline(Strategy):
+    def reconstruct(self, graph, observation, horizon):
+        return reconstruction_algorithms.{name}(
+            graph,
+            observation,
+            horizon,
+            diffusion_model="{config.diffusion_model}",
+            predict=getattr(self, "step_marginals", None),
+        )
+"""
+    elif name in localization_algorithms:
+        # A published localizer is a source-set INFERENCE, not a plan: it is
+        # handed the observation and returns the nodes it believes started the
+        # cascade. Its paired scorer rides along so the arm gets a real AUC
+        # rather than the rank-derived stand-in a set-only method falls back to.
+        script = f"""\
+class LocalizationBaseline(Strategy):
+    def localize(self, graph, observation, budget):
+        return [
+            int(node)
+            for node in localization_algorithms.{name}(
+                graph,
+                observation,
+                budget,
+                diffusion_model="{config.diffusion_model}",
+                horizon={config.horizon},
+            )
+        ]
+
+    def source_scores(self, graph, observation):
+        return localization_scorers.{name}(
+            graph, observation, diffusion_model="{config.diffusion_model}"
+        )
+"""
+    elif name in all_blocking_algorithms:
+        # A published blocker is handed the RUMOUR's own seeds and returns the
+        # intervention this lever buys: node ids on three levers, `(u, v)` arcs
+        # on the fourth. `blocking.blocking_plan` reconciles the two shapes into
+        # one plan, which is what keeps a library algorithm runnable without
+        # rewriting it to know what a plan is.
+        if not emittable(name, config.blocking_lever):
+            raise ValueError(
+                f"baseline {name!r} returns "
+                f"{blocking_shape(name)}s and this arm's lever "
+                f"({config.blocking_lever!r}) spends its budget on "
+                f"{lever_shape[config.blocking_lever]}s, so its output is not "
+                f"something this arm may emit. It is a "
+                f"{blocking_levers[name]} method: run it with "
+                f"--blocking-lever {blocking_levers[name]}, or pick a "
+                f"{config.blocking_lever} member."
+            )
+
+        script = f"""\
+class BlockingBaseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        picks = blocking_algorithms.{name}(
+            graph,
+            budget,
+            "{config.diffusion_model}",
+            negative_seeds={tuple(outbreak)!r},
+            horizon=horizon,
+        )
+        return blocking.blocking_plan(
+            picks, graph, budget, "{config.blocking_lever}", horizon
+        )
+"""
+    elif name in immunization_algorithms and get_task(config.task).epidemic:
+        # Gated on the task, NOT on pool membership alone. `netshield` and
+        # `acquaintance_immunization` exist in BOTH this pool and the
+        # dismantling one as genuinely different functions (the immunization
+        # forms take the outbreak and refuse to dose an index case), so an
+        # order-dependent chain would hand every critical-node-detection arm
+        # asking for `netshield` the epidemic implementation and silently
+        # score the wrong node set. Both accept **_, so it would never crash.
+        #
+        # A published immunizer is a static DOSE allocation, committed at t=0.
+        # It is handed the outbreak because the data-aware members (dava,
+        # frontier_immunization) condition on it; the structural ones take **kw
+        # and ignore it. `immunization_plan` then reconciles the two output
+        # shapes: node ids on the node levers, `(u, v)` arcs on the edge ones,
+        # and drops any index case the algorithm picked anyway.
+        if not immunization_emittable(name, config.epi_lever):
+            raise ValueError(
+                f"baseline {name!r} returns "
+                f"{immunization_shape[name]}s and this arm's lever "
+                f"({config.epi_lever!r}) spends its budget on "
+                f"{epidemic_lever_shape[config.epi_lever]}s, so its output is not "
+                f"something this arm may emit. It is a "
+                f"{immunization_levers[name]} method: run it with "
+                f"--epi-lever {immunization_levers[name]}, or pick a "
+                f"{config.epi_lever} member."
+            )
+
+        script = f"""\
+class ImmunizationBaseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        picks = immunization_algorithms.{name}(
+            graph,
+            budget,
+            "{config.diffusion_model}",
+            outbreak={tuple(outbreak)!r},
+            horizon=horizon,
+        )
+        return epidemic.immunization_plan(
+            picks,
+            graph,
+            budget,
+            "{config.epi_lever}",
+            horizon,
+            {tuple(outbreak)!r},
+            {config.contact_reduction!r},
+        )
+"""
+    elif name in dismantling_algorithms:
+        # A dismantler is a static REMOVAL set, committed at t=0. It is handed
+        # the outbreak because the simulation-based member scores candidates
+        # against it; the structural members take **kw and ignore it.
+        # `removal_plan` then drops any source it picked anyway and tops the
+        # set back up, which is what keeps a published algorithm runnable
+        # without rewriting it to know an outbreak exists.
+        script = f"""\
+class DismantlingBaseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        removals = dismantling_algorithms.{name}(
+            graph,
+            budget,
+            "{config.diffusion_model}",
+            horizon=horizon,
+            outbreak={tuple(outbreak)!r},
+        )
+        return containment.removal_plan(
+            removals, graph, budget, {tuple(outbreak)!r}, horizon
+        )
+"""
+    else:
+        # A classical baseline is a static seed set, committed at t=0
+        script = f"""\
+class Baseline(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        seeds = algorithms.{name}(
+            graph, budget, "{config.diffusion_model}", horizon=horizon
+        )
+        return [[ActionOp("add_node", node) for node in seeds]] + [
+            [] for _ in range(horizon)
+        ]
+"""
+
+    return script
 
 
 def run_experiment(
@@ -1189,214 +1426,9 @@ def run_experiment(
             else f"baseline:{config.baseline}"
         )
 
-        if config.baseline in adaptive_algorithms:
-            if batches is None:
-                raise ValueError(
-                    f"baseline {config.baseline!r} is a per-round adaptive policy, "
-                    f"but this arm is not adaptive. parse_arm marks adaptive "
-                    f"baselines with method='adaptive'; a hand-built "
-                    f"ExperimentConfig must set method='adaptive' too."
-                )
-
-            # A published adaptive algorithm is a per-round POLICY: act() runs
-            # once per round on the realized state. The schedule is inlined rather
-            # than passed, because act() receives only the timestep and the batch
-            # size varies between rounds when k does not divide evenly by r.
-            # total_budget is for static_split, which needs to know how long its
-            # static ranking should be.
-            schedule = round_schedule(batches, config.round_gap, config.horizon)
-            canned_script = f"""\
-class AdaptiveBaseline(Strategy):
-    def act(self, state, graph, timestep):
-        batch = {schedule!r}.get(timestep, 0)
-        if not batch:
-            return []
-        return [
-            ActionOp("add_node", node)
-            for node in adaptive_algorithms.{config.baseline}(
-                state,
-                graph,
-                batch,
-                "{config.diffusion_model}",
-                total_budget={config.budget},
-            )
-        ]
-"""
-        elif config.baseline in prediction_algorithms:
-            # A published predictor returns a NUMBER, which is what makes this pool
-            # different from every other one here. `fit_examples` is passed only to
-            # the members that fit a constant (the pool names them explicitly), so a
-            # label can never reach an unfitted member; `predict` is the metered
-            # forward model, which `mc_forward` reads and everything else ignores
-            # through **kw.
-            canned_script = f"""\
-class PredictionBaseline(Strategy):
-    def predict(self, graph, observation, horizon):
-        return prediction_algorithms.{config.baseline}(
-            graph,
-            observation,
-            horizon,
-            fit_examples=(
-                list(getattr(self, "fit_examples", []))
-                if "{config.baseline}" in {tuple(fitted_prediction_algorithms)!r}
-                else None
-            ),
-            predict=getattr(self, "forecast_marginals", None),
-            seed={config.seed},
+        canned_script = canned_baseline_script(
+            config, config.baseline, outbreak, batches
         )
-"""
-        elif config.baseline in reconstruction_algorithms:
-            # A published decoder is a whole-TRAJECTORY inference: it is handed the
-            # masked observation and returns `{node: (time, parent)}`. `predict` is
-            # the metered kernel, which the kernel-using members read and the
-            # structural ones ignore through **kw.
-            canned_script = f"""\
-class ReconstructionBaseline(Strategy):
-    def reconstruct(self, graph, observation, horizon):
-        return reconstruction_algorithms.{config.baseline}(
-            graph,
-            observation,
-            horizon,
-            diffusion_model="{config.diffusion_model}",
-            predict=getattr(self, "step_marginals", None),
-        )
-"""
-        elif config.baseline in localization_algorithms:
-            # A published localizer is a source-set INFERENCE, not a plan: it is
-            # handed the observation and returns the nodes it believes started the
-            # cascade. Its paired scorer rides along so the arm gets a real AUC
-            # rather than the rank-derived stand-in a set-only method falls back to.
-            canned_script = f"""\
-class LocalizationBaseline(Strategy):
-    def localize(self, graph, observation, budget):
-        return [
-            int(node)
-            for node in localization_algorithms.{config.baseline}(
-                graph,
-                observation,
-                budget,
-                diffusion_model="{config.diffusion_model}",
-                horizon={config.horizon},
-            )
-        ]
-
-    def source_scores(self, graph, observation):
-        return localization_scorers.{config.baseline}(
-            graph, observation, diffusion_model="{config.diffusion_model}"
-        )
-"""
-        elif config.baseline in all_blocking_algorithms:
-            # A published blocker is handed the RUMOUR's own seeds and returns the
-            # intervention this lever buys: node ids on three levers, `(u, v)` arcs
-            # on the fourth. `blocking.blocking_plan` reconciles the two shapes into
-            # one plan, which is what keeps a library algorithm runnable without
-            # rewriting it to know what a plan is.
-            if not emittable(config.baseline, config.blocking_lever):
-                raise ValueError(
-                    f"baseline {config.baseline!r} returns "
-                    f"{blocking_shape(config.baseline)}s and this arm's lever "
-                    f"({config.blocking_lever!r}) spends its budget on "
-                    f"{lever_shape[config.blocking_lever]}s, so its output is not "
-                    f"something this arm may emit. It is a "
-                    f"{blocking_levers[config.baseline]} method: run it with "
-                    f"--blocking-lever {blocking_levers[config.baseline]}, or pick a "
-                    f"{config.blocking_lever} member."
-                )
-
-            canned_script = f"""\
-class BlockingBaseline(Strategy):
-    def plan_horizon(self, graph, budget, horizon):
-        picks = blocking_algorithms.{config.baseline}(
-            graph,
-            budget,
-            "{config.diffusion_model}",
-            negative_seeds={tuple(outbreak)!r},
-            horizon=horizon,
-        )
-        return blocking.blocking_plan(
-            picks, graph, budget, "{config.blocking_lever}", horizon
-        )
-"""
-        elif config.baseline in immunization_algorithms and get_task(config.task).epidemic:
-            # Gated on the task, NOT on pool membership alone. `netshield` and
-            # `acquaintance_immunization` exist in BOTH this pool and the
-            # dismantling one as genuinely different functions (the immunization
-            # forms take the outbreak and refuse to dose an index case), so an
-            # order-dependent chain would hand every critical-node-detection arm
-            # asking for `netshield` the epidemic implementation and silently
-            # score the wrong node set. Both accept **_, so it would never crash.
-            #
-            # A published immunizer is a static DOSE allocation, committed at t=0.
-            # It is handed the outbreak because the data-aware members (dava,
-            # frontier_immunization) condition on it; the structural ones take **kw
-            # and ignore it. `immunization_plan` then reconciles the two output
-            # shapes: node ids on the node levers, `(u, v)` arcs on the edge ones,
-            # and drops any index case the algorithm picked anyway.
-            if not immunization_emittable(config.baseline, config.epi_lever):
-                raise ValueError(
-                    f"baseline {config.baseline!r} returns "
-                    f"{immunization_shape[config.baseline]}s and this arm's lever "
-                    f"({config.epi_lever!r}) spends its budget on "
-                    f"{epidemic_lever_shape[config.epi_lever]}s, so its output is not "
-                    f"something this arm may emit. It is a "
-                    f"{immunization_levers[config.baseline]} method: run it with "
-                    f"--epi-lever {immunization_levers[config.baseline]}, or pick a "
-                    f"{config.epi_lever} member."
-                )
-
-            canned_script = f"""\
-class ImmunizationBaseline(Strategy):
-    def plan_horizon(self, graph, budget, horizon):
-        picks = immunization_algorithms.{config.baseline}(
-            graph,
-            budget,
-            "{config.diffusion_model}",
-            outbreak={tuple(outbreak)!r},
-            horizon=horizon,
-        )
-        return epidemic.immunization_plan(
-            picks,
-            graph,
-            budget,
-            "{config.epi_lever}",
-            horizon,
-            {tuple(outbreak)!r},
-            {config.contact_reduction!r},
-        )
-"""
-        elif config.baseline in dismantling_algorithms:
-            # A dismantler is a static REMOVAL set, committed at t=0. It is handed
-            # the outbreak because the simulation-based member scores candidates
-            # against it; the structural members take **kw and ignore it.
-            # `removal_plan` then drops any source it picked anyway and tops the
-            # set back up, which is what keeps a published algorithm runnable
-            # without rewriting it to know an outbreak exists.
-            canned_script = f"""\
-class DismantlingBaseline(Strategy):
-    def plan_horizon(self, graph, budget, horizon):
-        removals = dismantling_algorithms.{config.baseline}(
-            graph,
-            budget,
-            "{config.diffusion_model}",
-            horizon=horizon,
-            outbreak={tuple(outbreak)!r},
-        )
-        return containment.removal_plan(
-            removals, graph, budget, {tuple(outbreak)!r}, horizon
-        )
-"""
-        else:
-            # A classical baseline is a static seed set, committed at t=0
-            canned_script = f"""\
-class Baseline(Strategy):
-    def plan_horizon(self, graph, budget, horizon):
-        seeds = algorithms.{config.baseline}(
-            graph, budget, "{config.diffusion_model}", horizon=horizon
-        )
-        return [[ActionOp("add_node", node) for node in seeds]] + [
-            [] for _ in range(horizon)
-        ]
-"""
     else:
         provider_label = config.model
 
@@ -1641,6 +1673,22 @@ class Baseline(Strategy):
             sum(entry.get("seconds", 0.0) for entry in getattr(method, "probe_log", [])),
             3,
         ),
+        # Probes asked in the probe turn (about the incumbent, answered before
+        # the generation was written) as opposed to beside a code block
+        "probe_turns": sum(
+            1
+            for entry in getattr(method, "probe_log", [])
+            if entry.get("turn") == "probe"
+        ),
+        # The search's own bookkeeping under a stochastic evaluator
+        # (coding_agent/search_metrics.py): what the naive delta > 0 rule would
+        # have accepted against what the band rule did; how well the model
+        # forecast its own edits; the incumbent's accepted score against its
+        # unbiased re-score; and whether --stop-when-flat ended the search early
+        "acceptance_ledger": getattr(method, "ledger", {}),
+        "calibration": getattr(method, "calibration", {}),
+        "in_loop_optimism": getattr(method, "optimism", {}),
+        "stopped_early": getattr(method, "stopped_early", None),
         # Per-node P(infected at end) across the ensemble. Costs n_samples
         # rollouts to produce, so it is serialized rather than recomputed: it
         # is what any post-hoc spatial analysis (coverage, per-community reach)
@@ -1687,6 +1735,35 @@ class Baseline(Strategy):
     # Sense first, because everything downstream that picks a winner needs it and
     # the per-arm JSON is read standalone by plots/report/summary
     result["objective"] = task.sense
+
+    # Rediscovery distance: every callable library member run on the same
+    # instance, its output compared with the winner's, on the exact call the
+    # condition-1 rows use. Agent arms only: a canned arm IS a library member.
+    result["provenance"] = None
+    if config.provenance and canned_script is None:
+        print("[run] provenance: running the library pool on this instance...")
+        result["provenance"] = compute_provenance(
+            task,
+            graph,
+            trajectory,
+            strategy.source_script,
+            partial(canned_baseline_script, config, outbreak=outbreak, batches=batches),
+            lever=(
+                config.blocking_lever
+                if task.blocks
+                else config.epi_lever
+                if task.immunizes
+                else None
+            ),
+            timeout=config.provenance_timeout,
+        )
+        nearest = result["provenance"].get("nearest")
+        if nearest is not None:
+            print(
+                f"[run] provenance: nearest library member {nearest} "
+                f"(similarity {result['provenance']['nearest_similarity']:.3f}; "
+                f"{len(result['provenance']['errors'])} members failed or timed out)"
+            )
 
     if task.forecasts:
         # Same reasoning as both inverse blocks: the error is measured against a
@@ -2972,6 +3049,50 @@ if __name__ == "__main__":
         "(default: legacy).",
     )
     parser.add_argument(
+        "--probe-turn",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="before every evolve generation, one trace-free aside in which the "
+        "model asks up to six what-if probes about the incumbent's plan and gets "
+        "the answers in the same generation's prompt. One extra LLM call per "
+        "generation; the write-turn probes block still works either way. "
+        "--no-probe-turn turns it off (default: True).",
+    )
+    parser.add_argument(
+        "--stop-when-flat",
+        type=int,
+        default=0,
+        help="stop an evolve search once the incumbent's re-score on the fresh "
+        "realization (the unbiased estimate) has not improved beyond the band "
+        "for this many consecutive generations; 0 runs every generation "
+        "(default: 0).",
+    )
+    parser.add_argument(
+        "--calibration-steering",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="when the model's last three forecasts of its own edits (the "
+        "`# EXPECTED:` line) were wrong in sign more often than not, count one "
+        "extra stalled generation in the operator schedule so an explore move "
+        "becomes likelier (default: False).",
+    )
+    parser.add_argument(
+        "--provenance",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="after the search, run every callable member of the task's library "
+        "pool on the same instance and record the similarity of each one's "
+        "output to the winner's (the rediscovery distance), plus the members the "
+        "winning source calls. --no-provenance skips it (default: True).",
+    )
+    parser.add_argument(
+        "--provenance-timeout",
+        type=float,
+        default=60.0,
+        help="seconds one library member may take in the provenance check before "
+        "it is recorded as timed out (default: 60.0).",
+    )
+    parser.add_argument(
         "--out-json",
         type=str,
         default=None,
@@ -3078,6 +3199,11 @@ if __name__ == "__main__":
         mc_agreement=args.mc_agreement,
         mc_agreement_runs=args.mc_agreement_runs,
         credit=args.credit,
+        probe_turn=args.probe_turn,
+        stop_when_flat=args.stop_when_flat,
+        calibration_steering=args.calibration_steering,
+        provenance=args.provenance,
+        provenance_timeout=args.provenance_timeout,
         out_json=args.out_json,
         arm_spec=arm_spec,
     )

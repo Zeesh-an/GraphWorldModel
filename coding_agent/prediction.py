@@ -643,6 +643,10 @@ def evaluate_predictor(
         },
         final_marginals=None,
         spread_curve=None,
+        # One error per scored cascade, cascade-aligned across predictors; a
+        # declined cascade has no entry, so two predictors that declined
+        # different cascades are not aligned and the band falls back
+        sample_rewards=[float(value) for value in per_cascade],
     )
 
     return trajectory, elapsed

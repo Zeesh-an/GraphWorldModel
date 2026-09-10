@@ -22,7 +22,7 @@ from coding_agent.prompts import (
     build_feedback_prompt,
     build_system_prompt,
     build_user_prompt,
-    probe_contract,
+    probe_contract_for,
 )
 from coding_agent.types import GraphInfo, Strategy, TaskSpec, Trajectory
 
@@ -111,7 +111,7 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
         # One thread for the whole refinement, so the base prompt is sent once and
         # every later turn is an edit against the script the model can still see
         if self.probes:
-            base_user += probe_contract
+            base_user += probe_contract_for(task)
 
         conversation = Conversation(agent, system)
         # Read back by run.py for the closing plain-English write-up
@@ -243,8 +243,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                     environment,
                     probe_request,
                     probe_note,
-                    best[1].actions if best is not None else None,
+                    best[1] if best is not None else None,
                     task,
+                    graph,
                     self.probes,
                     self.probe_log,
                     "one_shot",
@@ -367,8 +368,9 @@ class OneShotSuperAlgorithm(OuterLoopMethod):
                 environment,
                 probe_request,
                 probe_note,
-                trajectory.actions,
+                trajectory,
                 task,
+                graph,
                 self.probes,
                 self.probe_log,
                 "one_shot",

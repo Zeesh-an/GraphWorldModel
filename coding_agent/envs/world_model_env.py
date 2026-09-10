@@ -21,6 +21,9 @@ from world_model.wm_data import (
     build_epidemic_features,
     build_features,
     build_graph_input,
+    ch_add,
+    ch_frontier,
+    ch_infected,
     channels_for,
     edges_to_arrays,
     log_degree,
@@ -39,6 +42,9 @@ oracle_n_layers = 1
 # a 200-sample block of a 4M-arc graph would need tens of gigabytes; samples are
 # advanced in chunks of at most this many arcs and the pass is repeated per chunk
 default_max_block_arcs = 16_000_000
+# How far inside [0, 1] the relaxed seed vector of `seed_gradient` sits, so the
+# head's probability clamp (1e-6) never cuts the gradient
+gradient_relaxation = 1e-3
 
 
 class WorldModelEnvironment:
@@ -94,6 +100,17 @@ class WorldModelEnvironment:
         # keeps appending its frozen count until the whole call terminates.
         self.last_sample_counts = []
         self.last_sample_curves = []
+        # The final infected set of every sample block of the last rollout, so a
+        # search loop can read WHICH nodes a candidate and the incumbent reached
+        # in the realizations where they differed most (counterexamples). A fresh
+        # list per rollout, never mutated in place, so a caller may keep the
+        # previous rollout's reference across the next call.
+        self.last_sample_final_infected = []
+        # Frontier-at-t capture for the `frontier` probe: set the step before a
+        # rollout and the rollout leaves P(v on the frontier after that step)
+        # across the ensemble here, then clears the request
+        self.capture_frontier_step = None
+        self.last_frontier_marginals = None
         # Seed every rollout uses unless one is named explicitly; shared across
         # candidates so the DIFFERENCE between two strategies is well resolved
         self.base_seed = base_seed
@@ -657,6 +674,13 @@ class WorldModelEnvironment:
             self.last_sample_counts = [float(len(block)) for block in infected]
             self.last_sample_curves = [list(curve) for curve in sample_curves]
 
+            if self.capture_frontier_step == timestep:
+                frequency = np.zeros(num_nodes)
+                for sample in range(num_samples):
+                    frequency[list(frontier[sample])] += 1.0
+                self.last_frontier_marginals = frequency / num_samples
+                self.capture_frontier_step = None
+
             if record_representative:
                 representative_actions.append(bags[0])
                 representative_states.append(
@@ -675,6 +699,7 @@ class WorldModelEnvironment:
                 break
 
         final_counts = [float(len(infected[sample])) for sample in range(num_samples)]
+        self.last_sample_final_infected = [set(block) for block in infected]
 
         final_infected_freq = np.zeros(num_nodes)
         for sample in range(num_samples):
@@ -734,4 +759,101 @@ class WorldModelEnvironment:
                 if self.epidemic
                 else None
             ),
+            sample_rewards=final_counts,
         )
+
+    def seed_gradient(
+        self, plan: list, horizon: int, top: int = 10
+    ) -> dict:
+        """
+        d(expected final spread) / d(seed indicator) for every node, by one
+        differentiable mean-field rollout of f_theta.
+
+        The sampled rollout above draws coin flips and is not differentiable, so
+        the gradient runs the model on RELAXED states instead: the seed vector
+        `x` in [0, 1]^N is the t=0 add channel, and each step feeds the previous
+        step's predicted marginals back as the infected and frontier channels.
+        That is the mean-field propagation of the structured head, one forward
+        pass per step and one backward pass in total, whatever k is. The
+        gradient ranks the nodes NOT in the plan (where leave-one-out credit is
+        blind) as well as the ones in it. Single-cascade layouts only: the
+        competitive and compartmental samplers draw compartment assignments the
+        relaxation has no analogue for.
+        """
+        if self.competitive or self.epidemic:
+            raise ValueError(
+                "the gradient probe supports the single-cascade IC and LT layouts "
+                "only; this environment runs a competitive or compartmental model"
+            )
+
+        start = time.perf_counter()
+        num_nodes = self.graph.num_nodes
+        seeds = sorted(
+            {
+                int(action.target)
+                for bag in plan[:1]
+                for action in bag
+                if action.op == "add_node"
+            }
+        )
+        if not seeds:
+            raise ValueError("the gradient probe needs a plan with add_node seeds at t=0")
+
+        edge_index, edge_weight = edges_to_arrays(self.base_edges)
+        record = {
+            "state": {"infected": [], "frontier": []},
+            "action": [],
+            "next_state": {"infected": [], "frontier": []},
+            "next_marginal_infected": {},
+            "next_marginal_frontier": {},
+        }
+        base, _, _ = build_features(record, edge_index, num_nodes, self.action_encoding)
+        graph_input = build_graph_input(
+            edge_index,
+            edge_weight,
+            num_nodes,
+            self.diffusion_model,
+            self.device,
+            self.hide_edge_weights,
+        )
+
+        with torch.enable_grad():
+            base_x = torch.from_numpy(base).to(self.device)
+            # The head clamps its probabilities to [eps, 1 - eps] before the logit,
+            # which zeroes the gradient of any node sitting exactly at 0 or 1; the
+            # seed vector is relaxed just inside that range so every node's
+            # self-term survives
+            x = torch.full((num_nodes,), gradient_relaxation, device=self.device)
+            x[seeds] = 1.0 - gradient_relaxation
+            x.requires_grad_(True)
+            infected = torch.zeros(num_nodes, device=self.device)
+            frontier = torch.zeros(num_nodes, device=self.device)
+
+            for timestep in range(horizon + 1):
+                features = base_x.clone()
+                features[:, ch_infected] = infected
+                features[:, ch_frontier] = frontier
+                if timestep == 0:
+                    features[:, ch_add] = x
+                probabilities = torch.sigmoid(
+                    self.model(features, graph_input)
+                )  # shape: (N, 2)
+                infected, frontier = probabilities[:, 0], probabilities[:, 1]
+                self.forward_passes += 1
+
+            expected = infected.sum()
+            (gradient,) = torch.autograd.grad(expected, x)
+
+        gradient = gradient.detach().cpu().numpy().astype(np.float64)
+        chosen = set(seeds)
+        unselected = [node for node in np.argsort(-gradient) if int(node) not in chosen]
+        selected = sorted(seeds, key=lambda node: gradient[node])
+
+        self.rollout_calls += 1
+        self.evaluator_seconds += time.perf_counter() - start
+
+        return {
+            "mean_field_spread": float(expected.item()),
+            "best_unselected": [(int(node), float(gradient[node])) for node in unselected[:top]],
+            "worst_selected": [(int(node), float(gradient[node])) for node in selected[:top]],
+        }

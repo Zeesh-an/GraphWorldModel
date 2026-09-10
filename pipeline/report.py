@@ -1584,6 +1584,140 @@ def _world_model_section(
     return lines
 
 
+def _nearest_gain(result: dict, agent_results: list[dict], sense: str) -> str:
+    """The winner's referee gain over its nearest library member, when that member ran."""
+    provenance = result.get("provenance") or {}
+    nearest = provenance.get("nearest")
+    if nearest is None:
+        return ""
+
+    sibling = next(
+        (
+            other
+            for other in agent_results
+            if other.get("budget") == result.get("budget")
+            and (
+                other.get("arm") == nearest
+                or str(other.get("model", "")) == f"baseline:{nearest}"
+            )
+        ),
+        None,
+    )
+    if sibling is None:
+        return "not run"
+
+    gain = ground_truth_reward(result) - ground_truth_reward(sibling)
+    if sense == minimize:
+        gain = -gain
+
+    return f"{gain:+.3f}"
+
+
+def _search_section(agent_results: list[dict]) -> list[str]:
+    """
+    The search protocol's own bookkeeping, one row per agent arm and budget:
+    what the paired band rejected that the naive rule would have taken, how
+    far the reported curve sat above the unbiased one, how well the model
+    forecast its own edits, how many probes it asked, and the nearest library
+    member with the referee gain over it.
+    """
+    # Agent arms only: a canned row carries a one-entry history and no search
+    rows = [
+        result
+        for result in agent_results
+        if result.get("history")
+        and not str(result.get("model", "")).startswith(
+            ("baseline:", "routing:", "canned", "external:", "discovery:")
+        )
+    ]
+    if not rows:
+        return []
+
+    sense = result_sense(agent_results)
+    lines = [
+        "## Search protocol",
+        "",
+        "Every agent arm is scored under a stochastic evaluator, so the search keeps "
+        "records a deterministic-fitness loop never needs. **Accepted** counts the "
+        "generations whose paired delta cleared the paired standard error; **lucky "
+        "prevented** the generations the naive `delta > 0` rule would have accepted "
+        "and the band did not; **ties kept** the shorter `simplify` children that "
+        "replaced an incumbent inside the band. **Optimism** is the incumbent's "
+        "accepted score minus its re-score on the next fresh realization, in the "
+        "improving direction (mean over generations / at the end); positive means the "
+        "reported curve flattered the program. **Forecasts** scores the model's own "
+        "`# EXPECTED:` line per edit: how many, the sign accuracy, the Pearson "
+        "correlation with the realized delta, and the Brier score of its stated "
+        "probability of clearing the band. **Probes** counts the questions asked in the "
+        "probe turn (about the incumbent, before writing) and beside a code block. "
+        "**Nearest library member** is the pool member whose output is most similar to "
+        "the winner's on this instance (the rediscovery distance), with the winner's "
+        "referee gain over that member when it ran as a baseline row, and the library "
+        "members the winning source calls.",
+        "",
+        "| arm | k | generations | accepted | lucky prevented | ties kept | optimism "
+        "mean / final | forecasts n / sign acc / r / Brier | probes turn / write | "
+        "nearest library member (similarity) | gain over it | calls |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+
+    for result in rows:
+        ledger = result.get("acceptance_ledger") or {}
+        calibration = result.get("calibration") or {}
+        optimism = result.get("in_loop_optimism") or {}
+        provenance = result.get("provenance") or {}
+        scored = [entry for entry in result["history"] if entry.get("reward") is not None]
+        probe_turns = result.get("probe_turns") or 0
+        probe_total = len(result.get("probes") or [])
+        forecast = "0"
+        if calibration.get("n"):
+            forecast = (
+                f"{calibration['n']} / {_format_number(calibration.get('sign_accuracy'), 2)} / "
+                f"{_format_number(calibration.get('pearson_r'), 2)} / "
+                f"{_format_number(calibration.get('brier'), 3)}"
+            )
+        nearest = provenance.get("nearest")
+        nearest_text = (
+            f"`{nearest}` ({_format_number(provenance.get('nearest_similarity'), 3)})"
+            if nearest
+            else provenance.get("skipped") or "n/a"
+        )
+        calls = ", ".join(f"`{name}`" for name in provenance.get("calls") or []) or "none"
+        # A run recorded before the protocol existed has no ledger or optimism
+        # block; say so rather than printing empty cells
+        accepted = ledger.get("band_accepts", "n/a")
+        lucky = ledger.get("lucky_accepts_prevented", "n/a")
+        ties = ledger.get("ties_kept", "n/a")
+        optimism_text = (
+            f"{_format_number(optimism.get('mean'), 3)} / {_format_number(optimism.get('final'), 3)}"
+            if optimism.get("n")
+            else "n/a"
+        )
+        lines.append(
+            f"| `{result['arm']}` | {result.get('budget')} | {len(scored)}"
+            f"{' (stopped at ' + str(result['stopped_early']) + ')' if result.get('stopped_early') else ''} | "
+            f"{accepted} | {lucky} | {ties} | {optimism_text} | "
+            f"{forecast} | {probe_turns} / {probe_total - probe_turns} | {nearest_text} | "
+            f"{_nearest_gain(result, agent_results, sense) or 'n/a'} | {calls} |"
+        )
+
+    failed = {
+        result["arm"]: (result.get("provenance") or {}).get("errors") or {}
+        for result in rows
+    }
+    failed = {arm: errors for arm, errors in failed.items() if errors}
+    if failed:
+        lines += [""]
+        for arm, errors in failed.items():
+            names = ", ".join(f"`{name}`" for name in sorted(errors))
+            lines.append(
+                f"- `{arm}`: library members that failed or timed out in the provenance "
+                f"check: {names}."
+            )
+
+    return lines + [""]
+
+
 def _stage_timings(layout: Layout, agent_results: list[dict]) -> list[str]:
     """Per-stage wall time from pipeline.json, and the total the run cost so far.
 
@@ -1718,6 +1852,7 @@ def write_report(
     lines += _epidemic_section(agent_results)
     lines += _structural_section(agent_results)
     lines += _winner_section(agent_results)
+    lines += _search_section(agent_results)
     lines += _world_model_section(wm_results, metadata, agent_results)
     lines += _stage_timings(layout, agent_results)
     lines += _figures_section(layout.plots_dir, layout.root)

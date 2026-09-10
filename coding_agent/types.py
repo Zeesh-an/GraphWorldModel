@@ -452,6 +452,13 @@ class Trajectory:
     # reason (a dead epidemic's prevalence is 0, not its last non-zero value) so
     # it is padded with zeros instead.
     prevalence_curve: list[float] | None = None
+    # Final reward of every ensemble sample (or every instance on the inverse and
+    # forecast families), in sample order. Two rollouts at the same seed share
+    # their realizations sample for sample, so the standard error of the mean of
+    # the PAIRED differences is the noise of a comparison, and the samples where
+    # a candidate lost most are readable as counterexamples. None where samples
+    # are not aligned across calls (the multi-round union).
+    sample_rewards: list[float] | None = None
 
 
 class Strategy(Protocol):

@@ -7,14 +7,32 @@ from_scratch (explore: a new mechanism). The operator is drawn with weights that
 follow MCTS-AHD's schedule, an exploration term that scales with the REMAINING
 budget, so restructuring happens early and refinement late, with stagnation
 adding exploration back. A candidate replaces the incumbent only when its paired
-delta clears the standard error of the comparison (`methods.base.accepts`).
+delta clears the standard error of the PAIRED difference (`methods.base.accepts`,
+`search_metrics.paired_band`).
 
 The model sees the whole search every generation: an attempts table (operator,
-reward, delta, accepted, mechanism, hint) and a population table, plus a running
-memory of design rules that a short reflection call updates after every scored
-generation (ReEvo's short- and long-term reflections in one call). Explore
-operators run an idea search first: several candidate mechanisms, judged against
-the library and the population, one chosen for implementation.
+reward, delta, accepted, mechanism, hint, its own forecast) and a population
+table ranked by the paired estimate, plus a running memory of design rules that
+a short reflection call updates after every scored generation (ReEvo's short-
+and long-term reflections in one call). Explore operators run an idea search
+first: several candidate mechanisms, judged against the library and the
+population, one chosen for implementation.
+
+Five things the stochastic evaluator adds, none of which a deterministic-fitness
+loop needs (search_metrics.py, counterexamples.py, probes.py):
+
+- a PROBE TURN before every generation: a trace-free aside in which the model
+  asks what-if questions about the incumbent's plan and gets the answers in the
+  same generation's prompt;
+- the parent is the INCUMBENT, never the member with the luckiest realization,
+  and the rest of the population is ranked by the paired estimate;
+- every generation records what the naive `delta > 0` rule would have decided
+  (the spurious-accept ledger) and the incumbent's re-score on the fresh
+  realization beside its accepted score (the unbiased curve);
+- every candidate carries the model's forecast of its own paired delta, scored
+  after the fact (edit calibration), which can steer the operator choice;
+- when a candidate loses, the realizations it lost most on are described in the
+  task's terms and shown as counterexamples.
 """
 
 import difflib
@@ -24,6 +42,7 @@ from tqdm import tqdm
 
 from coding_agent import checkpoint
 from coding_agent.agent import CodingAgent, Conversation
+from coding_agent.counterexamples import describe_counterexamples, sample_sets
 from coding_agent.credit import credit_feedback
 from coding_agent.diagnostics import PlanDiagnostics
 from coding_agent.executor import StrategyError, build_strategy
@@ -31,6 +50,7 @@ from coding_agent.feedback import build_feedback
 from coding_agent.feedback import resolve as resolve_feedback
 from coding_agent.methods.base import (
     OuterLoopMethod,
+    _communities,
     accepts,
     baseline_anchor,
     evaluate_strategy,
@@ -45,6 +65,7 @@ from coding_agent.prompts import (
     build_evolve_prompt,
     build_ideas_prompt,
     build_population_table,
+    build_probe_turn_prompt,
     build_reflection_prompt,
     build_system_prompt,
     build_user_prompt,
@@ -52,14 +73,25 @@ from coding_agent.prompts import (
     mechanism_of,
     parse_ideas,
     parse_reflection,
-    probe_contract,
+    probe_contract_for,
     reflection_system,
+)
+from coding_agent.search_metrics import (
+    acceptance_ledger,
+    calibration_metrics,
+    expected_of,
+    flat_generations,
+    miscalibrated,
+    optimism_summary,
+    paired_band,
+    paired_strengths,
 )
 from coding_agent.types import (
     GraphInfo,
     Strategy,
     TaskSpec,
     Trajectory,
+    improves,
     rank_by,
 )
 
@@ -102,9 +134,19 @@ def choose_operator(
     stagnation: int,
     population_size: int,
     patience: int,
+    miscalibrated_now: bool = False,
 ) -> str:
-    """One operator for this generation, weighted by the schedule."""
-    explore = exploration_weight(iteration, total, stagnation)
+    """
+    One operator for this generation, weighted by the schedule.
+
+    `miscalibrated_now` (with `--calibration-steering`) counts as one more
+    stalled generation: the model's recent forecasts of its own edits were wrong
+    in sign, so its local picture of the program is stale and an explore move is
+    worth more than another refine.
+    """
+    explore = exploration_weight(
+        iteration, total, stagnation + (1 if miscalibrated_now else 0)
+    )
     # The old rule survives as a floor: a long stall forces an explore move
     if patience > 0 and stagnation >= patience:
         explore = 1.0
@@ -169,9 +211,26 @@ class EvolveSearch(OuterLoopMethod):
         probes: bool = True,
         reflect: bool = True,
         feedback: str | None = None,
+        probe_turn: bool = True,
+        stop_when_flat: int = 0,
+        calibration_steering: bool = False,
     ) -> None:
         # ReEvo-style reflection call after every scored generation
         self.reflect = reflect
+        # The trace-free probe aside before each generation (one extra LLM call
+        # per generation; answered immediately, about the incumbent's plan)
+        self.probe_turn = probe_turn
+        # Stop early once the UNBIASED incumbent estimate has not improved beyond
+        # the band for this many consecutive generations; 0 runs every generation
+        self.stop_when_flat = stop_when_flat
+        # Let a run of wrong-signed forecasts add exploration mass
+        self.calibration_steering = calibration_steering
+        # Filled at the end of optimize(): the ledger, the calibration report and
+        # the optimism summary, read back into the results JSON by run.py
+        self.ledger = {}
+        self.calibration = {}
+        self.optimism = {}
+        self.stopped_early = None
         self.outer_iters = outer_iters
         # Per-action counterfactual credit in every generation's feedback
         self.credit = credit
@@ -240,7 +299,7 @@ class EvolveSearch(OuterLoopMethod):
             self.label, task, graph, self.strategy_mode, self.allow_mc_algorithms
         ) + (f"\n\n{anchor}" if anchor else "")
         if self.probes:
-            base_user += probe_contract
+            base_user += probe_contract_for(task)
 
         # The thread lets the model see the generations it already produced;
         # build_evolve_prompt still names the PARENT explicitly because the
@@ -318,12 +377,32 @@ class EvolveSearch(OuterLoopMethod):
                     stagnation,
                     len(population),
                     self.stagnation_patience,
+                    self.calibration_steering and miscalibrated(self.history),
                 )
+                # The parent is the INCUMBENT: the program the paired acceptance
+                # rule has kept. Each member's own reward was measured on its own
+                # generation's realization, so the raw ranking put a rejected
+                # candidate that drew a generous realization above the incumbent
+                # and refine then edited the loser (64 percent of generations on
+                # the four local runs that recorded it, with acceptance falling
+                # from 33 to 3 percent). The rest are ranked by the paired
+                # estimate, one scale for every member.
+                strengths = paired_strengths(population)
+                for record in population:
+                    record["strength"] = strengths[int(record["iteration"])]
                 ranked = rank_by(
-                    population, lambda record: record["reward"], task.sense
+                    population, lambda record: record["strength"], task.sense
                 )
-                parent = ranked[0]
-                others = ranked[1:]
+                incumbent_record = (
+                    next(
+                        (r for r in population if r["script"] == best[0].source_script),
+                        None,
+                    )
+                    if best is not None
+                    else None
+                )
+                parent = incumbent_record if incumbent_record is not None else ranked[0]
+                others = [record for record in ranked if record is not parent]
                 inspirations = others[: self.inspiration_count]
                 if operator == "crossover":
                     # Rank-weighted partner (EoH's selection): the best alternative
@@ -379,6 +458,31 @@ class EvolveSearch(OuterLoopMethod):
                 user = f"{user}\n\n{probe_feedback}"
                 probe_feedback = None
 
+            # The probe turn: ask about the incumbent's plan and get the answers
+            # before writing, so a question has a payoff for THIS edit. A
+            # trace-free aside, so the thread carries neither the question nor
+            # the answer as a turn.
+            if self.probes and self.probe_turn and best is not None and parent is not None:
+                probe_reply = conversation.aside(
+                    build_probe_turn_prompt(parent, task, operator), kind="probe"
+                )
+                turn_request, turn_note = parse_probe_request(probe_reply)
+                turn_feedback = answer_probes(
+                    environment,
+                    turn_request,
+                    turn_note,
+                    best[1],
+                    task,
+                    graph,
+                    self.probes,
+                    self.probe_log,
+                    self.label,
+                    turn="probe",
+                    about="the incumbent's plan you are about to edit",
+                )
+                if turn_feedback:
+                    user = f"{user}\n\n{turn_feedback}"
+
             tqdm.write(
                 f"[{self.label}] iter {iteration + 1}/{self.outer_iters}: "
                 f"operator={operator}, population={len(population)}, "
@@ -413,7 +517,13 @@ class EvolveSearch(OuterLoopMethod):
                 trajectory, plan_seconds = evaluate_strategy(
                     strategy, environment, task, graph, seed=seed
                 )
+                candidate_sets = sample_sets(environment)
+                # The incumbent's accepted score, frozen at its own generation,
+                # against its re-score on this fresh realization: the first is
+                # a maximum over noisy estimates, the second is not
+                incumbent_reported = None if best is None else best[1].reward
                 best = rescore(best, environment, task, graph, seed)
+                incumbent_sets = sample_sets(environment) if best is not None else None
             except StrategyError as error:
                 last_error = str(error)
                 stagnation += 1
@@ -450,8 +560,9 @@ class EvolveSearch(OuterLoopMethod):
                     environment,
                     probe_request,
                     probe_note,
-                    best[1].actions if best is not None else None,
+                    best[1] if best is not None else None,
                     task,
+                    graph,
                     self.probes,
                     self.probe_log,
                     self.label,
@@ -495,6 +606,22 @@ class EvolveSearch(OuterLoopMethod):
                 if best is not None
                 else None
             )
+            # The realizations this candidate lost most on, in the task's terms;
+            # informs the next edit, never the estimate (the next generation is
+            # scored on its own fresh realization)
+            counterexamples = (
+                describe_counterexamples(
+                    trajectory,
+                    best[1],
+                    candidate_sets,
+                    incumbent_sets,
+                    graph,
+                    task,
+                    communities=_communities(graph) if not task.recovers and not task.decodes and not task.forecasts else None,
+                )
+                if best is not None
+                else None
+            )
             # LEGACY takes the existing path untouched; a ladder tier takes the
             # counted diagnostic blocks and NOTHING else, so its feedback content
             # is exactly what the tier names
@@ -502,6 +629,7 @@ class EvolveSearch(OuterLoopMethod):
                 summary = (
                     summarize(trajectory, graph, task)
                     + (f"\n{last_delta}" if last_delta else "")
+                    + (f"\n{counterexamples}" if counterexamples else "")
                     + (f"\n{diff}" if diff else "")
                     + (f"\n{credit_report}" if credit_report else "")
                 )
@@ -538,6 +666,20 @@ class EvolveSearch(OuterLoopMethod):
                     | diagnosis.to_dict()
                 )
 
+            # The signed delta and the noise band of THIS comparison, both on the
+            # same realization; the acceptance rule reads the band, not an epsilon
+            delta = None if best is None else trajectory.reward - best[1].reward
+            band, band_rule = (0.0, "none") if best is None else paired_band(trajectory, best[1])
+            predicted_delta, predicted_clear_p = expected_of(strategy.source_script)
+            incumbent_iteration = (
+                None
+                if best is None
+                else next(
+                    (r["iteration"] for r in population if r["script"] == best[0].source_script),
+                    None,
+                )
+            )
+
             record = {
                 "iteration": iteration + 1,
                 "script": strategy.source_script,
@@ -545,20 +687,14 @@ class EvolveSearch(OuterLoopMethod):
                 "reward": trajectory.reward,
                 "plan_seconds": round(plan_seconds, 3),
                 "summary": summary,
+                # The paired comparison this member was scored by: who it was
+                # compared with, on one realization, and by how much
+                "compared_to": incumbent_iteration,
+                "paired_delta": None if delta is None else round(delta, 6),
+                "band": round(band, 6),
             }
             population.append(record)
 
-            # The signed delta and the noise band of THIS comparison, both on the
-            # same realization; the acceptance rule reads the band, not an epsilon
-            delta = None if best is None else trajectory.reward - best[1].reward
-            band = (
-                0.0
-                if best is None
-                else max(
-                    float(trajectory.cost.get("reward_se") or 0.0),
-                    float(best[1].cost.get("reward_se") or 0.0),
-                )
-            )
             accepted = accepts(
                 trajectory,
                 None if best is None else best[1],
@@ -594,6 +730,15 @@ class EvolveSearch(OuterLoopMethod):
                         )
                         hint, self.memory = parse_reflection(reply, self.memory)
 
+            # What the naive rule would have decided, for the ledger: a positive
+            # delta in the task's sense, band or no band
+            naive_accepted = (
+                True
+                if best is None
+                else improves(trajectory.reward, best[1].reward, task.sense, 0.0)
+            )
+            incumbent_unbiased = None if best is None else best[1].reward
+
             if accepted:
                 best = (strategy, trajectory)
                 stagnation = 0
@@ -613,7 +758,17 @@ class EvolveSearch(OuterLoopMethod):
                     "mechanism": record["mechanism"],
                     "delta": None if delta is None else round(delta, 4),
                     "band": round(band, 4),
+                    "band_rule": band_rule,
                     "accepted": accepted,
+                    "naive_accepted": naive_accepted,
+                    # The incumbent entering this generation: its accepted score
+                    # and its re-score on this generation's realization
+                    "compared_to": incumbent_iteration,
+                    "incumbent_reported": incumbent_reported,
+                    "incumbent_unbiased": incumbent_unbiased,
+                    # The model's own forecast for this edit
+                    "predicted_delta": predicted_delta,
+                    "predicted_clear_p": predicted_clear_p,
                     "hint": hint,
                     # The script and what it edited: the closing write-up diffs
                     # them, since the thread is trimmed and cannot show old turns
@@ -651,8 +806,9 @@ class EvolveSearch(OuterLoopMethod):
                 environment,
                 probe_request,
                 probe_note,
-                trajectory.actions,
+                trajectory,
                 task,
+                graph,
                 self.probes,
                 self.probe_log,
                 self.label,
@@ -670,12 +826,26 @@ class EvolveSearch(OuterLoopMethod):
                 probe_feedback,
             )
 
+            if self.stop_when_flat > 0:
+                flat = flat_generations(self.history, task.sense)
+                if flat >= self.stop_when_flat:
+                    self.stopped_early = iteration + 1
+                    tqdm.write(
+                        f"[{self.label}] stopping at generation {iteration + 1}: the "
+                        f"unbiased incumbent estimate has been flat for {flat} generations"
+                    )
+                    break
+
         progress_bar.close()
 
         if best is None:
             raise StrategyError(
                 f"all {self.outer_iters} attempts failed; last error: {last_error}"
             )
+
+        self.ledger = acceptance_ledger(self.history)
+        self.calibration = calibration_metrics(self.history)
+        self.optimism = optimism_summary(self.history, task.sense)
 
         return best
 

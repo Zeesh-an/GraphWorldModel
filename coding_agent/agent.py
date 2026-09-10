@@ -312,6 +312,22 @@ class Conversation:
 
         return reply
 
+    def aside(self, user_text: str, kind: str = "aside") -> str:
+        """
+        One prose turn that sees the thread and leaves no trace in it.
+
+        Used for the probe turn before a generation: the model reads everything
+        it has written and been told so far, asks its questions, and neither the
+        question nor the answer becomes a message the next turns must carry. The
+        transcript archives it like every other turn.
+        """
+        reply = self.agent.provider.complete(
+            self.window() + [{"role": "user", "content": user_text}]
+        )
+        self._record(kind, user_text, reply)
+
+        return reply
+
     def compact_last(self, content: str) -> None:
         """
         Replace the last assistant turn with a compact stand-in.

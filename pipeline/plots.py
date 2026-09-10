@@ -955,12 +955,27 @@ def plot_convergence(
         if len(points) < 2:
             continue
 
-        axes.plot(
+        (line,) = axes.plot(
             [entry["iteration"] for entry in points],
             [entry.get("best", entry["reward"]) for entry in points],
             label=result["arm"],
             **_arm_style(index),
         )
+        # The incumbent re-scored on each generation's fresh realization: an
+        # accepted score is a maximum over noisy estimates and biased upward,
+        # the re-score is not, and the gap is the search's own optimism
+        unbiased = [
+            entry for entry in points if entry.get("incumbent_unbiased") is not None
+        ]
+        if len(unbiased) >= 2:
+            axes.plot(
+                [entry["iteration"] for entry in unbiased],
+                [entry["incumbent_unbiased"] for entry in unbiased],
+                label=f"{result['arm']} (unbiased re-score)",
+                linestyle="--",
+                alpha=0.7,
+                color=line.get_color(),
+            )
         plotted += 1
 
     if not plotted:
@@ -977,6 +992,66 @@ def plot_convergence(
         else f"best {reward_name(at_largest)} so far (selection split)"
     )
     axes.set_title(f"{title_prefix}: outer-loop convergence at k={largest}")
+    axes.grid(alpha=0.3)
+    axes.legend(fontsize=8)
+
+    return _save(figure, out_path)
+
+
+def plot_edit_calibration(
+    results: list[dict], out_path: Path, title_prefix: str
+) -> Path | None:
+    """
+    The model's forecast of each edit's paired delta against what the edit did,
+    one point per generation that carried an `# EXPECTED:` line, per arm at the
+    largest budget. Points on the diagonal are calibrated edits; the quadrants
+    off it are the sign errors.
+    """
+    with_history = [result for result in results if result.get("history")]
+    if not with_history:
+        return None
+
+    largest = max(result["budget"] for result in with_history)
+    at_largest = [result for result in with_history if result["budget"] == largest]
+
+    figure, axes = plt.subplots(figsize=figure_size)
+    plotted = 0
+    extent = 0.0
+
+    for index, result in enumerate(at_largest):
+        points = [
+            entry
+            for entry in result["history"]
+            if entry.get("predicted_delta") is not None and entry.get("delta") is not None
+        ]
+        if not points:
+            continue
+
+        predicted = [entry["predicted_delta"] for entry in points]
+        realized = [entry["delta"] for entry in points]
+        extent = max(extent, max(abs(value) for value in predicted + realized))
+        calibration = result.get("calibration") or {}
+        label = result["arm"]
+        if calibration.get("sign_accuracy") is not None:
+            label += f" (sign acc {calibration['sign_accuracy']:.0%}, n={calibration.get('n', len(points))})"
+        axes.scatter(
+            predicted, realized, label=label, alpha=0.8, marker=_arm_style(index)["marker"]
+        )
+        plotted += 1
+
+    if not plotted:
+        plt.close(figure)
+        return None
+
+    limit = extent * 1.1 or 1.0
+    axes.plot([-limit, limit], [-limit, limit], color="grey", linestyle=":", label="calibrated")
+    axes.axhline(0.0, color="grey", linewidth=0.5)
+    axes.axvline(0.0, color="grey", linewidth=0.5)
+    axes.set_xlim(-limit, limit)
+    axes.set_ylim(-limit, limit)
+    axes.set_xlabel(f"predicted paired delta ({reward_name(at_largest)})")
+    axes.set_ylabel("realized paired delta")
+    axes.set_title(f"{title_prefix}: edit calibration at k={largest}")
     axes.grid(alpha=0.3)
     axes.legend(fontsize=8)
 
@@ -2441,6 +2516,9 @@ def build_plots(
         ),
         plot_runtime(agent_results, plots_dir / "runtime.png", title_prefix),
         plot_convergence(agent_results, plots_dir / "convergence.png", title_prefix),
+        plot_edit_calibration(
+            agent_results, plots_dir / "edit_calibration.png", title_prefix
+        ),
         # Both return None on a non-adaptive sweep, so no guard is needed here
         plot_adaptivity_gap(
             agent_results, plots_dir / "adaptivity_gap.png", title_prefix

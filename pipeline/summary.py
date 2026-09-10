@@ -286,6 +286,25 @@ summary_columns = (
     "cp_model_msle",
     "cp_model_male",
     "cp_model_pcc",
+    # The search protocol's own bookkeeping (coding_agent/search_metrics.py,
+    # coding_agent/provenance.py): agent arms only, empty on every canned row
+    "accepted_generations",
+    "lucky_accepts_prevented",
+    "ties_kept",
+    "band_rule",
+    "in_loop_optimism_mean",
+    "in_loop_optimism_final",
+    "calibration_n",
+    "calibration_r",
+    "calibration_sign_accuracy",
+    "calibration_brier",
+    "probe_turns",
+    "probe_calls",
+    "probe_seconds",
+    "nearest_library",
+    "nearest_similarity",
+    "library_calls",
+    "stopped_early",
 )
 
 
@@ -318,6 +337,10 @@ def _row(result: dict, sense: str = "maximize") -> dict:
     # ...and the referee curve only exists once the referee ran, so the arm's own
     # is the fallback rather than the preference
     epidemic_curve = result.get("referee_curve") or {}
+    ledger = result.get("acceptance_ledger") or {}
+    calibration = result.get("calibration") or {}
+    optimism = result.get("in_loop_optimism") or {}
+    provenance = result.get("provenance") or {}
 
     return {
         "arm": result.get("arm"),
@@ -678,6 +701,23 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "cp_model_msle": result.get("model_msle"),
         "cp_model_male": result.get("model_male"),
         "cp_model_pcc": result.get("model_pcc"),
+        "accepted_generations": ledger.get("band_accepts"),
+        "lucky_accepts_prevented": ledger.get("lucky_accepts_prevented"),
+        "ties_kept": ledger.get("ties_kept"),
+        "band_rule": "+".join(ledger.get("band_rules") or []) or None,
+        "in_loop_optimism_mean": optimism.get("mean"),
+        "in_loop_optimism_final": optimism.get("final"),
+        "calibration_n": calibration.get("n"),
+        "calibration_r": calibration.get("pearson_r"),
+        "calibration_sign_accuracy": calibration.get("sign_accuracy"),
+        "calibration_brier": calibration.get("brier"),
+        "probe_turns": result.get("probe_turns"),
+        "probe_calls": result.get("probe_calls"),
+        "probe_seconds": result.get("probe_seconds"),
+        "nearest_library": provenance.get("nearest"),
+        "nearest_similarity": provenance.get("nearest_similarity"),
+        "library_calls": "+".join(provenance.get("calls") or []) or None,
+        "stopped_early": result.get("stopped_early"),
     }
 
 

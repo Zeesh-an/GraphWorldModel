@@ -345,6 +345,19 @@
 #                   (the default; batched on world-model and oracle arms,
 #                   auto-skipped on @monte_carlo arms; 0 passes --no-credit).
 #                   Costs one extra rollout per action.
+#   PROBE_TURN      1 = a trace-free probe aside before every evolve generation,
+#                   about the incumbent's plan, answered before the model writes
+#                   (the default; one extra LLM call per generation; 0 passes
+#                   --no-probe-turn).
+#   STOP_WHEN_FLAT  stop an evolve search once its unbiased incumbent estimate
+#                   has been flat for this many generations (default: unset,
+#                   every generation runs).
+#   CALIBRATION_STEERING 1 = a run of wrong-signed edit forecasts counts as a
+#                   stalled generation in the operator schedule (default 0).
+#   PROVENANCE      1 = after each agent arm, run the library pool on the same
+#                   instance and record the rediscovery distance (the default;
+#                   0 passes --no-provenance). PROVENANCE_TIMEOUT caps one member
+#                   in seconds (default 60).
 #   ALLOW_MC_ALGOS  1 = let generated scripts call the per-candidate-simulation
 #                   algorithms (celf, vanilla_greedy, ...). Default 0: they
 #                   exceed 60s per call and their episodes never reach
@@ -827,6 +840,11 @@ REFEREE_SAMPLES="${REFEREE_SAMPLES:-1000}"
 MC_AGREEMENT="${MC_AGREEMENT:-0}"
 MC_AGREEMENT_RUNS="${MC_AGREEMENT_RUNS:-}"
 CREDIT="${CREDIT:-1}"
+PROBE_TURN="${PROBE_TURN:-1}"
+STOP_WHEN_FLAT="${STOP_WHEN_FLAT:-}"
+CALIBRATION_STEERING="${CALIBRATION_STEERING:-0}"
+PROVENANCE="${PROVENANCE:-1}"
+PROVENANCE_TIMEOUT="${PROVENANCE_TIMEOUT:-}"
 ALLOW_MC_ALGOS="${ALLOW_MC_ALGOS:-0}"
 STRATEGY_TIMEOUT="${STRATEGY_TIMEOUT:-}"
 LLM_PRICE_IN="${LLM_PRICE_IN:-}"
@@ -909,6 +927,13 @@ flags+=(--referee "$REFEREE" --referee-samples "$REFEREE_SAMPLES")
 [ -n "$MC_AGREEMENT_RUNS" ] && flags+=(--mc-agreement-runs "$MC_AGREEMENT_RUNS")
 [ "$CREDIT" = "1" ]       && flags+=(--credit)
 [ "$CREDIT" = "0" ]       && flags+=(--no-credit)
+[ "$PROBE_TURN" = "1" ]   && flags+=(--probe-turn)
+[ "$PROBE_TURN" = "0" ]   && flags+=(--no-probe-turn)
+[ -n "$STOP_WHEN_FLAT" ]  && flags+=(--stop-when-flat "$STOP_WHEN_FLAT")
+[ "$CALIBRATION_STEERING" = "1" ] && flags+=(--calibration-steering)
+[ "$PROVENANCE" = "1" ]   && flags+=(--provenance)
+[ "$PROVENANCE" = "0" ]   && flags+=(--no-provenance)
+[ -n "$PROVENANCE_TIMEOUT" ] && flags+=(--provenance-timeout "$PROVENANCE_TIMEOUT")
 [ "$ALLOW_MC_ALGOS" = "1" ] && flags+=(--allow-mc-algorithms)
 [ -n "$STRATEGY_TIMEOUT" ] && flags+=(--strategy-timeout "$STRATEGY_TIMEOUT")
 [ -n "$LLM_PRICE_IN" ]  && flags+=(--llm-price-in "$LLM_PRICE_IN")

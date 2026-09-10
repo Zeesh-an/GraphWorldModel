@@ -1,6 +1,5 @@
 """OuterLoopMethod contract + shared helpers."""
 
-import math
 import time
 from dataclasses import replace
 from functools import partial
@@ -60,6 +59,7 @@ from coding_agent.tools.localization_algorithms import (
 )
 from coding_agent.tools.prediction_algorithms import prediction_algorithms
 from coding_agent.tools.reconstruction_algorithms import reconstruction_algorithms
+from coding_agent.search_metrics import paired_band
 from coding_agent.types import (
     ActionOp,
     GraphInfo,
@@ -695,17 +695,17 @@ def paired_delta(
     Both rollouts run at the same seed, so the realizations are shared and the
     difference is far better resolved than either absolute number, but on a
     hub-dominated graph the whole algorithmic spread can still sit inside this
-    band, and the model needs to be told that rather than chase it.
+    band, and the model needs to be told that rather than chase it. The band is
+    the paired standard error, the one acceptance reads.
 
     `sense` decides what a negative delta MEANS. Under containment fewer infected
     nodes is the win, so an unflipped verdict would coach the model to undo every
     improvement it makes.
     """
     delta = trajectory.reward - incumbent.reward
-    band = 2.0 * math.sqrt(
-        trajectory.cost.get("reward_se", 0.0) ** 2
-        + incumbent.cost.get("reward_se", 0.0) ** 2
-    )
+    # The SAME band the acceptance rule reads, so the verdict the model is told
+    # and the decision the loop makes can never disagree
+    band, _ = paired_band(trajectory, incumbent)
 
     if abs(delta) <= band:
         verdict = (
@@ -1182,7 +1182,8 @@ def accepts(
 ) -> bool:
     """
     Whether a candidate replaces the incumbent: its paired delta has to clear the
-    larger of the two standard errors, not an epsilon.
+    standard error of the paired difference (`search_metrics.paired_band`), not
+    an epsilon and not the larger marginal standard error.
 
     Both were scored on the same realization (common random numbers), so the
     band is the noise of that comparison, and a delta inside it is a coin flip
@@ -1194,10 +1195,7 @@ def accepts(
     if incumbent is None:
         return True
 
-    band = max(
-        float(candidate.cost.get("reward_se") or 0.0),
-        float(incumbent.cost.get("reward_se") or 0.0),
-    )
+    band, _ = paired_band(candidate, incumbent)
     if improves(candidate.reward, incumbent.reward, sense, band):
         return True
 

@@ -63,6 +63,12 @@ class MonteCarloEnvironment:
         # evaluator_calls / evaluator_seconds.
         self.rollout_calls = 0
         self.evaluator_seconds = 0.0
+        # Mirrors WorldModelEnvironment: the final infected set per episode of the
+        # last rollout (counterexamples), and the frontier-at-t capture for the
+        # `frontier` probe
+        self.last_sample_final_infected = []
+        self.capture_frontier_step = None
+        self.last_frontier_marginals = None
 
     def step_marginals(
         self, state: State, seed: int | None = None
@@ -116,6 +122,9 @@ class MonteCarloEnvironment:
         representative_states = []
         representative_actions = []
         representative_counts = []
+        final_sets = []
+        frontier_frequency = np.zeros(self.graph.num_nodes)
+        capture_step = self.capture_frontier_step
 
         self.episodes_used += self.mc_runs
 
@@ -177,6 +186,11 @@ class MonteCarloEnvironment:
             final_counts.append(float(len(state.infected)))
             per_run_curves.append(pad_counts(counts, horizon))
             final_infected_freq[list(state.infected)] += 1.0
+            final_sets.append(set(int(node) for node in state.infected))
+            # states[t + 1] is the state after the step at t; an episode that
+            # terminated earlier has an empty frontier there by definition
+            if capture_step is not None and capture_step + 1 < len(states):
+                frontier_frequency[list(states[capture_step + 1].frontier)] += 1.0
 
             if self.epidemic_config is not None:
                 # Zero-padded rather than held: a dead epidemic's prevalence IS
@@ -206,6 +220,11 @@ class MonteCarloEnvironment:
         # Report the averaged final count as the endpoint
         representative_counts[-1] = reward
 
+        self.last_sample_final_infected = final_sets
+        if capture_step is not None:
+            self.last_frontier_marginals = frontier_frequency / self.mc_runs
+            self.capture_frontier_step = None
+
         elapsed = time.perf_counter() - start
         self.rollout_calls += 1
         self.evaluator_seconds += elapsed
@@ -231,4 +250,5 @@ class MonteCarloEnvironment:
                 if per_run_prevalence
                 else None
             ),
+            sample_rewards=final_counts,
         )

@@ -325,7 +325,9 @@ available and re-implementing one is not the task."""
     return f"""\
 {prediction_brief}
 OUTPUT FORMAT: the first line inside your fenced block MUST be `# MECHANISM: <one
-sentence>` naming the idea of the algorithm. Reply with exactly ONE fenced ```python
+sentence>` naming the idea of the algorithm; from the second attempt on, the second
+line is `# EXPECTED: <signed change you expect against the program you edited> p=<0-1>`.
+Reply with exactly ONE fenced ```python
 block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
@@ -394,7 +396,9 @@ needs; a simulator call is not available."""
     return f"""\
 {reconstruction_brief}
 OUTPUT FORMAT: the first line inside your fenced block MUST be `# MECHANISM: <one
-sentence>` naming the idea of the algorithm. Reply with exactly ONE fenced ```python
+sentence>` naming the idea of the algorithm; from the second attempt on, the second
+line is `# EXPECTED: <signed change you expect against the program you edited> p=<0-1>`.
+Reply with exactly ONE fenced ```python
 block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
@@ -456,7 +460,9 @@ call is not available."""
     return f"""\
 {localization_brief}
 OUTPUT FORMAT: the first line inside your fenced block MUST be `# MECHANISM: <one
-sentence>` naming the idea of the algorithm. Reply with exactly ONE fenced ```python
+sentence>` naming the idea of the algorithm; from the second attempt on, the second
+line is `# EXPECTED: <signed change you expect against the program you edited> p=<0-1>`.
+Reply with exactly ONE fenced ```python
 block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
@@ -830,7 +836,9 @@ def _common_rules(task: TaskSpec | None) -> str:
     return f"""\
 {brief}
 OUTPUT FORMAT: the first line inside your fenced block MUST be `# MECHANISM: <one
-sentence>` naming the idea of the algorithm. Reply with exactly ONE fenced ```python
+sentence>` naming the idea of the algorithm; from the second attempt on, the second
+line is `# EXPECTED: <signed change you expect against the program you edited> p=<0-1>`.
+Reply with exactly ONE fenced ```python
 block and nothing else,
 no prose before or after. The block contains import lines (if you need any) and
 then exactly ONE class subclassing `Strategy`. Nothing else at module level: no
@@ -2811,7 +2819,10 @@ def build_attempts_table(history: list[dict], sense: str) -> str:
 
     direction = "lower is better" if sense == "minimize" else "higher is better"
     rows = history if len(history) <= max_table_rows else [history[0], *history[-(max_table_rows - 1):]]
-    lines = [f"iter | operator | reward ({direction}) | vs best | accepted | mechanism | hint"]
+    lines = [
+        f"iter | operator | reward ({direction}) | vs best | accepted | mechanism | hint | "
+        "you expected"
+    ]
     for record in rows:
         if record.get("error"):
             outcome = f"FAILED: {str(record['error']).splitlines()[0][:70]}"
@@ -2825,10 +2836,24 @@ def build_attempts_table(history: list[dict], sense: str) -> str:
             f"{record['iteration']} | {record.get('operator', '?')} | {record['reward']:.3f} | "
             f"{'' if delta is None else f'{delta:+.3f}'} | "
             f"{'yes' if record.get('accepted') else 'no'} | "
-            f"{record.get('mechanism', '')[:80]} | {record.get('hint', '')[:100]}"
+            f"{record.get('mechanism', '')[:80]} | {record.get('hint', '')[:100]} | "
+            f"{_expected_cell(record)}"
         )
 
     return "\n".join(lines)
+
+
+def _expected_cell(record: dict) -> str:
+    """The model's own forecast for that generation, beside what happened."""
+    predicted = record.get("predicted_delta")
+    if predicted is None:
+        return ""
+    probability = record.get("predicted_clear_p")
+    text = f"{predicted:+.3f}"
+    if probability is not None:
+        text += f" (p={probability:.2f})"
+
+    return text
 
 
 def build_population_table(population: list[dict], sense: str) -> str:
@@ -2836,13 +2861,22 @@ def build_population_table(population: list[dict], sense: str) -> str:
     if not population:
         return "(empty)"
 
+    # Rank by the paired estimate when the search computed one: each member's
+    # own reward was measured on its own generation's realization, and the
+    # paired estimate puts every member on one scale (search_metrics)
+    ranked_by_strength = all(record.get("strength") is not None for record in population)
+    key = "strength" if ranked_by_strength else "reward"
     ordered = sorted(
-        population, key=lambda record: record["reward"], reverse=(sense != "minimize")
+        population, key=lambda record: record[key], reverse=(sense != "minimize")
     )
-    lines = ["id | reward | plan seconds | code lines | mechanism"]
+    header = "id | reward | plan seconds | code lines | mechanism"
+    if ranked_by_strength:
+        header = "id | reward (own realization) | paired estimate | plan seconds | code lines | mechanism"
+    lines = [header]
     for record in ordered:
+        estimate = f"{record['strength']:.3f} | " if ranked_by_strength else ""
         lines.append(
-            f"{record.get('iteration', '?')} | {record['reward']:.3f} | "
+            f"{record.get('iteration', '?')} | {record['reward']:.3f} | {estimate}"
             f"{record.get('plan_seconds', 0.0):.1f} | "
             f"{len(str(record.get('script', '')).splitlines())} | "
             f"{record.get('mechanism', '')[:100]}"
@@ -2992,18 +3026,103 @@ def parse_ideas(reply: str) -> tuple[list[str], str]:
 
 # Appended to the evolve/adaptive opening turn on arms whose evaluator can
 # answer probes; the native arm never sees it and refuses a hallucinated block
-probe_contract = (
-    "\n\nPROBES. Beside your ```python block you may add ONE fenced block\n"
-    "```probes\n{\"probes\": [...]}\n```\n"
-    "asking the evaluator what-if questions about the plan your script produces "
-    "this iteration; the answers arrive with the NEXT iteration's feedback, and "
-    "every probe is metered evaluator work like any rollout. At most "
-    f"{max_probes_per_generation} per iteration. Ops: "
+_intervention_probe_ops = (
     '{"op": "drop", "node": N} = plan reward with node N\'s actions removed '
-    "(N's marginal contribution); "
-    '{"op": "swap", "a": N, "b": M} = reward if M replaces N in the plan; '
+    "(N's marginal contribution, 2 rollouts); "
+    '{"op": "swap", "a": N, "b": M} = reward if M replaces N (2 rollouts); '
+    '{"op": "add", "node": N} = marginal gain of one MORE budgeted action on an '
+    "unselected node N, at budget k+1 (2 rollouts); "
+    '{"op": "best_swap", "node": N} = the best replacement for N among the '
+    "highest-degree unselected nodes, with its delta (one batched call); "
+    '{"op": "overlap", "a": N, "b": M} = expected nodes the cascades of N and M '
+    "BOTH reach, i.e. how redundant two seeds are (seeding tasks, 3 rollouts); "
+    '{"op": "horizon", "t": T} = the plan\'s expected spread curve run out to T '
+    "steps, at most twice the task horizon (1 rollout); "
+    '{"op": "frontier", "t": T} = expected frontier size after step T and the '
+    "nodes most likely spreading then (1 rollout); "
     '{"op": "region", "nodes": [...]} = expected probability mass the plan '
-    "captures inside that node set."
+    "captures inside that node set (1 rollout); "
+    '{"op": "robust", "sigma": S} = the plan\'s reward with every p(u->v) '
+    "multiplied by lognormal noise of scale S, and "
+    '{"op": "robust", "mode": "hidden"} = its reward with the transmission '
+    "probabilities hidden from the model (forward-model arms; 2 rollouts); "
+    '{"op": "gradient", "top": M} = d(expected spread)/d(seed) for every node by '
+    "one differentiable mean-field rollout: the M highest-gradient UNSELECTED "
+    "nodes and the M lowest-gradient SELECTED ones (world-model and oracle arms, "
+    "add_node lever only; one pass whatever k is)."
+)
+_localization_probe_ops = (
+    '{"op": "resimulate", "nodes": [...], "episode": i} = the consistency score '
+    "of an arbitrary candidate source set on selection episode i (default 0), "
+    "with the nodes it over- and under-explains (1 rollout)."
+)
+_reconstruction_probe_ops = (
+    '{"op": "transmission", "u": U, "v": V, "t": T, "episode": i} = the kernel\'s '
+    "probability that V activates at T+1 given the state YOUR decoded history "
+    "asserts at T on selection cascade i, whether U is on that frontier, and the "
+    "activations the kernel finds likeliest (1 kernel call)."
+)
+
+
+def probe_ops_text(task: TaskSpec) -> str:
+    """The probe ops this task's family can answer, as prompt text."""
+    if task.forecasts:
+        return ""
+    if task.recovers:
+        return _localization_probe_ops
+    if task.decodes:
+        return _reconstruction_probe_ops
+
+    return _intervention_probe_ops
+
+
+def probe_contract_for(task: TaskSpec) -> str:
+    """The probe contract appended to the opening turn, or empty when the family has none."""
+    ops = probe_ops_text(task)
+    if not ops:
+        return ""
+
+    return (
+        "\n\nPROBES. Beside your ```python block you may add ONE fenced block\n"
+        "```probes\n{\"probes\": [...]}\n```\n"
+        "asking the evaluator what-if questions about the plan your script produces "
+        "this iteration; the answers arrive with the NEXT iteration's feedback, and "
+        "every probe is metered evaluator work like any rollout. Before each "
+        "generation you also get a PROBE TURN: the same questions asked about the "
+        "incumbent's plan, answered immediately, before you write. At most "
+        f"{max_probes_per_generation} per request. Ops: {ops}"
+    )
+
+
+def build_probe_turn_prompt(parent: dict, task: TaskSpec, operator: str) -> str:
+    """
+    The trace-free aside before a generation: the incumbent's plan and diagnostics
+    are in front of the model, and it may ask before it writes.
+    """
+    return f"""\
+PROBE TURN before your next {operator.replace("_", " ")} edit. The program you will \
+edit is the incumbent (iteration {parent.get("iteration", "?")}, reward \
+{parent["reward"]:.3f}, mechanism: {parent.get("mechanism", "")}). Its diagnostics:
+{parent.get("summary", "")}
+
+You may ask up to {max_probes_per_generation} what-if questions about THAT plan; \
+the answers arrive in the prompt for this generation. Every probe costs \
+evaluator work. Ops: {probe_ops_text(task)}
+
+Reply with exactly ONE fenced block
+```probes
+{{"probes": [...]}}
+```
+or the single word NONE if you have nothing to ask. No code in this reply."""
+
+
+# The forecast line every generation after the seed must carry under its
+# mechanism line, so the model's expectation of its own edit is on record
+expected_line_instruction = (
+    "The second line must be `# EXPECTED: <signed change in reward you expect "
+    "against the program you edited, in the task's units> p=<your probability, "
+    "0 to 1, that the change clears the noise band>`; the realized delta is "
+    "compared with it and your calibration is reported back to you."
 )
 
 
@@ -3074,7 +3193,7 @@ POPULATION (what survives):
 {last_text}{programs}{error_text}
 OPERATION: {evolve_operator_instructions[operator]}
 The first line inside your code block must be `# MECHANISM: <one sentence>` naming
-the idea of the strategy. Reply with one ```python block."""
+the idea of the strategy. {expected_line_instruction} Reply with one ```python block."""
 
 
 # GA-routing baseline: the LLM selects from the pool but never synthesizes code

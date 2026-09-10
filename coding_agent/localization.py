@@ -486,6 +486,9 @@ def evaluate_localizer(
         # P(infected) to report. reference_diff() already returns None on that.
         final_marginals=None,
         spread_curve=None,
+        # One consistency score per selection episode, instance-aligned across
+        # programs: the paired band and the counterexamples read these
+        sample_rewards=rewards,
     )
 
     return trajectory, elapsed

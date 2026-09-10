@@ -908,6 +908,8 @@ def evaluate_reconstructor(
         # No cascade was rolled out; nothing was seeded and nothing spread
         final_marginals=None,
         spread_curve=None,
+        # One reward per selection cascade, instance-aligned across decoders
+        sample_rewards=rewards,
     )
 
     return trajectory, elapsed
