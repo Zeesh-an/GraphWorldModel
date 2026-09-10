@@ -70,16 +70,25 @@ cd "$REPO_ROOT"
 [ -f pipeline/run.py ] || { echo "[repo] REPO_ROOT=$REPO_ROOT has no pipeline/run.py; set REPO_ROOT to the checkout" >&2; exit 1; }
 [ -w . ] || { echo "[repo] REPO_ROOT=$REPO_ROOT is not writable, and results/ and logs/ live here" >&2; exit 1; }
 echo "[repo] $REPO_ROOT"
-source venv/bin/activate
+VENV="${VENV:-venv}"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+fi
 mkdir -p results logs
+# The matrix's synthetic rows are 10,000 nodes (final_results_plan.md section 2);
+# the real graphs ignore this
+export SYN_NODES="${SYN_NODES:-10000}"
 
-SETTING="${CR_SETTING:-partial_times}"
+SETTING="${CR_SETTING:-final_snapshot}"
 
-for DATASET in jazz infectious email_univ uci_students citeseer cora_ml ca_grqc \
-               power_grid ca_hepth oregon2 rt_pol; do
+# final_results_plan.md section 4.6, in rank order. `ba` is DITTO's single-graph
+# protocol, so it gets one graph and the per-episode split the pipeline resolves
+for DATASET in uci_students ca_grqc rt_pol oregon2 ba; do
     echo "=== $DATASET ($SETTING) ==="
+    extra=()
+    [ "$DATASET" = "ba" ] && extra=(NUM_GRAPHS=1 BA_M=3)
     env TASK=cascade_reconstruction DATASET="$DATASET" RUN="${RUN:-default}" \
-        RUN_JOBID=0 CR_SETTING="$SETTING" \
+        RUN_JOBID=0 CR_SETTING="$SETTING" ${extra[@]+"${extra[@]}"} \
         ./sbatch/pipeline.sbatch \
         || echo "[cr_datasets] $DATASET FAILED, continuing"
 done

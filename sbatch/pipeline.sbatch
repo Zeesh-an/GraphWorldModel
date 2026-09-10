@@ -418,6 +418,9 @@
 #                    anything but 1 for it is a hard error
 #   SYN_NODES        nodes per synthetic graph
 #   ER_P BA_M WS_K WS_P SBM_BLOCKS SBM_P_IN SBM_P_OUT   family-specific
+#   SYN_NODES=10000 (or more) switches the synthetic class to the large-tier
+#   recipe (hidden 256, no betweenness, 64G, 48h) and the SBM to 10 blocks at
+#   p_in 0.01 / p_out 0.0005; final_results_plan.md section 8 is written for it.
 #   GEN_MODELS       IC, LT, or both: one transition file per dynamics
 #   GEN_ALGORITHMS   spine seed selectors: random degree pagerank betweenness
 #                    celf local_search. betweenness is exact Brandes, O(V*E)
@@ -654,22 +657,50 @@ OUTBREAK_SELECTORS="${OUTBREAK_SELECTORS:-}"
 IMMUNIZER_SELECTORS="${IMMUNIZER_SELECTORS:-}"
 
 # Dataset class drives the settings that genuinely cannot share a default:
-# graph population, seed selectors, encoder width, and memory.
+# graph population, seed selectors, encoder width, and memory. The tiers are
+# final_results_plan.md section 2's: medium is 1,000 to 10,000 nodes, large
+# 10,000 to 100,000, very large above 100,000, and every real graph in that
+# file's section 4 is named in the tier its node count puts it in. A real graph
+# not named here is treated as medium.
 case "$DATASET" in
   er|ba|ws|sbm|powerlaw_cluster|kronecker|karate)
-    class_graphs=40 ; class_nodes=100 ; class_rollouts=20
-    class_selectors="random degree pagerank betweenness"
-    class_hidden=64 ; class_mem=16G ; class_time=24:00:00
+    if [ "${SYN_NODES:-100}" -ge 10000 ]; then
+      # The matrix's one synthetic row (section 2: 10,000 nodes, large tier).
+      # Same recipe as the large real graphs, and the SBM is ten blocks of
+      # 1,000 with p_in / p_out chosen for a mean degree near 15 (about 10
+      # within the block, 4.5 across), which the 100-node defaults below
+      # would turn into a near-complete graph at this size.
+      class_graphs=40 ; class_nodes=10000 ; class_rollouts=20
+      class_selectors="random degree pagerank"
+      class_hidden=256 ; class_mem=64G ; class_time=48:00:00
+      SBM_BLOCKS="${SBM_BLOCKS:-10}"
+      SBM_P_IN="${SBM_P_IN:-0.01}"
+      SBM_P_OUT="${SBM_P_OUT:-0.0005}"
+    else
+      class_graphs=40 ; class_nodes=100 ; class_rollouts=20
+      class_selectors="random degree pagerank betweenness"
+      class_hidden=64 ; class_mem=16G ; class_time=24:00:00
+    fi
     ;;
-  nethept|twitter|digg|youtube|weibo)
-    # Exact Brandes betweenness is O(V*E) in pure networkx: hours at this
-    # size, so these lean on random/degree/pagerank instead
+  digg|youtube|weibo|epinions|orkut|livejournal|pokec|higgs_twitter|gowalla|dblp|web_stanford|email_euall|casflow_weibo|casflow_twitter|casflow_aps|digg_cascades|weibo_cascades|memetracker)
+    # Very large, above 100,000 nodes. One real graph, no betweenness (exact
+    # Brandes is O(V*E) in pure networkx: hours at this size), and the memory
+    # the digg run needed. The cascade corpora are here by their UNDERLYING node
+    # count, which is what the replayed graph costs; a --cp-max-nodes cap
+    # shrinks that but is not visible to a case statement on the name.
+    class_graphs=1 ; class_nodes=100 ; class_rollouts=50
+    class_selectors="random degree pagerank"
+    class_hidden=256 ; class_mem=128G ; class_time=48:00:00
+    ;;
+  nethept|twitter|epinions1|brightkite|deezer|p2p_gnutella|p2p_gnutella24|cit_hepth|cit_hepph|rt_pol|oregon1|oregon2|oregon2_010331|infectious_sociopatterns|pgp|netphy|email_enron|slashdot|taoke|aps)
+    # Large, 10,000 to 100,000 nodes. Same recipe as very large, half the memory.
     class_graphs=1 ; class_nodes=100 ; class_rollouts=50
     class_selectors="random degree pagerank"
     class_hidden=256 ; class_mem=64G ; class_time=48:00:00
     ;;
   *)
-    # One real graph: episode diversity comes from rollouts, not graph count
+    # Medium, and the small smoke graphs. One real graph: episode diversity
+    # comes from rollouts, not graph count, and betweenness is affordable.
     class_graphs=1 ; class_nodes=100 ; class_rollouts=100
     class_selectors="random degree pagerank betweenness"
     class_hidden=128 ; class_mem=32G ; class_time=24:00:00

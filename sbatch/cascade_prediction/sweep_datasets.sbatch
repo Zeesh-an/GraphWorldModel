@@ -61,8 +61,14 @@ cd "$REPO_ROOT"
 [ -f pipeline/run.py ] || { echo "[repo] REPO_ROOT=$REPO_ROOT has no pipeline/run.py; set REPO_ROOT to the checkout" >&2; exit 1; }
 [ -w . ] || { echo "[repo] REPO_ROOT=$REPO_ROOT is not writable, and results/ and logs/ live here" >&2; exit 1; }
 echo "[repo] $REPO_ROOT"
-source venv/bin/activate
+VENV="${VENV:-venv}"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+fi
 mkdir -p results logs
+# The matrix's synthetic rows are 10,000 nodes (final_results_plan.md section 2);
+# the real graphs ignore this
+export SYN_NODES="${SYN_NODES:-10000}"
 
 run_dataset () {
     local dataset="$1"; shift
@@ -72,19 +78,17 @@ run_dataset () {
         ./sbatch/pipeline.sbatch || echo "[cp_datasets] $dataset FAILED, continuing"
 }
 
-# Front-loaded: a leak-free split is impossible on it, and the pipeline says so
-# with the numbers rather than failing silently
-run_dataset taoke           CP_SPLIT=random CP_MAX_CASCADES=2000
-
-# CP_MAX_NODES deletes adopters from every cascade and the size filter is
-# re-applied after it, so a capped corpus keeps fewer cascades than the
-# uncapped one and is comparable only to itself (§8.4). casflow_aps is left
-# uncapped here on purpose: its first run needed a cap to fit in 64 GB during
-# the agent stage and that run's numbers are on a censored corpus.
+# final_results_plan.md section 4.8, in rank order. CP_MAX_NODES deletes
+# adopters from every cascade and the size filter is re-applied after it, so a
+# capped corpus keeps fewer cascades than the uncapped one and is comparable
+# only to itself (§8.4): one cap per corpus, stated in the caption. casflow_aps
+# runs uncapped at 128G first (its August run needed a cap to fit in 64G during
+# the agent stage). taoke needs CP_MIN_SIZE=3 for a leak-free split, and its
+# file has to be obtained by hand (the only source returned 404 on 2026-09-06).
+run_dataset casflow_weibo   CP_SPLIT=chronological CP_MAX_NODES=50000 MEM=128G
+run_dataset casflow_aps     CP_SPLIT=chronological MEM=128G
+run_dataset taoke           CP_SPLIT=chronological CP_MIN_SIZE=3
+run_dataset casflow_twitter CP_SPLIT=chronological CP_MAX_NODES=50000 MEM=128G
 run_dataset digg_cascades   CP_SPLIT=chronological
-run_dataset casflow_aps     CP_SPLIT=chronological
-run_dataset casflow_weibo   CP_SPLIT=chronological CP_MAX_NODES=50000
-run_dataset casflow_twitter CP_SPLIT=chronological CP_MAX_NODES=50000
-run_dataset memetracker     CP_SPLIT=chronological CP_MAX_NODES=20000
 
 echo "=== done: results/cascade_prediction/<corpus>/default/report.md ==="

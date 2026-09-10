@@ -23,11 +23,21 @@ from pipeline.tasks import minimize, tasks
 
 # Headless: SLURM nodes have no display
 matplotlib.use("Agg")
+# Embed TrueType rather than matplotlib's default Type 3. Type 3 text is not
+# reliably searchable or selectable and several venues' submission checkers
+# reject it outright, which is a problem discovered at the deadline rather than
+# here. 42 is TrueType for both vector backends.
+matplotlib.rcParams["pdf.fonttype"] = 42
+matplotlib.rcParams["ps.fonttype"] = 42
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.ticker import MaxNLocator  # noqa: E402
 
 figure_dpi = 200
 figure_size = (7.0, 4.5)
+# Every figure is written once per format. PNG is what the markdown report
+# embeds; PDF is vector and is what the paper needs, and producing it here costs
+# one extra write rather than a rerun months later to recover it.
+figure_formats = ("png", "pdf")
 marker_cycle = ("o", "s", "^", "D", "v", "P", "X", "*")
 condition_colors = {
     1: "#8C8C8C",
@@ -483,9 +493,20 @@ def _spread_title(results: list[dict]) -> str:
 
 
 def _save(figure: plt.Figure, path: Path) -> Path:
+    """
+    Write one figure in every format of `figure_formats`, and return the PNG path.
+
+    The return value stays the PNG because the report embeds it and `build_plots`
+    reports it; the PDF is a sibling with the same stem.
+    """
     _prettify_figure(figure)
     figure.tight_layout()
-    figure.savefig(path, dpi=figure_dpi, bbox_inches="tight")
+
+    for suffix in figure_formats:
+        figure.savefig(
+            path.with_suffix(f".{suffix}"), dpi=figure_dpi, bbox_inches="tight"
+        )
+
     plt.close(figure)
 
     return path

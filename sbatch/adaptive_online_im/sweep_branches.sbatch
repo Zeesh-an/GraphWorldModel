@@ -53,8 +53,11 @@ if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV/bin/activate" ]; then
     source "$VENV/bin/activate"
 fi
 mkdir -p results logs
+# The matrix's synthetic rows are 10,000 nodes (final_results_plan.md section 2);
+# the real graphs ignore this
+export SYN_NODES="${SYN_NODES:-10000}"
 
-DATASET="${DATASET:-powerlaw_cluster}"
+DATASET="${DATASET:-netscience}"
 BUDGET_PCTS="${BUDGET_PCTS:-1 5 10 20}"
 common=(TASK=adaptive_online_im DATASET="$DATASET" RUN_JOBID=0)
 

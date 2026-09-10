@@ -68,10 +68,16 @@ cd "$REPO_ROOT"
 [ -f pipeline/run.py ] || { echo "[repo] REPO_ROOT=$REPO_ROOT has no pipeline/run.py; set REPO_ROOT to the checkout" >&2; exit 1; }
 [ -w . ] || { echo "[repo] REPO_ROOT=$REPO_ROOT is not writable, and results/ and logs/ live here" >&2; exit 1; }
 echo "[repo] $REPO_ROOT"
-source venv/bin/activate
+VENV="${VENV:-venv}"
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -f "$VENV/bin/activate" ]; then
+    source "$VENV/bin/activate"
+fi
 mkdir -p results logs
+# The matrix's synthetic rows are 10,000 nodes (final_results_plan.md section 2);
+# the real graphs ignore this
+export SYN_NODES="${SYN_NODES:-10000}"
 
-DATASETS="${DATASETS:-karate dolphins jazz netscience cora_ml power_grid}"
+DATASETS="${DATASETS:-cora_ml power_grid deezer netscience sbm}"
 
 for dataset in $DATASETS; do
     echo "=== $dataset ==="

@@ -500,7 +500,7 @@ GraphWorldModel/
 ├── coding_agent/               # ← outer-loop coding agent (see its README)
 ├── sbatch/
 │   ├── pipeline.sbatch         # the task-agnostic SLURM entry point (self-submitting)
-│   └── <task>/                 # per-dataset generation + training scripts
+│   └── <task>/                 # protocol sweeps (loops over pipeline.sbatch) and data-only wrappers
 ├── research/                   # ← one literature review per graph task (see its README)
 ├── registry/                   # run registry: manifests, task families, consistency checks
 ├── scripts/                    # standalone eval scripts (transfer matrix, ablations, ranking)

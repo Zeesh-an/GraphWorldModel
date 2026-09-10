@@ -543,8 +543,8 @@ That 1% is the sober number to keep in mind: **retrospective reconstruction on r
 | --- | --- |
 | **Benchmark family** (§6, the 7 CR benchmarks) | `infectious`, `email_univ`, `uci_students`, `oregon2`, `rt_pol`, `ca_hepth`, `citeseer` |
 | **Also reported on** | `cora_ml`, `power_grid` (the two DIPT rows where our graph is known to match), `ca_grqc` (§8.2 trap 4's assortativity case), `jazz` |
-| **Synthetic** | `ba`, `er` at DITTO's own parameters (`generate_data_ba_er.sbatch`), plus `ws`, `sbm`, `karate`, `powerlaw_cluster`, `kronecker` |
-| **In `sbatch/cascade_reconstruction/sweep_datasets.sbatch` today** | `jazz`, `infectious`, `email_univ`, `uci_students`, `citeseer`, `cora_ml`, `ca_grqc`, `power_grid`, `ca_hepth`, `oregon2`, `rt_pol` |
+| **Synthetic** | `ba`, `er` at DITTO's own parameters (one graph, 1,000 nodes, 5 percent sources, diffusion-only with traced parents; `final_results_plan.md` section 8 runs `ba` at 10,000 nodes through `pipeline.sbatch`), plus `ws`, `sbm`, `karate`, `powerlaw_cluster`, `kronecker` |
+| **In `sbatch/cascade_reconstruction/sweep_datasets.sbatch` today** | `uci_students`, `ca_grqc`, `rt_pol`, `oregon2`, `ba` (section 4.6 of `final_results_plan.md`) |
 
 The sweep covers all 7 of the family plus the 4 context graphs. **`ca_hepth` is not `cit_hepth`** (8,638-node co-authorship vs 27,769-node citation).
 
