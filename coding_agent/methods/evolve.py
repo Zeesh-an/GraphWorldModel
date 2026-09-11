@@ -235,7 +235,7 @@ class EvolveSearch(OuterLoopMethod):
         # Per-action counterfactual credit in every generation's feedback
         self.credit = credit
         # Which feedback tier each generation gets (coding_agent/feedback.py).
-        # `legacy` (the default) is the repository's existing summarize() output
+        # `default` is the repository's full summarize() output
         # and leaves every current run byte-identical; f0-f3 are the controlled
         # ladder Experiment 3 varies.
         self.feedback = resolve_feedback(feedback)
@@ -622,10 +622,10 @@ class EvolveSearch(OuterLoopMethod):
                 if best is not None
                 else None
             )
-            # LEGACY takes the existing path untouched; a ladder tier takes the
+            # DEFAULT takes the summarize() path untouched; a ladder tier takes the
             # counted diagnostic blocks and NOTHING else, so its feedback content
             # is exactly what the tier names
-            if self.feedback.is_legacy:
+            if self.feedback.is_default:
                 summary = (
                     summarize(trajectory, graph, task)
                     + (f"\n{last_delta}" if last_delta else "")

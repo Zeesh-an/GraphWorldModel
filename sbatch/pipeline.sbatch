@@ -345,6 +345,16 @@
 #                   (the default; batched on world-model and oracle arms,
 #                   auto-skipped on @monte_carlo arms; 0 passes --no-credit).
 #                   Costs one extra rollout per action.
+#   ACTION_CONDITIONING  where the action enters the learned transition (sage
+#                   only): none (default, the historical model), message (the
+#                   action-conditioned message passing), global (its locality
+#                   ablation), message_blind (the capacity control). Recorded in
+#                   the checkpoint; the train stage refuses to reuse a checkpoint
+#                   trained under another value, so give a conditioned run its
+#                   own RUN name.
+#   FEEDBACK        what each evolve generation is told after scoring: default
+#                   (the full feedback) or the controlled ladder f0,
+#                   f1, f2, f3 (research/action_conditioning_and_feedback.md).
 #   PROBE_TURN      1 = a trace-free probe aside before every evolve generation,
 #                   about the incumbent's plan, answered before the model writes
 #                   (the default; one extra LLM call per generation; 0 passes
@@ -795,6 +805,8 @@ PLAN_BUDGET_GRAPHS="${PLAN_BUDGET_GRAPHS:-3}"
 PLAN_BUDGET_HORIZON="${PLAN_BUDGET_HORIZON:-20}"
 OOD_POLICIES="${OOD_POLICIES:-}"
 ACTION_ENCODING="${ACTION_ENCODING:-basic}"
+ACTION_CONDITIONING="${ACTION_CONDITIONING:-none}"
+FEEDBACK="${FEEDBACK:-default}"
 
 # Agent stage
 # Unset means "let pipeline.tasks decide": influence_maximization gets the
@@ -887,6 +899,8 @@ flags=(
   --plan-budget-k "$PLAN_BUDGET_K" --plan-budget-graphs "$PLAN_BUDGET_GRAPHS"
   --plan-budget-horizon "$PLAN_BUDGET_HORIZON"
   --action-encoding "$ACTION_ENCODING"
+  --action-conditioning "$ACTION_CONDITIONING"
+  --feedback "$FEEDBACK"
 
   --baseline-timeout "$BASELINE_TIMEOUT" --native-mc-runs "$NATIVE_MC_RUNS"
   --evaluator "$EVALUATOR" --llm-model "$LLM_MODEL"

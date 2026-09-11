@@ -480,3 +480,27 @@ def test_provenance_runs_the_library_pool_on_the_winner() -> None:
     assert "high_degree" in names
     hub_first = next(entry for entry in block["ranking"] if entry["name"] == "high_degree")
     assert hub_first["common"] >= 1
+
+
+def test_train_stage_refuses_a_checkpoint_trained_under_another_conditioning(tmp_path) -> None:
+    import pytest as _pytest
+
+    from pipeline.run import check_checkpoint_conditioning
+    from world_model.checkpoint import ModelSpec, build_model, save_checkpoint
+
+    spec = ModelSpec(backbone="sage", head="structured", diffusion_model="IC", hidden_dim=16, n_layers=2)
+    path = tmp_path / "wm_sage_IC.pt"
+    save_checkpoint(build_model(spec), path, spec)
+    check_checkpoint_conditioning(path, "none")
+    with _pytest.raises(ValueError, match="trained with --action-conditioning 'none'"):
+        check_checkpoint_conditioning(path, "message")
+
+    conditioned = ModelSpec(
+        backbone="sage", head="structured", diffusion_model="IC", hidden_dim=16, n_layers=2,
+        action_conditioning="message",
+    )
+    path = tmp_path / "wm_sage_IC_message.pt"
+    save_checkpoint(build_model(conditioned), path, conditioned)
+    check_checkpoint_conditioning(path, "message")
+    with _pytest.raises(ValueError):
+        check_checkpoint_conditioning(path, "global")

@@ -8,7 +8,7 @@ Two questions, kept apart because they have different answers:
    act on**, without retraining anything?
 
 Everything here is additive. `--action-conditioning none` and
-`--feedback legacy` are the defaults and reproduce the previous behaviour
+`--feedback default` are the defaults and reproduce the previous behaviour
 exactly; every existing checkpoint loads unchanged.
 
 ---
@@ -315,9 +315,9 @@ is a different change from the one tested here.
 | `f1`     | + per-seed drop attribution                     | k                        |
 | `f2`     | + regional coverage                             | k                        |
 | `f3`     | + seed overlap, bridge coverage, stagnation     | 2k                       |
-| `legacy` | the existing `summarize()` output (the default) | 0                        |
+| `default` | the existing `summarize()` output (the default) | 0                       |
 
-`legacy` is not a rung of this ladder: it already carries community reach and
+`default` is not a rung of this ladder: it already carries community reach and
 adjacent-seed hints, so it is richer than `f2` in places, and it reads
 `graph.ic_probs`, so it is not a clean "world-model-only" arm. It exists so
 nothing that runs today changes.

@@ -42,6 +42,8 @@ reported_config_keys = (
     "rounds",
     "round_gap",
     "feedback_model",
+    "action_conditioning",
+    "feedback",
     "edit_rate",
     "campaigns",
     "outbreak_pct",

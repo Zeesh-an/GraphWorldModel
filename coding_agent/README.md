@@ -685,7 +685,7 @@ Timing semantics: `cost.rollout_seconds` vs `mc_rollout_seconds` is the WM-vs-MC
 ## 9b. Feedback tiers (`--feedback`)
 
 What a refinement generation is TOLD after its candidate is scored, as a
-controlled variable rather than a fixed format. `legacy` is the default and is
+controlled variable rather than a fixed format. `default` is the default and is
 this document's existing `summarize()` output, unchanged.
 
 | tier     | blocks                                          | extra world-model rollouts / turn |
@@ -694,7 +694,7 @@ this document's existing `summarize()` output, unchanged.
 | `f1`     | + per-seed drop attribution `V(S) - V(S\{v})`   | k                                 |
 | `f2`     | + regional coverage `sum_{v in R} p_v`           | k                                 |
 | `f3`     | + seed overlap, bridge coverage, stagnation      | 2k                                |
-| `legacy` | the existing feedback (default)                  | 0                                 |
+| `default` | the full feedback (default)                     | 0                                 |
 
 The blocks come from `coding_agent/diagnostics.py`, which also backs the
 agent-initiated probes (`drop`, `swap`, `region`, and the nine newer ops listed under "The search protocol under a stochastic evaluator"). Two properties matter for any
@@ -704,7 +704,7 @@ comparison across tiers, and both are asserted in `tests/test_diagnostics.py`:
   bound evaluator, or arithmetic on its output, and `ProbeCost` reports which by
   reading the environment's own meters — the same probe on an `@monte_carlo` arm
   correctly reports `simulator_episodes`.
-- **`legacy` is not a rung of the ladder.** It carries community reach and
+- **`default` is not a rung of the ladder.** It carries community reach and
   adjacent-seed hints (richer than `f2` in places) and it reads
   `graph.ic_probs` through its reverse-reachable residual gains, so it is not a
   clean "world-model feedback only" arm. Use f0-f3 for feedback-content claims.

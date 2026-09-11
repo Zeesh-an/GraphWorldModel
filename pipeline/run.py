@@ -125,6 +125,8 @@ from coding_agent.tools.prediction_algorithms import prediction_algorithm_names
 from coding_agent.tools.reconstruction_algorithms import (
     reconstruction_algorithm_names,
 )
+from coding_agent.feedback import default as feedback_default
+from coding_agent.feedback import valid_tiers as valid_feedback_tiers
 from coding_agent.types import GraphInfo, full_adoption, valid_feedback_models
 from data.generate_wm_data import (
     GenConfig,
@@ -177,6 +179,8 @@ from pipeline.plots import build_plots
 from pipeline.report import write_report
 from pipeline.summary import write_environment, write_summary
 from pipeline.tasks import default_run, get_task, require_runnable, task_names
+from world_model.checkpoint import read_checkpoint
+from world_model.model.action_cond import no_conditioning, valid_action_conditioning
 from world_model.train_wm import TrainConfig, train_world_model
 from world_model.wm_data import (
     basic_encoding,
@@ -280,6 +284,15 @@ class PipelineConfig:
     ood_policies: tuple = ()
     # `typed` splits the single act_edge channel by op
     action_encoding: str = basic_encoding
+    # Where the action enters the LEARNED transition (sage only): `none` is the
+    # historical model, `message` the action-conditioned message passing,
+    # `global` its locality ablation and `message_blind` the capacity control
+    # (research/action_conditioning_and_feedback.md). A checkpoint records it,
+    # and the train stage refuses to reuse one trained under another value.
+    action_conditioning: str = no_conditioning
+    # What each evolve generation is told after scoring: `default` is the full
+    # summarize() feedback, f0-f3 the controlled ladder of diagnostic blocks
+    feedback: str = feedback_default
     # Feed the world model ones instead of the true p(u->v): the online/bandit
     # information state (research/adaptive_online_im.md §2.4b, §9.3 item 7)
     hide_edge_weights: bool = False
@@ -905,6 +918,7 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
     checkpoint_path = layout.wm_checkpoint(config.wm_model, config.diffusion_model)
 
     if results_path.exists() and checkpoint_path.exists() and not config.force:
+        check_checkpoint_conditioning(checkpoint_path, config.action_conditioning)
         existing = json.loads(results_path.read_text())
         print(
             f"[train] reusing {results_path} "
@@ -944,9 +958,29 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
             plan_budget_horizon=config.plan_budget_horizon,
             ood_policies=tuple(config.ood_policies),
             action_encoding=config.action_encoding,
+            action_conditioning=config.action_conditioning,
             hide_edge_weights=config.hide_edge_weights,
         )
     )
+
+
+def check_checkpoint_conditioning(checkpoint_path: Path, requested: str) -> None:
+    """
+    Refuse to reuse a checkpoint trained under a different action conditioning.
+
+    The value changes the model (the modulator tensors exist or not), so a run
+    that asks for `message` and silently reuses a `none` checkpoint would report
+    the conditioning it never trained. A legacy checkpoint with no spec is the
+    historical `none` model.
+    """
+    spec = read_checkpoint(checkpoint_path)["spec"]
+    trained = no_conditioning if spec is None else spec.action_conditioning
+    if trained != requested:
+        raise ValueError(
+            f"{checkpoint_path} was trained with --action-conditioning {trained!r} "
+            f"but this run asks for {requested!r}. Use a different --run for the "
+            f"conditioned model, or --force to retrain in place."
+        )
 
 
 def _skip_path(layout: Layout, label: str, arm) -> Path:
@@ -1370,6 +1404,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 graph_id=config.graph_id,
                 wm_results_json=str(wm_results) if wm_results.exists() else None,
                 credit=config.credit,
+                feedback=config.feedback,
                 probe_turn=config.probe_turn,
                 stop_when_flat=config.stop_when_flat,
                 calibration_steering=config.calibration_steering,
@@ -2237,6 +2272,31 @@ if __name__ == "__main__":
         "(default: basic).",
     )
     parser.add_argument(
+        "--action-conditioning",
+        type=str,
+        default=no_conditioning,
+        choices=list(valid_action_conditioning),
+        help="where the action enters the learned transition (sage only): `none` is "
+        "the historical model with the action as input columns of X; `message` puts "
+        "a global action embedding and a per-edge action-relevance vector inside the "
+        "message function; `global` drops the per-edge part; `message_blind` keeps "
+        "the extra MLP with its action inputs zeroed (the capacity control). The "
+        "checkpoint records it and the train stage refuses to reuse one trained "
+        "under another value (default: none).",
+    )
+    parser.add_argument(
+        "--feedback",
+        type=str,
+        default=feedback_default,
+        choices=list(valid_feedback_tiers),
+        help="what each evolve generation is told after its candidate is scored: "
+        "`default` is the full summarize() feedback with the paired verdict, "
+        "reference diff, credit and counterexamples; f0 = scalar reward only, f1 = "
+        "+ per-seed leave-one-out contribution, f2 = + regional coverage, f3 = + "
+        "seed overlap, bridge coverage and stagnation, all world-model work and "
+        "counted in `diagnostics` (default: default).",
+    )
+    parser.add_argument(
         "--hide-edge-weights",
         action="store_true",
         help="train the world model on ones instead of the true IC transmission "
@@ -3061,6 +3121,8 @@ if __name__ == "__main__":
         plan_budget_horizon=args.plan_budget_horizon,
         ood_policies=tuple(args.ood_policies),
         action_encoding=args.action_encoding,
+        action_conditioning=args.action_conditioning,
+        feedback=args.feedback,
         baselines=None if args.baselines is None else tuple(args.baselines),
         arms=None if args.arms is None else tuple(args.arms),
         budget_pcts=None if args.budget_pcts is None else tuple(args.budget_pcts),

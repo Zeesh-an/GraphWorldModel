@@ -3,7 +3,7 @@ The feedback ladder: the controlled variable of Experiment 3.
 
 What has to hold for the tier comparison to mean anything:
 
-  * `legacy` is the default and does not route through any new code, so every
+  * `default` is the default and does not route through any new code, so every
     existing run is unchanged;
   * each rung is a strict superset of the one below, so "richer" is an ordering
     rather than four unrelated formats;
@@ -21,16 +21,16 @@ from coding_agent.feedback import (
     f1,
     f2,
     f3,
-    legacy,
+    default,
     resolve,
     tier_blocks,
 )
 
 
 class TestPolicy:
-    def test_the_default_is_legacy(self):
-        assert resolve(None).tier == legacy
-        assert FeedbackPolicy().is_legacy
+    def test_the_default_tier_is_default(self):
+        assert resolve(None).tier == default
+        assert FeedbackPolicy().is_default
 
     def test_an_unknown_tier_is_refused(self):
         with pytest.raises(ValueError, match="unknown feedback tier"):
@@ -44,12 +44,12 @@ class TestPolicy:
         assert not resolve(f0).probes_allowed
         assert not resolve(f2).probes_allowed
         assert resolve(f3).probes_allowed
-        # ...and legacy keeps the behaviour it already had
-        assert resolve(legacy).probes_allowed
+        # ...and default keeps the behaviour it already had
+        assert resolve(default).probes_allowed
 
-    def test_legacy_is_not_produced_here(self):
-        with pytest.raises(ValueError, match="legacy tier"):
-            build_feedback(resolve(legacy), None, [])
+    def test_the_default_tier_is_not_produced_here(self):
+        with pytest.raises(ValueError, match="default tier"):
+            build_feedback(resolve(default), None, [])
 
 
 class TestCostPerTier:
@@ -153,10 +153,10 @@ class TestSearchWiring:
 
         return EvolveSearch(outer_iters=1, feedback=tier)
 
-    def test_the_default_search_is_legacy(self):
+    def test_the_default_search_uses_the_default_tier(self):
         from coding_agent.methods.evolve import EvolveSearch
 
-        assert EvolveSearch(outer_iters=1).feedback.is_legacy
+        assert EvolveSearch(outer_iters=1).feedback.is_default
 
     def test_a_tier_reaches_the_search(self):
         assert self._search(f2).feedback.tier == f2
@@ -166,7 +166,7 @@ class TestSearchWiring:
         tier it claims to be."""
         assert not self._search(f1).probes
         assert self._search(f3).probes
-        assert self._search(legacy).probes
+        assert self._search(default).probes
 
     def test_the_native_arm_still_overrides_every_tier(self):
         from coding_agent.methods.evolve import EvolveSearch

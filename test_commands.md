@@ -90,6 +90,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 2. adaptive online IM
@@ -112,6 +113,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 3. critical node detection
@@ -142,6 +144,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 4. source localization
@@ -170,6 +173,7 @@ EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 5. influence blocking
@@ -191,6 +195,7 @@ BUDGETS="10 20 30 40 50" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 6. cascade reconstruction
@@ -213,6 +218,7 @@ EVALUATOR=oracle \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 7. epidemic control
@@ -238,6 +244,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=15 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=50 \
 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- 8. cascade prediction
@@ -265,6 +272,7 @@ EVALUATOR=oracle \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=50 \
 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
@@ -324,6 +332,7 @@ python -m coding_agent.run \
 TASK=adaptive_online_im DATASET=netscience RUN=adaptgreedy RUN_JOBID=0 \
 SKIP_STAGES=train BASELINES="adapt_greedy adapt_epic static_split" ARMS=none \
 ROUNDS=3 BUDGET_PCTS="5" HORIZON=10 MC_RUNS=20 CREDIT=1 FORCE=1 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 GRES=gpu:1 MEM=64G TIME=12:00:00 ./sbatch/pipeline.sbatch
 ```
 
@@ -337,6 +346,7 @@ If you want the classical CELF reference row for the paper, run it once at a sin
 TASK=influence_maximization DATASET=netscience RUN=celfpp RUN_JOBID=0 \
 SKIP_STAGES=train BASELINES="celf_pp imm" ARMS=none \
 BUDGET_PCTS="1" HORIZON=10 MC_RUNS=200 CREDIT=1 FORCE=1 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 STRATEGY_TIMEOUT=7200 MEM=64G TIME=6:00:00 ./sbatch/pipeline.sbatch
 ```
 
@@ -399,6 +409,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 MC_AGREEMENT=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 TASK=influence_maximization \
@@ -419,6 +430,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 MC_AGREEMENT=1 CREDIT=1 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # Resume for an LT run whose agent stage failed or was interrupted: same RUN, start at
@@ -443,6 +455,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 MC_AGREEMENT=1 CREDIT=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- IM, the cheapest and the one to run first
@@ -455,6 +468,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 CREDIT=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- the other simulator tasks: same four arms
@@ -476,6 +490,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=15 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 \
 CREDIT=1 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
@@ -512,11 +527,13 @@ The section 6 submissions already include `all-discovery`. The split alternative
 TASK=influence_maximization DATASET=netscience RUN=testrun_ic RUN_JOBID=0 DIFFUSION_MODEL=IC \
   START_STAGE=agent ARMS=none BASELINES=all-discovery LLM_MODEL=gpt-6-astra \
   BUDGET_PCTS="1 5 10 20" HORIZON=10 MC_RUNS=200 N_SAMPLES=200 \
+  FEEDBACK=default ACTION_CONDITIONING=message \
   BASELINE_TIMEOUT=43200 MEM=64G TIME=7-00:00:00 ./sbatch/pipeline.sbatch
 
 TASK=influence_maximization DATASET=netscience RUN=testrun_lt RUN_JOBID=0 DIFFUSION_MODEL=LT \
   START_STAGE=agent ARMS=none BASELINES=all-discovery LLM_MODEL=gpt-6-astra \
   BUDGET_PCTS="1 5 10 20" HORIZON=10 MC_RUNS=200 N_SAMPLES=200 \
+  FEEDBACK=default ACTION_CONDITIONING=message \
   BASELINE_TIMEOUT=43200 MEM=64G TIME=7-00:00:00 ./sbatch/pipeline.sbatch
 ```
 
@@ -557,6 +574,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=0 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=128G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- IM on digg, LT
@@ -580,6 +598,7 @@ BUDGET_PCTS="1 5 10 20" \
 HORIZON=10 MC_RUNS=200 OUTER_ITERS=20 N_SAMPLES=200 REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=0 FORCE=1 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 GRES=gpu:1 MEM=128G TIME=7-00:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- the one Monte Carlo run: the speedup bar
@@ -596,6 +615,7 @@ TASK=influence_maximization DATASET=digg RUN=scale_ic RUN_JOBID=0 DIFFUSION_MODE
   EVALUATOR=oracle REFEREE_SAMPLES=200 MC_AGREEMENT=1 MC_AGREEMENT_RUNS=50 \
   CREDIT=0 FORCE=1 \
   GRES=none MEM=64G TIME=06:00:00 \
+  FEEDBACK=default ACTION_CONDITIONING=message \
   ./sbatch/pipeline.sbatch
 
 # ---------------------------------------------------------------- opt-in: DeepIM on digg
@@ -605,6 +625,7 @@ TASK=influence_maximization DATASET=digg RUN=scale_ic RUN_JOBID=0 DIFFUSION_MODE
   START_STAGE=agent ARMS=none BASELINES="external:deepim" \
   EVALUATOR=oracle REFEREE_SAMPLES=200 CREDIT=0 BASELINE_TIMEOUT=86400 \
   GRES=gpu:1 MEM=128G TIME=3-00:00:00 \
+  FEEDBACK=default ACTION_CONDITIONING=message \
   ./sbatch/pipeline.sbatch
 ```
 

@@ -12,17 +12,17 @@ with the cost of each block stated:
 | `f1`     | + per-seed drop attribution                              | k                          |
 | `f2`     | + regional coverage                                      | k                          |
 | `f3`     | + seed overlap, bridge coverage, stagnation              | 2k                         |
-| `legacy` | the repository's existing `summarize()` output, untouched | 0                         |
+| `default` | the repository's full `summarize()` feedback, untouched | 0                        |
 
-`legacy` is the DEFAULT and reproduces current behaviour byte-for-byte. It is
-its own tier rather than an alias for one of the others because it is not a
-point on this ladder: it already carries community reach and adjacent-seed hints
+`default` is what every run gets unless a tier is named. It is its own tier
+rather than an alias for one of the others because it is not a point on this
+ladder: it already carries community reach and adjacent-seed hints
 (so it is richer than `f2` in places), and it also carries reverse-reachable
 residual gains, which are computed from `graph.ic_probs` — the TRUE per-edge
 transmission probabilities. That is fine as a graph-structure prior in the
-existing design, but it means `legacy` is not a clean "world-model feedback
+existing design, but it means `default` is not a clean "world-model feedback
 only" arm, and the f0-f3 ladder is. Anything comparing feedback content should
-run on the ladder; `legacy` is there so nothing that exists today changes.
+run on the ladder; `default` is the full feedback every other experiment uses.
 
 The tiers deliberately do NOT change the evaluator, the candidate generator, the
 budget, the horizon or the number of outer iterations. Only what comes back.
@@ -38,10 +38,10 @@ f1 = "f1"
 f2 = "f2"
 #: + seed overlap, bridge coverage and the stagnation verdict.
 f3 = "f3"
-#: The repository's existing feedback, unchanged. The default.
-legacy = "legacy"
+#: The repository's full feedback (summary, paired verdict, reference diff, credit, counterexamples). The default.
+default = "default"
 
-valid_tiers = (legacy, f0, f1, f2, f3)
+valid_tiers = (default, f0, f1, f2, f3)
 
 #: Which `PlanDiagnostics.explain_plan` blocks each tier requests.
 tier_blocks = {
@@ -57,13 +57,13 @@ class FeedbackPolicy:
     """
     One tier, resolved into the switches the loop actually reads.
 
-    `structural_hints` is what separates `legacy` from the ladder: the existing
+    `structural_hints` is what separates `default` from the ladder: the existing
     `summarize()` extras (unreached-node lists, residual gains, adjacent seed
     pairs, community reach). On the ladder they are off, so every line of
     feedback is either the reward or a counted world-model probe.
     """
 
-    tier: str = legacy
+    tier: str = default
 
     def __post_init__(self) -> None:
         if self.tier not in valid_tiers:
@@ -72,8 +72,8 @@ class FeedbackPolicy:
             )
 
     @property
-    def is_legacy(self) -> bool:
-        return self.tier == legacy
+    def is_default(self) -> bool:
+        return self.tier == default
 
     @property
     def blocks(self) -> tuple:
@@ -82,20 +82,20 @@ class FeedbackPolicy:
     @property
     def structural_hints(self) -> bool:
         """Whether the pre-existing `summarize()` extras are included."""
-        return self.is_legacy
+        return self.is_default
 
     @property
     def probes_allowed(self) -> bool:
         """Agent-initiated `drop` / `swap` / `region` probes. Full tier only, so
         the ladder's lower rungs cannot buy their way back up."""
-        return self.tier in (legacy, f3)
+        return self.tier in (default, f3)
 
     def wants(self, block: str) -> bool:
         return block in self.blocks
 
     def describe(self) -> str:
-        if self.is_legacy:
-            return "legacy: the repository's existing summarize() feedback"
+        if self.is_default:
+            return "default: the repository's full summarize() feedback"
 
         return f"{self.tier}: blocks {list(self.blocks)}"
 
@@ -104,7 +104,7 @@ def resolve(tier: str | FeedbackPolicy | None) -> FeedbackPolicy:
     if isinstance(tier, FeedbackPolicy):
         return tier
 
-    return FeedbackPolicy(legacy if tier is None else str(tier))
+    return FeedbackPolicy(default if tier is None else str(tier))
 
 
 def build_feedback(
@@ -118,15 +118,16 @@ def build_feedback(
     """
     (text, Diagnosis) for one ladder tier.
 
-    `legacy` is NOT handled here: it is the existing `methods.base.summarize()`
-    path and stays where it is, so nothing about current behaviour routes through
-    new code. Callers branch on `policy.is_legacy` and this raises if they do not,
-    rather than silently returning an impoverished summary for a legacy run.
+    `default` is NOT handled here: it is the `methods.base.summarize()` path and
+    stays where it is, so nothing about the default behaviour routes through the
+    ladder's code. Callers branch on `policy.is_default` and this raises if they
+    do not, rather than silently returning an impoverished summary for a default
+    run.
     """
-    if policy.is_legacy:
+    if policy.is_default:
         raise ValueError(
-            "the legacy tier is produced by methods.base.summarize(); branch on "
-            "policy.is_legacy rather than calling build_feedback"
+            "the default tier is produced by methods.base.summarize(); branch on "
+            "policy.is_default rather than calling build_feedback"
         )
 
     diagnosis = diagnostics.explain_plan(
@@ -147,7 +148,7 @@ __all__ = [
     "f1",
     "f2",
     "f3",
-    "legacy",
+    "default",
     "resolve",
     "tier_blocks",
     "valid_tiers",

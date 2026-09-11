@@ -86,7 +86,7 @@ from coding_agent.credit import augment_solo, counterfactual_credit, planned_act
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
-from coding_agent.feedback import legacy as feedback_legacy
+from coding_agent.feedback import default as feedback_default
 from coding_agent.feedback import valid_tiers as valid_feedback_tiers
 from coding_agent.epidemic import (
     default_contact_reduction,
@@ -383,9 +383,9 @@ class ExperimentConfig:
     provenance: bool = True
     provenance_timeout: float = 60.0
     # Which feedback tier each refinement generation receives
-    # (coding_agent/feedback.py). `legacy` is the existing behaviour and the
+    # (coding_agent/feedback.py). `default` is the full feedback and the
     # default; f0-f3 are the controlled ladder Experiment 3 varies.
-    feedback: str = feedback_legacy
+    feedback: str = feedback_default
     baseline: str | None = None  # library algorithm name; evaluates it with no LLM
     routing: bool = False  # GA routing: one LLM call picks a library algorithm
     allowed_ops: tuple = valid_action_ops  # ops the strategy may emit
@@ -3037,16 +3037,16 @@ if __name__ == "__main__":
     parser.add_argument(
         "--feedback",
         type=str,
-        default=feedback_legacy,
+        default=feedback_default,
         choices=list(valid_feedback_tiers),
         help="what each refinement generation is told after its candidate is "
-        "scored. `legacy` (default) is the existing summarize() feedback and "
-        "leaves current runs unchanged. The f0-f3 ladder is the controlled "
+        "scored. `default` is the full summarize() feedback with the paired verdict, "
+        "reference diff, credit and counterexamples. The f0-f3 ladder is the controlled "
         "variable of the feedback experiment: f0 = scalar reward only, f1 = + "
         "per-seed leave-one-out contribution, f2 = + regional coverage, f3 = + "
         "seed overlap, bridge coverage and stagnation. Every ladder rung is "
         "world-model work only and is counted in `diagnostics` "
-        "(default: legacy).",
+        "(default: default).",
     )
     parser.add_argument(
         "--probe-turn",
