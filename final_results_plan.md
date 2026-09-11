@@ -7,7 +7,7 @@ The experiment matrix for the paper's main results, revised 2026-09-04 after the
 | Claim                  | Question                                                                                                   | Evidence                                                                                                                                                                                                                                                                                                                                                                           | Table            |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
 | C1 Dynamics learning   | Does the GWM reconstruct unknown graph dynamics?                                                           | One-step `delta_f1` and `brier` against MC marginals; free-running rollout `ens_count_bias`, `ens_marg_mae`, final count model vs true; `action_sensitivity` and `add_seed_success` for action conditioning; `wm_minus_mc` on the exact winning strategy; the `structured_oracle` ceiling beside it                                                                                | T1               |
-| C2 Efficiency          | How much faster are imagined rollouts than MC or oracle simulation, including the amortized training cost? | `rollout_seconds` vs `mc_rollout_seconds` per rollout sample; `evaluator_seconds` spent by conditions 4 and 6 in the same search; `train_seconds` plus data-generation seconds, converted to a break-even rollout count. The scale rows are where this claim is largest and where `@monte_carlo` may not finish at all                                                             | T2               |
+| C2 Efficiency          | How much faster are imagined rollouts than MC or oracle simulation, including the amortized training cost? | `rollout_seconds` vs `mc_rollout_seconds` per rollout sample; `evaluator_seconds` spent by conditions 5 and 6 in the same search (condition 4 only where it is run as an ablation); `train_seconds` plus data-generation seconds, converted to a break-even rollout count. The scale rows are where this claim is largest and where `@monte_carlo` may not finish at all                                                             | T2               |
 | C3 Downstream utility  | Does planning with the GWM improve graph-task performance?                                                 | The ladder replayed on the shared oracle referee: conditions 3, 4, 5, 6 with the method fixed and only the evaluator varying, beside the five baselines; `planning_regret_multi` vs degree and random                                                                                                                                                                              | T3 (main), T1    |
 | C4 Algorithm discovery | Does GWM access let the coding agent find better algorithms under the same interaction budget?             | Condition 6 against condition 9 (three published discovery systems on the plain simulator) at reported `evaluator_calls`, `real_env_episodes` and `evaluator_seconds`; the write-up's trajectory, closest-classical and novelty sections as case studies                                                                                                                           | T4, case studies |
 | C5 Generalization      | Does this hold across datasets, sizes, topologies and dynamics?                                            | T3 repeated over the five datasets per task (medium, large and very large tiers, real and synthetic), IC and LT for every simulator task, SIR/SIS/SEIR for epidemic control, chronological vs random split for cascade prediction, one world model per dataset reused across tasks (`scripts/transfer_matrix.py`), program transfer for source localization (`--sl-transfer-from`) | T5               |
@@ -26,7 +26,7 @@ T1 and T2 come free with every run (the `## World Model` section of each report 
 
 **Discovery systems.** One common set of three for every task, chosen for three different search paradigms: `llm4ad_funsearch` (FunSearch, the origin: an island program database with best-shot prompting), `eoh` (Evolution of Heuristics, ICML 2024 oral: co-evolution of a natural-language thought and its code), and `openevolve` (the open AlphaEvolve implementation: a MAP-Elites program database with cascade evaluation). All three run their own loop at published defaults on the plain simulator through `baselines/score_program.py`; the world model is unreachable by construction. Alternates: `reevo`, `mcts_ahd`, `llamea`.
 
-**Conditions per table row.** Every T3 cell has the five baselines (condition 1 or 7), the routed classical pool (condition 2), and the four-arm ladder `evolve_free@native`, `@monte_carlo`, `@oracle`, `@world_model` (conditions 3 to 6), all replayed on the shared referee: the exact oracle simulator at 1,000 samples (`--referee oracle --referee-samples 1000`, the defaults, reduced to 200 samples on the very-large rows). `--mc-agreement`, the second replay on the sampled simulator, is OFF on every row of the matrix: section 8.0 states what that gives up and how to recover a single timing row if one is wanted. Adaptive IM uses `adaptive_<mode>@<evaluator>` paired with the matching `evolve` arm so the adaptivity gap is computable.
+**Conditions per table row.** Every T3 cell has the five baselines (condition 1 or 7), the routed classical pool (condition 2), and the two-arm ladder `evolve_free@oracle`, `evolve_free@world_model` (conditions 5 and 6; the native and Monte Carlo arms, conditions 3 and 4, were dropped from the matrix on 2026-09-10 and are ablation rows only), all replayed on the shared referee: the exact oracle simulator at 1,000 samples (`--referee oracle --referee-samples 1000`, the defaults, reduced to 200 samples on the very-large rows). `--mc-agreement`, the second replay on the sampled simulator, is OFF on every row of the matrix: section 8.0 states what that gives up and how to recover a single timing row if one is wanted. Adaptive IM uses `adaptive_<mode>@<evaluator>` paired with the matching `evolve` arm so the adaptivity gap is computable.
 
 **Budgets and dynamics** follow `pipeline/tasks.py`: 1, 5, 10 and 20 percent of $N$ for the two IM tasks and critical node detection (outbreak 10 percent of $N$), absolute $k \in \{10, 20, 30, 40, 50\}$ for influence blocking (rumour 1 percent of $N$), a single 10 percent point for the two inverse tasks and cascade prediction, and the epidemic task's percent ladder against a 1 percent outbreak. IC and LT for every simulator task, SIR, SIS and SEIR for epidemic control, with the SIR $\gamma = 1$ check against IC reported once.
 
@@ -311,7 +311,7 @@ These are already the largest objects in the repo; there is no synthetic row by 
 
 **T2, efficiency** (one row per task and dataset, ordered by size): seconds per rollout sample for the world model and for the oracle referee (`rollout_seconds / n_samples` and `referee_rollout_seconds / referee_samples`), the speedup, `train_seconds` and data-generation seconds, and the break-even rollout count $\lceil (t_{\text{train}} + t_{\text{data}}) / (t_{\text{MC}} - t_{\text{WM}}) \rceil$; then the `evaluator_seconds` and `real_env_episodes` conditions 4 and 6 actually spent in the same search, which is the load-bearing pair now that the agreement replay is off and its `mc_rollout_seconds` column is empty. The size ordering is the point: the speedup should grow with the graph. Adaptive IM adds the per-round re-estimation cost, cascade reconstruction adds `kernel_calls_per_instance`, source localization `forward_calls_per_instance`.
 
-**T3, main results** (one block per task and dynamics; columns are budgets; rows are the five baselines, condition 2, and the four ladder arms; every cell is the oracle referee's `referee_reward` with its standard error): the downstream-utility claim is the difference between the `@world_model` and `@native` rows with the `@monte_carlo` and `@oracle` rows as the ceiling, and the baseline rows are the published comparison. The three critical datasets per task fill the main-text table; the two secondary datasets go to the appendix version. A ladder arm that did not finish on a scale row is printed as such with its evaluator budget, never dropped.
+**T3, main results** (one block per task and dynamics; columns are budgets; rows are the five baselines, condition 2, and the two ladder arms; every cell is the oracle referee's `referee_reward` with its standard error): the downstream-utility claim is the `@world_model` row against the baseline rows, with the `@oracle` row as the ceiling (an agent with perfect dynamics), and the baseline rows are the published comparison. The three critical datasets per task fill the main-text table; the two secondary datasets go to the appendix version. A ladder arm that did not finish on a scale row is printed as such with its evaluator budget, never dropped.
 
 **T4, algorithm discovery** (critical datasets only): condition 6 against the three discovery systems at their published budgets, each row carrying `evaluator_calls`, `real_env_episodes`, `evaluator_seconds` and the LLM call count, plus the routed classical pool and the best single baseline for scale. Beside it, the case studies: for the winner of each critical dataset, the write-up's first-attempt-to-winner trajectory, its closest classical algorithm and the parts marked new, with the top twenty programs across all runs in the supplement.
 
@@ -321,7 +321,7 @@ These are already the largest objects in the repo; there is no synthetic row by 
 
 Critical datasets first, in rank order, so the main-text table fills before the appendix. The first job on every large and very-large row is data generation alone, timed, because nothing above `nethept` has been generated yet; its wall clock decides `--mc-runs`, `--n-samples` and the horizon for that row before any arm runs. Per task that is three datasets, two dynamics (three for epidemic control, one for cascade prediction), all budgets, the five baselines, the ladder, and condition 9 on the critical rows. Rough count: 8 tasks, 5 datasets, an average of 2 dynamics, so about 80 pipeline runs plus the synthetic sweeps, of which 48 are critical and carry the discovery rows. The very-large rows (`digg`, `twitter`, `epinions1`, `brightkite`, `deezer`) run last.
 
-Expected cost per pipeline run (one task, one dynamics, four budgets, five classical baselines, the four-arm ladder with the referee replay; no external learned repo, no discovery system), from the measured netscience runs and a Monte Carlo microbenchmark on BA graphs at 1,000, 10,000 and 100,000 nodes: about 4 to 12 hours at 1,000 to 2,000 nodes, 6 to 16 hours at 10,000, and 1 to 3 days at 100,000. The LLM latency (16 arm-budget pairs at 20 iterations, 1 to 3 minutes per reply) is the largest block at every size and does not scale with the graph; data generation and training scale linearly with edges (20 to 40 minutes and 1 to 2 hours at 10,000; 3 to 6 hours and 10 to 24 hours at 100,000, where the training batch no longer fits and shrinks); the Monte Carlo evaluator arm costs about an hour per dynamics at 10,000 and 4 to 8 hours at 100,000, where a single evaluation is 90 seconds; a generated program that does its own sampling hits the 300-second per-call cap routinely at 100,000. Outside that table, DeepIM and MOEIM took 10.6 hours between them at netscience and do not get cheaper with size, and each discovery system is LLM-bound at one to two days per budget point. Old source-localization and cascade-reconstruction results predate the label-free rewards and are not comparable; both tasks rerun from scratch.
+Expected cost per pipeline run (one task, one dynamics, four budgets, five classical baselines, the two-arm ladder with the referee replay; no external learned repo, no discovery system), from the measured netscience runs and a Monte Carlo microbenchmark on BA graphs at 1,000, 10,000 and 100,000 nodes: about 4 to 12 hours at 1,000 to 2,000 nodes, 6 to 16 hours at 10,000, and 1 to 3 days at 100,000. The LLM latency (16 arm-budget pairs at 20 iterations, 1 to 3 minutes per reply) is the largest block at every size and does not scale with the graph; data generation and training scale linearly with edges (20 to 40 minutes and 1 to 2 hours at 10,000; 3 to 6 hours and 10 to 24 hours at 100,000, where the training batch no longer fits and shrinks); the Monte Carlo evaluator arm costs about an hour per dynamics at 10,000 and 4 to 8 hours at 100,000, where a single evaluation is 90 seconds; a generated program that does its own sampling hits the 300-second per-call cap routinely at 100,000. Outside that table, DeepIM and MOEIM took 10.6 hours between them at netscience and do not get cheaper with size, and each discovery system is LLM-bound at one to two days per budget point. Old source-localization and cascade-reconstruction results predate the label-free rewards and are not comparable; both tasks rerun from scratch.
 
 ## 7. Open decisions and things the survey turned up
 
@@ -331,7 +331,7 @@ Expected cost per pipeline run (one task, one dynamics, four budgets, five class
 - Whether influence blocking's lever table (sandimin, imin_joc) is main text or appendix; T3 stays counter-seed either way.
 - The discovery systems' budgets differ from ours by 5 to 50 times by design; T4 reports both at published defaults and states it, rather than matching budgets.
 - Whether the write-up prompt should forbid literal node ids in generated programs before the case-study harvest, so the top twenty are graph-general algorithms rather than tuned seed lists.
-- The scale rows have never been run; if `@monte_carlo` cannot finish on them under any budget, that row's T3 cell reports the budget it exhausted, and the C2 table is where the result lives.
+- The scale rows have never been run. The `@monte_carlo` arm is no longer in the matrix (dropped 2026-09-10), so the C2 efficiency comparison reads the oracle arm's `evaluator_seconds` against the world model's; a sampled-simulator timing row needs a separate `MC_AGREEMENT=1` replay on one critical dataset per task, as section 8.0 describes.
 - Whether the epidemic-control DAVA-vs-NetShield reversal on `hospital_lh10` (75 nodes) gets one appendix row now that no small graph is in the main matrix.
 - External repos, state as of 2026-09-04. Fixed in the repo and covered by tests or a local end-to-end run: `gdm` and `gdm_epi` (adapter rewritten against the real layout, GDM's own `models/GAT.py` on its published four-feature checkpoint with the 2019 PyG state dict converted and verified numerically; `baselines/gdm_support.py`), `selinda` (same fix through the repo's own `agent/gdm.py`; it reproduces the gdm row exactly and is a cross-check, not coverage), `glie` (its runner now prints a bracketed seed list), `moeim` (duplicate seeds deduplicated in both parsers), `diffim` deleted outright (its surrogate training stalled the sweep; the user's call). Cluster setup only: `setup_baselines --all` rebuilds the venvs for `rl4im` (the `numpy<1.24` patch), `mind`, `nirm`, `dcrs` and `touplegdd`; the `work_dir` group (all CP, CR and SL repos, the six `netimm_*` rows) needs one confirming run after the 2026-08-23 fix. Not fixable here: `finder` needs a CPython 3.7 on the box; `dismantling_review` needs `graph_tool`, which pip cannot install.
 
@@ -343,7 +343,7 @@ One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 1
 
 **Names.** `RUN` names the dynamics (`final_ic`, `final_lt`, `final_sir`, `final_sis`, `final_seir`) because a run directory holds one dynamics' data, checkpoint and arm results, so IC and LT on the same graph must never share one. `JOB_NAME` is `<task>_<dataset>_<dynamics>` with the task abbreviated (`im`, `aim`, `cnd`, `sl`, `ib`, `cr`, `ec`, `cp`); the script's default would be `gwm_<dataset>_<run>`, which two tasks on one graph would share, and Slurm's `singleton` dependency keys on the name. `RUN_JOBID=0` keeps the directory stable so a resubmission resumes it. **Never pass `FORCE=1`**: every command is idempotent, resubmitting it skips finished stages and finished arms, and an evolve arm resumes from its per-generation checkpoint. `FORCE=1` throws all of that away and, on a requeue, regenerates the data and retrains before reaching the agent stage, which is what cost three of the five attempts on the September digg job.
 
-**Identical in every command**, because they are the protocol rather than a resource: `LLM_MODEL=gpt-6-astra`, `REASONING_EFFORT=high`, `WM_MODEL=sage`, `HEAD=structured` (the one head defined under IC, LT, CLT and all three compartmental dynamics; `structured_residual` raises under LT, so using it anywhere would make the IC and LT rows different models), `EVALUATOR=oracle`, `REFEREE=oracle`, `HORIZON=10`, `OUTER_ITERS=20`, `N_SAMPLES=200`, `MC_RUNS=200`, `SEED=42`, `ACTION_CONDITIONING=message`, `FEEDBACK=default`, and `ARMS`, which is the full ladder for the task (condition 2 plus conditions 3 to 6, and on adaptive IM the nine arms that pair each `evolve` with its `adaptive` twin so the adaptivity gap is computable). Also fixed and not written out because no command changes them: learning rate 1e-3, weight decay 5e-4, `pos_weight` off, 3 layers, dropout 0.1, `basic` action encoding, inject 0.4, counterfactual 0.4 with 2 branches, budgets drawn from 1 to 20 percent of $N$ at generation, weighted cascade probabilities, and the 70/15/15 split, which resolves graph-disjoint for a synthetic family and per-episode for a single real graph.
+**Identical in every command**, because they are the protocol rather than a resource: `LLM_MODEL=gpt-6-astra`, `REASONING_EFFORT=high`, `WM_MODEL=sage`, `HEAD=structured` (the one head defined under IC, LT, CLT and all three compartmental dynamics; `structured_residual` raises under LT, so using it anywhere would make the IC and LT rows different models), `EVALUATOR=oracle`, `REFEREE=oracle`, `HORIZON=10`, `OUTER_ITERS=20`, `N_SAMPLES=200`, `MC_RUNS=200`, `SEED=42`, `ACTION_CONDITIONING=message`, `FEEDBACK=default`, and `ARMS`, which is the ladder for the task (condition 2 plus conditions 5 and 6, `routing evolve_free@oracle evolve_free@world_model`; on adaptive IM the five arms that pair each `evolve` with its `adaptive` twin on both evaluators so the adaptivity gap is computable). The native and Monte Carlo arms (conditions 3 and 4) were removed from every command on 2026-09-10; they remain runnable as ablation rows by adding `evolve_free@native evolve_free@monte_carlo` back to `ARMS` on a cell. Also fixed and not written out because no command changes them: learning rate 1e-3, weight decay 5e-4, `pos_weight` off, 3 layers, dropout 0.1, `basic` action encoding, inject 0.4, counterfactual 0.4 with 2 branches, budgets drawn from 1 to 20 percent of $N$ at generation, weighted cascade probabilities, and the 70/15/15 split, which resolves graph-disjoint for a synthetic family and per-episode for a single real graph.
 
 **Also identical, and on by default since 2026-09-10, so no command names them:** the probe turn before every generation (`PROBE_TURN=1`, one extra LLM call per generation, so a 20-generation search now makes about 40 generation-level calls plus reflections and idea searches; the LLM call count in T4 is read from `llm_usage.calls`, not from `OUTER_ITERS`), the paired acceptance band, the incumbent-pinned parent with the paired population ranking, the spurious-accept ledger, the unbiased incumbent curve, the `# EXPECTED:` edit forecast, counterexample realizations in the feedback, and the post-search rediscovery distance (`PROVENANCE=1`, capped at `PROVENANCE_TIMEOUT` seconds per library member, 60 by default; on the very-large rows the slow structural members such as exact betweenness will time out and the report says which). Two knobs stay OFF everywhere because they change the protocol: `STOP_WHEN_FLAT` (early stop on the unbiased curve; the matrix fixes `OUTER_ITERS=20`) and `CALIBRATION_STEERING` (forecast errors feeding the operator schedule). The report's "Search protocol" section and the `edit_calibration` figure read these per arm.
 
@@ -373,7 +373,7 @@ One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 1
 
 Four of those rows deserve their reason stated, because a reader will otherwise read them as arbitrary. **The very-large column is anchored on a measurement**: the finished `digg` run trained a 128-wide model at batch 2 for 60 epochs and reached one-step `delta_f1` 0.9008 with a Brier score of 0.00127, so that width is a demonstrated floor rather than a hope. It stays 128 rather than rising to the large column's 256 because the structured head's edge MLP materialises an `(E, 2H + 1)` tensor over every arc, so width is the one knob that multiplies the largest allocation on exactly the rows where memory has already forced the batch down to 2, and because the digg diagnosis says capacity is not what is missing. Its `ROLLOUTS` and `MC_MARGINALS` are 20 rather than the 10 that run used, which is the change that addresses what IS missing: that model was excellent one-step and 12.3 percent optimistic over a full rollout (`ens_count_bias` +4,980, final 53,514 against 47,651), which is compounding error and noisy soft targets rather than too few parameters. Ten Monte Carlo draws is a noisy estimate of `P(infected)` to fit against, and 30 episodes is a thin training set. Doubling both costs about an hour of generation and roughly doubles training, which the tier's 48 hours absorbs. **`STRATEGY_TIMEOUT` is 900 or 1800 rather than the 300-second default** because a generated program that does its own sampling routinely blows 300 seconds per call above 10,000 nodes, and a timed-out call is a lost generation rather than a slow one. **`NO_PLAN_DEMO=1` above the medium tier** because the planning demo spends real simulator episodes on five graphs after training to produce one diagnostic figure, which is worth its price on a 2,000-node graph and not on a 60,000-node one. **`REFEREE_SAMPLES=200` only at the very-large tier**: it is a per-arm cost that scales with arcs, its standard error on `digg` is about 27 nodes against arm differences in the hundreds, and the caption says which rows ran reduced.
 
-**`MC_AGREEMENT=0` on every row, and what that gives up.** With `=0` an arm's final number is the shared referee alone: every winner replayed on the exact batched oracle simulator at `REFEREE_SAMPLES` samples, which is the only column that may be read across rows. `=1` would replay each winner a SECOND time on the sampled simulator and add `mc_reward`, `mc_reward_se`, `mc_rollout_seconds` and `referee_minus_mc`. Two things go with it. First, the independent check that the analytic oracle is not quietly wrong, which is answered instead by `coding_agent/check_*.py`, where each head and each simulator is measured against thousands of draws, and by the `@monte_carlo` arm, which searches on sampled episodes and is scored on the same referee as the oracle arm. Second, T2's per-rollout timing column for the sampled simulator, which `pipeline/plots.py` builds only from `mc_rollout_seconds / mc_agreement_runs`: with the agreement off that column is empty, so the efficiency claim is read from `evaluator_seconds` and `real_env_episodes`, which is what conditions 4 and 6 actually spent inside the same search and is the stronger evidence anyway. If a single sampled-timing row is wanted for the paper, rerun ONE critical dataset per task with `MC_AGREEMENT=1 MC_AGREEMENT_RUNS=50 START_STAGE=agent` rather than paying for it on all 80. Note also that the agreement replay is not NDlib on every task: it is our two-cascade stepper under influence blocking, our compartmental stepper under epidemic control (NDlib carries no per-arc $\beta$, which is the whole reason that stepper exists), and on cascade prediction it is not a replay at all but `model_msle` beside the program's own error.
+**`MC_AGREEMENT=0` on every row, and what that gives up.** With `=0` an arm's final number is the shared referee alone: every winner replayed on the exact batched oracle simulator at `REFEREE_SAMPLES` samples, which is the only column that may be read across rows. `=1` would replay each winner a SECOND time on the sampled simulator and add `mc_reward`, `mc_reward_se`, `mc_rollout_seconds` and `referee_minus_mc`. Two things go with it. First, the independent check that the analytic oracle is not quietly wrong, which is answered instead by `coding_agent/check_*.py`, where each head and each simulator is measured against thousands of draws, (the `@monte_carlo` arm, which would have searched on sampled episodes and been scored on the same referee, is no longer in the matrix). Second, T2's per-rollout timing column for the sampled simulator, which `pipeline/plots.py` builds only from `mc_rollout_seconds / mc_agreement_runs`: with the agreement off that column is empty, so the efficiency claim is read from `evaluator_seconds` and `real_env_episodes`, which is what conditions 4 and 6 actually spent inside the same search and is the stronger evidence anyway. If a single sampled-timing row is wanted for the paper, rerun ONE critical dataset per task with `MC_AGREEMENT=1 MC_AGREEMENT_RUNS=50 START_STAGE=agent` rather than paying for it on all 80. Note also that the agreement replay is not NDlib on every task: it is our two-cascade stepper under influence blocking, our compartmental stepper under epidemic control (NDlib carries no per-arc $\beta$, which is the whole reason that stepper exists), and on cascade prediction it is not a replay at all but `model_msle` beside the program's own error.
 
 **`NO_PLAN_DEMO=1` versus `=0`.** `NO_PLAN_DEMO=0` (the default) runs `planning_regret_multi` after training: the model picks a one-step intervention on each of `PLAN_GRAPHS` graphs, the TRUE simulator scores what it picked, and the regret against an oracle choice is reported beside `degree` and `random` references. It is the one training-time number that asks whether the model is useful for choosing rather than merely accurate at predicting, and it feeds `wm_planning_regret.png`. It also costs real simulator episodes on every one of those graphs, which is why `NO_PLAN_DEMO=1` turns it off above the medium tier. Turning it off costs one diagnostic figure and nothing in T1 or T3. Note the separate `PLAN_BUDGET_K`, which is the full $k$-seed horizon version of the same idea and is left at 0 everywhere because it is far more expensive again.
 
@@ -410,7 +410,7 @@ Baselines from section 4.1: `imm`, `degree_discount`, `external:opim`, `external
 TASK=influence_maximization DATASET=netscience RUN=final_ic RUN_JOBID=0 JOB_NAME=im_netscience_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -427,7 +427,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=netscience RUN=final_lt RUN_JOBID=0 JOB_NAME=im_netscience_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -446,7 +446,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=nethept RUN=final_ic RUN_JOBID=0 JOB_NAME=im_nethept_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -463,7 +463,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=nethept RUN=final_lt RUN_JOBID=0 JOB_NAME=im_nethept_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -482,7 +482,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=digg RUN=final_ic RUN_JOBID=0 JOB_NAME=im_digg_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=20 \
@@ -499,7 +499,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=digg RUN=final_lt RUN_JOBID=0 JOB_NAME=im_digg_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=20 \
@@ -518,7 +518,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=cora_ml RUN=final_ic RUN_JOBID=0 JOB_NAME=im_cora_ml_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -535,7 +535,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=cora_ml RUN=final_lt RUN_JOBID=0 JOB_NAME=im_cora_ml_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -554,7 +554,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=sbm RUN=final_ic RUN_JOBID=0 JOB_NAME=im_sbm_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -571,7 +571,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_maximization DATASET=sbm RUN=final_lt RUN_JOBID=0 JOB_NAME=im_sbm_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="imm degree_discount external:opim external:subsim external:deepim" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -609,7 +609,7 @@ Baselines from section 4.2: `adapt_epic`, `adapt_degree_discount`, `imm`, `stati
 TASK=adaptive_online_im DATASET=netscience RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_netscience_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -626,7 +626,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=netscience RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_netscience_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -645,7 +645,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=nethept RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_nethept_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -662,7 +662,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=nethept RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_nethept_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -681,7 +681,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=twitter RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_twitter_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -698,7 +698,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=twitter RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_twitter_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -717,7 +717,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=powerlaw_cluster RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_powerlaw_cluster_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -734,7 +734,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=powerlaw_cluster RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_powerlaw_cluster_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -753,7 +753,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=facebook RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_facebook_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -770,7 +770,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=facebook RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_facebook_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@native adaptive_free@native evolve_free@monte_carlo adaptive_free@monte_carlo evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -808,7 +808,7 @@ Baselines from section 4.3: `bpd_r`, `collective_influence_r`, `adaptive_degree`
 TASK=critical_node_detection DATASET=power_grid RUN=final_ic RUN_JOBID=0 JOB_NAME=cnd_power_grid_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -825,7 +825,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=power_grid RUN=final_lt RUN_JOBID=0 JOB_NAME=cnd_power_grid_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -844,7 +844,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=pgp RUN=final_ic RUN_JOBID=0 JOB_NAME=cnd_pgp_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -861,7 +861,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=pgp RUN=final_lt RUN_JOBID=0 JOB_NAME=cnd_pgp_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -880,7 +880,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=p2p_gnutella RUN=final_ic RUN_JOBID=0 JOB_NAME=cnd_p2p_gnutella_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -897,7 +897,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=p2p_gnutella RUN=final_lt RUN_JOBID=0 JOB_NAME=cnd_p2p_gnutella_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -916,7 +916,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=openflights RUN=final_ic RUN_JOBID=0 JOB_NAME=cnd_openflights_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -933,7 +933,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=openflights RUN=final_lt RUN_JOBID=0 JOB_NAME=cnd_openflights_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -952,7 +952,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=ba RUN=final_ic RUN_JOBID=0 JOB_NAME=cnd_ba_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -969,7 +969,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=critical_node_detection DATASET=ba RUN=final_lt RUN_JOBID=0 JOB_NAME=cnd_ba_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="bpd_r collective_influence_r adaptive_degree gndr explosive_immunization frontier_removal external:finder" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1009,7 +1009,7 @@ Baselines from section 4.4: `infected_betweenness`, `infected_degree`, `dynamic_
 TASK=source_localization DATASET=cora_ml RUN=final_ic RUN_JOBID=0 JOB_NAME=sl_cora_ml_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1026,7 +1026,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=cora_ml RUN=final_lt RUN_JOBID=0 JOB_NAME=sl_cora_ml_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1045,7 +1045,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=power_grid RUN=final_ic RUN_JOBID=0 JOB_NAME=sl_power_grid_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1062,7 +1062,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=power_grid RUN=final_lt RUN_JOBID=0 JOB_NAME=sl_power_grid_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1081,7 +1081,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=deezer RUN=final_ic RUN_JOBID=0 JOB_NAME=sl_deezer_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1098,7 +1098,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=deezer RUN=final_lt RUN_JOBID=0 JOB_NAME=sl_deezer_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1117,7 +1117,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=netscience RUN=final_ic RUN_JOBID=0 JOB_NAME=sl_netscience_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1134,7 +1134,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=netscience RUN=final_lt RUN_JOBID=0 JOB_NAME=sl_netscience_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1153,7 +1153,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=sbm RUN=final_ic RUN_JOBID=0 JOB_NAME=sl_sbm_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1170,7 +1170,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=source_localization DATASET=sbm RUN=final_lt RUN_JOBID=0 JOB_NAME=sl_sbm_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="infected_betweenness infected_degree dynamic_age lpsi rumor_centrality external:graphsl_slvae" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1221,7 +1221,7 @@ Without the symlinks the node-lever command regenerates and retrains from scratc
 TASK=influence_blocking DATASET=email_eu_core RUN=final_ic RUN_JOBID=0 JOB_NAME=ib_email_eu_core_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1238,7 +1238,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=email_eu_core RUN=final_lt RUN_JOBID=0 JOB_NAME=ib_email_eu_core_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1255,7 +1255,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=email_eu_core RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_email_eu_core_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1272,7 +1272,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=email_eu_core RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_email_eu_core_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1291,7 +1291,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=p2p_gnutella24 RUN=final_ic RUN_JOBID=0 JOB_NAME=ib_p2p_gnutella24_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1308,7 +1308,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=p2p_gnutella24 RUN=final_lt RUN_JOBID=0 JOB_NAME=ib_p2p_gnutella24_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1325,7 +1325,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=p2p_gnutella24 RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_p2p_gnutella24_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1342,7 +1342,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=p2p_gnutella24 RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_p2p_gnutella24_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1361,7 +1361,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=epinions1 RUN=final_ic RUN_JOBID=0 JOB_NAME=ib_epinions1_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1378,7 +1378,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=epinions1 RUN=final_lt RUN_JOBID=0 JOB_NAME=ib_epinions1_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1395,7 +1395,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=epinions1 RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_epinions1_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1412,7 +1412,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=epinions1 RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_epinions1_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1431,7 +1431,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=cit_hepth RUN=final_ic RUN_JOBID=0 JOB_NAME=ib_cit_hepth_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1448,7 +1448,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=cit_hepth RUN=final_lt RUN_JOBID=0 JOB_NAME=ib_cit_hepth_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1465,7 +1465,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=cit_hepth RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_cit_hepth_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1482,7 +1482,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=cit_hepth RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_cit_hepth_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1501,7 +1501,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=powerlaw_cluster RUN=final_ic RUN_JOBID=0 JOB_NAME=ib_powerlaw_cluster_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1518,7 +1518,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=powerlaw_cluster RUN=final_lt RUN_JOBID=0 JOB_NAME=ib_powerlaw_cluster_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="rps reverse_blocking proximity cldag" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1535,7 +1535,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=powerlaw_cluster RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_powerlaw_cluster_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1552,7 +1552,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=powerlaw_cluster RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_powerlaw_cluster_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1592,7 +1592,7 @@ Baselines from section 4.6: `steiner_tree`, `jordan_backward`, `cri`, `dhrec`, `
 TASK=cascade_reconstruction DATASET=uci_students RUN=final_ic RUN_JOBID=0 JOB_NAME=cr_uci_students_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1609,7 +1609,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=uci_students RUN=final_lt RUN_JOBID=0 JOB_NAME=cr_uci_students_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1628,7 +1628,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=ca_grqc RUN=final_ic RUN_JOBID=0 JOB_NAME=cr_ca_grqc_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1645,7 +1645,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=ca_grqc RUN=final_lt RUN_JOBID=0 JOB_NAME=cr_ca_grqc_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1664,7 +1664,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=rt_pol RUN=final_ic RUN_JOBID=0 JOB_NAME=cr_rt_pol_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1681,7 +1681,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=rt_pol RUN=final_lt RUN_JOBID=0 JOB_NAME=cr_rt_pol_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1700,7 +1700,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=oregon2 RUN=final_ic RUN_JOBID=0 JOB_NAME=cr_oregon2_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1717,7 +1717,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=oregon2 RUN=final_lt RUN_JOBID=0 JOB_NAME=cr_oregon2_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1736,7 +1736,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=ba RUN=final_ic RUN_JOBID=0 JOB_NAME=cr_ba_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1753,7 +1753,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_reconstruction DATASET=ba RUN=final_lt RUN_JOBID=0 JOB_NAME=cr_ba_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="steiner_tree jordan_backward cri dhrec observed_only external:ditto external:grin" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1791,7 +1791,7 @@ Baselines from section 4.7: `dava`, `netshield_plus`, `greedy_walk`, `degree_imm
 TASK=epidemic_control DATASET=infectious_sociopatterns RUN=final_sir RUN_JOBID=0 JOB_NAME=ec_infectious_sociopatterns_sir \
 DIFFUSION_MODEL=SIR GEN_MODELS=SIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1808,7 +1808,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=infectious_sociopatterns RUN=final_sis RUN_JOBID=0 JOB_NAME=ec_infectious_sociopatterns_sis \
 DIFFUSION_MODEL=SIS GEN_MODELS=SIS \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1825,7 +1825,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=infectious_sociopatterns RUN=final_seir RUN_JOBID=0 JOB_NAME=ec_infectious_sociopatterns_seir \
 DIFFUSION_MODEL=SEIR GEN_MODELS=SEIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1844,7 +1844,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=oregon1 RUN=final_sir RUN_JOBID=0 JOB_NAME=ec_oregon1_sir \
 DIFFUSION_MODEL=SIR GEN_MODELS=SIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1861,7 +1861,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=oregon1 RUN=final_sis RUN_JOBID=0 JOB_NAME=ec_oregon1_sis \
 DIFFUSION_MODEL=SIS GEN_MODELS=SIS \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1878,7 +1878,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=oregon1 RUN=final_seir RUN_JOBID=0 JOB_NAME=ec_oregon1_seir \
 DIFFUSION_MODEL=SEIR GEN_MODELS=SEIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1897,7 +1897,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=brightkite RUN=final_sir RUN_JOBID=0 JOB_NAME=ec_brightkite_sir \
 DIFFUSION_MODEL=SIR GEN_MODELS=SIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1914,7 +1914,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=brightkite RUN=final_sis RUN_JOBID=0 JOB_NAME=ec_brightkite_sis \
 DIFFUSION_MODEL=SIS GEN_MODELS=SIS \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1931,7 +1931,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=brightkite RUN=final_seir RUN_JOBID=0 JOB_NAME=ec_brightkite_seir \
 DIFFUSION_MODEL=SEIR GEN_MODELS=SEIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1950,7 +1950,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=p2p_gnutella05 RUN=final_sir RUN_JOBID=0 JOB_NAME=ec_p2p_gnutella05_sir \
 DIFFUSION_MODEL=SIR GEN_MODELS=SIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1967,7 +1967,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=p2p_gnutella05 RUN=final_sis RUN_JOBID=0 JOB_NAME=ec_p2p_gnutella05_sis \
 DIFFUSION_MODEL=SIS GEN_MODELS=SIS \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1984,7 +1984,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=p2p_gnutella05 RUN=final_seir RUN_JOBID=0 JOB_NAME=ec_p2p_gnutella05_seir \
 DIFFUSION_MODEL=SEIR GEN_MODELS=SEIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -2003,7 +2003,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=ba RUN=final_sir RUN_JOBID=0 JOB_NAME=ec_ba_sir \
 DIFFUSION_MODEL=SIR GEN_MODELS=SIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -2020,7 +2020,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=ba RUN=final_sis RUN_JOBID=0 JOB_NAME=ec_ba_sis \
 DIFFUSION_MODEL=SIS GEN_MODELS=SIS \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -2037,7 +2037,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=epidemic_control DATASET=ba RUN=final_seir RUN_JOBID=0 JOB_NAME=ec_ba_seir \
 DIFFUSION_MODEL=SEIR GEN_MODELS=SEIR \
 BASELINES="dava netshield_plus greedy_walk degree_immunization frontier_immunization external:explosive_immunization_epi external:collective_influence_epi" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -2077,7 +2077,7 @@ Baselines from section 4.8: `feature_linear`, `rpp`, `szabo_huberman`, `hawkes`,
 TASK=cascade_prediction DATASET=casflow_weibo RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_weibo_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
@@ -2095,7 +2095,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_prediction DATASET=casflow_aps RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_aps_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
@@ -2113,7 +2113,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_prediction DATASET=taoke RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_taoke_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
@@ -2131,7 +2131,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_prediction DATASET=casflow_twitter RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_twitter_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
@@ -2149,7 +2149,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=cascade_prediction DATASET=digg_cascades RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_digg_cascades_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities" \
-ARMS="routing evolve_free@native evolve_free@monte_carlo evolve_free@oracle evolve_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
