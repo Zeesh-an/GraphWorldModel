@@ -26,7 +26,7 @@ T1 and T2 come free with every run (the `## World Model` section of each report 
 
 **Discovery systems.** One common set of three for every task, chosen for three different search paradigms: `llm4ad_funsearch` (FunSearch, the origin: an island program database with best-shot prompting), `eoh` (Evolution of Heuristics, ICML 2024 oral: co-evolution of a natural-language thought and its code), and `openevolve` (the open AlphaEvolve implementation: a MAP-Elites program database with cascade evaluation). All three run their own loop at published defaults on the plain simulator through `baselines/score_program.py`; the world model is unreachable by construction. Alternates: `reevo`, `mcts_ahd`, `llamea`.
 
-**Conditions per table row.** Every T3 cell has the five baselines (condition 1 or 7), the routed classical pool (condition 2), and the two-arm ladder `evolve_free@oracle`, `evolve_free@world_model` (conditions 5 and 6; the native and Monte Carlo arms, conditions 3 and 4, were dropped from the matrix on 2026-09-10 and are ablation rows only), all replayed on the shared referee: the exact oracle simulator at 1,000 samples (`--referee oracle --referee-samples 1000`, the defaults, reduced to 200 samples on the very-large rows). `--mc-agreement`, the second replay on the sampled simulator, is OFF on every row of the matrix: section 8.0 states what that gives up and how to recover a single timing row if one is wanted. Adaptive IM uses `adaptive_<mode>@<evaluator>` paired with the matching `evolve` arm so the adaptivity gap is computable.
+**Conditions per table row.** Every T3 cell has the five baselines (condition 1 or 7), the routed classical pool (condition 2), and the two-arm ladder `evolve_free@oracle`, `evolve_free@world_model` (conditions 5 and 6; the native and Monte Carlo arms, conditions 3 and 4, were dropped from the matrix on 2026-09-10 and are ablation rows only), all replayed on the shared referee: the exact oracle simulator at 1,000 samples (`--referee oracle --referee-samples 1000`, the defaults, reduced to 200 samples on the very-large rows). `--mc-agreement`, the second replay on the sampled simulator, is OFF on every row of the matrix: section 8.0 states what that gives up and how to recover a single timing row if one is wanted. Adaptive IM runs the same two arms; the `adaptive_<mode>@<evaluator>` twins that make the adaptivity gap computable are ablation rows, not matrix rows, since 2026-09-10.
 
 **Budgets and dynamics** follow `pipeline/tasks.py`: 1, 5, 10 and 20 percent of $N$ for the two IM tasks and critical node detection (outbreak 10 percent of $N$), absolute $k \in \{10, 20, 30, 40, 50\}$ for influence blocking (rumour 1 percent of $N$), a single 10 percent point for the two inverse tasks and cascade prediction, and the epidemic task's percent ladder against a 1 percent outbreak. IC and LT for every simulator task, SIR, SIS and SEIR for epidemic control, with the SIR $\gamma = 1$ check against IC reported once.
 
@@ -343,7 +343,7 @@ One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 1
 
 **Names.** `RUN` names the dynamics (`final_ic`, `final_lt`, `final_sir`, `final_sis`, `final_seir`) because a run directory holds one dynamics' data, checkpoint and arm results, so IC and LT on the same graph must never share one. `JOB_NAME` is `<task>_<dataset>_<dynamics>` with the task abbreviated (`im`, `aim`, `cnd`, `sl`, `ib`, `cr`, `ec`, `cp`); the script's default would be `gwm_<dataset>_<run>`, which two tasks on one graph would share, and Slurm's `singleton` dependency keys on the name. `RUN_JOBID=0` keeps the directory stable so a resubmission resumes it. **Never pass `FORCE=1`**: every command is idempotent, resubmitting it skips finished stages and finished arms, and an evolve arm resumes from its per-generation checkpoint. `FORCE=1` throws all of that away and, on a requeue, regenerates the data and retrains before reaching the agent stage, which is what cost three of the five attempts on the September digg job.
 
-**Identical in every command**, because they are the protocol rather than a resource: `LLM_MODEL=gpt-6-astra`, `REASONING_EFFORT=high`, `WM_MODEL=sage`, `HEAD=structured` (the one head defined under IC, LT, CLT and all three compartmental dynamics; `structured_residual` raises under LT, so using it anywhere would make the IC and LT rows different models), `EVALUATOR=oracle`, `REFEREE=oracle`, `HORIZON=10`, `OUTER_ITERS=20`, `N_SAMPLES=200`, `MC_RUNS=200`, `SEED=42`, `ACTION_CONDITIONING=message`, `FEEDBACK=default`, and `ARMS`, which is the ladder for the task (condition 2 plus conditions 5 and 6, `routing evolve_free@oracle evolve_free@world_model`; on adaptive IM the five arms that pair each `evolve` with its `adaptive` twin on both evaluators so the adaptivity gap is computable). The native and Monte Carlo arms (conditions 3 and 4) were removed from every command on 2026-09-10; they remain runnable as ablation rows by adding `evolve_free@native evolve_free@monte_carlo` back to `ARMS` on a cell. Also fixed and not written out because no command changes them: learning rate 1e-3, weight decay 5e-4, `pos_weight` off, 3 layers, dropout 0.1, `basic` action encoding, inject 0.4, counterfactual 0.4 with 2 branches, budgets drawn from 1 to 20 percent of $N$ at generation, weighted cascade probabilities, and the 70/15/15 split, which resolves graph-disjoint for a synthetic family and per-episode for a single real graph.
+**Identical in every command**, because they are the protocol rather than a resource: `LLM_MODEL=gpt-6-astra`, `REASONING_EFFORT=high`, `WM_MODEL=sage`, `HEAD=structured` (the one head defined under IC, LT, CLT and all three compartmental dynamics; `structured_residual` raises under LT, so using it anywhere would make the IC and LT rows different models), `EVALUATOR=oracle`, `REFEREE=oracle`, `HORIZON=10`, `OUTER_ITERS=20`, `N_SAMPLES=200`, `MC_RUNS=200`, `SEED=42`, `ACTION_CONDITIONING=message`, `FEEDBACK=default`, and `ARMS`, which is the ladder for the task (condition 2 plus conditions 5 and 6, `routing evolve_free@oracle evolve_free@world_model`; the same three arms on adaptive IM, whose `adaptive_free@<evaluator>` twins were removed on 2026-09-10; the adaptivity gap is therefore not computed by the matrix and needs an ablation cell that adds `adaptive_free@oracle adaptive_free@world_model` back). The native and Monte Carlo arms (conditions 3 and 4) were removed from every command on 2026-09-10; they remain runnable as ablation rows by adding `evolve_free@native evolve_free@monte_carlo` back to `ARMS` on a cell. Also fixed and not written out because no command changes them: learning rate 1e-3, weight decay 5e-4, `pos_weight` off, 3 layers, dropout 0.1, `basic` action encoding, inject 0.4, counterfactual 0.4 with 2 branches, budgets drawn from 1 to 20 percent of $N$ at generation, weighted cascade probabilities, and the 70/15/15 split, which resolves graph-disjoint for a synthetic family and per-episode for a single real graph.
 
 **Also identical, and on by default since 2026-09-10, so no command names them:** the probe turn before every generation (`PROBE_TURN=1`, one extra LLM call per generation, so a 20-generation search now makes about 40 generation-level calls plus reflections and idea searches; the LLM call count in T4 is read from `llm_usage.calls`, not from `OUTER_ITERS`), the paired acceptance band, the incumbent-pinned parent with the paired population ranking, the spurious-accept ledger, the unbiased incumbent curve, the `# EXPECTED:` edit forecast, counterexample realizations in the feedback, and the post-search rediscovery distance (`PROVENANCE=1`, capped at `PROVENANCE_TIMEOUT` seconds per library member, 60 by default; on the very-large rows the slow structural members such as exact betweenness will time out and the report says which). Two knobs stay OFF everywhere because they change the protocol: `STOP_WHEN_FLAT` (early stop on the unbiased curve; the matrix fixes `OUTER_ITERS=20`) and `CALIBRATION_STEERING` (forecast errors feeding the operator schedule). The report's "Search protocol" section and the `edit_calibration` figure read these per arm.
 
@@ -609,7 +609,7 @@ Baselines from section 4.2: `adapt_epic`, `adapt_degree_discount`, `imm`, `stati
 TASK=adaptive_online_im DATASET=netscience RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_netscience_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -626,7 +626,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=netscience RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_netscience_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -645,7 +645,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=nethept RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_nethept_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -662,7 +662,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=nethept RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_nethept_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -681,7 +681,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=twitter RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_twitter_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -698,7 +698,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=twitter RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_twitter_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -717,7 +717,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=powerlaw_cluster RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_powerlaw_cluster_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -734,7 +734,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=powerlaw_cluster RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_powerlaw_cluster_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -753,7 +753,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=facebook RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_facebook_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -770,7 +770,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=adaptive_online_im DATASET=facebook RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_facebook_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
-ARMS="routing evolve_free@oracle adaptive_free@oracle evolve_free@world_model adaptive_free@world_model" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
