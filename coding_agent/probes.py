@@ -45,10 +45,18 @@ from coding_agent.types import ActionOp
 
 max_probes_per_generation = 6
 max_region_nodes = 300
-# Replacement candidates a best_swap probe scores, ranked by degree; a sampling
-# evaluator pays one rollout per candidate, so it gets far fewer
+# Replacement candidates a best_swap probe scores, ranked by degree. The cap
+# scales with the graph: on a batched evaluator every candidate is n_samples
+# sample blocks of E arcs each, so the count is bounded by an arc-evaluation
+# budget per timestep (2^30 keeps a 2.6M-arc graph at the floor and lets a
+# 10,000-node graph score every candidate); a sampling evaluator pays mc_runs
+# episodes per candidate, so its cap follows the episode cost of the graph
 max_best_swap_candidates = 200
+min_best_swap_candidates = 10
+max_best_swap_arc_evaluations = 2**30
 max_best_swap_sequential = 20
+min_best_swap_sequential = 3
+max_sequential_arc_evaluations = 2**22
 max_listed_nodes = 10
 # A horizon probe may look at most this many times further than the task horizon
 max_horizon_multiple = 2
@@ -129,7 +137,14 @@ def _drop(plan: list, node: int) -> list:
     ]
 
 
-def _swap(plan: list, old: int, new: int) -> list:
+def _swap(plan: list, old: int, new: int, task=None, graph=None) -> list:
+    # A blocked removal travels as a deletion bag whose remove_edge ops name the
+    # old node's own arcs, so it is rebuilt for the new node rather than retargeted
+    if task is not None and graph is not None and task.budget_op == "remove_node" and task.contains:
+        swapped = _drop(plan, old)
+        swapped[0] = swapped[0] + expand_removals([ActionOp("remove_node", new)], graph)
+        return swapped
+
     return [
         [
             replace(action, target=new) if int(action.target) == old else action
@@ -137,6 +152,22 @@ def _swap(plan: list, old: int, new: int) -> list:
         ]
         for bag in plan
     ]
+
+
+def best_swap_limit(environment: object, graph) -> int:
+    """How many replacement candidates one best_swap probe may score on this graph."""
+    arcs = max(1, int(graph.edge_index.shape[1]))
+    if batched_environment(environment):
+        samples = max(1, int(getattr(environment, "n_samples", 1)))
+        return max(
+            min_best_swap_candidates,
+            min(max_best_swap_candidates, max_best_swap_arc_evaluations // (samples * arcs)),
+        )
+
+    return max(
+        min_best_swap_sequential,
+        min(max_best_swap_sequential, max_sequential_arc_evaluations // arcs),
+    )
 
 
 def _budgeted(plan: list, task) -> list[int]:
@@ -239,7 +270,9 @@ def _answer_intervention(
 
     if operation == "swap":
         old, new = int(probe["a"]), int(probe["b"])
-        base, swapped = _plan_rewards(environment, [plan, _swap(plan, old, new)], horizon, budget)
+        base, swapped = _plan_rewards(
+            environment, [plan, _swap(plan, old, new, task, graph)], horizon, budget
+        )
         return (
             f"swap({old}->{new}): plan={base:.2f}, swapped={swapped:.2f}, "
             f"delta={swapped - base:+.2f}",
@@ -274,11 +307,7 @@ def _answer_intervention(
         if old not in budgeted:
             return f"best_swap({old}): that node is not in the plan", 0
         excluded = set(budgeted) | set(int(node) for node in task.outbreak)
-        limit = (
-            max_best_swap_candidates
-            if batched_environment(environment)
-            else max_best_swap_sequential
-        )
+        limit = best_swap_limit(environment, graph)
         candidates = sorted(
             (node for node in range(graph.num_nodes) if node not in excluded),
             key=lambda node: -graph.degree(node),
@@ -287,7 +316,7 @@ def _answer_intervention(
             return f"best_swap({old}): no replacement candidates", 0
         rewards = _plan_rewards(
             environment,
-            [plan] + [_swap(plan, old, new) for new in candidates],
+            [plan] + [_swap(plan, old, new, task, graph) for new in candidates],
             horizon,
             budget,
         )

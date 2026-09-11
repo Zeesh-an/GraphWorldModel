@@ -504,3 +504,38 @@ def test_train_stage_refuses_a_checkpoint_trained_under_another_conditioning(tmp
     check_checkpoint_conditioning(path, "message")
     with _pytest.raises(ValueError):
         check_checkpoint_conditioning(path, "global")
+
+
+def test_best_swap_cap_scales_with_the_graph_and_swap_rebuilds_a_deletion_bag() -> None:
+    from coding_agent.probes import _swap, best_swap_limit
+
+    graph = _graph()
+    environment = WorldModelEnvironment.oracle(graph, "IC", n_samples=8, base_seed=0)
+    assert best_swap_limit(environment, graph) == 200
+
+    class Huge:
+        edge_index = np.zeros((2, 2_600_000), dtype=np.int64)
+
+    # At the ladder's 200 samples a 2.6M-arc graph sits at the floor
+    ladder = WorldModelEnvironment.oracle(graph, "IC", n_samples=200, base_seed=0)
+    assert best_swap_limit(ladder, Huge()) == 10
+    assert 10 < best_swap_limit(environment, Huge()) < 200
+    sampler = MonteCarloEnvironment(graph, "IC", mc_runs=2, base_seed=0)
+    assert best_swap_limit(sampler, graph) == 20
+    assert best_swap_limit(sampler, Huge()) == 3
+
+    containment = TaskSpec(
+        task="critical_node_detection", objective_kind="minimize", sense="minimize",
+        budget_op="remove_node", remove_semantics="blocked", allowed_ops=("remove_node",),
+        budget=1, horizon=2,
+    )
+    assert containment.contains
+    from coding_agent.containment import expand_removals
+
+    plan = [expand_removals([ActionOp("remove_node", 0)], graph), [], []]
+    swapped = _swap(plan, 0, 11, containment, graph)
+    targets = {(action.op, int(action.target), action.destination) for action in swapped[0]}
+    assert ("remove_node", 11, None) in targets and ("remove_node", 0, None) not in targets
+    # The new node's own arcs, not the old node's retargeted ones
+    assert all(11 in (int(a.target), int(a.destination)) for a in swapped[0] if a.op == "remove_edge")
+    assert any(a.op == "remove_edge" for a in swapped[0])
