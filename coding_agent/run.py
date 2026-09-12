@@ -2415,7 +2415,9 @@ def run_experiment(
             )
 
     # Whole experiment including LLM calls; the per-rollout WM-vs-MC timing lives in cost.rollout_seconds / referee_rollout_seconds
-    result["elapsed_seconds"] = time.perf_counter() - experiment_start
+    result["elapsed_seconds"] = time.perf_counter() - experiment_start + getattr(
+        method, "resumed_elapsed", 0.0
+    )
 
     if config.arm_spec:
         arm = parse_arm(config.arm_spec, default_evaluator=config.evaluator)

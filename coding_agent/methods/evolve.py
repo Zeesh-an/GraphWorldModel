@@ -37,6 +37,7 @@ loop needs (search_metrics.py, counterexamples.py, probes.py):
 
 import difflib
 from pathlib import Path
+import time
 import numpy as np
 from tqdm import tqdm
 
@@ -195,6 +196,12 @@ def compact_turn(script: str, parent_script: str | None, verdict: str) -> str:
     return f"{head}# MECHANISM: {mechanism_of(script)}\n```diff\n" + "\n".join(diff) + "\n```"
 
 
+# The inner-loop cost counters run.py reads off the environment; a resumed
+# search restores them so the result JSON charges the whole search, not the
+# process that happened to finish it
+counter_keys = ("episodes_used", "rollout_calls", "evaluator_seconds", "forward_passes")
+
+
 class EvolveSearch(OuterLoopMethod):
     def __init__(
         self,
@@ -276,6 +283,11 @@ class EvolveSearch(OuterLoopMethod):
     ) -> tuple[Strategy, Trajectory]:
         system = build_system_prompt(self.label, self.strategy_mode, task)
         self.effective_budget = task.budget
+        # Read by _checkpoint and by run.py's elapsed_seconds
+        self.environment = environment
+        self.provider = agent.provider
+        self.search_start = time.perf_counter()
+        self.resumed_elapsed = 0.0
 
         resumed = checkpoint.load(self.checkpoint_path, self.checkpoint_fingerprint)
 
@@ -326,6 +338,16 @@ class EvolveSearch(OuterLoopMethod):
             self.probe_log = resumed.get("probe_log", [])
             probe_feedback = resumed.get("probe_feedback")
             start_iteration = resumed["iteration"]
+            # The killed process's evaluator work, LLM usage and wall clock up
+            # to its last checkpoint; .get: checkpoints from before 2026-09-11
+            self.resumed_elapsed = float(resumed.get("elapsed_seconds") or 0.0)
+            for key, value in (resumed.get("evaluator_counters") or {}).items():
+                if hasattr(environment, key):
+                    setattr(environment, key, getattr(environment, key) + value)
+            usage = getattr(agent.provider, "usage", None)
+            if usage is not None:
+                for key, value in (resumed.get("llm_usage") or {}).items():
+                    usage[key] = usage.get(key, 0) + value
 
             if resumed["best"] is not None:
                 best = (
@@ -868,6 +890,13 @@ class EvolveSearch(OuterLoopMethod):
             {
                 "fingerprint": self.checkpoint_fingerprint,
                 "iteration": iteration,
+                "elapsed_seconds": self.resumed_elapsed + time.perf_counter() - self.search_start,
+                "evaluator_counters": {
+                    key: getattr(self.environment, key)
+                    for key in counter_keys
+                    if hasattr(self.environment, key)
+                },
+                "llm_usage": dict(getattr(self.provider, "usage", None) or {}),
                 "population": population,
                 "best": (
                     None

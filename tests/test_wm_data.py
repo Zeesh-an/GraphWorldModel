@@ -264,6 +264,48 @@ class TestTransitionDataset:
         branches = {sample[0]["branch"] for sample in dataset.samples}
         assert branches == {"main", "cf_0", "cf_1"}
 
+    def test_node_only_records_share_the_base_graph_arrays(self, dataset_dir: Path) -> None:
+        import json
+
+        # Two node-only episodes and one episode with an edge op: every record of
+        # the first two must reuse ONE pair of arrays (digg is 80 MB per copy),
+        # the edited one must get its own
+        def record(t, branch, action, episode):
+            return {
+                "graph_id": "g0",
+                "episode_id": episode,
+                "t": t,
+                "branch": branch,
+                "state": {"infected": [1], "frontier": [1]},
+                "action": action,
+                "next_state": {"infected": [1, 2], "frontier": [2]},
+                "next_marginal_infected": {"1": 1.0, "2": 0.5},
+                "next_marginal_frontier": {"2": 0.5},
+            }
+
+        records = [
+            record(0, "main", [{"op": "add_node", "target": 1}], "a"),
+            record(1, "main", [], "a"),
+            record(1, "cf_0", [{"op": "remove_node", "target": 1}], "a"),
+            record(0, "main", [], "b"),
+            record(0, "main", [{"op": "remove_edge", "target": 4, "destination": 5}], "c"),
+        ]
+        (dataset_dir / "transitions_IC_val.jsonl").write_text(
+            "\n".join(json.dumps(entry) for entry in records) + "\n"
+        )
+        dataset = TransitionDataset(dataset_dir, "IC", "val")
+        arrays = [(sample[1], sample[2]) for sample in dataset.samples]
+
+        shared = arrays[:4]
+        assert all(edge_index is shared[0][0] for edge_index, _ in shared)
+        assert all(weights is shared[0][1] for _, weights in shared)
+        base_index, base_weights = edges_to_arrays(dataset.store["g0"]["base_edges"])
+        assert np.array_equal(shared[0][0], base_index)
+        assert np.array_equal(shared[0][1], base_weights)
+        edited_index, _ = arrays[4]
+        assert edited_index is not shared[0][0]
+        assert edited_index.shape[1] == base_index.shape[1] - 1
+
     def test_action_encoding_sets_feature_width(self, dataset_dir: Path) -> None:
         assert TransitionDataset(dataset_dir, "IC", "test")[0]["X"].shape[1] == 6
         assert (

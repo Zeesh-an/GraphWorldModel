@@ -498,6 +498,11 @@
 #
 # Every finished stage, every finished (budget, arm) result, and every skipped
 # external baseline is on disk and gets reused; only the missing work runs.
+# A stage whose previous attempt FAILED keeps that attempt's seconds in the
+# manifest total; a stage whose previous attempt was KILLED (status "running",
+# an OOM or a wall-clock kill) never recorded its seconds, so that time is not
+# in the table. An interrupted evolve search resumes from its checkpoint with
+# its evaluator counters, LLM usage and wall clock carried over.
 # Check what is done first:
 #
 #   R=results/influence_maximization/ba/default

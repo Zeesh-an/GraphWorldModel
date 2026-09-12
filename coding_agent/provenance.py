@@ -23,6 +23,7 @@ from typing import Callable
 import numpy as np
 
 from coding_agent.executor import (
+    _StrategyTimeout,
     _time_limit,
     build_strategy,
     mc_blocked_algorithms,
@@ -314,9 +315,17 @@ def compute_provenance(
             block = _compare(winner, output, task)
         # A library member that fails, times out or returns the wrong shape is a
         # data point of the provenance table, never a failure of the finished
-        # search; the message is recorded verbatim for the report
+        # search; the message is recorded verbatim for the report. The alarm's
+        # exception carries no message (call_strategy is what normally words
+        # it), and a bare `assert` in a member does not either, so the first
+        # line is taken only when there is one: on nethept a 60 s timeout in
+        # this handler took down an eight-hour agent stage
+        except _StrategyTimeout:
+            errors[name] = f"timeout: exceeded {timeout:.0f} s"
+            continue
         except Exception as error:
-            errors[name] = f"{type(error).__name__}: {str(error).splitlines()[0][:200]}"
+            message = str(error).splitlines()[0][:200] if str(error).strip() else "no message"
+            errors[name] = f"{type(error).__name__}: {message}"
             continue
         block["name"] = name
         block["seconds"] = round(time.perf_counter() - member_start, 3)

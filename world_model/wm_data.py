@@ -996,15 +996,24 @@ class TransitionDataset(Dataset):
             groups[(record["graph_id"], record["episode_id"])].append(record)
 
         # Flatten every transition into samples = [(record, edge_index, edge_weight), …]
+        # A record with no edge ops sees the store's own base graph, and every
+        # such record of one graph shares ONE pair of arrays: materializing the
+        # arrays per record costs arcs x 20 bytes each, which on digg (4.0M
+        # arcs, 80 MB) at 1,000 records is more host memory than the node has
         self.samples = []
+        base_arrays = {}
         for (graph_id, _), episode_records in groups.items():
             base_edges = self.store[graph_id]["base_edges"]
             adjacency_map = reconstruct_episode_adjacency(episode_records, base_edges)
 
             for record in episode_records:
-                edge_index, weights = edges_to_arrays(
-                    adjacency_map[(record["t"], record["branch"])]
-                )
+                edges = adjacency_map[(record["t"], record["branch"])]
+                if edges is base_edges:
+                    if graph_id not in base_arrays:
+                        base_arrays[graph_id] = edges_to_arrays(base_edges)
+                    edge_index, weights = base_arrays[graph_id]
+                else:
+                    edge_index, weights = edges_to_arrays(edges)
                 self.samples.append((record, edge_index, weights))
 
     def __len__(self) -> int:

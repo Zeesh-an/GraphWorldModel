@@ -1681,6 +1681,17 @@ def load_wm_results(config: PipelineConfig, layout: Layout) -> dict | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
+def carried_seconds(layout: Layout, stage: str) -> float:
+    if not layout.manifest_path.exists():
+        return 0.0
+
+    previous = (json.loads(layout.manifest_path.read_text()).get("stages") or {}).get(stage) or {}
+    if previous.get("status") == "failed":
+        return float(previous.get("seconds") or 0.0)
+
+    return 0.0
+
+
 def _write_manifest(layout: Layout, config: PipelineConfig) -> None:
     """Config + per-stage status, rewritten whenever anything changes."""
     # A resumed run only carries the stages IT ran; merging the previous
@@ -1806,6 +1817,12 @@ def run_pipeline(config: PipelineConfig) -> dict:
             f"{'=' * 72}"
         )
 
+        # A failed attempt's seconds carry into this attempt's total, so the
+        # stage table reports what the stage cost rather than what the last
+        # process spent; a killed attempt (status `running`) never recorded
+        # its seconds and carries nothing
+        carried = carried_seconds(layout, stage)
+
         # Mark the stage in-flight so a killed run is distinguishable from a
         # clean one when the manifest is read back
         config.stage_status[stage] = {"status": "running", "seconds": None}
@@ -1847,7 +1864,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
         except Exception as error:
             config.stage_status[stage] = {
                 "status": "failed",
-                "seconds": round(time.perf_counter() - stage_start, 1),
+                "seconds": round(carried + time.perf_counter() - stage_start, 1),
                 "error": f"{type(error).__name__}: {error}",
             }
             _write_manifest(layout, config)
@@ -1857,7 +1874,7 @@ def run_pipeline(config: PipelineConfig) -> dict:
         seconds = time.perf_counter() - stage_start
         config.stage_status[stage] = {
             "status": "done",
-            "seconds": round(seconds, 1),
+            "seconds": round(carried + seconds, 1),
         }
         print(f"[pipeline] stage {stage} done in {seconds:.1f}s")
 

@@ -402,10 +402,12 @@ class _ScriptedProvider:
     def __init__(self) -> None:
         self.scripts = [seed_script, worse_script, better_script, worse_script]
         self.calls = []
+        self.usage = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
     def complete(self, messages: list[dict]) -> str:
         prompt = messages[-1]["content"]
         self.calls.append(prompt[:40])
+        self.usage["calls"] += 1
         if prompt.startswith("PROBE TURN before"):
             return '```probes\n{"probes": [{"op": "drop", "node": 0}, {"op": "gradient", "top": 2}]}\n```'
         if '"ideas"' in prompt:
@@ -455,6 +457,49 @@ def test_evolve_end_to_end_records_the_whole_protocol() -> None:
     assert trajectory.sample_rewards is not None and strategy.source_script
 
 
+def test_resumed_search_carries_cost_usage_and_wall_clock(tmp_path) -> None:
+    graph = _graph()
+    task = _task(seed=3)
+    checkpoint_path = tmp_path / "search.checkpoint.json"
+    fingerprint = {"test": "resume"}
+
+    def search(outer_iters: int) -> tuple:
+        environment = WorldModelEnvironment.oracle(graph, "IC", n_samples=16, base_seed=0)
+        provider = _ScriptedProvider()
+        method = EvolveSearch(
+            outer_iters=outer_iters,
+            strategy_mode="free",
+            use_anchor=False,
+            credit=False,
+            reflect=False,
+            probes=False,
+            probe_turn=False,
+            checkpoint_path=checkpoint_path,
+            checkpoint_fingerprint=fingerprint,
+        )
+        method.optimize(CodingAgent(provider), environment, task, graph)
+        return method, environment, provider
+
+    # Two generations, then the "killed" process's checkpoint is resumed by a
+    # fresh environment and a fresh provider for two more
+    first, env_first, provider_first = search(2)
+    saved = json.loads(checkpoint_path.read_text())
+    assert saved["iteration"] == 2 and saved["elapsed_seconds"] > 0
+    assert saved["evaluator_counters"]["rollout_calls"] == env_first.rollout_calls
+    assert saved["llm_usage"]["calls"] == provider_first.usage["calls"]
+
+    second, env_second, provider_second = search(4)
+    assert len([entry for entry in second.history if entry.get("reward") is not None]) == 4
+    # The counters, the usage and the clock include the first process's work
+    assert env_second.rollout_calls > env_first.rollout_calls
+    assert env_second.evaluator_seconds > env_first.evaluator_seconds
+    assert provider_second.usage["calls"] > provider_first.usage["calls"]
+    assert second.resumed_elapsed == pytest.approx(saved["elapsed_seconds"])
+    resumed_saved = json.loads(checkpoint_path.read_text())
+    assert resumed_saved["evaluator_counters"]["rollout_calls"] == env_second.rollout_calls
+    assert resumed_saved["elapsed_seconds"] > saved["elapsed_seconds"]
+
+
 def test_provenance_runs_the_library_pool_on_the_winner() -> None:
     from functools import partial
 
@@ -480,6 +525,45 @@ def test_provenance_runs_the_library_pool_on_the_winner() -> None:
     assert "high_degree" in names
     hub_first = next(entry for entry in block["ranking"] if entry["name"] == "high_degree")
     assert hub_first["common"] >= 1
+
+
+def test_provenance_records_a_timed_out_member_instead_of_crashing() -> None:
+    from coding_agent.provenance import compute_provenance
+
+    graph = _graph()
+    task = _task()
+    winner = _trajectory(5.0, 0.5, actions=_plan([0, 11], 3))
+    # Every pool member becomes one of three scripts: one spins past the cap,
+    # one raises with no message (the alarm's own exception has none either),
+    # the rest answer at once
+    fast = """\
+class Fast(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        return [[ActionOp("add_node", 0), ActionOp("add_node", 11)]] + [[] for _ in range(horizon)]
+"""
+    spinner = """\
+class Spinner(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        while True:
+            pass
+"""
+    mute = """\
+class Mute(Strategy):
+    def plan_horizon(self, graph, budget, horizon):
+        assert False
+"""
+
+    def script_for(name: str) -> str:
+        if name == "degree_discount":
+            return spinner
+        if name == "high_degree":
+            return mute
+        return fast
+
+    block = compute_provenance(task, graph, winner, fast, script_for, timeout=0.5)
+    assert block["errors"]["degree_discount"] == "timeout: exceeded 0 s"
+    assert block["errors"]["high_degree"] == "AssertionError: no message"
+    assert len(block["ranking"]) + len(block["errors"]) == block["pool_size"]
 
 
 def test_train_stage_refuses_a_checkpoint_trained_under_another_conditioning(tmp_path) -> None:

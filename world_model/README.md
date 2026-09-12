@@ -85,6 +85,8 @@ This guarantees the model is always shown the adjacency that actually produced t
 
 ### Batching
 
+`TransitionDataset` keeps one `(edge_index, edge_weight)` pair per graph for every record that saw no edge op (the store's base graph, which is every record of node-op-only data) and materializes a fresh pair only for a step an edge op changed, so host memory is one adjacency per graph plus the JSON records rather than one adjacency per record; on digg (4.0M arcs, 80 MB per copy) the latter exceeded 128 GB at 20 rollouts and the OOM killer ended the train stage with the manifest still saying `running` [measured 2026-09-11].
+
 `collate_transitions` stacks `B` transitions into one **disjoint block-diagonal** graph: node ids are offset per sample, `X`/`y` are concatenated, and a single `GraphInput` is built over the union. Because the blocks are disconnected, message passing never crosses sample boundaries, it is exactly equivalent to running each graph independently, but in one batched forward pass.
 
 ---
