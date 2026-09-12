@@ -159,6 +159,8 @@ IC: `ICTransmissionHead(oracle=True)` skips the MLP and sets `q = edge_weight` (
 
 ## Training: `train_wm.py`
 
+**Memory.** Training memory is per-arc activations: 103 bytes per arc per hidden unit under message conditioning and 29 without it (measured; 3-layer SAGE, structured head, forward plus backward; the modulator's per-arc MLP inputs are what autograd keeps), so digg at hidden 128 is 53 GB per graph and twitter at hidden 256 is 46 GB, against 15 and 13 GB unconditioned. One optimizer step still sees `--batch-size` transitions, but `micro_batches` runs them in sub-batches whose `arcs x hidden` stay under `--max-batch-arc-hidden` (2^28, about 28 GB; `MAX_BATCH_ARC_HIDDEN` in `pipeline.sbatch`), each sub-batch's mean loss weighted by its node share so the accumulated gradient equals the whole batch's, and a single graph over the budget runs alone. Batch 2 of digg (106 GB) and batch 8 of twitter (371 GB) both exceeded a 95 GB card before this; both rows need an 80 GB or larger card even now.
+
 **Teacher-forced one-step.** Each batch is a set of true `(s_t, a_t)` inputs; the model predicts the next-state marginals and is scored against the MC targets:
 
 ```

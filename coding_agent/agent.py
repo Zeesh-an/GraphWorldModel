@@ -8,9 +8,16 @@ import os
 import re
 import time
 from typing import Protocol
-from openai import OpenAI, OpenAIError
+from openai import APIConnectionError, APIStatusError, OpenAI, OpenAIError
 
-gateway_retries = 3
+# A search runs for hours, so a transient gateway failure (a 502 "server is
+# overloaded", a 429, a dropped connection) is waited out rather than fatal:
+# the waits double from retry_base_seconds up to retry_cap_seconds, about 40
+# minutes over ten attempts. A 4xx that will not change on retry raises at once
+gateway_retries = 10
+retry_base_seconds = 10.0
+retry_cap_seconds = 600.0
+retryable_status = (408, 409, 429, 500, 502, 503, 504)
 
 # The model every experiment runs on unless a flag says otherwise. GPT-6 Astra:
 # chat completions and responses endpoints, 1.05M context, $10 in / $50 out per
@@ -85,6 +92,15 @@ def verify_gateway_model(model: str, available: list[str] | None = None) -> None
             f"Ask the gateway admin to enable it, or pass --llm-model / LLM_MODEL with "
             f"one of the served names."
         )
+
+
+def retryable(error: Exception) -> bool:
+    if isinstance(error, APIStatusError):
+        return error.status_code in retryable_status
+
+    # A dropped or timed-out connection, or an empty completion, is transient;
+    # anything else the gateway said is an answer
+    return isinstance(error, (APIConnectionError, ValueError))
 
 
 def empty_usage() -> dict:
@@ -193,13 +209,16 @@ class GatewayProvider:
 
                 return content
             except (OpenAIError, ValueError) as error:
-                if attempt == gateway_retries:
+                if attempt == gateway_retries or not retryable(error):
                     raise
 
+                wait = min(retry_cap_seconds, retry_base_seconds * 2 ** (attempt - 1))
                 print(
                     f"warning: gateway call failed (attempt {attempt}/"
-                    f"{gateway_retries}, model {self.model!r}): {error}"
+                    f"{gateway_retries}, model {self.model!r}), retrying in "
+                    f"{wait:.0f} s: {error}"
                 )
+                time.sleep(wait)
 
         raise RuntimeError("unreachable: retry loop exits via return or raise")
 

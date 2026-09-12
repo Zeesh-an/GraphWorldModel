@@ -1,6 +1,9 @@
 import numpy as np
 
-from coding_agent.envs.world_model_env import WorldModelEnvironment
+import pytest
+
+from coding_agent.envs import world_model_env
+from coding_agent.envs.world_model_env import WorldModelEnvironment, oracle_hidden_dim
 from coding_agent.types import ActionOp, GraphInfo
 
 
@@ -23,9 +26,10 @@ def seed_policy(state, timestep):
 def test_chunked_rollout_matches_the_single_block() -> None:
     graph = ring_graph(16)
     whole = WorldModelEnvironment.oracle(graph, "IC", n_samples=10, base_seed=3)
-    # 32 arcs per graph, so a 70-arc cap advances two samples per forward pass
+    # 32 arcs x hidden per sample, so a budget of 70 arcs' worth advances two
+    # samples per forward pass
     chunked = WorldModelEnvironment.oracle(graph, "IC", n_samples=10, base_seed=3)
-    chunked.max_block_arcs = 70
+    chunked.max_block_arc_hidden = 70 * oracle_hidden_dim
 
     reference = whole.rollout(seed_policy, horizon=5, budget=2)
     trajectory = chunked.rollout(seed_policy, horizon=5, budget=2)
@@ -34,3 +38,15 @@ def test_chunked_rollout_matches_the_single_block() -> None:
     assert trajectory.final_marginals == reference.final_marginals
     assert trajectory.spread_curve == reference.spread_curve
     assert chunked.forward_passes == 5 * whole.forward_passes
+
+
+def test_gradient_probe_refuses_a_graph_it_cannot_hold(monkeypatch) -> None:
+    graph = ring_graph(16)
+    environment = WorldModelEnvironment.oracle(graph, "IC", n_samples=4, base_seed=3)
+    plan = [[ActionOp("add_node", 0)]] + [[] for _ in range(5)]
+    assert "best_unselected" in environment.seed_gradient(plan, horizon=5)
+
+    # 32 arcs x 8 hidden x 6 steps = 1,536 arc-hidden-steps; a budget below it refuses with the reason
+    monkeypatch.setattr(world_model_env, "max_gradient_arc_hidden_steps", 1_000)
+    with pytest.raises(ValueError, match="gradient probe keeps every timestep"):
+        environment.seed_gradient(plan, horizon=5)

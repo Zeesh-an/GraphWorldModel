@@ -799,6 +799,12 @@ EPOCHS="${EPOCHS:-400}"
 LR="${LR:-1e-3}"
 WEIGHT_DECAY="${WEIGHT_DECAY:-5e-4}"
 BATCH_SIZE="${BATCH_SIZE:-32}"
+# Arcs x hidden units one training forward/backward may hold (2^28, about
+# 28 GB at the measured 103 bytes per arc-hidden under message conditioning,
+# 29 bytes without it);
+# a larger batch runs as micro-batches with the gradient accumulated exactly,
+# so BATCH_SIZE keeps its meaning on every graph size
+MAX_BATCH_ARC_HIDDEN="${MAX_BATCH_ARC_HIDDEN:-268435456}"
 POS_WEIGHT="${POS_WEIGHT:-off}"
 PATIENCE="${PATIENCE:-50}"
 PLAN_GRAPHS="${PLAN_GRAPHS:-5}"
@@ -900,6 +906,7 @@ flags=(
   --gcnii-alpha "$GCNII_ALPHA" --gcnii-lamda "$GCNII_LAMDA"
   --dropout "$DROPOUT" --epochs "$EPOCHS" --lr "$LR"
   --weight-decay "$WEIGHT_DECAY" --batch-size "$BATCH_SIZE"
+  --max-batch-arc-hidden "$MAX_BATCH_ARC_HIDDEN"
   --pos-weight "$POS_WEIGHT" --patience "$PATIENCE" --plan-graphs "$PLAN_GRAPHS"
   --plan-budget-k "$PLAN_BUDGET_K" --plan-budget-graphs "$PLAN_BUDGET_GRAPHS"
   --plan-budget-horizon "$PLAN_BUDGET_HORIZON"
@@ -1095,6 +1102,9 @@ echo "[sbatch] resume this run with: RUN=$run_label RUN_JOBID=0 $script_path"
 python -c "import torch; print('[sbatch] CUDA:', torch.cuda.is_available(), '|', (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU-ONLY'))"
 echo "[sbatch] python -m pipeline.run ${flags[*]}"
 
+# Lets the CUDA caching allocator grow segments instead of failing on a
+# fragmented pool, which is what the OOM message itself recommends
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 python -m pipeline.run "${flags[@]}"
 
 echo "[sbatch] done -> $RESULTS_ROOT/$TASK/$DATASET/$run_label/report.md"

@@ -75,6 +75,17 @@ pos_weight_max = 50.0
 history_flush_epochs = 5
 
 
+# Training memory is per-arc activations: measured 103 bytes per arc per hidden
+# unit under message conditioning, 29 without it (3-layer SAGE, structured head,
+# forward and backward; the modulator keeps its per-arc MLP inputs for backward). One optimizer step still sees --batch-size transitions, but they
+# are run in micro-batches whose arcs x hidden stay under this budget, with
+# the gradient accumulated exactly (each micro-batch's mean loss weighted by
+# its node share). 2^28 is about 28 GB; a single graph over the budget runs
+# alone (digg at hidden 128 is 53 GB, twitter at hidden 256 is 46 GB). Batch 2
+# of digg was 106 GB and batch 8 of twitter 371 GB, both past a 95 GB GPU
+max_batch_arc_hidden = 2**28
+
+
 @dataclass()
 class TrainConfig:
     """Field names are the results-JSON `config` schema that world_model_env reads back."""
@@ -139,6 +150,7 @@ class TrainConfig:
     lr: float = 1e-3
     weight_decay: float = 5e-4
     batch_size: int = 32
+    max_batch_arc_hidden: int = max_batch_arc_hidden
     pos_weight: str = "off"
     patience: int = 50
     seed: int = 42
@@ -417,6 +429,24 @@ def check_hide_edge_weights(config: TrainConfig) -> None:
         )
 
 
+def micro_batches(items: list[dict], collate_fn, budget: int, hidden_dim: int) -> list[dict]:
+    """Collated sub-batches whose arcs x hidden stay under budget; a graph over it goes alone."""
+    chunks, current, load = [], [], 0
+
+    for item in items:
+        cost = int(item["edge_index"].shape[1]) * hidden_dim
+        if current and load + cost > budget:
+            chunks.append(current)
+            current, load = [], 0
+        current.append(item)
+        load += cost
+
+    if current:
+        chunks.append(current)
+
+    return [collate_fn(chunk) for chunk in chunks]
+
+
 def train_world_model(config: TrainConfig) -> dict:
     config = resolve_paths(config)
     check_remove_semantics(config)
@@ -484,11 +514,13 @@ def train_world_model(config: TrainConfig) -> dict:
         hide_edge_weights=config.hide_edge_weights,
     )
 
+    # The loader hands back the raw items; micro_batches collates them under
+    # the memory budget inside the step
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=config.batch_size,
         shuffle=True,
-        collate_fn=collate_fn,
+        collate_fn=list,
     )
 
     backbone_kwargs = {
@@ -576,19 +608,27 @@ def train_world_model(config: TrainConfig) -> dict:
         batch_bar = tqdm(train_dataloader, desc=f"  epoch {epoch}", leave=False)
         epoch_loss, n_batches = 0.0, 0
 
-        for batch in batch_bar:
+        for items in batch_bar:
             optimizer.zero_grad()
+            total_nodes = sum(item["num_nodes"] for item in items)
+            loss_value = 0.0
 
-            logits = model(batch["X"], batch["graph"])
-            loss = sum(
-                term(logits[:, column], batch["y"][:, column])
-                for column, term in enumerate(losses)
-            )
+            for batch in micro_batches(
+                items, collate_fn, config.max_batch_arc_hidden, config.hidden_dim
+            ):
+                logits = model(batch["X"], batch["graph"])
+                loss = sum(
+                    term(logits[:, column], batch["y"][:, column])
+                    for column, term in enumerate(losses)
+                )
+                # Each term is a mean over this micro-batch's nodes, so weighting
+                # by its node share makes the accumulated gradient the whole
+                # batch's mean-loss gradient, whatever the split
+                loss = loss * (batch["X"].shape[0] / total_nodes)
+                loss.backward()
+                loss_value += loss.item()
 
-            loss.backward()
             optimizer.step()
-
-            loss_value = loss.item()
             epoch_loss += loss_value
             n_batches += 1
             batch_bar.set_postfix(loss=f"{loss_value:.6f}")
@@ -1005,6 +1045,14 @@ if __name__ == "__main__":
         type=int,
         default=32,
         help="transition batch size (default: 32).",
+    )
+    parser.add_argument(
+        "--max-batch-arc-hidden",
+        type=int,
+        default=max_batch_arc_hidden,
+        help="arcs x hidden units one forward/backward may hold; a batch above it "
+        "is run as micro-batches with the gradient accumulated exactly "
+        f"(default: {max_batch_arc_hidden}).",
     )
     parser.add_argument(
         "--pos-weight",

@@ -13,15 +13,74 @@ policy would have reacted to the ablated cascade.
 """
 
 from functools import partial
+import numpy as np
 
 from coding_agent.types import ActionOp, State
 
-
+# Credit costs one rollout per credited action plus one solo cascade each, so
+# the count is capped by the same evaluator-cost model the best_swap probe uses
+# (plans x samples x arcs): 128 actions on a small graph, 85 on nethept, 4 on
+# digg, where one 200-sample world-model rollout is 156 s. Uncapped, pct20 on nethept is
+# 6,000 rollouts per generation and digg pct1 is 51 hours of them. When k
+# exceeds the cap the credited actions are evenly spaced by target degree,
+# so the report still spans hubs to leaves
+max_credit_actions = 128
+min_credit_actions = 4
+max_credit_arc_evaluations = 2**30
+max_sequential_credit_arc_evaluations = 2**22
 def planned_action(
     plan: list[list[ActionOp]], state: State, timestep: int
 ) -> list[ActionOp]:
     """Adapts a static plan into an ActionFn."""
     return plan[timestep] if timestep < len(plan) else []
+
+
+def credit_limit(environment: object, graph) -> int:
+    """How many actions credit may ablate on this graph under this evaluator."""
+    arcs = max(1, int(graph.edge_index.shape[1]))
+    if batched_environment(environment):
+        samples = max(1, int(getattr(environment, "n_samples", 1)))
+        return max(
+            min_credit_actions,
+            min(max_credit_actions, max_credit_arc_evaluations // (samples * arcs)),
+        )
+
+    return max(
+        min_credit_actions,
+        min(max_credit_actions, max_sequential_credit_arc_evaluations // arcs),
+    )
+
+
+def creditable_actions(
+    plan: list[list[ActionOp]],
+    horizon: int,
+    creditable_ops: tuple | None,
+    limit: int | None = None,
+    graph=None,
+) -> list[tuple]:
+    """
+    (timestep, index in bag, action, bag) for every action credit may ablate,
+    in plan order; above `limit` the kept ones are evenly spaced by target
+    degree (plan order when no graph is given).
+    """
+    found = [
+        (timestep, action_index, action, bag)
+        for timestep, bag in enumerate(plan[: horizon + 1])
+        for action_index, action in enumerate(bag)
+        if creditable_ops is None or action.op in creditable_ops
+    ]
+    if limit is None or len(found) <= limit:
+        return found
+
+    order = (
+        sorted(range(len(found)), key=lambda position: -graph.degree(int(found[position][2].target)))
+        if graph is not None
+        else list(range(len(found)))
+    )
+    picks = np.linspace(0, len(found) - 1, limit).round().astype(int)
+    kept = sorted({order[int(pick)] for pick in picks})
+
+    return [found[position] for position in kept]
 
 
 def counterfactual_credit(
@@ -31,6 +90,8 @@ def counterfactual_credit(
     budget: int,
     seed: int | None = None,
     creditable_ops: tuple | None = None,
+    limit: int | None = None,
+    graph=None,
 ) -> tuple[float, list[dict]]:
     """
     Return (base_reward, one credit entry per creditable action in the plan).
@@ -43,25 +104,22 @@ def counterfactual_credit(
     decisions while the stream stays in the base rollout, where it belongs.
     """
     ablated_plans, entries = [], []
-    for timestep, bag in enumerate(plan[: horizon + 1]):
-        for action_index, action in enumerate(bag):
-            if creditable_ops is not None and action.op not in creditable_ops:
-                continue
+    for timestep, action_index, action, _ in creditable_actions(
+        plan, horizon, creditable_ops, limit, graph
+    ):
+        # Same plan minus exactly this one action (bags shallow-copied so the original plan is untouched)
+        ablated = [list(action_bag) for action_bag in plan]
+        del ablated[timestep][action_index]
+        ablated_plans.append(ablated)
 
-            # Same plan minus exactly this one action (bags shallow-copied so the original plan is untouched)
-            ablated = [list(action_bag) for action_bag in plan]
-            del ablated[timestep][action_index]
-            ablated_plans.append(ablated)
-
-            entry = {
-                "t": int(timestep),
-                "op": action.op,
-                "target": int(action.target),
-            }
-            if action.destination is not None:
-                entry["destination"] = int(action.destination)
-            entries.append(entry)
-
+        entry = {
+            "t": int(timestep),
+            "op": action.op,
+            "target": int(action.target),
+        }
+        if action.destination is not None:
+            entry["destination"] = int(action.destination)
+        entries.append(entry)
     if batched_environment(environment):
         rewards, _ = batched_plan_rewards(
             environment, [plan] + ablated_plans, horizon, budget, seed
@@ -157,6 +215,8 @@ def augment_solo(
     budget: int,
     seed: int | None = None,
     creditable_ops: tuple | None = None,
+    limit: int | None = None,
+    graph=None,
 ) -> None:
     """
     Add each credited action's SOLO cascade to its entry: `solo` (its reward
@@ -169,14 +229,9 @@ def augment_solo(
 
     # Recover each entry's action object by replaying counterfactual_credit's
     # iteration order, so weights and destinations survive exactly
-    actions, bags = [], []
-    for timestep, bag in enumerate(plan[: horizon + 1]):
-        for action in bag:
-            if creditable_ops is not None and action.op not in creditable_ops:
-                continue
-            actions.append(action)
-            bags.append(bag)
-
+    selected = creditable_actions(plan, horizon, creditable_ops, limit, graph)
+    actions = [action for _, _, action, _ in selected]
+    bags = [bag for _, _, _, bag in selected]
     solo_plans = []
     for action, bag in zip(actions, bags, strict=True):
         solo = [action]
@@ -264,12 +319,16 @@ def credit_feedback(environment: object, trajectory, task, graph) -> str | None:
         return None
 
     creditable = tuple(task.allowed_ops)
+    limit = credit_limit(environment, graph)
+    total = len(creditable_actions(trajectory.actions, task.horizon, creditable))
     base_reward, entries = counterfactual_credit(
         environment,
         trajectory.actions,
         task.horizon,
         task.budget,
         creditable_ops=creditable,
+        limit=limit,
+        graph=graph,
     )
     augment_solo(
         environment,
@@ -278,20 +337,27 @@ def credit_feedback(environment: object, trajectory, task, graph) -> str | None:
         task.horizon,
         task.budget,
         creditable_ops=creditable,
+        limit=limit,
+        graph=graph,
     )
 
-    report = format_credit_report(base_reward, entries)
+    report = format_credit_report(base_reward, entries, total)
     bottleneck = frontier_bottlenecks(environment, trajectory, graph, task)
 
     return report + (f"\n{bottleneck}" if bottleneck else "")
 
 
-def format_credit_report(base_reward: float, entries: list[dict]) -> str:
+def format_credit_report(base_reward: float, entries: list[dict], total: int | None = None) -> str:
     if not entries:
         return "No actions in the plan to credit."
 
+    coverage = (
+        f" for {len(entries)} of {total} actions, evenly spaced by target degree,"
+        if total is not None and total > len(entries)
+        else ""
+    )
     lines = [
-        f"Per-action counterfactual credit (base spread {base_reward:.2f}; "
+        f"Per-action counterfactual credit{coverage} (base spread {base_reward:.2f}; "
         "delta = spread lost if that single action is removed; ~0 = wasted budget):"
     ]
     for entry in entries:

@@ -38,10 +38,17 @@ edge_ops = ("add_edge", "remove_edge", "set_edge_weight")
 oracle_hidden_dim = 8
 oracle_n_layers = 1
 
-# Arcs per forward pass. The message gather materializes E x hidden per layer, so
-# a 200-sample block of a 4M-arc graph would need tens of gigabytes; samples are
-# advanced in chunks of at most this many arcs and the pass is repeated per chunk
-default_max_block_arcs = 16_000_000
+# Arcs x hidden units per forward pass. Inference materializes per-arc tensors
+# of width hidden in every layer, measured at 29 bytes per arc-hidden under
+# message conditioning (17 without it), so 2^30 is about 31 GB per block;
+# samples are advanced in chunks under this budget and the pass is repeated
+# per chunk. The old constant was 16M arcs whatever the width, which at hidden
+# 256 put a 200-sample block of nethept (12.5M arcs) at 93 GB
+default_max_block_arc_hidden = 2**30
+# The gradient probe keeps every timestep's activations for its one backward
+# pass, measured at 103 bytes per arc-hidden-step under message conditioning,
+# so this budget is about 28 GB; digg and twitter are refused with a note
+max_gradient_arc_hidden_steps = 2**28
 # How far inside [0, 1] the relaxed seed vector of `seed_gradient` sits, so the
 # head's probability clamp (1e-6) never cuts the gradient
 gradient_relaxation = 1e-3
@@ -62,7 +69,7 @@ class WorldModelEnvironment:
         epidemic: bool = False,
         hide_edge_weights: bool = False,
         action_encoding: str = basic_encoding,
-        max_block_arcs: int = default_max_block_arcs,
+        max_block_arc_hidden: int = default_max_block_arc_hidden,
     ) -> None:
         self.model = model.to(device).eval()
         self.graph = graph
@@ -91,7 +98,7 @@ class WorldModelEnvironment:
         # sample. Recomputing it was 11% of rollout time for a constant. Keyed by
         # id() of the edge array, holding the array itself alongside so its id
         # cannot be recycled while the entry lives, and cleared per rollout.
-        self.max_block_arcs = max_block_arcs
+        self.max_block_arc_hidden = max_block_arc_hidden
         self._degree_cache = {}
         # Filled by every rollout: final infected count per sample block, and the
         # per-step count curve per sample block. The curves are what lets a
@@ -419,7 +426,11 @@ class WorldModelEnvironment:
         base_arrays = edges_to_arrays(self.base_edges)
         sample_edges = [self.base_edges] * num_samples
         sample_arrays = [base_arrays] * num_samples
-        chunk = max(1, self.max_block_arcs // max(1, int(base_arrays[0].shape[1])))
+        chunk = max(
+            1,
+            self.max_block_arc_hidden
+            // max(1, int(self.model.hidden_dim) * int(base_arrays[0].shape[1])),
+        )
         chunks = [
             range(first, min(first + chunk, num_samples))
             for first in range(0, num_samples, chunk)
@@ -800,6 +811,14 @@ class WorldModelEnvironment:
             raise ValueError("the gradient probe needs a plan with add_node seeds at t=0")
 
         edge_index, edge_weight = edges_to_arrays(self.base_edges)
+        cost = int(edge_index.shape[1]) * int(self.model.hidden_dim) * (horizon + 1)
+        if cost > max_gradient_arc_hidden_steps:
+            raise ValueError(
+                f"the gradient probe keeps every timestep's activations for its "
+                f"backward pass, about {cost * 103 / 1e9:.0f} GB on this graph at this "
+                f"horizon, over its {max_gradient_arc_hidden_steps * 103 / 1e9:.0f} GB "
+                f"budget; use best_swap or add on a graph this size"
+            )
         record = {
             "state": {"infected": [], "frontier": []},
             "action": [],

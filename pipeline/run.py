@@ -181,7 +181,7 @@ from pipeline.summary import write_environment, write_summary
 from pipeline.tasks import default_run, get_task, require_runnable, task_names
 from world_model.checkpoint import read_checkpoint
 from world_model.model.action_cond import no_conditioning, valid_action_conditioning
-from world_model.train_wm import TrainConfig, train_world_model
+from world_model.train_wm import TrainConfig, max_batch_arc_hidden, train_world_model
 from world_model.wm_data import (
     basic_encoding,
     load_graph_store,
@@ -268,6 +268,7 @@ class PipelineConfig:
     lr: float = 1e-3
     weight_decay: float = 5e-4
     batch_size: int = 32
+    max_batch_arc_hidden: int = max_batch_arc_hidden
     pos_weight: str = "off"
     patience: int = 50
     plan_demo: bool = True
@@ -945,6 +946,7 @@ def stage_train(config: PipelineConfig, layout: Layout) -> dict:
             lr=config.lr,
             weight_decay=config.weight_decay,
             batch_size=config.batch_size,
+            max_batch_arc_hidden=config.max_batch_arc_hidden,
             pos_weight=config.pos_weight,
             patience=config.patience,
             seed=config.seed,
@@ -2230,6 +2232,14 @@ if __name__ == "__main__":
         "--batch-size", type=int, default=32, help="transition batch size (default: 32)."
     )
     parser.add_argument(
+        "--max-batch-arc-hidden",
+        type=int,
+        default=max_batch_arc_hidden,
+        help="arcs x hidden units one training forward/backward may hold; a batch "
+        "above it runs as micro-batches with the gradient accumulated exactly "
+        f"(default: {max_batch_arc_hidden}).",
+    )
+    parser.add_argument(
         "--pos-weight",
         type=str,
         default="off",
@@ -3128,6 +3138,7 @@ if __name__ == "__main__":
         lr=args.lr,
         weight_decay=args.weight_decay,
         batch_size=args.batch_size,
+        max_batch_arc_hidden=args.max_batch_arc_hidden,
         pos_weight=args.pos_weight,
         patience=args.patience,
         plan_demo=not args.no_plan_demo,

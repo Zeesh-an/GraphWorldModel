@@ -1039,6 +1039,8 @@ class WorldModel(nn.Module):
 
         self.head_type = head_type
         self.in_channels = in_channels
+        # Read by the rollout environment to size its per-pass block
+        self.hidden_dim = hidden_dim
         self.remove_semantics = remove_semantics
         self.competitive = competitive
         self.epidemic = epidemic

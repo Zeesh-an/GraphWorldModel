@@ -82,7 +82,7 @@ from coding_agent.containment import (
     ring_size,
     select_outbreak,
 )
-from coding_agent.credit import augment_solo, counterfactual_credit, planned_action
+from coding_agent.credit import augment_solo, counterfactual_credit, credit_limit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
 from coding_agent.envs.world_model_env import WorldModelEnvironment
@@ -2111,12 +2111,15 @@ def run_experiment(
     ):
         print("[run] per-action counterfactual credit (one rollout per action)...")
         # Credit of the executed action sequence; for state-dependent strategies (per_step/windowed) the recorded bags are replayed as a fixed plan
+        limit = credit_limit(environment, graph)
         base_reward, entries = counterfactual_credit(
             environment,
             trajectory.actions,
             config.horizon,
             config.budget,
             creditable_ops=tuple(config.allowed_ops),
+            limit=limit,
+            graph=graph,
         )
         # Solo cascades and stagnation timing ride along on batched evaluators
         augment_solo(
@@ -2126,10 +2129,12 @@ def run_experiment(
             config.horizon,
             config.budget,
             creditable_ops=tuple(config.allowed_ops),
+            limit=limit,
+            graph=graph,
         )
         result["credit_base_reward"] = base_reward
         result["credit"] = entries
-
+        result["credit_limit"] = limit
     # Every arm's winner is replayed on the SHARED referee, the exact oracle
     # simulator by default: the one number comparable across conditions. A native
     # arm's own reward is one noisy episode, a monte_carlo arm's carries the
