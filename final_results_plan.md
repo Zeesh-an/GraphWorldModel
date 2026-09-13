@@ -328,7 +328,7 @@ Expected cost per pipeline run (one task, one dynamics, four budgets, five class
 - `forward_blocking` scored 96.6 against 87.0 for random blocking on email_eu_core. Reproduced on 2026-09-04 with the run's own graph and rumour: the implementation matches its definition (seed the nodes the simulated rumour reaches most often), and those nodes are the rumour's dead-end neighbours (out-degree 0 to 6, against 47 to 81 for random's picks), so they save themselves and nothing else. It is the published heuristic being weak on a dense graph, not a bug; it stays out of the five but is fine to cite.
 - On jazz the infected-subgraph centralities beat LPSI by more than double; whether that holds on sparse graphs (cora_ml, power_grid) decides if LPSI stays a reference row or is dropped.
 - Cascade prediction's `--cp-max-nodes` cap for `casflow_weibo` and `casflow_aps`: the same cap for every row of a corpus, stated in the caption; the August APS run went out of memory at 64 GB uncapped.
-- Whether influence blocking's lever table (sandimin, imin_joc) is main text or appendix; T3 stays counter-seed either way.
+- Whether influence blocking gets a lever table (the three agent arms on the node lever beside `sandimin` and `imin_joc`). The `final_<dynamics>_node` runs carry the two repos only; the table needs the same commands resubmitted with `ARMS="routing evolve_free@oracle evolve_free@world_model"` and the world-model symlink from section 8.5, and the pipeline resumes over the finished repo rows and runs only the arms. T3 stays counter-seed either way.
 - The discovery systems' budgets differ from ours by 5 to 50 times by design; T4 reports both at published defaults and states it, rather than matching budgets.
 - Whether the write-up prompt should forbid literal node ids in generated programs before the case-study harvest, so the top twenty are graph-general algorithms rather than tuned seed lists.
 - The scale rows have never been run. The `@monte_carlo` arm is no longer in the matrix (dropped 2026-09-10), so the C2 efficiency comparison reads the oracle arm's `evaluator_seconds` against the world model's; a sampled-simulator timing row needs a separate `MC_AGREEMENT=1` replay on one critical dataset per task, as section 8.0 describes.
@@ -337,7 +337,7 @@ Expected cost per pipeline run (one task, one dynamics, four budgets, five class
 
 ## 8. Commands
 
-One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 10 for each of the six IC/LT simulator tasks, 15 for epidemic control, 5 for cascade prediction, plus a second lever command per influence-blocking cell. Every command is complete and every knob is written out, including the ones that would come from a default, so a command can be read as the caption of the row it produces. Copy it, run it from the repo root on a login node, and it submits itself.
+One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 10 for each of the six IC/LT simulator tasks, 15 for epidemic control, 5 for cascade prediction, plus a second, baselines-only lever command per influence-blocking cell. Every command is complete and every knob is written out, including the ones that would come from a default, so a command can be read as the caption of the row it produces. Copy it, run it from the repo root on a login node, and it submits itself.
 
 ### 8.0 Conventions, and what to add per cluster
 
@@ -389,7 +389,7 @@ Four of those rows deserve their reason stated, because a reader will otherwise 
 python -m pipeline.run --task <task> --dataset <dataset> --run final_<dynamics> --start-stage plots
 ```
 
-**Conditional rows.** The externals section 4 flags as conditional (`rl4im`, `finder`, `graphsl_slvae`, `ditto`, `grin`) are in the commands. If `python -m baselines.setup_baselines --only <name>` has not produced a working venv on the cluster, the pipeline writes a `.skipped.json` with the reason and the report says the row is absent; nothing else in the job is affected. Influence blocking's two repos (`imin_joc`, `sandimin`) are node-blocking methods and their registry notes say to run them under `--blocking-lever node_block`; under the counter-seed lever their output would be read as positive seeds. Each blocking cell therefore has a second command, `RUN=final_<dynamics>_node`, which is also that cell in the section 4.5 lever table; section 8.5 gives the two symlinks that let it reuse the counter-seed run's data and checkpoint instead of rebuilding them.
+**Conditional rows.** The externals section 4 flags as conditional (`rl4im`, `finder`, `graphsl_slvae`, `ditto`, `grin`) are in the commands. If `python -m baselines.setup_baselines --only <name>` has not produced a working venv on the cluster, the pipeline writes a `.skipped.json` with the reason and the report says the row is absent; nothing else in the job is affected. Influence blocking's two repos (`imin_joc`, `sandimin`) are node-blocking methods and their registry notes say to run them under `--blocking-lever node_block`; under the counter-seed lever their output would be read as positive seeds. Each blocking cell therefore has a second command, `RUN=final_<dynamics>_node`, that runs the two repos alone under `ARMS=none` (no arm needs the world model, so the pipeline skips the train stage itself and nothing in the job touches a GPU); section 8.5 gives the symlink that lets it reuse the counter-seed run's episodes instead of regenerating them.
 
 **Delta** (the commands are written for it). Export once per shell before submitting: `SBATCH_ARGS="--account=<code>-delta-gpu"` (every job needs an account, and `accounts` prints yours; the CPU-only discovery jobs use `--account=<code>-delta-cpu` with `PARTITION=cpu`), `PARTITION="gpuA40x4,gpuA100x4"` (the A40 partition is charged at half the A100 rate and either GPU is enough for every row except the two giant ones: under message conditioning one digg graph needs 53 GB of activations at hidden 128 and one twitter graph 46 GB at hidden 256, so neither fits a 40 GB A100 or a 48 GB A40 and both belong on PDE's 96 GB cards), and `VENV=.venv` if the checkout was set up with `uv`. Keep the checkout under `/work/hdd/<code>/$USER` or `/projects/<code>`, not the 100 GB home. The walltime cap is 48 hours, so for the `TIME=48:00:00` rows that may not finish, submit the identical command four times with `--dependency=singleton` appended to `SBATCH_ARGS`; the copies queue behind each other by `JOB_NAME` and each one resumes from disk. Check once that the LLM gateway is reachable from a compute node (`srun --account=... --partition=cpu-interactive --time=00:05:00 curl -s "$GATEWAY_BASE_URL/models"`), because the agent stage cannot run without it.
 
@@ -1204,18 +1204,19 @@ done; done; done
 
 Baselines from section 4.5: `rps`, `reverse_blocking`, `proximity`, `cldag`.
 
-Each dataset has FOUR commands: the counter-seed ladder per dynamics, which is the T3 row, and the node-lever pair that answers section 4.5's other two repos. A lever changes only what the planner may emit and what one unit of budget buys; the generator injects the same four ops whatever the lever, so the node-lever run's episodes and checkpoint are identical to the counter-seed run's and should be shared rather than rebuilt. Do that once per dataset and dynamics, after the counter-seed run's training has finished and before submitting the node-lever command. Both stages then print `reusing` and nothing is written into the shared directories:
+Each dataset has FOUR commands: the counter-seed ladder per dynamics, which is the T3 row, and the node-lever pair that runs section 4.5's other two repos alone. The node-lever commands set `ARMS=none`: no agent arm, so the pipeline skips the train stage on its own, the agent stage is the two repos and their referee replays, and the job asks for no GPU. The training knobs still written in those commands are inert and stay only so the command reads as a complete caption. A lever changes only what the planner may emit and what one unit of budget buys; the generator injects the same four ops whatever the lever, so the node-lever run's episodes are identical to the counter-seed run's and should be shared rather than rebuilt. Do that once per dataset and dynamics, after the counter-seed run's data stage has finished and before submitting the node-lever command. The data stage then prints `reusing` and nothing is written into the shared directory:
 
 ```bash
 d=results/influence_blocking/<dataset>
 for dyn in ic lt; do
   mkdir -p "$d/final_${dyn}_node"
-  ln -s ../final_${dyn}/data        "$d/final_${dyn}_node/data"
-  ln -s ../final_${dyn}/world_model "$d/final_${dyn}_node/world_model"
+  ln -s ../final_${dyn}/data "$d/final_${dyn}_node/data"
 done
 ```
 
-Without the symlinks the node-lever command regenerates and retrains from scratch, which on `epinions1` and `cit_hepth` is most of the row's wall clock spent twice for byte-identical files.
+Without the symlink the node-lever command regenerates the episodes from scratch, which on `epinions1` and `cit_hepth` is hours spent twice for byte-identical files.
+
+The three agent arms are deliberately absent from the node-lever runs. On that lever the agent writes deletion programs, a different action space from the T3 row rather than a repeat of it, so those rows would be a separate table (the agent on SandIMIN's and IMIN's own problem) that section 7 has not decided to include. If it is wanted, resubmit the same node-lever command with `ARMS="routing evolve_free@oracle evolve_free@world_model"`, `GRES=gpu:1`, and a second symlink `ln -s ../final_${dyn}/world_model "$d/final_${dyn}_node/world_model"` made after the counter-seed run's training has finished; the pipeline resumes over the finished repo rows and runs only the arms.
 
 **`email_eu_core`** (rank 1, medium, critical).
 
@@ -1257,7 +1258,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=email_eu_core RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_email_eu_core_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1265,7 +1266,7 @@ HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
-CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
+CPUS=4 GRES=none MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1274,7 +1275,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=email_eu_core RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_email_eu_core_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=100 MC_MARGINALS=30 \
@@ -1282,7 +1283,7 @@ HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
-CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
+CPUS=4 GRES=none MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1327,7 +1328,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=p2p_gnutella24 RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_p2p_gnutella24_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1335,7 +1336,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1344,7 +1345,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=p2p_gnutella24 RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_p2p_gnutella24_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1352,7 +1353,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1397,7 +1398,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=epinions1 RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_epinions1_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1405,7 +1406,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1414,7 +1415,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=epinions1 RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_epinions1_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1422,7 +1423,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1467,7 +1468,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=cit_hepth RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_cit_hepth_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1475,7 +1476,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1484,7 +1485,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=cit_hepth RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_cit_hepth_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=50 MC_MARGINALS=20 \
@@ -1492,7 +1493,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1537,7 +1538,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=powerlaw_cluster RUN=final_ic_node RUN_JOBID=0 JOB_NAME=ib_powerlaw_cluster_ic_node \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1545,7 +1546,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1554,7 +1555,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 TASK=influence_blocking DATASET=powerlaw_cluster RUN=final_lt_node RUN_JOBID=0 JOB_NAME=ib_powerlaw_cluster_lt_node \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="external:imin_joc external:sandimin" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
+ARMS=none \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
 ROLLOUTS=20 MC_MARGINALS=30 \
@@ -1562,7 +1563,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1587,6 +1588,21 @@ done; done; done; done
 Baselines from section 4.6: `steiner_tree`, `jordan_backward`, `cri`, `dhrec`, `observed_only`, `external:ditto`, `external:grin`.
 
 `GEN_ACTION_OPS` is deliberately EMPTY. This task's episodes are diffusion-only, and the registry asserts it: an episode carrying a mid-cascade injection would have an observation its seed set did not produce, so its labelled pair would be a lie.
+
+**Before submitting.** The two external repos in the baseline list need their venvs built once per cluster, on a login node:
+
+```bash
+python -m baselines.setup_baselines --only ditto grin
+```
+
+Without them the job still runs: the agent stage catches the missing venv, writes a `.skipped.json` with the reason, and the report says the two rows are absent. The four real graphs download themselves inside the data stage and `ba` is synthetic. If the compute nodes have no outbound network, fetch the raw files once from a login node first; each call is a no-op when the file is already there:
+
+```bash
+python -c "from data.datasets.uci_students import download_uci_students as d; d()"
+python -c "from data.datasets.ca_grqc import download_ca_grqc as d; d()"
+python -c "from data.datasets.rt_pol import download_rt_pol as d; d()"
+python -c "from data.datasets.oregon2 import download_oregon2 as d; d()"
+```
 
 **`uci_students`** (rank 1, medium, critical).
 
@@ -2072,6 +2088,12 @@ done; done; done; done
 Baselines from section 4.8: `feature_linear`, `rpp`, `szabo_huberman`, `hawkes`, `persistence`, `weng_communities`.
 
 `ROLLOUTS` and `MC_MARGINALS` are absent from these commands on purpose: no simulator runs on this task, the corpus is replayed by `data/wm_cascades.py`, and neither knob is read on that path. `GEN_ACTION_OPS` is empty for the same reason the two inverse tasks leave it empty, and here it is stronger than a convention: `a_t` is NULL at every step, so `T_exo` is the identity and none of the five ops can fire.
+
+**Before submitting.** No external repos run here, so there is no venv to build, but four of the five corpora cannot be fetched by script. The three CasFlow corpora sit behind a Google Drive interstitial: open the Drive link in `data/datasets/casflow_bundle.py` (a Baidu mirror is listed beside it), extract the archive, and copy each corpus file to `data/raw/casflow/weibo/dataset.txt`, `data/raw/casflow/aps/dataset.txt` and `data/raw/casflow/twitter/dataset.txt`. `taoke`'s only source still returns 404 (re-checked 2026-09-13), so obtain `Taoke.zip` by hand and place it at `data/raw/taoke/Taoke.zip`; the loader extracts it. A missing file makes the data stage raise with these same steps rather than run on nothing. `digg_cascades` is the one automatic corpus, two KONECT tarballs fetched by the data stage; if the compute nodes have no outbound network, fetch it once from a login node first:
+
+```bash
+python -c "from data.datasets.digg_cascades import download_digg_cascades as d; d()"
+```
 
 **`casflow_weibo`** (rank 1, very large (6,738,040 underlying nodes), critical; capped at 50,000 underlying nodes, the same cap for every row of this corpus).
 
