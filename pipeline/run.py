@@ -310,6 +310,9 @@ class PipelineConfig:
     # whose k is a property of the instance can say so once.
     budget_pcts: tuple | None = None
     budgets: tuple | None = None
+    # Label of the one budget point the LLM arms search at; every other point
+    # replans that winner and replays it on the referee. None searches everywhere
+    search_budget: str | None = None
     evaluator: str = "oracle"
     native_mc_runs: int = native_mc_runs_default
     llm_model: str = default_model
@@ -557,6 +560,32 @@ def expand_baselines(
             specs.append(f"baseline:{name}")
 
     return specs
+
+
+def ordered_points(points: list[tuple], search_budget: str | None) -> list[tuple]:
+    """The sweep with the search point first, so a transferred row's source exists."""
+    if search_budget is None:
+        return points
+
+    labels = [label for label, _, _ in points]
+    if search_budget not in labels:
+        raise ValueError(
+            f"--search-budget {search_budget!r} is not a point of this sweep; "
+            f"choose one of {labels}"
+        )
+
+    return sorted(points, key=lambda point: point[0] != search_budget)
+
+
+def transfer_source(layout: Layout, search_budget: str, arm) -> dict | None:
+    """The searched row an LLM arm transfers from, or None when it has no program."""
+    path = layout.agent_result(search_budget, arm.name)
+    if not path.exists():
+        return None
+
+    source = json.loads(path.read_text())
+
+    return source if source.get("script") else None
 
 
 def resolve_arms(config: PipelineConfig) -> tuple:
@@ -1271,7 +1300,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
 
         _check_wm_results(config, wm_results)
 
-    points = budget_points(config)
+    points = ordered_points(budget_points(config), config.search_budget)
     completed = []
     reused = failed = 0
 
@@ -1303,11 +1332,38 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 f"(condition {arm.condition}: {arm.condition_name}, "
                 f"evaluator={evaluator}, mc_runs={mc_runs})"
             )
+            # Under --search-budget an LLM arm searches once; at every other
+            # point its winner is replanned at this k and scored through the
+            # identical canned path a library baseline takes, referee included
+            transfer = (
+                config.search_budget is not None
+                and arm.is_agent
+                and label != config.search_budget
+            )
+            source = (
+                transfer_source(layout, config.search_budget, arm) if transfer else None
+            )
+            if transfer and source is None:
+                reason = (
+                    f"no program to transfer: {layout.agent_result(config.search_budget, arm.name)} "
+                    f"is missing or has no script (the search at {config.search_budget} "
+                    f"did not produce a winner)"
+                )
+                tqdm.write(f"[agent] {label}/{arm.name}: SKIPPED, {reason}")
+                _record_skip(layout, label, arm, reason)
+                failed += 1
+                progress_bar.update(1)
+                continue
+
             arm_start = time.perf_counter()
 
             experiment = ExperimentConfig(
                 task=config.task,
-                method=arm.method,
+                method=(
+                    arm.method
+                    if source is None or arm.method == "adaptive"
+                    else "one_shot"
+                ),
                 strategy_mode=arm.strategy_mode,
                 evaluator=evaluator,
                 model=arm.llm_model or config.llm_model,
@@ -1379,7 +1435,9 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 # (and would re-run the same canned script --outer-iters times).
                 outer_iters=(
                     1
-                    if not arm.is_agent or config.sl_transfer_from is not None
+                    if not arm.is_agent
+                    or config.sl_transfer_from is not None
+                    or source is not None
                     else config.outer_iters
                 ),
                 mc_runs=mc_runs,
@@ -1526,7 +1584,9 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 result = run_experiment(
                     experiment,
                     canned_script=(
-                        _external_script(external_seeds, config)
+                        source["script"]
+                        if source is not None
+                        else _external_script(external_seeds, config)
                         if external_seeds
                         else None
                     ),
@@ -1543,6 +1603,14 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             result["condition"] = arm.condition
             result["condition_name"] = arm.condition_name
             result["budget_label"] = label
+            if source is not None:
+                # The program was written by the LLM at the search point, so the
+                # row keeps that model rather than the canned provider's label
+                result["transferred_from"] = config.search_budget
+                result["model"] = source.get("model")
+                # ...and the arm's own method, which is what the adaptivity-gap and
+                # condition readers pair rows on; transferred_from says how it ran
+                result["method"] = source.get("method", result["method"])
 
             # This arm skipped on an earlier run and works now, so retract the
             # marker. Nothing else deletes them, and a stale one makes the run
@@ -2621,6 +2689,15 @@ if __name__ == "__main__":
         "choice (default: 1 5 10 20).",
     )
     parser.add_argument(
+        "--search-budget",
+        type=str,
+        default=None,
+        help="label of the one budget point the LLM arms search at, e.g. pct10 or "
+        "k30; every other point replans that winner at its own k and replays it "
+        "on the referee, marked transferred_from. Unset searches at every point "
+        "(default: None).",
+    )
+    parser.add_argument(
         "--sl-select-split",
         type=str,
         default="train",
@@ -3167,6 +3244,7 @@ if __name__ == "__main__":
         arms=None if args.arms is None else tuple(args.arms),
         budget_pcts=None if args.budget_pcts is None else tuple(args.budget_pcts),
         budgets=tuple(args.budgets) if args.budgets else None,
+        search_budget=args.search_budget,
         evaluator=args.evaluator,
         native_mc_runs=args.native_mc_runs,
         llm_model=args.llm_model,

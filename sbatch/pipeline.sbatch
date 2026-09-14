@@ -334,6 +334,10 @@
 #                   registry's own sweep, which is a single 10% point for source
 #                   localization because k there is a property of the instance
 #   BUDGETS         absolute k, overrides BUDGET_PCTS entirely
+#   SEARCH_BUDGET   label of the one point the LLM arms search at (pct10, k30);
+#                   every other point replans that winner at its own k and
+#                   replays it on the referee (transferred_from). UNSET = search
+#                   at every point
 #   REFEREE         oracle (default) or monte_carlo: the shared referee every winner is replayed on.
 #   REFEREE_SAMPLES rollout samples for that replay (default 1000).
 #   MC_AGREEMENT    1 = also replay every winner on NDlib: the independent check on the oracle and the timing row.
@@ -841,6 +845,7 @@ NATIVE_MC_RUNS="${NATIVE_MC_RUNS:-1}"
 # a choice, and hardcoding the four-point ladder here would silently turn that
 # into four runs of one experiment.
 BUDGET_PCTS="${BUDGET_PCTS:-}"
+SEARCH_BUDGET="${SEARCH_BUDGET:-}"
 BUDGETS="${BUDGETS:-}"
 EVALUATOR="${EVALUATOR:-oracle}"
 LLM_MODEL="${LLM_MODEL:-gpt-6-astra}"
@@ -948,6 +953,7 @@ if [ -n "$BUDGETS" ]; then
 elif [ -n "$BUDGET_PCTS" ]; then
   flags+=(--budget-pcts $BUDGET_PCTS)
 fi
+[ -n "$SEARCH_BUDGET" ] && flags+=(--search-budget "$SEARCH_BUDGET")
 
 [ -n "$TEMPERATURE" ]     && flags+=(--temperature "$TEMPERATURE")
 flags+=(--reasoning-effort "$REASONING_EFFORT")

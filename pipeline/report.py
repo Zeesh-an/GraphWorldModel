@@ -736,6 +736,16 @@ def _results_table(agent_results: list[dict]) -> list[str]:
             "",
         ]
 
+    transferred = sorted({result["transferred_from"] for result in agent_results if result.get("transferred_from")})
+    if transferred:
+        lines += [
+            f"**Transferred rows.** An arm marked `(from {', '.join(transferred)})` did not "
+            f"search at that budget: the program it evolved at the marked point was "
+            f"replanned at this k and replayed on the referee, so its cost columns are "
+            f"the replay's alone.",
+            "",
+        ]
+
     header = (
         f"| # | budget k | % of N | arm | evaluator | spread "
         f"({reward_direction(sense)}) | % of N |"
@@ -766,8 +776,9 @@ def _results_table(agent_results: list[dict]) -> list[str]:
         nodes = result["graph"]["num_nodes"]
         row = (
             f"| {result.get('condition', ', ')} | {result['budget']} "
-            f"| {_format_number(result['budget_pct'])} | `{result['arm']}` "
-            f"| `{result.get('evaluator', ', ')}` | {_format_number(spread)} "
+            f"| {_format_number(result['budget_pct'])} | `{result['arm']}`"
+            + (f" (from {result['transferred_from']})" if result.get("transferred_from") else "")
+            + f" | `{result.get('evaluator', ', ')}` | {_format_number(spread)} "
             f"| {_format_number(100.0 * spread / nodes)} |"
         )
 
