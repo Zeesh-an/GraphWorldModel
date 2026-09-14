@@ -85,7 +85,10 @@ from coding_agent.containment import (
 from coding_agent.credit import augment_solo, counterfactual_credit, credit_limit, planned_action
 from coding_agent.envs.monte_carlo_env import MonteCarloEnvironment
 from coding_agent.envs.multi_round_env import MultiRoundEnvironment
-from coding_agent.envs.world_model_env import WorldModelEnvironment
+from coding_agent.envs.world_model_env import (
+    WorldModelEnvironment,
+    default_max_block_arc_hidden,
+)
 from coding_agent.feedback import default as feedback_default
 from coding_agent.feedback import valid_tiers as valid_feedback_tiers
 from coding_agent.epidemic import (
@@ -365,6 +368,9 @@ class ExperimentConfig:
     mc_agreement: bool = False
     mc_agreement_runs: int | None = None
     n_samples: int = 200
+    # arcs x hidden units one world-model rollout block may hold; scoring more
+    # plans than fit runs as several blocks with identical results
+    max_block_arc_hidden: int = default_max_block_arc_hidden
     seed: int = 42
     device: str = "cpu"
     data_dir: str | None = None  # world_model.wm_data graph store dir
@@ -675,6 +681,7 @@ def _build_environment(
             n_samples=config.n_samples,
             base_seed=config.seed,
             negative_seeds=negative_seeds,
+            max_block_arc_hidden=config.max_block_arc_hidden,
         )
 
         # The head is built for ONE dynamics (an LT threshold head has no per-edge
@@ -745,6 +752,7 @@ def _build_environment(
             remove_semantics=config.remove_semantics,
             negative_seeds=negative_seeds,
             competitive=competitive,
+            max_block_arc_hidden=config.max_block_arc_hidden,
             tie_break=(
                 config.tie_break
                 if epidemic
@@ -2995,6 +3003,13 @@ if __name__ == "__main__":
         help="world-model rollout samples (default: 200).",
     )
     parser.add_argument(
+        "--max-block-arc-hidden",
+        type=int,
+        default=default_max_block_arc_hidden,
+        help="arcs x hidden units one world-model rollout block may hold; more plans "
+        f"run as several blocks with identical results (default: {default_max_block_arc_hidden}).",
+    )
+    parser.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -3196,6 +3211,7 @@ if __name__ == "__main__":
         outer_iters=args.outer_iters,
         mc_runs=args.mc_runs,
                 n_samples=args.n_samples,
+        max_block_arc_hidden=args.max_block_arc_hidden,
         seed=args.seed,
         device=args.device,
         data_dir=args.data_dir,

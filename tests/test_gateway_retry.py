@@ -1,9 +1,15 @@
-import httpx
 import pytest
 from openai import APIConnectionError, APIStatusError
 
 from coding_agent import agent as agent_module
 from coding_agent.agent import GatewayProvider, retryable
+
+# openai 3 builds its errors on httpx2 and no longer installs httpx; the fakes
+# below must come from whichever client the installed SDK uses
+try:
+    import httpx2 as httpx
+except ImportError:
+    import httpx
 
 
 def _status_error(code: int) -> APIStatusError:

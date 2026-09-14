@@ -80,6 +80,7 @@ from coding_agent.agent import (
 )
 from coding_agent.blocking import counter_seed, resolve_lever, valid_levers
 from coding_agent.containment import outbreak_selectors, select_outbreak
+from coding_agent.envs.world_model_env import default_max_block_arc_hidden
 from coding_agent.epidemic import (
     default_contact_reduction,
     vaccinate,
@@ -269,6 +270,7 @@ class PipelineConfig:
     weight_decay: float = 5e-4
     batch_size: int = 32
     max_batch_arc_hidden: int = max_batch_arc_hidden
+    max_block_arc_hidden: int = default_max_block_arc_hidden
     pos_weight: str = "off"
     patience: int = 50
     plan_demo: bool = True
@@ -1400,6 +1402,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                     if arm.method == "adaptive"
                     else config.n_samples
                 ),
+                max_block_arc_hidden=config.max_block_arc_hidden,
                 seed=config.seed,
                 device=config.device,
                 data_dir=str(layout.data_dir),
@@ -2238,6 +2241,14 @@ if __name__ == "__main__":
         help="arcs x hidden units one training forward/backward may hold; a batch "
         "above it runs as micro-batches with the gradient accumulated exactly "
         f"(default: {max_batch_arc_hidden}).",
+    )
+    parser.add_argument(
+        "--max-block-arc-hidden",
+        type=int,
+        default=default_max_block_arc_hidden,
+        help="arcs x hidden units one world-model rollout block may hold in the agent "
+        "stage; scoring more plans than fit runs as several blocks with identical "
+        f"results (default: {default_max_block_arc_hidden}).",
     )
     parser.add_argument(
         "--pos-weight",
@@ -3139,6 +3150,7 @@ if __name__ == "__main__":
         weight_decay=args.weight_decay,
         batch_size=args.batch_size,
         max_batch_arc_hidden=args.max_batch_arc_hidden,
+        max_block_arc_hidden=args.max_block_arc_hidden,
         pos_weight=args.pos_weight,
         patience=args.patience,
         plan_demo=not args.no_plan_demo,

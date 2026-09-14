@@ -805,6 +805,9 @@ BATCH_SIZE="${BATCH_SIZE:-32}"
 # a larger batch runs as micro-batches with the gradient accumulated exactly,
 # so BATCH_SIZE keeps its meaning on every graph size
 MAX_BATCH_ARC_HIDDEN="${MAX_BATCH_ARC_HIDDEN:-268435456}"
+# same idea for the agent stage's world-model rollouts: arcs x hidden one block
+# may hold; a 24 GB GPU wants 268435456 here, an 80 GB one keeps the default
+MAX_BLOCK_ARC_HIDDEN="${MAX_BLOCK_ARC_HIDDEN:-1073741824}"
 POS_WEIGHT="${POS_WEIGHT:-off}"
 PATIENCE="${PATIENCE:-50}"
 PLAN_GRAPHS="${PLAN_GRAPHS:-5}"
@@ -907,6 +910,7 @@ flags=(
   --dropout "$DROPOUT" --epochs "$EPOCHS" --lr "$LR"
   --weight-decay "$WEIGHT_DECAY" --batch-size "$BATCH_SIZE"
   --max-batch-arc-hidden "$MAX_BATCH_ARC_HIDDEN"
+  --max-block-arc-hidden "$MAX_BLOCK_ARC_HIDDEN"
   --pos-weight "$POS_WEIGHT" --patience "$PATIENCE" --plan-graphs "$PLAN_GRAPHS"
   --plan-budget-k "$PLAN_BUDGET_K" --plan-budget-graphs "$PLAN_BUDGET_GRAPHS"
   --plan-budget-horizon "$PLAN_BUDGET_HORIZON"

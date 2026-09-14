@@ -147,6 +147,7 @@ class WorldModelEnvironment:
         n_samples: int = 20,
         base_seed: int = 0,
         negative_seeds: tuple = (),
+        max_block_arc_hidden: int = default_max_block_arc_hidden,
     ) -> "WorldModelEnvironment":
         """Rebuild a WorldModel from a train_wm.py results JSON config and load its checkpoint."""
 
@@ -190,6 +191,7 @@ class WorldModelEnvironment:
             epidemic=spec.epidemic,
             hide_edge_weights=spec.hide_edge_weights,
             action_encoding=spec.action_encoding,
+            max_block_arc_hidden=max_block_arc_hidden,
         )
 
     @classmethod
@@ -211,6 +213,7 @@ class WorldModelEnvironment:
         epi_beta: float = 1.0,
         epi_gamma: float | None = None,
         epi_alpha: float | None = None,
+        max_block_arc_hidden: int = default_max_block_arc_hidden,
     ) -> "WorldModelEnvironment":
         """Ground-truth dynamics baseline: same rollout machinery, q = true edge weight."""
         if epidemic:
@@ -242,6 +245,7 @@ class WorldModelEnvironment:
                 base_seed=base_seed,
                 remove_semantics=remove_semantics,
                 epidemic=True,
+                max_block_arc_hidden=max_block_arc_hidden,
             )
 
         if diffusion_model not in ("IC", "LT"):
@@ -281,6 +285,7 @@ class WorldModelEnvironment:
             remove_semantics=remove_semantics,
             negative_seeds=negative_seeds,
             competitive=competitive,
+            max_block_arc_hidden=max_block_arc_hidden,
         )
 
     def _block_graph_input(self, sample_arrays: list[tuple]) -> GraphInput:
