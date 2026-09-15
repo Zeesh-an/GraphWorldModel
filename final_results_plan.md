@@ -482,7 +482,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-**`digg`** (rank 3, very large, critical; the finished IC run under `RUN=scale_ic` used exactly this tier's knobs and can be reused by passing that run name instead of `final_ic`).
+**`digg`** (rank 3, very large, critical; a PDE row on `pdeweek` with a seven-day walltime, since message conditioning puts each epoch near two hours and early stopping lands around epoch 30; the finished IC run under `RUN=scale_ic` used this tier's knobs without action conditioning and can be reused by passing that run name instead of `final_ic`).
 
 ```bash
 TASK=influence_maximization DATASET=digg RUN=final_ic RUN_JOBID=0 JOB_NAME=im_digg_ic \
@@ -496,7 +496,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -513,7 +513,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -681,7 +681,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-**`twitter`** (rank 3, large by node count but 1.77M arcs, critical; 128G rather than the tier's 64G; data stage alone first).
+**`twitter`** (rank 3, large by node count but 2.6M arcs, critical; trained at the very-large tier's knobs like digg, since a message-conditioned transition on this graph fills a 96 GB GPU on its own and the large tier's 200 epochs at hidden 256 measured two hours per epoch on PDE; 128G rather than the tier's 64G; a PDE row on `pdeweek` with a seven-day walltime; data stage alone first).
 
 ```bash
 TASK=adaptive_online_im DATASET=twitter RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_twitter_ic \
@@ -690,12 +690,12 @@ BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim
 ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
-ROLLOUTS=50 MC_MARGINALS=20 \
-HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
+ROLLOUTS=20 MC_MARGINALS=20 \
+HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -707,12 +707,12 @@ BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim
 ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
-ROLLOUTS=50 MC_MARGINALS=20 \
-HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
+ROLLOUTS=20 MC_MARGINALS=20 \
+HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
