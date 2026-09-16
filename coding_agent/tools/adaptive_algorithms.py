@@ -190,6 +190,25 @@ def adapt_greedy(
     return chosen
 
 
+# The RR sets depend on the graph and the seed alone, and the harness calls an
+# adaptive policy once per sample per round with the same seed, so without this
+# a 1,000-sample evaluation redraws the identical 20,000 sets 4,000 times; on
+# nethept that was hours per row. One entry, holding the graph so its id cannot
+# be reused by another object while the entry lives
+epic_rr_cache = {}
+
+
+def epic_rr_sets(graph: GraphInfo, theta: int, seed: int) -> list[set[int]]:
+    key = (id(graph), theta, seed)
+    hit = epic_rr_cache.get(key)
+    if hit is None or hit[0] is not graph:
+        epic_rr_cache.clear()
+        hit = (graph, primitives.batch_reverse_sample(graph, theta=theta, seed=seed))
+        epic_rr_cache[key] = hit
+
+    return hit[1]
+
+
 def adapt_epic(
     state: State,
     graph: GraphInfo,
@@ -212,7 +231,7 @@ def adapt_epic(
 
     active = set(state.infected) | set(state.frontier)
     theta = min(epic_max_theta, epic_rr_per_node * graph.num_nodes)
-    rr_sets = primitives.batch_reverse_sample(graph, theta=theta, seed=seed)
+    rr_sets = epic_rr_sets(graph, theta, seed)
 
     # A set already containing an active node is satisfied: its root is reachable
     # whatever we seed now, so counting it would credit every candidate equally

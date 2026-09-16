@@ -496,27 +496,31 @@ def batch_reverse_sample(graph: GraphInfo, theta: int, seed: int = 0) -> list[se
 
 def ris_select(rr_sets: list[set[int]], budget: int, num_nodes: int) -> list[int]:
     """Greedy max-coverage over RR sets -> top-k seeds (RIS selection rule)."""
-    covers = {node: set() for node in range(num_nodes)}
+    covers = [[] for _ in range(num_nodes)]
     for rr_index, rr_set in enumerate(rr_sets):
         for node in rr_set:
-            covers[node].add(rr_index)
+            covers[node].append(rr_index)
 
+    # Marginal gains kept as counts and decremented as sets get covered, so the
+    # whole selection costs the total RR-set size once rather than a fresh set
+    # difference per node per pick; the first maximum wins, as before. A chosen
+    # node's gain goes to -1 so it is never picked twice; a tie at zero gain still
+    # picks the lowest index, which is what the per-node scan did
+    gain = np.array([len(cover) for cover in covers], dtype=np.int64)
+    covered = np.zeros(len(rr_sets), dtype=bool)
     chosen = []
-    covered = set()
     for _ in range(budget):
-        best_node, best_gain = -1, -1
-        for node in range(num_nodes):
-            if node in chosen:
-                continue
-            gain = len(covers[node] - covered)
-            if gain > best_gain:
-                best_gain, best_node = gain, node
-
-        if best_node < 0:
+        best_node = int(np.argmax(gain)) if num_nodes else -1
+        if best_node < 0 or gain[best_node] < 0:
             break
 
         chosen.append(best_node)
-        covered |= covers[best_node]
+        for rr_index in covers[best_node]:
+            if not covered[rr_index]:
+                covered[rr_index] = True
+                for node in rr_sets[rr_index]:
+                    gain[node] -= 1
+        gain[best_node] = -1
 
     return chosen
 
