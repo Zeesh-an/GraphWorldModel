@@ -2099,7 +2099,7 @@ Baselines from section 4.8: `feature_linear`, `rpp`, `szabo_huberman`, `hawkes`,
 python -c "from data.datasets.digg_cascades import download_digg_cascades as d; d()"
 ```
 
-**`casflow_aps`** (rank 1, very large (616,316 underlying nodes), critical; capped at the 30,000 busiest participants and 5,000 sampled cascades, both stated in the caption. The August run was capped at 30,000 nodes and 20,000 cascades, not uncapped as this note used to say: its metadata records 15,420 surviving cascades, 8,909 replayed, 115,599 transitions, and it was OOM-killed in the agent stage at 64G, which the tier's 128G covers. Training time is linear in replayed cascades at about 13 transitions per cascade, so 5,000 cascades is roughly half a day of training on a PDE-class GPU where the uncapped corpus would be months; 5,000 is the floor, since the chronological test split is about 300 cascades at that size).
+**`casflow_aps`** (rank 1, very large (616,316 underlying nodes), critical; capped at the 30,000 busiest participants and 5,000 sampled cascades, both stated in the caption. The August run was capped at 30,000 nodes and 20,000 cascades, not uncapped as this note used to say: its metadata records 15,420 surviving cascades, 8,909 replayed, 115,599 transitions, and it was OOM-killed in the agent stage at 64G before the per-record adjacency copies were fixed on 2026-09-11; at 5,000 sampled cascades and with that fix the row runs at 64G, which is what finetuner's nodes offer. Training time is linear in replayed cascades at about 13 transitions per cascade, so 5,000 cascades is roughly half a day of training on a PDE-class GPU where the uncapped corpus would be months; 5,000 is the floor, since the chronological test split is about 300 cascades at that size).
 
 ```bash
 TASK=cascade_prediction DATASET=casflow_aps RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_aps_ic \
@@ -2112,7 +2112,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2148,7 +2148,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
