@@ -107,14 +107,14 @@ Every loader in `data/datasets/` (79 datasets; the four helper modules `cascade_
 | `brightkite`               | 58,228 | 214,078        | undirected, $\lambda_1 = 101.49$         | epidemic control (spectral) |
 | `p2p_gnutella`             | 62,561 | 147,878        | undirected P2P, Gnutella31 GCC           | dismantling                 |
 | `epinions1`                | 75,879 | 508,837 arcs   | directed trust                           | influence blocking          |
-| `twitter`                  | 81,306 | 1,768,149 arcs | directed follows                         | IM, AOIM                    |
+| `twitter`                  | 81,306 | 1,768,149 arcs | directed follows                         | IM                          |
 | `slashdot`                 | 82,168 | 870,161 arcs   | directed, Feb 2009                       | influence blocking          |
 
 **Very large (above 100,000 nodes)**
 
 | Dataset              | Nodes     | Edges           | Kind                                                        | Task family                  |
 | -------------------- | --------- | --------------- | ----------------------------------------------------------- | ---------------------------- |
-| `digg`               | 116,893   | about 2.6M      | undirected friendships                                      | IM (scale)                   |
+| `digg`               | 116,893   | about 2.6M      | undirected friendships                                      | IM, AOIM (scale)                   |
 | `epinions`           | 131,828   | 841,372 arcs    | directed signed trust, sign dropped                         | IM (scale)                   |
 | `gowalla`            | 196,591   | 950,327         | undirected location friendships                             | influence blocking           |
 | `email_euall`        | 265,009   | 418,956 arcs    | directed email                                              | influence blocking           |
@@ -163,7 +163,7 @@ Survey (netscience, IC and LT runs pooled): `imm` 556, `voterank` 532, `degree_d
 | ---- | ------------------ | ------ | ------------------------------ | ------ | --------- | ------------------------------------------------------------------------------------------------------------- |
 | 1    | `netscience`       | 1,589  | 2,742                          | medium | real      | results exist; the same graph as the static IM row, so the adaptivity gap reads against a known static number |
 | 2    | `nethept`          | 15,229 | 62,752 arcs                    | large  | real      | Han et al.'s benchmark; a generation script exists                                                            |
-| 3    | `twitter`          | 81,306 | 1,768,149 arcs                 | large  | real      | Han et al.'s own scale benchmark, where per-round MC re-estimation is the cost the task exists to show        |
+| 3    | `digg`             | 116,893 | 2.6M edges                    | very large | real  | the IM scale row's graph and world model reused, so the adaptivity gap is measured on the same graph as the static row; per-round MC re-estimation at 2.6M edges is the cost the task exists to show |
 | 4    | `powerlaw_cluster` | 10,000 | `--plc-p 0.05` (RL4IM's value) | large  | synthetic | RL4IM's family; results and a generation script exist at a smaller size                                       |
 | 5    | `facebook`         | 4,039  | 88,234                         | medium | real      | the dense regime where rounds reveal little, so the theory cap on the adaptivity gap is visible               |
 
@@ -288,11 +288,11 @@ Survey (primary*school, attack size): `frontier_immunization` 130.5 (control), `
 
 | Rank | Dataset           | Cascades | Underlying nodes | Windows                              | Tier       | Why                                                                                                                                                                                                                 |
 | ---- | ----------------- | -------- | ---------------- | ------------------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1    | `casflow_weibo`   | 119,313  | 6,738,040        | 0.5 h and 1 h observed, 24 h horizon | very large | the de-facto benchmark; the CasFlow bundle                                                                                                                                                                          |
-| 2    | `casflow_aps`     | 207,685  | 616,316          | citation years                       | very large | results exist; the corpus whose published band moves most under the leak-free split                                                                                                                                 |
-| 3    | `taoke`           | 2,862    | 29,711           | 3,600 s observed                     | large      | CasTemp's own corpus, the only one with a published leak-free number; needs `--cp-min-size 3`, and its only download source returned 404 on 2026-09-06, so the file has to be obtained by hand before this row runs |
-| 4    | `casflow_twitter` | 88,440   | 490,474          | 1 d and 2 d observed, 32 d horizon   | very large | the third CasFlow corpus; where CasCN becomes the best baseline under the fix                                                                                                                                       |
-| 5    | `digg_cascades`   | 3,553    | 279,630          | votes                                | very large | Topo-LSTM's corpus; a graph-and-cascade pair rather than a bundle                                                                                                                                                   |
+| 1    | `casflow_aps`     | 207,685  | 616,316          | citation years                       | very large | results exist; the corpus whose published band moves most under the leak-free split                                                                                                                                 |
+| 2    | `taoke`           | 2,862    | 29,711           | 3,600 s observed                     | large      | CasTemp's own corpus, the only one with a published leak-free number; needs `--cp-min-size 3`, and its only download source returned 404 on 2026-09-06, so the file has to be obtained by hand before this row runs |
+| 3    | `casflow_twitter` | 88,440   | 490,474          | 1 d and 2 d observed, 32 d horizon   | very large | the third CasFlow corpus; where CasCN becomes the best baseline under the fix                                                                                                                                       |
+| 4    | `digg_cascades`   | 3,553    | 279,630          | votes                                | very large | Topo-LSTM's corpus; a graph-and-cascade pair rather than a bundle                                                                                                                                                   |
+| 5    | `casflow_weibo`   | 119,313  | 6,738,040        | 0.5 h and 1 h observed, 24 h horizon | very large | the de-facto benchmark; the CasFlow bundle                                                                                                                                                                          |
 
 These are already the largest objects in the repo; there is no synthetic row by construction. Survey (casflow_aps under `--cp-max-nodes`, so a censored corpus): `degree_scaled` 0.064, `rpp` 0.118, `feature_linear` 0.128, `branching_factor` 0.129, `hawkes` 0.160, `persistence` 0.168, `weng_communities` 0.211, `hip` 0.265, `feature_gbt` 0.274, `seismic` 0.279, `szabo_huberman` 0.313, `hawkes_hybrid` 0.482, `neighborhood_size` 0.574, `mean_size` 0.920, `random_prediction` 2.32, `reachability` 32.3; `evolve_free@oracle` 0.094 with zero forward-model calls. External: `casflow`, `ccgl`, `ctcp`, `cascn` and `coupledgnn` all skipped by the `work_dir` bug.
 
@@ -319,7 +319,7 @@ These are already the largest objects in the repo; there is no synthetic row by 
 
 ## 6. Run order and volume
 
-Critical datasets first, in rank order, so the main-text table fills before the appendix. The first job on every large and very-large row is data generation alone, timed, because nothing above `nethept` has been generated yet; its wall clock decides `--mc-runs`, `--n-samples` and the horizon for that row before any arm runs. Per task that is three datasets, two dynamics (three for epidemic control, one for cascade prediction), all budgets, the five baselines, the ladder, and condition 9 on the critical rows. Rough count: 8 tasks, 5 datasets, an average of 2 dynamics, so about 80 pipeline runs plus the synthetic sweeps, of which 48 are critical and carry the discovery rows. The very-large rows (`digg`, `twitter`, `epinions1`, `brightkite`, `deezer`) run last.
+Critical datasets first, in rank order, so the main-text table fills before the appendix. The first job on every large and very-large row is data generation alone, timed, because nothing above `nethept` has been generated yet; its wall clock decides `--mc-runs`, `--n-samples` and the horizon for that row before any arm runs. Per task that is three datasets, two dynamics (three for epidemic control, one for cascade prediction), all budgets, the five baselines, the ladder, and condition 9 on the critical rows. Rough count: 8 tasks, 5 datasets, an average of 2 dynamics, so about 80 pipeline runs plus the synthetic sweeps, of which 48 are critical and carry the discovery rows. The very-large rows (`digg`, `epinions1`, `brightkite`, `deezer`) run last.
 
 Expected cost per pipeline run (one task, one dynamics, four budgets, five classical baselines, the two-arm ladder with the referee replay; no external learned repo, no discovery system), from the measured netscience runs and a Monte Carlo microbenchmark on BA graphs at 1,000, 10,000 and 100,000 nodes: about 4 to 12 hours at 1,000 to 2,000 nodes, 6 to 16 hours at 10,000, and 1 to 3 days at 100,000. The LLM latency (16 arm-budget pairs at 20 iterations, 1 to 3 minutes per reply) is the largest block at every size and does not scale with the graph; data generation and training scale linearly with edges (20 to 40 minutes and 1 to 2 hours at 10,000; 3 to 6 hours and 10 to 24 hours at 100,000, where the training batch no longer fits and shrinks); the Monte Carlo evaluator arm costs about an hour per dynamics at 10,000 and 4 to 8 hours at 100,000, where a single evaluation is 90 seconds; a generated program that does its own sampling hits the 300-second per-call cap routinely at 100,000. Outside that table, DeepIM and MOEIM took 10.6 hours between them at netscience and do not get cheaper with size, and each discovery system is LLM-bound at one to two days per budget point. Old source-localization and cascade-reconstruction results predate the label-free rewards and are not comparable; both tasks rerun from scratch.
 
@@ -356,7 +356,7 @@ One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 1
 | knob | medium, 1k to 10k | large, 10k to 100k | very large, above 100k | synthetic at 10k |
 | --- | --- | --- | --- | --- |
 | `CPUS` | 4 | 8 | 8 | 8 |
-| `MEM` | 32G | 64G (128G for `twitter`) | 128G | 64G |
+| `MEM` | 32G | 64G | 128G | 64G |
 | `TIME` | 24:00:00 | 48:00:00 | 48:00:00 | 48:00:00 |
 | `ROLLOUTS` | 100 | 50 | 20 | 20 (times 40 graphs) |
 | `MC_MARGINALS` | 30 | 20 | 20 | 30 |
@@ -397,7 +397,7 @@ python -m pipeline.run --task <task> --dataset <dataset> --run final_<dynamics> 
 
 **One search per row, transferred across budgets** (`SEARCH_BUDGET`, since 2026-09-14). The two LLM arms search only at the named point, `pct10` on the percentage ladders and `k30` on influence blocking's absolute one; at every other budget the pipeline replans that winner at the new k and replays it on the referee through the canned path a library baseline takes, and the row carries `transferred_from`. Routing and every baseline still run at every budget. The reason is measured, not assumed: on the two finished netscience adaptive-IM runs, fifteen of the sixteen evolved programs replanned at the other three budgets landed within half a node of the winner evolved there, on the same 1,000-sample referee; the one failure was a pct1 winner that did not scale up, which is why the search point is the middle of the ladder rather than its bottom. The transfer cuts each row's gateway-bound block by four; a transferred row's cost columns are the replay's alone, so evaluator-cost comparisons between arms are read at the search point. The report marks transferred rows and the summary CSV carries the column. Set `SEARCH_BUDGET` empty to search at every point again.
 
-**Single GPU without SLURM** (a Lambda instance, or any workstation). The same commands run inline when `SLURM_JOB_ID` is set to anything: put `SLURM_JOB_ID=local` in front of the command and `nohup` or a `parallel -j 3` queue behind it; `CPUS`, `GRES`, `MEM` and `TIME` are read only by the submit path and are ignored. On a 24 GB GPU add `MAX_BATCH_ARC_HIDDEN=67108864 MAX_BLOCK_ARC_HIDDEN=268435456` to every large row, which holds the training micro-batch and the world-model rollout block near 7 GB each so three jobs share one card; both caps change memory only, never the numbers. The scale rows (digg, twitter, epinions1, cit_hepth, brightkite, deezer, p2p_gnutella, casflow_aps) stay on an 80 GB GPU.
+**Single GPU without SLURM** (a Lambda instance, or any workstation). The same commands run inline when `SLURM_JOB_ID` is set to anything: put `SLURM_JOB_ID=local` in front of the command and `nohup` or a `parallel -j 3` queue behind it; `CPUS`, `GRES`, `MEM` and `TIME` are read only by the submit path and are ignored. On a 24 GB GPU add `MAX_BATCH_ARC_HIDDEN=67108864 MAX_BLOCK_ARC_HIDDEN=268435456` to every large row, which holds the training micro-batch and the world-model rollout block near 7 GB each so three jobs share one card; both caps change memory only, never the numbers. The scale rows (digg, epinions1, cit_hepth, brightkite, deezer, p2p_gnutella, casflow_aps) stay on an 80 GB GPU.
 
 - **No `--account`**, and therefore no `SBATCH_ARGS` for accounting.
 - **Add `PARTITION`**: `pdeday` for the `TIME=24:00:00` rows and `pdeweek` for the `TIME=48:00:00` ones. A shorter partition schedules sooner, so take the shortest that still covers the row. `pdemonth` is the 31-day default and is only for a row that genuinely needs more than a week; `pdehour` is for smoke tests.
@@ -681,10 +681,10 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-**`twitter`** (rank 3, large by node count but 2.6M arcs, critical; trained at the very-large tier's knobs like digg, since a message-conditioned transition on this graph fills a 96 GB GPU on its own and the large tier's 200 epochs at hidden 256 measured two hours per epoch on PDE; 128G rather than the tier's 64G; a PDE row on `pdeweek` with a seven-day walltime; data stage alone first).
+**`digg`** (rank 3, very large, critical; the same graph, generation knobs and training knobs as the IM scale row, so its `data` and `world_model` directories are the IM run's, copied over with the two path fields in the results JSON rewritten, exactly as section 8.5 does for the node-lever runs; only the agent stage runs. A PDE row on `pdeweek` with a seven-day walltime. Twitter, Han et al.'s own scale benchmark, was the row here until 2026-09-16 and was dropped because its own data and training cost more than the whole row is worth when digg's can be reused; its loader stays).
 
 ```bash
-TASK=adaptive_online_im DATASET=twitter RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_twitter_ic \
+TASK=adaptive_online_im DATASET=digg RUN=final_ic RUN_JOBID=0 JOB_NAME=aim_digg_ic \
 DIFFUSION_MODEL=IC GEN_MODELS=IC \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
 ARMS="routing evolve_free@oracle evolve_free@world_model" \
@@ -701,7 +701,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ```
 
 ```bash
-TASK=adaptive_online_im DATASET=twitter RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_twitter_lt \
+TASK=adaptive_online_im DATASET=digg RUN=final_lt RUN_JOBID=0 JOB_NAME=aim_digg_lt \
 DIFFUSION_MODEL=LT GEN_MODELS=LT \
 BASELINES="adapt_epic adapt_degree_discount imm static_split external:adaptiveim external:rl4im" \
 ARMS="routing evolve_free@oracle evolve_free@world_model" \
@@ -792,7 +792,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics and budget, CPU-only):
 
 ```bash
-for ds in netscience nethept twitter; do for dyn in IC LT; do for sys in llm4ad_funsearch eoh openevolve; do for pct in 1 5 10 20; do
+for ds in netscience nethept digg; do for dyn in IC LT; do for sys in llm4ad_funsearch eoh openevolve; do for pct in 1 5 10 20; do
   run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
   TASK=adaptive_online_im DATASET=$ds RUN=$run RUN_JOBID=0 \
   JOB_NAME=disc_aim_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys}_${pct} \
@@ -2099,25 +2099,7 @@ Baselines from section 4.8: `feature_linear`, `rpp`, `szabo_huberman`, `hawkes`,
 python -c "from data.datasets.digg_cascades import download_digg_cascades as d; d()"
 ```
 
-**`casflow_weibo`** (rank 1, very large (6,738,040 underlying nodes), critical; capped at 50,000 underlying nodes, the same cap for every row of this corpus).
-
-```bash
-TASK=cascade_prediction DATASET=casflow_weibo RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_weibo_ic \
-DIFFUSION_MODEL=IC GEN_MODELS=IC \
-BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities" \
-ARMS="routing evolve_free@oracle evolve_free@world_model" \
-LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
-WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
-HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
-EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=50000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
-MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
-FEEDBACK=default ACTION_CONDITIONING=message \
-./sbatch/pipeline.sbatch
-```
-
-**`casflow_aps`** (rank 2, very large (616,316 underlying nodes), critical; run uncapped, which the tier gives 128G for (the August run was OOM-killed in the agent stage at 64G); if it still fails there, add `CP_MAX_NODES=50000` and say so in the caption).
+**`casflow_aps`** (rank 1, very large (616,316 underlying nodes), critical; capped at the 30,000 busiest participants and 5,000 sampled cascades, both stated in the caption. The August run was capped at 30,000 nodes and 20,000 cascades, not uncapped as this note used to say: its metadata records 15,420 surviving cascades, 8,909 replayed, 115,599 transitions, and it was OOM-killed in the agent stage at 64G, which the tier's 128G covers. Training time is linear in replayed cascades at about 13 transitions per cascade, so 5,000 cascades is roughly half a day of training on a PDE-class GPU where the uncapped corpus would be months; 5,000 is the floor, since the chronological test split is about 300 cascades at that size).
 
 ```bash
 TASK=cascade_prediction DATASET=casflow_aps RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_aps_ic \
@@ -2127,7 +2109,7 @@ ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
-EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test \
+EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
@@ -2135,7 +2117,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-**`taoke`** (rank 3, critical; `CP_MIN_SIZE=3` is what makes the leak-free split possible, and the file has to be obtained by hand first (its only source returned 404 on 2026-09-06)).
+**`taoke`** (rank 2, critical; `CP_MIN_SIZE=3` is what makes the leak-free split possible, and the file has to be obtained by hand first (its only source returned 404 on 2026-09-06)).
 
 ```bash
 TASK=cascade_prediction DATASET=taoke RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_taoke_ic \
@@ -2153,7 +2135,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-**`casflow_twitter`** (rank 4, very large (490,474 underlying nodes); capped at 50,000 like Weibo).
+**`casflow_twitter`** (rank 3, very large (490,474 underlying nodes), critical; capped at the 30,000 busiest participants and 5,000 sampled cascades like APS, both stated in the caption; the corpus where the leak-free split changes a ranking, CasCN becoming the best baseline, so it is the row that reproduces section 8.3's finding).
 
 ```bash
 TASK=cascade_prediction DATASET=casflow_twitter RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_twitter_ic \
@@ -2163,7 +2145,7 @@ ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
-EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=50000 \
+EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
@@ -2171,7 +2153,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-**`digg_cascades`** (rank 5, very large (279,630 underlying nodes); a graph-and-cascade pair rather than a bundle, uncapped).
+**`digg_cascades`** (rank 4, very large (279,630 underlying nodes); a graph-and-cascade pair rather than a bundle: the transitions run on the real friendship graph, whose 1.7M arcs make an uncapped transition cost what a digg IM transition costs, so it is capped at the 30,000 busiest participants; no cascade cap, since the corpus has only 3,553 cascades; its literature predicts the next adopter rather than popularity, so the row is self-contained rather than a published comparison).
 
 ```bash
 TASK=cascade_prediction DATASET=digg_cascades RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_digg_cascades_ic \
@@ -2181,7 +2163,25 @@ ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
-EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test \
+EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 \
+HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
+FEEDBACK=default ACTION_CONDITIONING=message \
+./sbatch/pipeline.sbatch
+```
+
+**`casflow_weibo`** (rank 5, very large (6,738,040 underlying nodes); the de-facto benchmark, run last because even at a node cap every surviving cascade replays into about 13 transitions and the uncapped survivor pool is weeks of training; capped at the 30,000 busiest participants and 10,000 sampled cascades, both stated in the caption; APS and Twitter run at 5,000).
+
+```bash
+TASK=cascade_prediction DATASET=casflow_weibo RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_weibo_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC \
+BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities" \
+ARMS="routing evolve_free@oracle evolve_free@world_model" \
+LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
+HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
+EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=10000 \
 HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
@@ -2192,7 +2192,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics, CPU-only):
 
 ```bash
-for ds in casflow_weibo casflow_aps taoke; do for dyn in IC; do for sys in llm4ad_funsearch eoh openevolve; do
+for ds in casflow_aps taoke casflow_twitter; do for dyn in IC; do for sys in llm4ad_funsearch eoh openevolve; do
   run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
   TASK=cascade_prediction DATASET=$ds RUN=$run RUN_JOBID=0 \
   JOB_NAME=disc_cp_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys} \
