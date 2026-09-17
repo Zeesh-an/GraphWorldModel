@@ -321,7 +321,7 @@ These are already the largest objects in the repo; there is no synthetic row by 
 
 Critical datasets first, in rank order, so the main-text table fills before the appendix. The first job on every large and very-large row is data generation alone, timed, because nothing above `nethept` has been generated yet; its wall clock decides `--mc-runs`, `--n-samples` and the horizon for that row before any arm runs. Per task that is three datasets, two dynamics (three for epidemic control, one for cascade prediction), all budgets, the five baselines, the ladder, and condition 9 on the critical rows. Rough count: 8 tasks, 5 datasets, an average of 2 dynamics, so about 80 pipeline runs plus the synthetic sweeps, of which 48 are critical and carry the discovery rows. The very-large rows (`digg`, `epinions1`, `brightkite`, `deezer`) run last.
 
-Expected cost per pipeline run (one task, one dynamics, four budgets, five classical baselines, the two-arm ladder with the referee replay; no external learned repo, no discovery system), from the measured netscience runs and a Monte Carlo microbenchmark on BA graphs at 1,000, 10,000 and 100,000 nodes: about 4 to 12 hours at 1,000 to 2,000 nodes, 6 to 16 hours at 10,000, and 1 to 3 days at 100,000. The LLM latency (16 arm-budget pairs at 20 iterations, 1 to 3 minutes per reply) is the largest block at every size and does not scale with the graph; data generation and training scale linearly with edges (20 to 40 minutes and 1 to 2 hours at 10,000; 3 to 6 hours and 10 to 24 hours at 100,000, where the training batch no longer fits and shrinks); the Monte Carlo evaluator arm costs about an hour per dynamics at 10,000 and 4 to 8 hours at 100,000, where a single evaluation is 90 seconds; a generated program that does its own sampling hits the 300-second per-call cap routinely at 100,000. Outside that table, DeepIM and MOEIM took 10.6 hours between them at netscience and do not get cheaper with size, and each discovery system is LLM-bound at one to two days per budget point. Old source-localization and cascade-reconstruction results predate the label-free rewards and are not comparable; both tasks rerun from scratch.
+Expected cost per pipeline run (one task, one dynamics, four budgets, five classical baselines, the two-arm ladder with the referee replay; no external learned repo, no discovery system), from the measured netscience runs and a Monte Carlo microbenchmark on BA graphs at 1,000, 10,000 and 100,000 nodes: about 4 to 12 hours at 1,000 to 2,000 nodes, 6 to 16 hours at 10,000, and 1 to 3 days at 100,000. The LLM latency (the arm-budget pairs that search, at 10 iterations, 1 to 3 minutes per reply) is the largest block at every size and does not scale with the graph; data generation and training scale linearly with edges (20 to 40 minutes and 1 to 2 hours at 10,000; 3 to 6 hours and 10 to 24 hours at 100,000, where the training batch no longer fits and shrinks); the Monte Carlo evaluator arm costs about an hour per dynamics at 10,000 and 4 to 8 hours at 100,000, where a single evaluation is 90 seconds; a generated program that does its own sampling hits the 300-second per-call cap routinely at 100,000. Outside that table, DeepIM and MOEIM took 10.6 hours between them at netscience and do not get cheaper with size, and each discovery system is LLM-bound at one to two days per budget point. Old source-localization and cascade-reconstruction results predate the label-free rewards and are not comparable; both tasks rerun from scratch.
 
 ## 7. Open decisions and things the survey turned up
 
@@ -343,9 +343,9 @@ One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 1
 
 **Names.** `RUN` names the dynamics (`final_ic`, `final_lt`, `final_sir`, `final_sis`, `final_seir`) because a run directory holds one dynamics' data, checkpoint and arm results, so IC and LT on the same graph must never share one. `JOB_NAME` is `<task>_<dataset>_<dynamics>` with the task abbreviated (`im`, `aim`, `cnd`, `sl`, `ib`, `cr`, `ec`, `cp`); the script's default would be `gwm_<dataset>_<run>`, which two tasks on one graph would share, and Slurm's `singleton` dependency keys on the name. `RUN_JOBID=0` keeps the directory stable so a resubmission resumes it. **Never pass `FORCE=1`**: every command is idempotent, resubmitting it skips finished stages and finished arms, and an evolve arm resumes from its per-generation checkpoint. `FORCE=1` throws all of that away and, on a requeue, regenerates the data and retrains before reaching the agent stage, which is what cost three of the five attempts on the September digg job.
 
-**Identical in every command**, because they are the protocol rather than a resource: `LLM_MODEL=gpt-6-astra`, `REASONING_EFFORT=high`, `WM_MODEL=sage`, `HEAD=structured` (the one head defined under IC, LT, CLT and all three compartmental dynamics; `structured_residual` raises under LT, so using it anywhere would make the IC and LT rows different models), `EVALUATOR=oracle`, `REFEREE=oracle`, `HORIZON=10`, `OUTER_ITERS=20`, `N_SAMPLES=200`, `MC_RUNS=200`, `SEED=42`, `ACTION_CONDITIONING=message`, `FEEDBACK=default`, and `ARMS`, which is the ladder for the task (condition 2 plus conditions 5 and 6, `routing evolve_free@oracle evolve_free@world_model`; the same three arms on adaptive IM, whose `adaptive_free@<evaluator>` twins were removed on 2026-09-10; the adaptivity gap is therefore not computed by the matrix and needs an ablation cell that adds `adaptive_free@oracle adaptive_free@world_model` back). The native and Monte Carlo arms (conditions 3 and 4) were removed from every command on 2026-09-10; they remain runnable as ablation rows by adding `evolve_free@native evolve_free@monte_carlo` back to `ARMS` on a cell. Also fixed and not written out because no command changes them: learning rate 1e-3, weight decay 5e-4, `pos_weight` off, 3 layers, dropout 0.1, `basic` action encoding, inject 0.4, counterfactual 0.4 with 2 branches, budgets drawn from 1 to 20 percent of $N$ at generation, weighted cascade probabilities, and the 70/15/15 split, which resolves graph-disjoint for a synthetic family and per-episode for a single real graph.
+**Identical in every command**, because they are the protocol rather than a resource: `LLM_MODEL=gpt-6-astra`, `REASONING_EFFORT=high`, `WM_MODEL=sage`, `HEAD=structured` (the one head defined under IC, LT, CLT and all three compartmental dynamics; `structured_residual` raises under LT, so using it anywhere would make the IC and LT rows different models), `EVALUATOR=oracle`, `REFEREE=oracle`, `HORIZON=10`, `OUTER_ITERS=10`, `N_SAMPLES=200`, `MC_RUNS=200`, `SEED=42`, `ACTION_CONDITIONING=message`, `FEEDBACK=default`, and `ARMS`, which is the ladder for the task (condition 2 plus conditions 5 and 6, `routing evolve_free@oracle evolve_free@world_model`; the same three arms on adaptive IM, whose `adaptive_free@<evaluator>` twins were removed on 2026-09-10; the adaptivity gap is therefore not computed by the matrix and needs an ablation cell that adds `adaptive_free@oracle adaptive_free@world_model` back). The native and Monte Carlo arms (conditions 3 and 4) were removed from every command on 2026-09-10; they remain runnable as ablation rows by adding `evolve_free@native evolve_free@monte_carlo` back to `ARMS` on a cell. Also fixed and not written out because no command changes them: learning rate 1e-3, weight decay 5e-4, `pos_weight` off, 3 layers, dropout 0.1, `basic` action encoding, inject 0.4, counterfactual 0.4 with 2 branches, budgets drawn from 1 to 20 percent of $N$ at generation, weighted cascade probabilities, and the 70/15/15 split, which resolves graph-disjoint for a synthetic family and per-episode for a single real graph.
 
-**Also identical, and on by default since 2026-09-10, so no command names them:** the probe turn before every generation (`PROBE_TURN=1`, one extra LLM call per generation, so a 20-generation search now makes about 40 generation-level calls plus reflections and idea searches; the LLM call count in T4 is read from `llm_usage.calls`, not from `OUTER_ITERS`), the paired acceptance band, the incumbent-pinned parent with the paired population ranking, the spurious-accept ledger, the unbiased incumbent curve, the `# EXPECTED:` edit forecast, counterexample realizations in the feedback, and the post-search rediscovery distance (`PROVENANCE=1`, capped at `PROVENANCE_TIMEOUT` seconds per library member, 60 by default; on the very-large rows the slow structural members such as exact betweenness will time out and the report says which). Two knobs stay OFF everywhere because they change the protocol: `STOP_WHEN_FLAT` (early stop on the unbiased curve; the matrix fixes `OUTER_ITERS=20`) and `CALIBRATION_STEERING` (forecast errors feeding the operator schedule). The report's "Search protocol" section and the `edit_calibration` figure read these per arm.
+**Also identical, and on by default since 2026-09-10, so no command names them:** the probe turn before every generation (`PROBE_TURN=1`, one extra LLM call per generation, so a 10-generation search now makes about 20 generation-level calls plus reflections and idea searches; the LLM call count in T4 is read from `llm_usage.calls`, not from `OUTER_ITERS`), the paired acceptance band, the incumbent-pinned parent with the paired population ranking, the spurious-accept ledger, the unbiased incumbent curve, the `# EXPECTED:` edit forecast, counterexample realizations in the feedback, and the post-search rediscovery distance (`PROVENANCE=1`, capped at `PROVENANCE_TIMEOUT` seconds per library member, 60 by default; on the very-large rows the slow structural members such as exact betweenness will time out and the report says which). Two knobs stay OFF everywhere because they change the protocol: `STOP_WHEN_FLAT` (early stop on the unbiased curve; the matrix fixes `OUTER_ITERS=10`) and `CALIBRATION_STEERING` (forecast errors feeding the operator schedule). The report's "Search protocol" section and the `edit_calibration` figure read these per arm.
 
 **Two knobs from Hongji's branch, wired through `pipeline.sbatch` on 2026-09-10 and set explicitly in every command below:** `ACTION_CONDITIONING=message` (the action-conditioned message passing; `global` is its locality ablation, `message_blind` the capacity control, `none` the historical model; sage only) and `FEEDBACK=default` (the full feedback; `f0` to `f3` is the controlled ladder of diagnostic blocks, an ablation variable rather than the protocol). Two consequences to keep in view. Under `HEAD=structured` with the true edge weights Hongji's sweep found all four conditioning arms identical to four decimals, so `message` is run for consistency with the method the paper describes, not because it is expected to move the table. And the checkpoint records the conditioning while the train stage refuses to reuse one trained under another value, so any `final_<dyn>` run whose checkpoint was trained before 2026-09-10 under `none` (the September `digg` runs, for example) has to be retrained: either resubmit with `FORCE=1` on the train stage or give the conditioned run a new `RUN` name. A run that skips the train stage (`START_STAGE=agent`, `SKIP_STAGES=train`) never checks, and the agent stage loads whatever conditioning the checkpoint on disk carries.
 
@@ -422,7 +422,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -439,7 +439,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -458,7 +458,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -475,7 +475,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -494,7 +494,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=20 \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -511,7 +511,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=20 \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -530,7 +530,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -547,7 +547,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -566,7 +566,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -583,7 +583,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -621,7 +621,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -638,7 +638,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -657,7 +657,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -674,7 +674,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -693,7 +693,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=20 \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -710,7 +710,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=20 \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -729,7 +729,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -746,7 +746,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -765,7 +765,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -782,7 +782,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -820,7 +820,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -837,7 +837,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -856,7 +856,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -873,7 +873,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -892,7 +892,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -909,7 +909,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -928,7 +928,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -945,7 +945,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -964,7 +964,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -981,7 +981,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1021,7 +1021,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1038,7 +1038,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1057,7 +1057,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1074,7 +1074,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1093,7 +1093,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1110,7 +1110,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1129,7 +1129,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1146,7 +1146,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1165,7 +1165,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1182,7 +1182,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1234,7 +1234,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1251,7 +1251,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1268,7 +1268,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=none MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1285,7 +1285,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=none MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1304,7 +1304,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1321,7 +1321,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1338,7 +1338,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1355,7 +1355,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1374,7 +1374,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1391,7 +1391,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1408,7 +1408,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1425,7 +1425,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1444,7 +1444,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1461,7 +1461,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1478,7 +1478,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1495,7 +1495,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1514,7 +1514,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1531,7 +1531,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1548,7 +1548,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1565,7 +1565,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge s
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=none MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1620,7 +1620,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1637,7 +1637,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1656,7 +1656,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1673,7 +1673,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1692,7 +1692,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1709,7 +1709,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1728,7 +1728,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1745,7 +1745,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1764,7 +1764,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test SYN_NODES=10000 NUM_GRAPHS=1 BA_M=3 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1781,7 +1781,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test SYN_NODES=10000 NUM_GRAPHS=1 BA_M=3 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1819,7 +1819,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1836,7 +1836,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1853,7 +1853,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1872,7 +1872,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1889,7 +1889,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1906,7 +1906,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1925,7 +1925,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1942,7 +1942,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1959,7 +1959,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=50 MC_MARGINALS=20 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1978,7 +1978,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -1995,7 +1995,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2012,7 +2012,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=100 MC_MARGINALS=30 \
 HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=32G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2031,7 +2031,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2048,7 +2048,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2065,7 +2065,7 @@ WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_w
 ROLLOUTS=20 MC_MARGINALS=30 \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 SYN_NODES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2110,7 +2110,7 @@ LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2128,7 +2128,7 @@ LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MIN_SIZE=3 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2146,7 +2146,7 @@ LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2164,7 +2164,7 @@ LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
@@ -2182,7 +2182,7 @@ LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=10000 \
-HORIZON=10 OUTER_ITERS=20 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
