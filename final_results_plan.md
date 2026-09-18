@@ -351,12 +351,12 @@ One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 1
 
 **Varied per cell**: `TASK`, `DATASET`, `DIFFUSION_MODEL` with `GEN_MODELS` equal to it, `RUN`, `JOB_NAME`, `BASELINES` (section 4's rows, plus the control section 2 says is always run: `frontier_removal` on critical node detection and `frontier_immunization` on epidemic control; `observed_only` and `persistence` are already in their lists), `GEN_ACTION_OPS` (the task's own, empty for the three diffusion-only tasks), the task's protocol knobs at their T3 values, and everything in the tier table below. `MC_AGREEMENT` is 0 on every row, for the reason two paragraphs down.
 
-**The size tiers.** These are cost controls, not protocol, and the table is what each command writes out. Only the first two rows of it are free choices; the rest exist because a row has to fit. `MEM` is 31G everywhere below the very-large tier since 2026-09-18, measured rather than guessed: a cascade-prediction training set is 1.1 GB resident for taoke's 68,000 transitions and 1.8 GB for digg's 106,000, and taoke's agent stage with the six classical baselines and the referee peaked at 2.3 GB; a large simulator row's host-side terms, transitions times nodes and referee features, come to a few GB at 62,000 nodes. The one host OOM on record at 64G, APS in August, was the per-record adjacency copies fixed on 2026-09-11. 31G is what lets four jobs share finetuner's 125 GB node; if a row is ever killed for memory, the manifest marks the stage failed and a resubmit at 64G reuses every finished stage and row. The very-large rows keep 128G on PDE, where digg's arrays are forty times nethept's and memory is not scarce.
+**The size tiers.** These are cost controls, not protocol, and the table is what each command writes out. Only the first two rows of it are free choices; the rest exist because a row has to fit. `MEM` is 31G everywhere below the very-large tier since 2026-09-18, measured rather than guessed: a cascade-prediction training set is 1.1 GB resident for taoke's 68,000 transitions and 1.8 GB for digg's 106,000, and taoke's agent stage with the six classical baselines and the referee peaked at 2.3 GB; a large simulator row's host-side terms, transitions times nodes and referee features, come to a few GB at 62,000 nodes. The one host OOM on record at 64G, APS in August, was the per-record adjacency copies fixed on 2026-09-11. 31G is what lets four jobs share finetuner's 125 GB node; if a row is ever killed for memory, the manifest marks the stage failed and a resubmit at 64G reuses every finished stage and row. The very-large rows ask 64G: a digg row's own peak is about 15 GB (the training set is 3.9 GB resident at 10 rollouts, so about 8 GB at 20; a rollout block is 2 GB in transit; imm's sample count is capped at 20,000 sets on any graph), and the headroom is for the external repos in their own processes, DeepIM and rl4im, which are unmeasured at this size.
 
 | knob | medium, 1k to 10k | large, 10k to 100k | very large, above 100k | synthetic at 10k |
 | --- | --- | --- | --- | --- |
 | `CPUS` | 4 | 8 | 8 | 8 |
-| `MEM` | 31G | 31G | 128G | 31G |
+| `MEM` | 31G | 31G | 64G | 31G |
 | `TIME` | 24:00:00 | 48:00:00 | 48:00:00 | 48:00:00 |
 | `ROLLOUTS` | 100 | 50 | 20 | 20 (times 40 graphs) |
 | `MC_MARGINALS` | 30 | 20 | 20 | 30 |
@@ -496,7 +496,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -513,7 +513,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -601,7 +601,7 @@ for ds in netscience nethept digg; do for dyn in IC LT; do for sys in llm4ad_fun
   BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=128G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=64G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done; done
 ```
 
@@ -695,7 +695,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -712,7 +712,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=7-00:00:00 PARTITION=pdeweek \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2184,7 +2184,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=128G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
