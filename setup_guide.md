@@ -116,7 +116,7 @@ Only `aps` is needed for the section 3 submission (`DATASET=casflow_aps`); copy 
 ### 5.2 Other manual and known-broken corpora
 
 - `weibo` (the 1.8M-node follower graph, not the CasFlow cascades): AMiner requires registration. Register at https://www.aminer.cn/influencelocality, download `weibo_network.tar.gz`, extract `weibo_network.txt` into `data/raw/weibo/`.
-- `taoke`: its only source (`Lucas-PJ/CasTemp-ALGO`, `Taoke.zip`) returns 404; the loader stays for when the file resurfaces.
+- `taoke`: its only source, the `Lucas-PJ/CasTemp-ALGO` repository, no longer exists on GitHub (checked 2026-09-18) and has no Wayback capture. The 14 MB `Taoke.zip` fetched on 2026-08-05 is the corpus now: it lives in `data/raw/taoke/` on the lab laptop and should be copied to `data/raw/taoke/Taoke.zip` on every machine that runs the row; the loader extracts it.
 - `digg`: `datasets.syr.edu`'s TLS certificate failed verification from the cluster in August 2026, so `urlretrieve` failed there; from a workstation the download returned 200 with a valid certificate on 2026-09-06. If it fails on your node, fetch the zip by hand and place it where `data/datasets/digg.py` looks.
 - `orkut`, `livejournal`, `pokec`, `higgs_twitter`, `youtube`, `twitter`, `weibo`: load fine but are far beyond what the NDlib rollout path simulates in reasonable time. Scalability targets, not day-one datasets.
 
