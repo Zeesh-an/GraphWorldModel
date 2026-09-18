@@ -351,12 +351,12 @@ One `pipeline.sbatch` submission per (task, dataset, dynamics) cell: 80 cells, 1
 
 **Varied per cell**: `TASK`, `DATASET`, `DIFFUSION_MODEL` with `GEN_MODELS` equal to it, `RUN`, `JOB_NAME`, `BASELINES` (section 4's rows, plus the control section 2 says is always run: `frontier_removal` on critical node detection and `frontier_immunization` on epidemic control; `observed_only` and `persistence` are already in their lists), `GEN_ACTION_OPS` (the task's own, empty for the three diffusion-only tasks), the task's protocol knobs at their T3 values, and everything in the tier table below. `MC_AGREEMENT` is 0 on every row, for the reason two paragraphs down.
 
-**The size tiers.** These are cost controls, not protocol, and the table is what each command writes out. Only the first two rows of it are free choices; the rest exist because a row has to fit. `MEM` is 31G everywhere below the very-large tier since 2026-09-18, measured rather than guessed: a cascade-prediction training set is 1.1 GB resident for taoke's 68,000 transitions and 1.8 GB for digg's 106,000, and taoke's agent stage with the six classical baselines and the referee peaked at 2.3 GB; a large simulator row's host-side terms, transitions times nodes and referee features, come to a few GB at 62,000 nodes. The one host OOM on record at 64G, APS in August, was the per-record adjacency copies fixed on 2026-09-11. 31G is what lets four jobs share finetuner's 125 GB node; if a row is ever killed for memory, the manifest marks the stage failed and a resubmit at 64G reuses every finished stage and row. The very-large rows ask 64G: a digg row's own peak is about 15 GB (the training set is 3.9 GB resident at 10 rollouts, so about 8 GB at 20; a rollout block is 2 GB in transit; imm's sample count is capped at 20,000 sets on any graph), and the headroom is for the external repos in their own processes, DeepIM and rl4im, which are unmeasured at this size.
+**The size tiers.** These are cost controls, not protocol, and the table is what each command writes out. Only the first two rows of it are free choices; the rest exist because a row has to fit. `MEM` is 31G on the medium tier and 62G from the large tier up since 2026-09-18. The medium value is measured rather than guessed: a cascade-prediction training set is 1.1 GB resident for taoke's 68,000 transitions and 1.8 GB for digg's 106,000, and taoke's agent stage with the six classical baselines and the referee peaked at 2.3 GB; a large simulator row's host-side terms, transitions times nodes and referee features, come to a few GB at 62,000 nodes. The one host OOM on record at 64G, APS in August, was the per-record adjacency copies fixed on 2026-09-11. 62G is what lets two jobs share finetuner's 125 GB node, and a 31G row can sit beside one of them; if a medium row is ever killed for memory, the manifest marks the stage failed and a resubmit at 62G reuses every finished stage and row. The large rows went back up from 31G to 62G on 2026-09-18 after two cascade-prediction training jobs were killed at 31G at the end of their first epoch: the one-step validation pass holds every record's per-node arrays until it finishes, about 20 GB on a 30,000-node corpus. The very-large rows ask 62G as well: a digg row's own peak is about 15 GB (the training set is 3.9 GB resident at 10 rollouts, so about 8 GB at 20; a rollout block is 2 GB in transit; imm's sample count is capped at 20,000 sets on any graph), and the headroom is for the external repos in their own processes, DeepIM and rl4im, which are unmeasured at this size.
 
 | knob | medium, 1k to 10k | large, 10k to 100k | very large, above 100k | synthetic at 10k |
 | --- | --- | --- | --- | --- |
 | `CPUS` | 4 | 8 | 8 | 8 |
-| `MEM` | 31G | 31G | 64G | 31G |
+| `MEM` | 31G | 62G | 62G | 62G |
 | `TIME` | 24:00:00 | 48:00:00 | 48:00:00 | 48:00:00 |
 | `ROLLOUTS` | 100 | 50 | 20 | 20 (times 40 graphs) |
 | `MC_MARGINALS` | 30 | 20 | 20 | 30 |
@@ -393,7 +393,7 @@ python -m pipeline.run --task <task> --dataset <dataset> --run final_<dynamics> 
 
 **Delta** (the commands are written for it). Export once per shell before submitting: `SBATCH_ARGS="--account=<code>-delta-gpu"` (every job needs an account, and `accounts` prints yours; the CPU-only discovery jobs use `--account=<code>-delta-cpu` with `PARTITION=cpu`), `PARTITION="gpuA40x4,gpuA100x4"` (the A40 partition is charged at half the A100 rate and either GPU is enough for every row except the two giant ones: under message conditioning one digg graph needs 53 GB of activations at hidden 128 and one twitter graph 46 GB at hidden 256, so neither fits a 40 GB A100 or a 48 GB A40 and both belong on PDE's 96 GB cards), and `VENV=.venv` if the checkout was set up with `uv`. Keep the checkout under `/work/hdd/<code>/$USER` or `/projects/<code>`, not the 100 GB home. The walltime cap is 48 hours, so for the `TIME=48:00:00` rows that may not finish, submit the identical command four times with `--dependency=singleton` appended to `SBATCH_ARGS`; the copies queue behind each other by `JOB_NAME` and each one resumes from disk. Check once that the LLM gateway is reachable from a compute node (`srun --account=... --partition=cpu-interactive --time=00:05:00 curl -s "$GATEWAY_BASE_URL/models"`), because the agent stage cannot run without it.
 
-**PDE** (the Math department's cluster; what to change instead). Log in with `ssh -J <netid>@lab0z.mathcs.emory.edu <netid>@pdelogin` and keep the checkout in `/local/scratch2/<netid>/GraphWorldModel` (a quota applies, so delete the `data/` directory of any row whose report is final). It is a single node, `pde`, with 8 RTX PRO 6000 GPUs of 96 GB, 80 CPUs and 756 GB of RAM on a PCIe bus, which suits these single-GPU jobs. The GPU count binds first, so at most eight of these run at once, and with `CPUS=8` the 80 cores bind at ten; the `MEM` of whatever is running must also sum to under 756G, so eight 64G jobs fit but only five 128G ones. The card matters on the two giant rows: under message conditioning training costs 103 bytes per arc per hidden unit against 29 without it (measured 2026-09-12; Hongji's modulator keeps its per-arc MLP inputs for backward), so one digg graph at hidden 128 is 53 GB and one twitter graph at hidden 256 is 46 GB where the September `none` runs needed 15 and 13, and the train stage now runs those rows one graph per micro-batch (`MAX_BATCH_ARC_HIDDEN`, gradient accumulated exactly, `BATCH_SIZE` unchanged); batch 2 of digg was 106 GB and batch 8 of twitter 371 GB, which is what the 2026-09-12 CUDA OOMs were. Host RAM is the other constraint: the dataset now holds one adjacency per graph rather than one per record, which is what ended the digg train stage before that. The changes to each command:
+**PDE** (the Math department's cluster; what to change instead). Log in with `ssh -J <netid>@lab0z.mathcs.emory.edu <netid>@pdelogin` and keep the checkout in `/local/scratch2/<netid>/GraphWorldModel` (a quota applies, so delete the `data/` directory of any row whose report is final). It is a single node, `pde`, with 8 RTX PRO 6000 GPUs of 96 GB, 80 CPUs and 756 GB of RAM on a PCIe bus, which suits these single-GPU jobs. The GPU count binds first, so at most eight of these run at once, and with `CPUS=8` the 80 cores bind at ten; the `MEM` of whatever is running must also sum to under 756G, so eight 62G jobs fit but only five 128G ones. The card matters on the two giant rows: under message conditioning training costs 103 bytes per arc per hidden unit against 29 without it (measured 2026-09-12; Hongji's modulator keeps its per-arc MLP inputs for backward), so one digg graph at hidden 128 is 53 GB and one twitter graph at hidden 256 is 46 GB where the September `none` runs needed 15 and 13, and the train stage now runs those rows one graph per micro-batch (`MAX_BATCH_ARC_HIDDEN`, gradient accumulated exactly, `BATCH_SIZE` unchanged); batch 2 of digg was 106 GB and batch 8 of twitter 371 GB, which is what the 2026-09-12 CUDA OOMs were. Host RAM is the other constraint: the dataset now holds one adjacency per graph rather than one per record, which is what ended the digg train stage before that. The changes to each command:
 
 **One search per row, transferred across budgets** (`SEARCH_BUDGET`, since 2026-09-14). The two LLM arms search only at the named point, `pct10` on the percentage ladders and `k30` on influence blocking's absolute one; at every other budget the pipeline replans that winner at the new k and replays it on the referee through the canned path a library baseline takes, and the row carries `transferred_from`. Routing and every baseline still run at every budget. The reason is measured, not assumed: on the two finished netscience adaptive-IM runs, fifteen of the sixteen evolved programs replanned at the other three budgets landed within half a node of the winner evolved there, on the same 1,000-sample referee; the one failure was a pct1 winner that did not scale up, which is why the search point is the middle of the ladder rather than its bottom. The transfer cuts each row's gateway-bound block by four; a transferred row's cost columns are the replay's alone, so evaluator-cost comparisons between arms are read at the search point. The report marks transferred rows and the summary CSV carries the column. Set `SEARCH_BUDGET` empty to search at every point again.
 
@@ -460,7 +460,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -477,7 +477,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -496,7 +496,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=7-00:00:00 PARTITION=pdeweek \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -513,7 +513,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=7-00:00:00 PARTITION=pdeweek \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -568,7 +568,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -585,7 +585,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -601,7 +601,7 @@ for ds in netscience nethept digg; do for dyn in IC LT; do for sys in llm4ad_fun
   BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=64G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done; done
 ```
 
@@ -659,7 +659,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -676,7 +676,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -695,7 +695,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=7-00:00:00 PARTITION=pdeweek \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -712,7 +712,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=7-00:00:00 PARTITION=pdeweek \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=7-00:00:00 PARTITION=pdeweek \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -731,7 +731,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -748,7 +748,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -800,7 +800,7 @@ for ds in netscience nethept digg; do for dyn in IC LT; do for sys in llm4ad_fun
   BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=31G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done; done
 ```
 
@@ -858,7 +858,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -875,7 +875,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -894,7 +894,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -911,7 +911,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -966,7 +966,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -983,7 +983,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -999,7 +999,7 @@ for ds in power_grid pgp p2p_gnutella; do for dyn in IC LT; do for sys in llm4ad
   BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=31G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done; done
 ```
 
@@ -1095,7 +1095,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1112,7 +1112,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1167,7 +1167,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1184,7 +1184,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1200,7 +1200,7 @@ for ds in cora_ml power_grid deezer; do for dyn in IC LT; do for sys in llm4ad_f
   BASELINES="discovery:$sys" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=31G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done
 ```
 
@@ -1306,7 +1306,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1323,7 +1323,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1340,7 +1340,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=none MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1357,7 +1357,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=none MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1376,7 +1376,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1393,7 +1393,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1410,7 +1410,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=none MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1427,7 +1427,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=none MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1446,7 +1446,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1463,7 +1463,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1480,7 +1480,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=none MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1497,7 +1497,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=none MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1516,7 +1516,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1533,7 +1533,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1550,7 +1550,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=none MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1567,7 +1567,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGETS="10 20 30 40 50" SEARCH_BUDGET=k30 BLOCKING_LEVER=node_block OUTBREAK_PCT=1 TIE_BREAK=auto SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=none MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=none MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1583,7 +1583,7 @@ for ds in email_eu_core p2p_gnutella24 epinions1; do for dyn in IC LT; do for sy
   BASELINES="discovery:$sys" BUDGETS="$k" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=31G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done; done
 ```
 
@@ -1694,7 +1694,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1711,7 +1711,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1730,7 +1730,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1747,7 +1747,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1766,7 +1766,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test SYN_NODES=10000 NUM_GRAPHS=1 BA_M=3 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1783,7 +1783,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test SYN_NODES=10000 NUM_GRAPHS=1 BA_M=3 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1799,7 +1799,7 @@ for ds in uci_students ca_grqc rt_pol; do for dyn in IC LT; do for sys in llm4ad
   BASELINES="discovery:$sys" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=31G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done
 ```
 
@@ -1821,7 +1821,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1838,7 +1838,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1855,7 +1855,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1874,7 +1874,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1891,7 +1891,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1908,7 +1908,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1927,7 +1927,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1944,7 +1944,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -1961,7 +1961,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2033,7 +2033,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2050,7 +2050,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2067,7 +2067,7 @@ HIDDEN_DIM=256 BATCH_SIZE=8 EPOCHS=200 PATIENCE=25 NO_PLAN_DEMO=0 \
 EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 SYN_NODES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2083,7 +2083,7 @@ for ds in infectious_sociopatterns oregon1 brightkite; do for dyn in SIR SIS SEI
   BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=31G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done; done
 ```
 
@@ -2099,7 +2099,7 @@ Baselines from section 4.8: `feature_linear`, `rpp`, `szabo_huberman`, `hawkes`,
 python -c "from data.datasets.digg_cascades import download_digg_cascades as d; d()"
 ```
 
-**`casflow_aps`** (rank 1, very large (616,316 underlying nodes), critical; capped at the 30,000 busiest participants and 5,000 sampled cascades, both stated in the caption. The August run was capped at 30,000 nodes and 20,000 cascades, not uncapped as this note used to say: its metadata records 15,420 surviving cascades, 8,909 replayed, 115,599 transitions, and it was OOM-killed in the agent stage at 64G before the per-record adjacency copies were fixed on 2026-09-11; at 5,000 sampled cascades and with that fix the row runs at 64G, which is what finetuner's nodes offer. Training time is linear in replayed cascades at about 13 transitions per cascade, so 5,000 cascades is roughly half a day of training on a PDE-class GPU where the uncapped corpus would be months; 5,000 is the floor, since the chronological test split is about 300 cascades at that size).
+**`casflow_aps`** (rank 1, very large (616,316 underlying nodes), critical; capped at the 30,000 busiest participants and 5,000 sampled cascades, both stated in the caption. The August run was capped at 30,000 nodes and 20,000 cascades, not uncapped as this note used to say: its metadata records 15,420 surviving cascades, 8,909 replayed, 115,599 transitions, and it was OOM-killed in the agent stage at 64G before the per-record adjacency copies were fixed on 2026-09-11; at 5,000 sampled cascades and with that fix the row runs at 62G. Training time is linear in replayed cascades at about 13 transitions per cascade, so 5,000 cascades is roughly half a day of training on a PDE-class GPU where the uncapped corpus would be months; 5,000 is the floor, since the chronological test split is about 300 cascades at that size).
 
 ```bash
 TASK=cascade_prediction DATASET=casflow_aps RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_casflow_aps_ic \
@@ -2112,7 +2112,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=24:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2130,7 +2130,7 @@ HIDDEN_DIM=128 BATCH_SIZE=16 EPOCHS=60 PATIENCE=5 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MIN_SIZE=3 CP_MAX_CASCADES=2000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=24:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2148,7 +2148,7 @@ HIDDEN_DIM=128 BATCH_SIZE=16 EPOCHS=60 PATIENCE=5 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=1000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2166,7 +2166,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=31G TIME=24:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2184,7 +2184,7 @@ HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
 EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=10000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
@@ -2200,6 +2200,6 @@ for ds in casflow_aps taoke digg_cascades; do for dyn in IC; do for sys in llm4a
   BASELINES="discovery:$sys" EVALUATOR=oracle REFEREE=oracle SEED=42 \
   BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
   FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=31G TIME=48:00:00 ./sbatch/pipeline.sbatch
+  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
 done; done; done
 ```
