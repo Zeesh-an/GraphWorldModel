@@ -2135,7 +2135,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-**`digg_cascades`** (rank 3, very large (279,630 underlying nodes), critical; a graph-and-cascade pair rather than a bundle: the transitions run on the real friendship graph, whose 1.7M arcs make an uncapped transition cost what a digg IM transition costs, so it is capped at the 30,000 busiest participants; no cascade cap, since the corpus has only 3,553 cascades, fewer than the 5,000 the CasFlow rows sample; its literature predicts the next adopter rather than popularity, so the row is self-contained rather than a published comparison).
+**`digg_cascades`** (rank 3, very large (279,630 underlying nodes), critical; a graph-and-cascade pair rather than a bundle: the transitions run on the real friendship graph, whose 1.7M arcs make an uncapped transition cost what a digg IM transition costs, so it is capped at the 30,000 busiest participants; and at 1,000 sampled cascades with batch 16 and patience 5, because its protocol steps every 15 minutes across a 24-hour horizon and Digg stories collect votes all day, so a cascade replays into about 40 transitions (measured: 3,081 survivors, 87,038 training transitions, 301,000 arcs per transition on the induced friendship graph), three times the taoke run that measured two hours per epoch; the sample brings it to about 28,000 transitions per epoch; its literature predicts the next adopter rather than popularity, so the row is self-contained rather than a published comparison).
 
 ```bash
 TASK=cascade_prediction DATASET=digg_cascades RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_digg_cascades_ic \
@@ -2144,11 +2144,11 @@ BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities
 ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
-HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
-EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 \
+HIDDEN_DIM=128 BATCH_SIZE=16 EPOCHS=60 PATIENCE=5 NO_PLAN_DEMO=1 \
+EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=1000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=24:00:00 \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
