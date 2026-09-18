@@ -2117,7 +2117,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-**`taoke`** (rank 2, critical; trained at hidden 128 with 60 epochs and patience 10, since at the large tier's hidden 256 and 200 epochs an epoch over its 56,008 replayed transitions measured four hours on finetuner's A6000; batch 8 stays, because a taoke transition is 157,000 arcs and batch 2, the very-large tier's setting for graphs that fill a GPU, only quadrupled the optimizer steps per epoch without making one cheaper and one to two days per row, which is why it keeps a 48-hour walltime; `CP_MIN_SIZE=3` is what makes the leak-free split possible, and the file has to be placed by hand first: its source repository no longer exists, so `Taoke.zip` is copied from the lab laptop's `data/raw/taoke/` to the same path on the target machine, as `setup_guide.md` section 5.2 says).
+**`taoke`** (rank 2, critical; trained at hidden 128 with 60 epochs and patience 10, since at the large tier's hidden 256 and 200 epochs an epoch over its 56,008 replayed transitions measured four hours on finetuner's A6000; batch 16 and patience 5, because a taoke transition is 157,000 arcs, so a batch is a few gigabytes, and at two hours per epoch early stopping decides the bill; `CP_MAX_CASCADES=2000` samples 2,000 of the 3,231 cascades that pass the size filter, so the row's chronological test split is about 300 cascades rather than 486, which the caption states and one to two days per row, which is why it keeps a 48-hour walltime; `CP_MIN_SIZE=3` is what makes the leak-free split possible, and the file has to be placed by hand first: its source repository no longer exists, so `Taoke.zip` is copied from the lab laptop's `data/raw/taoke/` to the same path on the target machine, as `setup_guide.md` section 5.2 says).
 
 ```bash
 TASK=cascade_prediction DATASET=taoke RUN=final_ic RUN_JOBID=0 JOB_NAME=cp_taoke_ic \
@@ -2126,11 +2126,11 @@ BASELINES="feature_linear rpp szabo_huberman hawkes persistence weng_communities
 ARMS="routing evolve_free@oracle evolve_free@world_model" \
 LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
 WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
-HIDDEN_DIM=128 BATCH_SIZE=8 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=1 \
-EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MIN_SIZE=3 \
+HIDDEN_DIM=128 BATCH_SIZE=16 EPOCHS=60 PATIENCE=5 NO_PLAN_DEMO=1 \
+EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MIN_SIZE=3 CP_MAX_CASCADES=2000 \
 HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
 MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
-CPUS=8 GRES=gpu:1 MEM=64G TIME=48:00:00 \
+CPUS=8 GRES=gpu:1 MEM=64G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
