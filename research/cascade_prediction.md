@@ -400,7 +400,7 @@ Same three names, seven different artefacts. This is §5.7 made concrete.
 | **APS** B | CTCP preprocessing (papers before 1997) | 48,575 [verified] | CTCP |
 | **APS** C | CasTemp preprocessing | 90,768 [verified] | CasTemp |
 
-The **filters** that produce these differences are all stated and all different: CasFlow drops cascades with `|C(t_o)| < 10` and truncates at the first 100 participants [verified]; CasFT drops `< 10` participants [verified]; CoupledGNN drops `< 5` active users [verified]; SEISMIC/Mishra require `≥ 50` retweets [verified]. A `< 10` vs `< 50` threshold alone moves MSLE by more than the gap between any two consecutive rows of §5.1.
+The **filters** that produce these differences are all stated and all different: CasFlow drops cascades with `|C(t_o)| < 10` and shows its model only the first 100 observed participants, with the label computed from the full cascade [verified, `gene_cas.py` and `gene_emb.py`]; CasFT drops `< 10` participants [verified]; CoupledGNN drops `< 5` active users [verified]; SEISMIC/Mishra require `≥ 50` retweets [verified]. A `< 10` vs `< 50` threshold alone moves MSLE by more than the gap between any two consecutive rows of §5.1.
 
 ### 6.5 What we would actually load
 
@@ -498,7 +498,7 @@ What changes under the fix [verified, §5.3]:
 | Trap | Detail |
 | ---- | ------ |
 | **Filter threshold** | `< 10` participants (CasFlow, CasFT) vs `< 5` (CoupledGNN) vs `≥ 50` retweets (SEISMIC, Mishra). Dropping small cascades removes the hardest, most numerous cases and inflates every metric. |
-| **Truncation** | CasFlow keeps only the **first 100 participants** of any cascade [verified]. A method that exploits long tails cannot show it. |
+| **Truncation** | CasFlow shows its model only the **first 100 observed participants** of a cascade; the label is the untruncated count [verified, `gene_emb.py` `max_seq`]. A method that exploits long tails cannot show it. Capping the whole cascade instead makes the label a function of the prefix: on Digg every story exceeds 100 votes, and our pipeline did exactly that until 2026-09-18, scoring every arm at zero error. |
 | **Unscoreable cascades** | Generative models decline to predict supercritical cascades: SEISMIC failed on 1,022 / ~20K News cascades at 5 min [verified]. Papers report the mean over *scoreable* cascades only, which silently favours the model that gives up more often. Mishra et al. publish the failure counts; almost nobody else does. |
 | **Diurnal filtering** | Weibo keeps only 8 a.m., 6 p.m. posts [verified]. A model tested there has never seen an overnight cascade. |
 | **Metric direction** | MSLE/MALE/MAPE/MRSE/WroPerc: lower better. R²/PCC/COV-k/Hits@k: higher better. Mixed within single tables. |

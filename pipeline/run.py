@@ -2869,9 +2869,11 @@ if __name__ == "__main__":
         "--cp-truncate",
         type=int,
         default=100,
-        help="cascade prediction: keep only the first this-many participants of any "
-        "cascade. CasFlow uses 100; a method that exploits long tails cannot show it "
-        "under this rule, which is why it is reported. 0 disables (default: 100).",
+        help="cascade prediction: show the predictor only the first this-many "
+        "participants inside the observation window; later adoptions and the "
+        "label are untouched. CasFlow caps the sequence its model reads at 100 this "
+        "way; a method that exploits long tails cannot show it under this rule, "
+        "which is why it is reported. 0 disables (default: 100).",
     )
     parser.add_argument(
         "--cp-split",

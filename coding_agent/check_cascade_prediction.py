@@ -474,11 +474,19 @@ def check_filters_are_the_published_ones() -> None:
     kept = filter_cascades(cascades, observation=200, min_observed=10, truncate=100)
     assert len(kept) == 5
 
-    # Truncation keeps the FIRST n participants, which is CasFlow's rule
+    # Truncation keeps the FIRST n OBSERVED participants and every later one,
+    # which is CasFlow's rule: its model reads at most 100 observed nodes and its
+    # label is the untruncated count. Capping the whole cascade made the digg
+    # target 100 minus the observed count, and every arm predicted it exactly.
     truncated = filter_cascades(cascades, observation=200, min_observed=1, truncate=3)
     assert all(cascade.size == 3 for cascade in truncated), (
         [cascade.size for cascade in truncated]
     )
+    truncated = filter_cascades(cascades, observation=40, min_observed=1, truncate=3)
+    assert all(cascade.size == 3 + 7 for cascade in truncated), (
+        [cascade.size for cascade in truncated]
+    )
+    assert all(cascade.popularity_at(40) == 3 for cascade in truncated)
 
     print("[OK] the participant filter and the truncation are CasFlow's own")
 

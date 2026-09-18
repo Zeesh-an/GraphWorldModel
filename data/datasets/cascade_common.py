@@ -58,9 +58,11 @@ import scipy.sparse as sp
 # numerous cases and inflates every metric, so a table has to report it.
 default_min_observed = 10
 
-# ...and keeps only the first this-many participants of any cascade [verified,
-# §8.4]. A method that exploits long tails cannot show it under this rule, which is
-# also why it is reported rather than assumed.
+# ...and shows its model only the first this-many OBSERVED participants [verified,
+# §8.4]: `gene_emb.py` cuts the sequence at `max_seq` 100 while `gene_cas.py`
+# computes the label from the full cascade, so the cap bounds what a predictor
+# sees and never the target. A method that exploits long tails cannot show it
+# under this rule, which is also why it is reported rather than assumed.
 default_truncate = 100
 
 
@@ -289,7 +291,10 @@ def filter_cascades(
     `min_observed` drops cascades with fewer than that many participants INSIDE the
     observation window (CasFlow and CasFT both use 10; CoupledGNN uses 5; SEISMIC
     and Mishra require 50 retweets). `truncate` keeps only the first that-many
-    participants of what survives (CasFlow keeps 100). Both are §8.4 landmines and
+    participants INSIDE the window and every later adoption (CasFlow's model reads
+    100 observed nodes; its label is the untruncated count, so capping the whole
+    cascade would make the target a function of the prefix: on Digg, where every
+    story has more than 100 votes, it made every arm exact). Both are §8.4 landmines and
     both are recorded in `data/metadata.json`, because a `< 10` versus `< 50`
     threshold moves MSLE by more than the gap between any two consecutive rows of
     §5.1, so a number quoted without them is comparable to nothing.
@@ -300,7 +305,9 @@ def filter_cascades(
         if cascade.popularity_at(observation) < min_observed:
             continue
 
-        events = cascade.events[:truncate] if truncate else cascade.events
+        observed = [event for event in cascade.events if event[1] <= observation]
+        later = [event for event in cascade.events if event[1] > observation]
+        events = (observed[:truncate] if truncate else observed) + later
         kept.append(
             Cascade(
                 cascade_id=cascade.cascade_id,

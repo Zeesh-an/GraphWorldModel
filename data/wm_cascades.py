@@ -441,7 +441,7 @@ def replay_corpus(config: ReplayConfig) -> dict:
     print(
         f"[replay] filters kept {len(cascades)}/{total} cascades "
         f"(>= {config.min_observed} participants inside the observation window, "
-        f"first {config.truncate} kept): both are §8.4 landmines and both are in "
+        f"first {config.truncate} observed kept): both are §8.4 landmines and both are in "
         f"metadata.json"
     )
 
