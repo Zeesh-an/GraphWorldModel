@@ -257,13 +257,21 @@ def check_replay_round_trip() -> None:
         cascade_id="rt",
         root=0,
         publish_time=0,
-        # Elapsed 0, 5, 12, 25, 44 with a step of 10 lands them in bins 0, 0, 1, 2, 4
-        events=[(0, 0, None), (1, 5, 0), (2, 12, 1), (3, 25, 2), (4, 44, 3)],
+        # Elapsed 0, 5, 12, 25, 44 with a step of 10 lands them in bins 0, 0, 1, 2, 4;
+        # 60 and 75 are at and past the prediction time and belong to no bin
+        events=[
+            (0, 0, None), (1, 5, 0), (2, 12, 1), (3, 25, 2), (4, 44, 3),
+            (5, 60, 4), (6, 75, 4),
+        ],
     )
     waves, parents = bin_events(cascade, step=10, horizon=6)
 
     assert waves[0] == [0, 1], waves
     assert waves[1] == [2] and waves[2] == [3] and waves[4] == [4], waves
+    assert sum(len(wave) for wave in waves) == 5 and 5 not in parents, (
+        "an adoption at or after the prediction time reached a wave; the label "
+        "is P(t_p), and CasFlow counts only `time_now < pred_time`"
+    )
     assert parents[2] == 1 and parents[0] is None
 
     class _Bundle:

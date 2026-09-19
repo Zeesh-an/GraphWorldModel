@@ -194,20 +194,27 @@ def bin_events(
     """
     A cascade's events as per-timestep adopter waves, plus each wave's parents.
 
-    Index `t` holds the nodes whose elapsed time falls in `[t * step, (t+1) * step)`,
-    capped at `horizon` steps. The root is forced into wave 0 whatever its recorded
-    elapsed time, because a cascade with no adopter at `t = 0` has no seed commit
-    and `load_episode_endpoints` would skip the episode entirely.
+    Index `t` holds the nodes whose elapsed time falls in `[t * step, (t+1) * step)`
+    for `t < horizon`. An adoption at or after the prediction time is DROPPED, which
+    is CasFlow's own label rule (`if time_now < pred_time`): clipping it into the
+    last wave instead made the label the whole logged cascade rather than
+    `P(t_p)`, 61% of a median taoke cascade at its 6 h horizon, and trained the
+    world model on a final step in which that whole tail arrives at once. The root
+    is forced into wave 0 whatever its recorded elapsed time, because a cascade
+    with no adopter at `t = 0` has no seed commit and `load_episode_endpoints`
+    would skip the episode entirely.
     """
-    waves = [[] for _ in range(horizon + 1)]
+    waves = [[] for _ in range(horizon)]
     parents = {}
     placed = set()
 
     for adopter, elapsed, parent in cascade.events:
-        index = min(int(elapsed) // step, horizon)
+        index = int(elapsed) // step
 
         if adopter == cascade.root:
             index = 0
+        elif index >= horizon:
+            continue
 
         if adopter in placed:
             continue
