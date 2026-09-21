@@ -878,7 +878,7 @@ def plot_evaluator_fidelity(
     return _save(figure, out_path)
 
 
-runtime_colors = ("#4C72B0", "#DD8452", "#55A868")
+runtime_colors = {"Monte Carlo": "#DD8452", "world model (ours)": "#4C72B0", "exact oracle": "#55A868"}
 
 
 def plot_runtime(
@@ -895,7 +895,7 @@ def plot_runtime(
     run at different ensemble sizes (the NDlib agreement replay is often 50 episodes
     against 200 model samples).
     """
-    per_sample = {"world model": [], "Monte Carlo (NDlib)": []}
+    per_sample = {"Monte Carlo": [], "world model (ours)": []}
     if include_oracle:
         per_sample["exact oracle"] = []
 
@@ -904,9 +904,9 @@ def plot_runtime(
         seconds = cost.get("rollout_seconds")
 
         if seconds and result.get("evaluator") == "world_model" and cost.get("n_samples"):
-            per_sample["world model"].append(seconds / cost["n_samples"])
+            per_sample["world model (ours)"].append(seconds / cost["n_samples"])
         elif seconds and result.get("evaluator") == "monte_carlo" and cost.get("mc_runs"):
-            per_sample["Monte Carlo (NDlib)"].append(seconds / cost["mc_runs"])
+            per_sample["Monte Carlo"].append(seconds / cost["mc_runs"])
         elif (
             include_oracle
             and seconds
@@ -931,7 +931,7 @@ def plot_runtime(
         # The agreement replay is the same NDlib simulator on the same bags, and on
         # a scale row it is the only Monte Carlo timing that exists
         if result.get("mc_rollout_seconds") and result.get("mc_agreement_runs"):
-            per_sample["Monte Carlo (NDlib)"].append(
+            per_sample["Monte Carlo"].append(
                 result["mc_rollout_seconds"] / result["mc_agreement_runs"]
             )
 
@@ -942,7 +942,7 @@ def plot_runtime(
     means = [sum(per_sample[label]) / len(per_sample[label]) for label in labels]
 
     figure, axes = plt.subplots(figsize=(5.5, 4.2))
-    bars = axes.bar(labels, means, color=runtime_colors[: len(labels)], width=0.55)
+    bars = axes.bar(labels, means, color=[runtime_colors[label] for label in labels], width=0.55)
 
     for bar, value in zip(bars, means, strict=True):
         axes.text(
@@ -958,7 +958,8 @@ def plot_runtime(
     axes.set_ylabel("seconds per rollout sample (log scale)")
     # Stated as a ratio in whichever direction it goes: on a small graph a cheap
     # simulator episode can beat the learned rollout, and the title must say so
-    ratio = means[1] / max(means[0], 1e-9)
+    by_label = dict(zip(labels, means, strict=True))
+    ratio = by_label["Monte Carlo"] / max(by_label["world model (ours)"], 1e-9)
     verdict = (
         f"{ratio:.1f}x faster than Monte Carlo"
         if ratio >= 1.0
