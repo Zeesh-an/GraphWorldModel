@@ -2086,7 +2086,7 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 
 ## 9. Ablations and extra experiments
 
-Everything outside the main tables. Two hosts only, chosen for speed: influence maximization on `netscience` under IC (1,589 nodes) and critical node detection on `power_grid` under IC (4,941 nodes). On graphs this size a search is bound by the LLM, about 60 calls and one hour per 10 generations, and the evaluator is a rounding error, so the host barely changes the cost while the task type would (adaptive IM spends 2 to 5 hours of evaluator time per budget and is not used here). Netscience trains its world model in 11 minutes (642 s measured on the finished run).
+Everything outside the main tables. Two hosts only, chosen for speed: influence maximization on `netscience` under IC (1,589 nodes) and critical node detection on `power_grid` under IC (4,941 nodes). On graphs this size a search is bound by the LLM, about 30 calls and 15 to 40 minutes of LLM time per arm per 10 generations (measured on finished 20-generation searches with the probe turn on, 62 calls each: 28 minutes of LLM time on adaptive IM `netscience`, 78 minutes on source localization `cora_ml`, whose prompts are far longer; that is three calls a generation, the probe turn, the edit and the reflection, plus an idea search on the few exploring generations), and the evaluator is a rounding error, so the host barely changes the cost while the task type would (adaptive IM spends 2 to 5 hours of evaluator time per budget and is not used here). Netscience trains its world model in 11 minutes (642 s measured on the finished run).
 
 ### 9.0 Conventions
 
@@ -2114,7 +2114,7 @@ To see what a call would submit without submitting it, add `DRY_RUN=1` to the ca
 
 ### 9.1 Evaluator ladder and the timing figure
 
-The same search under three evaluators, stripped of everything that is not a scoring rollout: probes off, per-action credit off, provenance off. Read `referee_reward`, `evaluator_seconds` and `real_env_episodes` for the three arms from `summary.csv`. The plots stage writes `plots/runtime.png`, seconds per rollout sample for the world model against Monte Carlo only; the native arm never enters that figure, since it has no rollout timing of its own kind, and the oracle is absent from it by design. `plots/runtime_with_oracle.png` adds the oracle, timed from the referee replays. Four budgets with the search at 10 percent, so `evaluator_seconds` and `real_env_episodes` on the `pct10` rows are the cost of the search, and on the other three rows the cost of scoring one fixed program once; the timing figures average seconds per sample over all four. **Needs a GPU**: the world-model arm's speed is the measurement. About three hours per host.
+The same search under three evaluators, stripped of everything that is not a scoring rollout: probes off, per-action credit off, provenance off. Read `referee_reward`, `evaluator_seconds` and `real_env_episodes` for the three arms from `summary.csv`. The plots stage writes `plots/runtime.png`, seconds per rollout sample for the world model against Monte Carlo only; the native arm never enters that figure, since it has no rollout timing of its own kind, and the oracle is absent from it by design. `plots/runtime_with_oracle.png` adds the oracle, timed from the referee replays. Four budgets with the search at 10 percent, so `evaluator_seconds` and `real_env_episodes` on the `pct10` rows are the cost of the search, and on the other three rows the cost of scoring one fixed program once; the timing figures average seconds per sample over all four. **Needs a GPU**: the world-model arm's speed is the measurement. About two to three hours per host: three arms at two calls a generation with the probes off, plus the Monte Carlo arm's evaluator time.
 
 ```bash
 copy_run influence_maximization netscience abl_ladder
@@ -2148,7 +2148,16 @@ The digg copy is several GB. `data/` is only read, so `ln -s` in place of the `c
 
 ### 9.3 LLM comparison
 
-`evolve_free@oracle` under three other models, everything else at protocol, **budgets included**: the main table's four budgets with `SEARCH_BUDGET=pct10`, exactly as the main runs have it. The LLM searches once, at 10 percent, and the winner is replanned and scored at 1, 5 and 20 percent through the canned path, referee included, with no further LLM calls. The `gpt-6-astra` side of the comparison is the main run's own `evolve_free@oracle` rows in `final_ic`, which were searched at 10 percent and transferred to the other three budgets under the same settings, so they are not rerun here. The oracle evaluator runs on CPU, so **no GPU**. About one hour of search each, plus a few minutes for the three transferred points.
+`evolve_free@oracle` under three other models, everything else at protocol, **budgets included**: the main table's four budgets with `SEARCH_BUDGET=pct10`, exactly as the main runs have it. The LLM searches once, at 10 percent, and the winner is replanned and scored at 1, 5 and 20 percent through the canned path, referee included, with no further LLM calls. The `gpt-6-astra` side of the comparison is the main run's own `evolve_free@oracle` rows in `final_ic`, which were searched at 10 percent and transferred to the other three budgets under the same settings, so they are not rerun here. The probe turn stays ON (the sbatch default, and what the main runs used): turning it off would save a third of the calls, ten to twenty minutes a run, and would make the three new rows a different protocol from the `gpt-6-astra` row they are compared against. The oracle evaluator needs no GPU, so these run with `GRES=none`. The main run scored its oracle arm on the GPU it held for training, so the two sides share the sampler, the seeds and the expectation but not the random stream (CPU and CUDA generators differ); that is noise of the size `reward_se` already reports, not a protocol difference. Everything else the search sees is identical: a diff of the two commands leaves only `ARMS`, `BASELINES`, `GRES` and `START_STAGE`, the search's anchors are a fixed per-task list that `BASELINES` does not feed, and no file of the search loop has changed since the commands moved to 10 generations. About 20 to 45 minutes per run: 15 to 40 of search, scaled from 20-generation runs on other tasks rather than measured on these two hosts, plus a few minutes for start-up, the three transferred points, the plots and the report. The measured figure is the main run's own `pct10` row, the same search under `gpt-6-astra`, which the check below prints; the other three models differ from it only in latency per call, which is not known in advance.
+
+**Check the main run before relying on its row.** The commands in section 8 were at `OUTER_ITERS=20` until 2026-09-17 19:30 and had no `SEARCH_BUDGET` until 2026-09-14 16:40, so a `final_ic` submitted before then searched twice as long as these runs will, and its row is not the `gpt-6-astra` side of this comparison. This must print `10 pct10 True` on both hosts; if it does not, add `gpt-6-astra` back to the loop below (one more run per host).
+
+```bash
+for r in influence_maximization/netscience critical_node_detection/power_grid; do
+  python3 -c "import json; c = json.load(open('results/$r/final_ic/pipeline.json'))['config']; print(c['outer_iters'], c['search_budget'], c['probe_turn'])"
+  python3 -c "import json; r = json.load(open('results/$r/final_ic/agent/pct10/evolve_free@oracle.json')); print(round(r['elapsed_seconds'] / 60), 'min in total,', round(r['evaluator_seconds'] / 60), 'min of evaluator,', r['llm_usage']['calls'], 'LLM calls')"
+done
+```
 
 ```bash
 for m in gpt-5.6-luna gpt-5.6-terra gpt-5.6-sol; do tag=${m##*-}
@@ -2163,7 +2172,7 @@ done
 
 ### 9.4 Evaluator noise
 
-`N_SAMPLES` at 50, 200 and 800 for the oracle and world-model arms. Each arm's result carries `acceptance_ledger`: `naive_accepts` is what a plain greater-than rule would have accepted, `band_accepts` what the paired band accepted, and `lucky_accepts_prevented` the difference, which should grow as the sample count falls while `referee_reward` holds. The ledger exists on the searched `pct10` row only; the three transferred rows carry the winner's `referee_reward` at the other budgets, which shows whether a noisier search also picked a program that travels worse. **GPU optional** (set here, since 800 world-model samples per evaluation is the one place it shortens the run noticeably). About two hours each.
+`N_SAMPLES` at 50, 200 and 800 for the oracle and world-model arms. Each arm's result carries `acceptance_ledger`: `naive_accepts` is what a plain greater-than rule would have accepted, `band_accepts` what the paired band accepted, and `lucky_accepts_prevented` the difference, which should grow as the sample count falls while `referee_reward` holds. The ledger exists on the searched `pct10` row only; the three transferred rows carry the winner's `referee_reward` at the other budgets, which shows whether a noisier search also picked a program that travels worse. **GPU optional** (set here, since 800 world-model samples per evaluation is the one place it shortens the run noticeably). About an hour and a half each, since a run holds two arms.
 
 ```bash
 for n in 50 200 800; do
@@ -2299,10 +2308,10 @@ done
 
 | Section | Runs per host | Stages run | GPU | Time per run | LLM calls per run |
 | --- | --- | --- | --- | --- | --- |
-| 9.1 ladder and timing (four budgets, search at pct10) | 1 | agent to report | required | about 3 h | about 120, probes off |
+| 9.1 ladder and timing (four budgets, search at pct10) | 1 | agent to report | required | 2 to 3 h | about 65 (3 arms, about 22 each with probes off) |
 | 9.2 digg timing | 1 in total | agent to report | required | about 1 h | 0 |
-| 9.3 LLM comparison (four budgets, search at pct10) | 3 | agent to report | no | about 1 h | about 60 |
-| 9.4 evaluator noise (four budgets, search at pct10) | 3 | agent to report | optional | about 2 h | about 120 |
+| 9.3 LLM comparison (four budgets, search at pct10) | 3 | agent to report | no | 20 to 45 min | about 30 (1 arm, probes on) |
+| 9.4 evaluator noise (four budgets, search at pct10) | 3 | agent to report | optional | about 1.5 h | about 60 (2 arms, about 30 each) |
 | 9.5 discovery baselines (four budgets, search at pct10) | 3 | agent to report | no | 0.5 to 2 h | 20 to 110 |
 | 9.6 backbones | 5 | train | required | about 11 min | 0 |
 | 9.7 hidden weights | 2 | train to report, agent to report | training only | about 15 min | 0 |
