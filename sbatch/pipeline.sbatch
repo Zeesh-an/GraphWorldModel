@@ -334,7 +334,8 @@
 #                   registry's own sweep, which is a single 10% point for source
 #                   localization because k there is a property of the instance
 #   BUDGETS         absolute k, overrides BUDGET_PCTS entirely
-#   SEARCH_BUDGET   label of the one point the LLM arms search at (pct10, k30);
+#   SEARCH_BUDGET   label of the one point the LLM arms and the discovery systems
+#                   search at (pct10, k30);
 #                   every other point replans that winner at its own k and
 #                   replays it on the referee (transferred_from). UNSET = search
 #                   at every point
@@ -460,6 +461,7 @@
 #                    the edge ops) and empty for the three pure-diffusion tasks;
 #                    set it explicitly to add the three edge ops for the full
 #                    action space.
+#                    `none` = no ops at all, the diffusion-only dataset.
 #   PROB_MODEL       weighted (p = 1/in_degree) | uniform (UNIFORM_P)
 #   BUDGET_PCT_RANGE per-episode k drawn from this band, which is what lets ONE
 #                    checkpoint serve the whole budget sweep. It must cover
@@ -933,7 +935,10 @@ flags=(
 # Op lists are omitted when unset so the task registry supplies them; passing
 # the influence-maximization pair unconditionally would make every task look
 # like influence maximization to the generator and the planner
-[ -n "$GEN_ACTION_OPS" ] && flags+=(--gen-action-ops $GEN_ACTION_OPS)
+# `none` is the bare flag, the diffusion-only dataset, which an unset variable cannot
+# ask for on a task whose registry default injects actions
+if [ "$GEN_ACTION_OPS" = "none" ]; then flags+=(--gen-action-ops)
+elif [ -n "$GEN_ACTION_OPS" ]; then flags+=(--gen-action-ops $GEN_ACTION_OPS); fi
 [ -n "$ALLOWED_OPS" ]    && flags+=(--allowed-ops $ALLOWED_OPS)
 
 # `none` means the empty list: argparse's nargs="*" takes zero values when the

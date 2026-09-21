@@ -878,17 +878,26 @@ def plot_evaluator_fidelity(
     return _save(figure, out_path)
 
 
-def plot_runtime(results: list[dict], out_path: Path, title_prefix: str) -> Path | None:
+runtime_colors = ("#4C72B0", "#DD8452", "#55A868")
+
+
+def plot_runtime(
+    results: list[dict], out_path: Path, title_prefix: str, include_oracle: bool = False
+) -> Path | None:
     """
     Seconds per rollout SAMPLE, world model against Monte Carlo: the cost claim.
 
-    The exact oracle is deliberately absent. It is a closed-form product per step
-    and cheaper than any learned model, and it exists only because IC has one;
-    the claim the model makes is against simulation. Per sample rather than per
-    rollout, because the two sides run at different ensemble sizes (the NDlib
-    agreement replay is often 50 episodes against 200 model samples).
+    The exact oracle is absent from the default figure on purpose. It is a
+    closed-form product per step and cheaper than any learned model, and it exists
+    only because IC has one; the claim the model makes is against simulation.
+    `include_oracle` draws it as a third bar for the appendix, where hiding it would
+    be the dishonest choice. Per sample rather than per rollout, because the sides
+    run at different ensemble sizes (the NDlib agreement replay is often 50 episodes
+    against 200 model samples).
     """
     per_sample = {"world model": [], "Monte Carlo (NDlib)": []}
+    if include_oracle:
+        per_sample["exact oracle"] = []
 
     for result in results:
         cost = result.get("cost", {}) or {}
@@ -898,6 +907,26 @@ def plot_runtime(results: list[dict], out_path: Path, title_prefix: str) -> Path
             per_sample["world model"].append(seconds / cost["n_samples"])
         elif seconds and result.get("evaluator") == "monte_carlo" and cost.get("mc_runs"):
             per_sample["Monte Carlo (NDlib)"].append(seconds / cost["mc_runs"])
+        elif (
+            include_oracle
+            and seconds
+            and result.get("evaluator") == "oracle"
+            and cost.get("n_samples")
+        ):
+            per_sample["exact oracle"].append(seconds / cost["n_samples"])
+
+        # A row scored by another evaluator is still replayed on the oracle referee,
+        # which is the only oracle timing a world-model or Monte Carlo row carries
+        if (
+            include_oracle
+            and result.get("referee") == "oracle"
+            and result.get("evaluator") != "oracle"
+            and result.get("referee_rollout_seconds")
+            and result.get("referee_samples")
+        ):
+            per_sample["exact oracle"].append(
+                result["referee_rollout_seconds"] / result["referee_samples"]
+            )
 
         # The agreement replay is the same NDlib simulator on the same bags, and on
         # a scale row it is the only Monte Carlo timing that exists
@@ -913,7 +942,7 @@ def plot_runtime(results: list[dict], out_path: Path, title_prefix: str) -> Path
     means = [sum(per_sample[label]) / len(per_sample[label]) for label in labels]
 
     figure, axes = plt.subplots(figsize=(5.5, 4.2))
-    bars = axes.bar(labels, means, color=["#4C72B0", "#DD8452"], width=0.55)
+    bars = axes.bar(labels, means, color=runtime_colors[: len(labels)], width=0.55)
 
     for bar, value in zip(bars, means, strict=True):
         axes.text(
@@ -927,10 +956,15 @@ def plot_runtime(results: list[dict], out_path: Path, title_prefix: str) -> Path
 
     axes.set_yscale("log")
     axes.set_ylabel("seconds per rollout sample (log scale)")
-    axes.set_title(
-        f"{title_prefix}: rollout cost, "
-        f"{means[1] / max(means[0], 1e-9):.0f}x faster than Monte Carlo"
+    # Stated as a ratio in whichever direction it goes: on a small graph a cheap
+    # simulator episode can beat the learned rollout, and the title must say so
+    ratio = means[1] / max(means[0], 1e-9)
+    verdict = (
+        f"{ratio:.1f}x faster than Monte Carlo"
+        if ratio >= 1.0
+        else f"{1.0 / max(ratio, 1e-9):.1f}x slower than Monte Carlo"
     )
+    axes.set_title(f"{title_prefix}: world-model rollout cost, {verdict}")
     axes.grid(alpha=0.3, axis="y")
 
     return _save(figure, out_path)
@@ -2515,6 +2549,12 @@ def build_plots(
             agent_results, plots_dir / "sample_efficiency.png", title_prefix
         ),
         plot_runtime(agent_results, plots_dir / "runtime.png", title_prefix),
+        plot_runtime(
+            agent_results,
+            plots_dir / "runtime_with_oracle.png",
+            title_prefix,
+            include_oracle=True,
+        ),
         plot_convergence(agent_results, plots_dir / "convergence.png", title_prefix),
         plot_edit_calibration(
             agent_results, plots_dir / "edit_calibration.png", title_prefix

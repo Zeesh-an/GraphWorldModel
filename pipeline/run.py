@@ -577,9 +577,14 @@ def ordered_points(points: list[tuple], search_budget: str | None) -> list[tuple
     return sorted(points, key=lambda point: point[0] != search_budget)
 
 
+def searches_once(arm) -> bool:
+    """Arms whose artefact is a PROGRAM, which --search-budget can replan at another k."""
+    return arm.is_agent or arm.condition == discovery_condition
+
+
 def transfer_source(layout: Layout, search_budget: str, arm) -> dict | None:
-    """The searched row an LLM arm transfers from, or None when it has no program."""
-    path = layout.agent_result(search_budget, arm.name)
+    """The searched row an arm transfers from, or None when it has no program."""
+    path = layout.agent_result(search_budget, arm.name, external=arm.external is not None)
     if not path.exists():
         return None
 
@@ -1334,18 +1339,23 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             )
             # Under --search-budget an LLM arm searches once; at every other
             # point its winner is replanned at this k and scored through the
-            # identical canned path a library baseline takes, referee included
+            # identical canned path a library baseline takes, referee included.
+            # A discovery system gets the same treatment, so neither side of that
+            # comparison is handed four searches against the other's one
             transfer = (
                 config.search_budget is not None
-                and arm.is_agent
+                and searches_once(arm)
                 and label != config.search_budget
             )
             source = (
                 transfer_source(layout, config.search_budget, arm) if transfer else None
             )
             if transfer and source is None:
+                searched = layout.agent_result(
+                    config.search_budget, arm.name, external=arm.external is not None
+                )
                 reason = (
-                    f"no program to transfer: {layout.agent_result(config.search_budget, arm.name)} "
+                    f"no program to transfer: {searched} "
                     f"is missing or has no script (the search at {config.search_budget} "
                     f"did not produce a winner)"
                 )
@@ -1489,7 +1499,9 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
             # An external repo only hands back a seed set; wrapping it as a
             # canned Strategy routes it through the identical scoring path
             external_seeds = None
-            if arm.external is not None:
+            # A transferred discovery row already has its program: running the
+            # framework again here is the search --search-budget exists to skip
+            if arm.external is not None and source is None:
                 graph = _load_pipeline_graph(layout, config)
                 resolved = budget or max(
                     1, round(graph.num_nodes * budget_pct / 100)
@@ -1611,6 +1623,10 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 # ...and the arm's own method, which is what the adaptivity-gap and
                 # condition readers pair rows on; transferred_from says how it ran
                 result["method"] = source.get("method", result["method"])
+                if source.get("external"):
+                    # The framework did not run at this point, so its selection
+                    # time stays on the searched row and is not counted twice
+                    result["external"] = {**source["external"], "selection_seconds": 0.0}
 
             # This arm skipped on an earlier run and works now, so retract the
             # marker. Nothing else deletes them, and a stale one makes the run
@@ -2127,10 +2143,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--gen-action-ops",
         type=str,
-        nargs="+",
+        nargs="*",
         default=None,
         choices=list(valid_action_ops),
-        help="action ops injected during generation. Unset = the task registry's own set: add_node remove_node for every intervention task except influence blocking and epidemic control, whose levers add the edge ops, and empty for the three tasks whose episodes must be pure diffusion (default: None).",
+        help="action ops injected during generation. Unset = the task registry's own set: add_node remove_node for every intervention task except influence blocking and epidemic control, whose levers add the edge ops, and empty for the three tasks whose episodes must be pure diffusion. Pass the flag with no values for a diffusion-only dataset on any task (default: None).",
     )
     parser.add_argument(
         "--trace-parents",
@@ -2692,8 +2708,9 @@ if __name__ == "__main__":
         "--search-budget",
         type=str,
         default=None,
-        help="label of the one budget point the LLM arms search at, e.g. pct10 or "
-        "k30; every other point replans that winner at its own k and replays it "
+        help="label of the one budget point the LLM arms and the discovery systems "
+        "search at, e.g. pct10 or k30; every other point replans that winner at its "
+        "own k and replays it "
         "on the referee, marked transferred_from. Unset searches at every point "
         "(default: None).",
     )

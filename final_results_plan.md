@@ -24,7 +24,7 @@ T1 and T2 come free with every run (the `## World Model` section of each report 
 
 **Baselines.** Five per task, chosen from the arms the August sweep scored on its Monte Carlo referee (the per-task survey tables below give the mean referee score across budgets, from `results/` and `results_archive/`), plus the wired learned or state-of-the-art repos that answer the same question. The external repos ran in the same sweep and their rows live under `baselines/<budget>/external_*.json` rather than `agent/`; thirteen scored, and about forty were skipped for reasons listed per task below and collected in section 7. A control that is not a method (the outbreak ring, the reports-only decoder, the two prediction floors) is always run and printed above the table but does not count toward the five. `celf_pp` is removed from influence maximization entirely.
 
-**Discovery systems.** One common set of three for every task, chosen for three different search paradigms: `llm4ad_funsearch` (FunSearch, the origin: an island program database with best-shot prompting), `eoh` (Evolution of Heuristics, ICML 2024 oral: co-evolution of a natural-language thought and its code), and `openevolve` (the open AlphaEvolve implementation: a MAP-Elites program database with cascade evaluation). All three run their own loop at published defaults on the plain simulator through `baselines/score_program.py`; the world model is unreachable by construction. Alternates: `reevo`, `mcts_ahd`, `llamea`.
+**Discovery systems.** One common set of three for every task, chosen for three different search paradigms: `llm4ad_funsearch` (FunSearch, the origin: an island program database with best-shot prompting), `eoh` (Evolution of Heuristics, ICML 2024 oral: co-evolution of a natural-language thought and its code), and `openevolve` (the open AlphaEvolve implementation: a MAP-Elites program database with cascade evaluation). All three run their own loop at published defaults on the plain simulator through `baselines/score_program.py`; the world model is unreachable by construction. Since 2026-09-20 they run in section 9.5 only (influence maximization on `netscience` and critical node detection on `power_grid`, both IC, one search at 10 percent transferred to the other three budgets), not on every task's critical datasets. Alternates: `reevo`, `mcts_ahd`, `llamea`.
 
 **Conditions per table row.** Every T3 cell has the five baselines (condition 1 or 7), the routed classical pool (condition 2), and the two-arm ladder `evolve_free@oracle`, `evolve_free@world_model` (conditions 5 and 6; the native and Monte Carlo arms, conditions 3 and 4, were dropped from the matrix on 2026-09-10 and are ablation rows only), all replayed on the shared referee: the exact oracle simulator at 1,000 samples (`--referee oracle --referee-samples 1000`, the defaults, reduced to 200 samples on the very-large rows). `--mc-agreement`, the second replay on the sampled simulator, is OFF on every row of the matrix: section 8.0 states what that gives up and how to recover a single timing row if one is wanted. Adaptive IM runs the same two arms; the `adaptive_<mode>@<evaluator>` twins that make the adaptivity gap computable are ablation rows, not matrix rows, since 2026-09-10.
 
@@ -313,13 +313,13 @@ These are already the largest objects in the repo; there is no synthetic row by 
 
 **T3, main results** (one block per task and dynamics; columns are budgets; rows are the five baselines, condition 2, and the two ladder arms; every cell is the oracle referee's `referee_reward` with its standard error): the downstream-utility claim is the `@world_model` row against the baseline rows, with the `@oracle` row as the ceiling (an agent with perfect dynamics), and the baseline rows are the published comparison. The three critical datasets per task fill the main-text table; the two secondary datasets go to the appendix version. A ladder arm that did not finish on a scale row is printed as such with its evaluator budget, never dropped.
 
-**T4, algorithm discovery** (critical datasets only): condition 6 against the three discovery systems at their published budgets, each row carrying `evaluator_calls`, `real_env_episodes`, `evaluator_seconds` and the LLM call count, plus the routed classical pool and the best single baseline for scale. Beside it, the case studies: for the winner of each critical dataset, the write-up's first-attempt-to-winner trajectory, its closest classical algorithm and the parts marked new, with the top twenty programs across all runs in the supplement.
+**T4, algorithm discovery** (the two hosts of section 9.5, since the per-task discovery loops were removed on 2026-09-20): condition 6 against the three discovery systems at their published budgets, each row carrying `evaluator_calls`, `real_env_episodes`, `evaluator_seconds` and the LLM call count, plus the routed classical pool and the best single baseline for scale. Beside it, the case studies: for the winner of each critical dataset, the write-up's first-attempt-to-winner trajectory, its closest classical algorithm and the parts marked new, with the top twenty programs across all runs in the supplement.
 
 **T5, generalization**: T3 sliced four ways. By dataset and size tier (the five rows per task, medium through very large), by topology (the synthetic families against the real graphs, and the graphs with ground-truth communities, `email_eu_core` with its 42 departments and the `sbm` rows with their planted blocks, for the region diagnostics), by dynamics (IC against LT everywhere; SIR, SIS, SEIR for epidemic control; SIR at $\gamma = 1$ against IC once), and by transfer (one world model per dataset reused across the tasks that share its dynamics, from `scripts/transfer_matrix.py`; a source-localization program moved to another graph with `--sl-transfer-from`; the chronological against the random split for cascade prediction).
 
 ## 6. Run order and volume
 
-Critical datasets first, in rank order, so the main-text table fills before the appendix. The first job on every large and very-large row is data generation alone, timed, because nothing above `nethept` has been generated yet; its wall clock decides `--mc-runs`, `--n-samples` and the horizon for that row before any arm runs. Per task that is three datasets, two dynamics (three for epidemic control, one for cascade prediction), all budgets, the five baselines, the ladder, and condition 9 on the critical rows. Rough count: 8 tasks, 5 datasets, an average of 2 dynamics, so about 80 pipeline runs plus the synthetic sweeps, of which 48 are critical and carry the discovery rows. The very-large rows (`digg`, `epinions1`, `brightkite`, `deezer`) run last.
+Critical datasets first, in rank order, so the main-text table fills before the appendix. The first job on every large and very-large row is data generation alone, timed, because nothing above `nethept` has been generated yet; its wall clock decides `--mc-runs`, `--n-samples` and the horizon for that row before any arm runs. Per task that is three datasets, two dynamics (three for epidemic control, one for cascade prediction), all budgets, the five baselines, the ladder, and condition 9 on the critical rows. Rough count: 8 tasks, 5 datasets, an average of 2 dynamics, so about 80 pipeline runs plus the synthetic sweeps, of which 48 are critical (the discovery rows they used to carry moved to section 9.5 on 2026-09-20). The very-large rows (`digg`, `epinions1`, `brightkite`, `deezer`) run last.
 
 Expected cost per pipeline run (one task, one dynamics, four budgets, five classical baselines, the two-arm ladder with the referee replay; no external learned repo, no discovery system), from the measured netscience runs and a Monte Carlo microbenchmark on BA graphs at 1,000, 10,000 and 100,000 nodes: about 4 to 12 hours at 1,000 to 2,000 nodes, 6 to 16 hours at 10,000, and 1 to 3 days at 100,000. The LLM latency (the arm-budget pairs that search, at 10 iterations, 1 to 3 minutes per reply) is the largest block at every size and does not scale with the graph; data generation and training scale linearly with edges (20 to 40 minutes and 1 to 2 hours at 10,000; 3 to 6 hours and 10 to 24 hours at 100,000, where the training batch no longer fits and shrinks); the Monte Carlo evaluator arm costs about an hour per dynamics at 10,000 and 4 to 8 hours at 100,000, where a single evaluation is 90 seconds; a generated program that does its own sampling hits the 300-second per-call cap routinely at 100,000. Outside that table, DeepIM and MOEIM took 10.6 hours between them at netscience and do not get cheaper with size, and each discovery system is LLM-bound at one to two days per budget point. Old source-localization and cascade-reconstruction results predate the label-free rewards and are not comparable; both tasks rerun from scratch.
 
@@ -383,7 +383,7 @@ Four of those rows deserve their reason stated, because a reader will otherwise 
 
 **Order of operations on a large or very-large row.** Section 6's rule: the first job on the row is the data stage alone, timed, because nothing above `nethept` has been generated yet. Run the row's command with `START_STAGE=data END_STAGE=data GRES=none` added in front, read the wall clock in the log, then submit the command as written; it finds the data on disk and continues from training. If the data stage alone takes more than a quarter of the row's `TIME`, cut `ROLLOUTS` and `MC_MARGINALS` further for that row and say so in the caption.
 
-**Two follow-ups per row.** The discovery systems (condition 9) are LLM-bound at one to two days per budget point, so they cannot sit inside the main job: they are one job per system per budget, submitted after the row's main job has FINISHED (they write into the same run directory, and two pipelines writing one `pipeline.json` at once is the one way to corrupt a row), running `START_STAGE=agent END_STAGE=agent ARMS=none BASELINES="discovery:<system>"`. The loop at the end of each task subsection writes them, on the three critical datasets only, CPU-only, with the timeout at 46 hours so it sits under the 48-hour walltime. When every job on a row has finished, rebuild its figures and report from the login node, which takes seconds and needs no GPU:
+**One follow-up per row.** The discovery systems (condition 9) are not run per row: the per-task discovery loops that used to close each subsection were removed on 2026-09-20, and the only discovery runs are section 9.5's, on the two ablation hosts. When every job on a row has finished, rebuild its figures and report from the login node, which takes seconds and needs no GPU:
 
 ```bash
 python -m pipeline.run --task <task> --dataset <dataset> --run final_<dynamics> --start-stage plots
@@ -391,7 +391,7 @@ python -m pipeline.run --task <task> --dataset <dataset> --run final_<dynamics> 
 
 **Conditional rows.** The externals section 4 flags as conditional (`rl4im`, `finder`, `graphsl_slvae`, `ditto`, `grin`) are in the commands. If `python -m baselines.setup_baselines --only <name>` has not produced a working venv on the cluster, the pipeline writes a `.skipped.json` with the reason and the report says the row is absent; nothing else in the job is affected. Influence blocking's two repos (`imin_joc`, `sandimin`) are node-blocking methods and their registry notes say to run them under `--blocking-lever node_block`; under the counter-seed lever their output would be read as positive seeds. Each blocking cell therefore has a second command, `RUN=final_<dynamics>_node`, that runs the two repos alone under `ARMS=none` (no arm needs the world model, so the pipeline skips the train stage itself and nothing in the job touches a GPU); section 8.5 gives the symlink that lets it reuse the counter-seed run's episodes instead of regenerating them.
 
-**Delta** (the commands are written for it). Export once per shell before submitting: `SBATCH_ARGS="--account=<code>-delta-gpu"` (every job needs an account, and `accounts` prints yours; the CPU-only discovery jobs use `--account=<code>-delta-cpu` with `PARTITION=cpu`), `PARTITION="gpuA40x4,gpuA100x4"` (the A40 partition is charged at half the A100 rate and either GPU is enough for every row except the two giant ones: under message conditioning one digg graph needs 53 GB of activations at hidden 128 and one twitter graph 46 GB at hidden 256, so neither fits a 40 GB A100 or a 48 GB A40 and both belong on PDE's 96 GB cards), and `VENV=.venv` if the checkout was set up with `uv`. Keep the checkout under `/work/hdd/<code>/$USER` or `/projects/<code>`, not the 100 GB home. The walltime cap is 48 hours, so for the `TIME=48:00:00` rows that may not finish, submit the identical command four times with `--dependency=singleton` appended to `SBATCH_ARGS`; the copies queue behind each other by `JOB_NAME` and each one resumes from disk. Check once that the LLM gateway is reachable from a compute node (`srun --account=... --partition=cpu-interactive --time=00:05:00 curl -s "$GATEWAY_BASE_URL/models"`), because the agent stage cannot run without it.
+**Delta** (the commands are written for it). Export once per shell before submitting: `SBATCH_ARGS="--account=<code>-delta-gpu"` (every job needs an account, and `accounts` prints yours; the CPU-only jobs (`GRES=none`) use `--account=<code>-delta-cpu` with `PARTITION=cpu`), `PARTITION="gpuA40x4,gpuA100x4"` (the A40 partition is charged at half the A100 rate and either GPU is enough for every row except the two giant ones: under message conditioning one digg graph needs 53 GB of activations at hidden 128 and one twitter graph 46 GB at hidden 256, so neither fits a 40 GB A100 or a 48 GB A40 and both belong on PDE's 96 GB cards), and `VENV=.venv` if the checkout was set up with `uv`. Keep the checkout under `/work/hdd/<code>/$USER` or `/projects/<code>`, not the 100 GB home. The walltime cap is 48 hours, so for the `TIME=48:00:00` rows that may not finish, submit the identical command four times with `--dependency=singleton` appended to `SBATCH_ARGS`; the copies queue behind each other by `JOB_NAME` and each one resumes from disk. Check once that the LLM gateway is reachable from a compute node (`srun --account=... --partition=cpu-interactive --time=00:05:00 curl -s "$GATEWAY_BASE_URL/models"`), because the agent stage cannot run without it.
 
 **PDE** (the Math department's cluster; what to change instead). Log in with `ssh -J <netid>@lab0z.mathcs.emory.edu <netid>@pdelogin` and keep the checkout in `/local/scratch2/<netid>/GraphWorldModel` (a quota applies, so delete the `data/` directory of any row whose report is final). It is a single node, `pde`, with 8 RTX PRO 6000 GPUs of 96 GB, 80 CPUs and 756 GB of RAM on a PCIe bus, which suits these single-GPU jobs. The GPU count binds first, so at most eight of these run at once, and with `CPUS=8` the 80 cores bind at ten; the `MEM` of whatever is running must also sum to under 756G, so eight 62G jobs fit but only five 128G ones. The card matters on the two giant rows: under message conditioning training costs 103 bytes per arc per hidden unit against 29 without it (measured 2026-09-12; Hongji's modulator keeps its per-arc MLP inputs for backward), so one digg graph at hidden 128 is 53 GB and one twitter graph at hidden 256 is 46 GB where the September `none` runs needed 15 and 13, and the train stage now runs those rows one graph per micro-batch (`MAX_BATCH_ARC_HIDDEN`, gradient accumulated exactly, `BATCH_SIZE` unchanged); batch 2 of digg was 106 GB and batch 8 of twitter 371 GB, which is what the 2026-09-12 CUDA OOMs were. Host RAM is the other constraint: the dataset now holds one adjacency per graph rather than one per record, which is what ended the digg train stage before that. The changes to each command:
 
@@ -590,21 +590,6 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics and budget, CPU-only):
-
-```bash
-for ds in netscience nethept digg; do for dyn in IC LT; do for sys in llm4ad_funsearch eoh openevolve; do for pct in 1 5 10 20; do
-  run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
-  TASK=influence_maximization DATASET=$ds RUN=$run RUN_JOBID=0 \
-  JOB_NAME=disc_im_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys}_${pct} \
-  DIFFUSION_MODEL=$dyn GEN_MODELS=$dyn START_STAGE=agent END_STAGE=agent ARMS=none \
-  BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
-  BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
-  FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
-done; done; done; done
-```
-
 ### 8.2 Adaptive online IM (`adaptive_online_im`, IC, LT; 10 commands)
 
 Baselines from section 4.2: `adapt_epic`, `adapt_degree_discount`, `imm`, `static_split`, `external:adaptiveim`, `external:rl4im`.
@@ -787,21 +772,6 @@ MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
 CPUS=4 GRES=gpu:1 MEM=31G TIME=24:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
-```
-
-Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics and budget, CPU-only):
-
-```bash
-for ds in netscience nethept digg; do for dyn in IC LT; do for sys in llm4ad_funsearch eoh openevolve; do for pct in 1 5 10 20; do
-  run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
-  TASK=adaptive_online_im DATASET=$ds RUN=$run RUN_JOBID=0 \
-  JOB_NAME=disc_aim_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys}_${pct} \
-  DIFFUSION_MODEL=$dyn GEN_MODELS=$dyn START_STAGE=agent END_STAGE=agent ARMS=none \
-  BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
-  BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
-  FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
-done; done; done; done
 ```
 
 ### 8.3 Critical node detection (`critical_node_detection`, IC, LT; 10 commands)
@@ -988,21 +958,6 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics and budget, CPU-only):
-
-```bash
-for ds in power_grid pgp p2p_gnutella; do for dyn in IC LT; do for sys in llm4ad_funsearch eoh openevolve; do for pct in 1 5 10 20; do
-  run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
-  TASK=critical_node_detection DATASET=$ds RUN=$run RUN_JOBID=0 \
-  JOB_NAME=disc_cnd_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys}_${pct} \
-  DIFFUSION_MODEL=$dyn GEN_MODELS=$dyn START_STAGE=agent END_STAGE=agent ARMS=none \
-  BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
-  BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
-  FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
-done; done; done; done
-```
-
 ### 8.4 Source localization (`source_localization`, IC, LT; 10 commands)
 
 Baselines from section 4.4: `infected_betweenness`, `infected_degree`, `dynamic_age`, `lpsi`, `rumor_centrality`, `external:graphsl_slvae`.
@@ -1187,21 +1142,6 @@ MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
-```
-
-Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics, CPU-only):
-
-```bash
-for ds in cora_ml power_grid deezer; do for dyn in IC LT; do for sys in llm4ad_funsearch eoh openevolve; do
-  run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
-  TASK=source_localization DATASET=$ds RUN=$run RUN_JOBID=0 \
-  JOB_NAME=disc_sl_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys} \
-  DIFFUSION_MODEL=$dyn GEN_MODELS=$dyn START_STAGE=agent END_STAGE=agent ARMS=none \
-  BASELINES="discovery:$sys" EVALUATOR=oracle REFEREE=oracle SEED=42 \
-  BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
-  FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
-done; done; done
 ```
 
 ### 8.5 Influence blocking (`influence_blocking`, IC, LT; 20 commands: 10 counter-seed and 10 node-lever)
@@ -1572,21 +1512,6 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics and budget, CPU-only):
-
-```bash
-for ds in email_eu_core p2p_gnutella24 epinions1; do for dyn in IC LT; do for sys in llm4ad_funsearch eoh openevolve; do for k in 10 20 30 40 50; do
-  run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
-  TASK=influence_blocking DATASET=$ds RUN=$run RUN_JOBID=0 \
-  JOB_NAME=disc_ib_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys}_${k} \
-  DIFFUSION_MODEL=$dyn GEN_MODELS=$dyn START_STAGE=agent END_STAGE=agent ARMS=none \
-  BASELINES="discovery:$sys" BUDGETS="$k" EVALUATOR=oracle REFEREE=oracle SEED=42 \
-  BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
-  FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
-done; done; done; done
-```
-
 ### 8.6 Cascade reconstruction (`cascade_reconstruction`, IC, LT; 10 commands)
 
 Baselines from section 4.6: `steiner_tree`, `jordan_backward`, `cri`, `dhrec`, `observed_only`, `external:ditto`, `external:grin`.
@@ -1786,21 +1711,6 @@ MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=21600 STRATEGY_TIMEOUT=1800 \
 CPUS=8 GRES=gpu:1 MEM=62G TIME=48:00:00 \
 FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
-```
-
-Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics, CPU-only):
-
-```bash
-for ds in uci_students ca_grqc rt_pol; do for dyn in IC LT; do for sys in llm4ad_funsearch eoh openevolve; do
-  run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
-  TASK=cascade_reconstruction DATASET=$ds RUN=$run RUN_JOBID=0 \
-  JOB_NAME=disc_cr_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys} \
-  DIFFUSION_MODEL=$dyn GEN_MODELS=$dyn START_STAGE=agent END_STAGE=agent ARMS=none \
-  BASELINES="discovery:$sys" EVALUATOR=oracle REFEREE=oracle SEED=42 \
-  BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
-  FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
-done; done; done
 ```
 
 ### 8.7 Epidemic control (`epidemic_control`, SIR, SIS, SEIR; 15 commands)
@@ -2072,21 +1982,6 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics and budget, CPU-only):
-
-```bash
-for ds in infectious_sociopatterns oregon1 brightkite; do for dyn in SIR SIS SEIR; do for sys in llm4ad_funsearch eoh openevolve; do for pct in 1 5 10 20; do
-  run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
-  TASK=epidemic_control DATASET=$ds RUN=$run RUN_JOBID=0 \
-  JOB_NAME=disc_ec_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys}_${pct} \
-  DIFFUSION_MODEL=$dyn GEN_MODELS=$dyn START_STAGE=agent END_STAGE=agent ARMS=none \
-  BASELINES="discovery:$sys" BUDGET_PCTS="$pct" EVALUATOR=oracle REFEREE=oracle SEED=42 \
-  BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
-  FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
-done; done; done; done
-```
-
 ### 8.8 Cascade prediction (`cascade_prediction`, IC; 5 commands)
 
 Baselines from section 4.8: `feature_linear`, `rpp`, `szabo_huberman`, `hawkes`, `persistence`, `weng_communities`.
@@ -2189,17 +2084,268 @@ FEEDBACK=default ACTION_CONDITIONING=message \
 ./sbatch/pipeline.sbatch
 ```
 
-Discovery follow-ups on the critical datasets, after each row's main job has finished (one job per system, dynamics, CPU-only):
+## 9. Ablations and extra experiments
+
+Everything outside the main tables. Two hosts only, chosen for speed: influence maximization on `netscience` under IC (1,589 nodes) and critical node detection on `power_grid` under IC (4,941 nodes). On graphs this size a search is bound by the LLM, about 60 calls and one hour per 10 generations, and the evaluator is a rounding error, so the host barely changes the cost while the task type would (adaptive IM spends 2 to 5 hours of evaluator time per budget and is not used here). Netscience trains its world model in 11 minutes (642 s measured on the finished run).
+
+### 9.0 Conventions
+
+**Fixed in every run of this section:** one search budget, 10 percent, one dynamics (IC), `OUTER_ITERS=10`, `BASELINES=none` and `ARMS=none` unless a run names them, and every other knob at its main-table value. A run changes exactly one thing, which its command shows.
+
+**Budgets.** The helpers default to `BUDGET_PCTS="10"` alone. The four subsections that compare search results against the main table (9.1, 9.3, 9.4, 9.5) pass `BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10` instead, which is what the main runs do: the search happens once, at 10 percent, and its winning program is replanned at 1, 5 and 20 percent and scored through the canned path, referee included, with no further LLM calls (`transferred_from` marks those rows). That costs minutes per run on these two graphs. Since 2026-09-20 the same transfer covers a `discovery:<name>` row, which before then would have rerun the whole framework at every budget.
+
+**Nothing is overwritten.** Every run has its own `RUN` name starting with `abl_` and its own `JOB_NAME` starting with `abl_im_` or `abl_cnd_`. No command in this section writes into `final_ic`. Runs that reuse the main world model copy `data/` and `world_model/`; runs that retrain copy `data/` only, because a copied checkpoint would be reused by the train stage and the run would silently train nothing.
+
+**GPU.** Each subsection states it. In short: training needs a GPU; a search or a canned row with the world model as evaluator runs on either (these graphs are small enough for CPU, a GPU only shortens the evaluator share); the timing runs of 9.1 and 9.2 must use a GPU, since the world model's speed on the hardware it is meant for is what they measure; oracle-only, Monte Carlo, native and discovery runs need none. The helpers default to `GRES=none`, and GPU runs pass `GRES=gpu:1`.
+
+**Four code changes this section relies on** (in the repository since 2026-09-20): `SEARCH_BUDGET` transfers a discovery system's program as it does an LLM arm's; `plot_runtime` draws a second figure, `plots/runtime_with_oracle.png`, beside `plots/runtime.png`, and its title now states the ratio in whichever direction it goes; `GEN_ACTION_OPS=none` asks for a diffusion-only dataset (the pipeline flag accepts an empty list); `scripts/compare_world_models.py` prints one table across world-model results files, including the count bias after 1, 2, 5, 10 and 20 steps.
+
+Source these three helpers once per shell, from the repo root. On a machine without SLURM, put `SLURM_JOB_ID=local` in front of a call, as in section 8.0.
 
 ```bash
-for ds in casflow_aps taoke digg_cascades; do for dyn in IC; do for sys in llm4ad_funsearch eoh openevolve; do
-  run=final_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')
-  TASK=cascade_prediction DATASET=$ds RUN=$run RUN_JOBID=0 \
-  JOB_NAME=disc_cp_${ds}_$(printf '%s' "$dyn" | tr '[:upper:]' '[:lower:]')_${sys} \
-  DIFFUSION_MODEL=$dyn GEN_MODELS=$dyn START_STAGE=agent END_STAGE=agent ARMS=none \
-  BASELINES="discovery:$sys" EVALUATOR=oracle REFEREE=oracle SEED=42 \
-  BASELINE_TIMEOUT=165600 STRATEGY_TIMEOUT=1800 \
-  FEEDBACK=default ACTION_CONDITIONING=message \
-  CPUS=8 GRES=none MEM=62G TIME=48:00:00 ./sbatch/pipeline.sbatch
-done; done; done
+# Host 1: influence maximization on netscience under IC. Later assignments win, so a call overrides any knob.
+im_abl() {
+  env TASK=influence_maximization DATASET=netscience RUN_JOBID=0 \
+    DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS=none \
+    LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
+    WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+    ROLLOUTS=100 MC_MARGINALS=30 \
+    HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
+    EVALUATOR=oracle BUDGET_PCTS="10" \
+    HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+    MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
+    FEEDBACK=default ACTION_CONDITIONING=message \
+    CPUS=4 GRES=none MEM=31G TIME=24:00:00 \
+    "$@" ./sbatch/pipeline.sbatch
+}
+
+# Host 2: critical node detection on power_grid under IC
+cnd_abl() {
+  env TASK=critical_node_detection DATASET=power_grid RUN_JOBID=0 \
+    DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS=none \
+    LLM_MODEL=gpt-6-astra REASONING_EFFORT=high \
+    WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+    ROLLOUTS=100 MC_MARGINALS=30 \
+    HIDDEN_DIM=128 BATCH_SIZE=32 EPOCHS=400 PATIENCE=50 NO_PLAN_DEMO=0 \
+    EVALUATOR=oracle BUDGET_PCTS="10" OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
+    HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+    MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=14400 STRATEGY_TIMEOUT=900 \
+    FEEDBACK=default ACTION_CONDITIONING=message \
+    CPUS=4 GRES=none MEM=31G TIME=24:00:00 \
+    "$@" ./sbatch/pipeline.sbatch
+}
+
+# copy_run <task> <dataset> <new_run> [data]: copies data/ and world_model/ out of final_ic,
+# or data/ alone when the fourth argument is `data` (the runs that retrain)
+copy_run() {
+  local src="results/$1/$2/final_ic" dst="results/$1/$2/$3"
+  [ -e "$dst" ] && { echo "refusing to overwrite $dst"; return 1; }
+  mkdir -p "$dst"
+  cp -r "$src/data" "$dst/"
+  [ "${4:-both}" = "data" ] || cp -r "$src/world_model" "$dst/"
+  # The copied JSONs name the run they came from; point them at the copy so it stands alone
+  grep -rl "$2/final_ic" "$dst/data/metadata.json" "$dst"/world_model/*.json 2>/dev/null \
+    | xargs -r perl -pi -e "s#\Q$2/final_ic\E#$2/$3#g"
+}
 ```
+
+`copy_run` refuses an existing destination, so rerunning a block never clobbers a run. The path rewrite uses `perl -pi`, which behaves the same on the clusters and on macOS.
+
+### 9.1 Evaluator ladder and the timing figure
+
+The same search under three evaluators, stripped of everything that is not a scoring rollout: probes off, per-action credit off, provenance off. Read `referee_reward`, `evaluator_seconds` and `real_env_episodes` for the three arms from `summary.csv`. The plots stage writes `plots/runtime.png`, seconds per rollout sample for the world model against Monte Carlo only; the native arm never enters that figure, since it has no rollout timing of its own kind, and the oracle is absent from it by design. `plots/runtime_with_oracle.png` adds the oracle, timed from the referee replays. Four budgets with the search at 10 percent, so `evaluator_seconds` and `real_env_episodes` on the `pct10` rows are the cost of the search, and on the other three rows the cost of scoring one fixed program once; the timing figures average seconds per sample over all four. **Needs a GPU**: the world-model arm's speed is the measurement. About three hours per host.
+
+```bash
+copy_run influence_maximization netscience abl_ladder
+im_abl RUN=abl_ladder JOB_NAME=abl_im_ladder GRES=gpu:1 START_STAGE=agent \
+  ARMS="evolve_free@world_model evolve_free@native evolve_free@monte_carlo" \
+  PROBE_TURN=0 CREDIT=0 PROVENANCE=0 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+
+copy_run critical_node_detection power_grid abl_ladder
+cnd_abl RUN=abl_ladder JOB_NAME=abl_cnd_ladder GRES=gpu:1 START_STAGE=agent \
+  ARMS="evolve_free@world_model evolve_free@native evolve_free@monte_carlo" \
+  PROBE_TURN=0 CREDIT=0 PROVENANCE=0 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+```
+
+### 9.2 One world-model evaluation against one Monte Carlo evaluation on digg
+
+No search and no LLM. A canned row scores one fixed plan once, so `ARMS=none` with one instant heuristic (`high_degree`) under `EVALUATOR=world_model` times exactly one world-model evaluation. `MC_AGREEMENT=1` replays the same plan on NDlib and times it, and the referee replay times the exact oracle, so one job yields all three numbers in `agent/pct1/baseline_high_degree.json` (`cost.rollout_seconds` over `cost.n_samples`, `mc_rollout_seconds` over `mc_agreement_runs`, `referee_rollout_seconds` over `referee_samples`) and both figures: `plots/runtime.png` with Monte Carlo and the world model, `plots/runtime_with_oracle.png` with all three. The Monte Carlo side runs 50 episodes and the figures are per sample, so the smaller count does not bias them. **Needs a GPU** and the finished digg IM run on the same machine. Expect the oracle to be the cheapest of the three: on 2026-09-08 a 200-sample rollout cost 156 s under the world model against 37 s under the oracle.
+
+```bash
+copy_run influence_maximization digg abl_timing
+env TASK=influence_maximization DATASET=digg RUN=abl_timing RUN_JOBID=0 JOB_NAME=abl_im_digg_timing \
+  DIFFUSION_MODEL=IC GEN_MODELS=IC START_STAGE=agent \
+  ARMS=none BASELINES=high_degree EVALUATOR=world_model \
+  WM_MODEL=sage HEAD=structured HIDDEN_DIM=128 ACTION_CONDITIONING=message \
+  BUDGET_PCTS="1" HORIZON=10 N_SAMPLES=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+  MC_AGREEMENT=1 MC_AGREEMENT_RUNS=50 CREDIT=0 PROVENANCE=0 SEED=42 \
+  BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+  CPUS=8 GRES=gpu:1 MEM=62G TIME=12:00:00 ./sbatch/pipeline.sbatch
+```
+
+The digg copy is several GB. `data/` is only read, so `ln -s` in place of the `cp -r` is safe there if disk is short. The same single-shot run works on the two hosts by swapping the task, dataset and `BASELINES` (`high_degree` for IM, `adaptive_degree` for CND) and dropping the digg resources.
+
+### 9.3 LLM comparison
+
+`evolve_free@oracle` under three other models, everything else at protocol, **budgets included**: the main table's four budgets with `SEARCH_BUDGET=pct10`, exactly as the main runs have it. The LLM searches once, at 10 percent, and the winner is replanned and scored at 1, 5 and 20 percent through the canned path, referee included, with no further LLM calls. The `gpt-6-astra` side of the comparison is the main run's own `evolve_free@oracle` rows in `final_ic`, which were searched at 10 percent and transferred to the other three budgets under the same settings, so they are not rerun here. The oracle evaluator runs on CPU, so **no GPU**. About one hour of search each, plus a few minutes for the three transferred points.
+
+```bash
+for m in gpt-5.6-luna gpt-5.6-terra gpt-5.6-sol; do tag=${m##*-}
+  copy_run influence_maximization netscience abl_llm_$tag
+  im_abl RUN=abl_llm_$tag JOB_NAME=abl_im_llm_$tag START_STAGE=agent ARMS="evolve_free@oracle" LLM_MODEL=$m \
+    BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+  copy_run critical_node_detection power_grid abl_llm_$tag
+  cnd_abl RUN=abl_llm_$tag JOB_NAME=abl_cnd_llm_$tag START_STAGE=agent ARMS="evolve_free@oracle" LLM_MODEL=$m \
+    BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+done
+```
+
+### 9.4 Evaluator noise
+
+`N_SAMPLES` at 50, 200 and 800 for the oracle and world-model arms. Each arm's result carries `acceptance_ledger`: `naive_accepts` is what a plain greater-than rule would have accepted, `band_accepts` what the paired band accepted, and `lucky_accepts_prevented` the difference, which should grow as the sample count falls while `referee_reward` holds. The ledger exists on the searched `pct10` row only; the three transferred rows carry the winner's `referee_reward` at the other budgets, which shows whether a noisier search also picked a program that travels worse. **GPU optional** (set here, since 800 world-model samples per evaluation is the one place it shortens the run noticeably). About two hours each.
+
+```bash
+for n in 50 200 800; do
+  copy_run influence_maximization netscience abl_n$n
+  im_abl RUN=abl_n$n JOB_NAME=abl_im_n$n GRES=gpu:1 START_STAGE=agent \
+    ARMS="evolve_free@oracle evolve_free@world_model" N_SAMPLES=$n BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+  copy_run critical_node_detection power_grid abl_n$n
+  cnd_abl RUN=abl_n$n JOB_NAME=abl_cnd_n$n GRES=gpu:1 START_STAGE=agent \
+    ARMS="evolve_free@oracle evolve_free@world_model" N_SAMPLES=$n BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+done
+
+python3 - <<'EOF'
+import glob, json
+for path in sorted(glob.glob("results/*/*/abl_n*/agent/pct10/evolve_free@*.json")):
+    result = json.load(open(path))
+    ledger = result["acceptance_ledger"]
+    others = {p: json.load(open(path.replace("/pct10/", f"/{p}/")))["referee_reward"] for p in ("pct1", "pct5", "pct20")}
+    print(path.split("/")[1], path.split("/")[3], result["evaluator"], f"referee={result['referee_reward']:.2f}",
+          f"naive={ledger['naive_accepts']}", f"band={ledger['band_accepts']}", f"prevented={ledger['lucky_accepts_prevented']}",
+          " ".join(f"{p}={value:.2f}" for p, value in others.items()))
+EOF
+```
+
+### 9.5 Algorithm-discovery baselines
+
+FunSearch, EoH and OpenEvolve at their own defaults: nothing is overridden, `DISCOVERY_SMOKE` must be unset, and `OUTER_ITERS` does not apply to them. They search against the oracle simulator and never see the world model. Evaluated programs at default: FunSearch 20, EoH 110, OpenEvolve 100, against about 10 for our search, so report `external.info` beside each score. **No GPU.** FunSearch is under half an hour, the other two one to two hours. One run directory per system, so the three can run at once. Four budgets under the same rule as our own arms: the framework runs once, at 10 percent, and the program it returns is replanned at 1, 5 and 20 percent and replayed on the referee, so each side of the comparison gets exactly one search. Those three rows launch nothing and cost seconds. These are the only discovery runs in the plan: section 8's per-task discovery loops were removed on 2026-09-20.
+
+```bash
+python -m baselines.setup_baselines --only llm4ad_funsearch eoh openevolve
+
+for s in llm4ad_funsearch eoh openevolve; do
+  copy_run influence_maximization netscience abl_disc_$s
+  im_abl RUN=abl_disc_$s JOB_NAME=abl_im_disc_$s START_STAGE=agent \
+    BASELINES="discovery:$s" BASELINE_TIMEOUT=86400 TIME=30:00:00 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+  copy_run critical_node_detection power_grid abl_disc_$s
+  cnd_abl RUN=abl_disc_$s JOB_NAME=abl_cnd_disc_$s START_STAGE=agent \
+    BASELINES="discovery:$s" BASELINE_TIMEOUT=86400 TIME=30:00:00 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+done
+```
+
+### 9.6 World-model backbones
+
+Training only. `message` conditioning exists for GraphSAGE alone, so all five train under `ACTION_CONDITIONING=none`, including a fresh GraphSAGE run: comparing the other four with the main `message` checkpoint would mix two variables. GCNII gets the 8 layers its design is for, the rest keep 3. `data/` only is copied. **Needs a GPU.** About 11 minutes each on netscience.
+
+```bash
+for b in sage gat gcn gcnii gt; do layers=3; [ "$b" = gcnii ] && layers=8
+  copy_run influence_maximization netscience abl_wm_$b data
+  im_abl RUN=abl_wm_$b JOB_NAME=abl_im_wm_$b GRES=gpu:1 START_STAGE=train END_STAGE=train \
+    WM_MODEL=$b N_LAYERS=$layers ACTION_CONDITIONING=none
+  copy_run critical_node_detection power_grid abl_wm_$b data
+  cnd_abl RUN=abl_wm_$b JOB_NAME=abl_cnd_wm_$b GRES=gpu:1 START_STAGE=train END_STAGE=train \
+    WM_MODEL=$b N_LAYERS=$layers ACTION_CONDITIONING=none
+done
+
+for host in influence_maximization/netscience critical_node_detection/power_grid; do
+  python -m scripts.compare_world_models $(for b in sage gat gcn gcnii gt; do
+    echo "$b=results/$host/abl_wm_$b/world_model/${b}_IC.json"; done)
+done
+```
+
+### 9.7 Hidden edge weights
+
+With the weights visible the structured head can read the transmission probability off its input, so this trains with them replaced by ones. No coding agent: after training, one canned heuristic is scored under `EVALUATOR=world_model`, which gives the referee gap (`arm_minus_referee` in the row's JSON, and the In-Loop Evaluator Fidelity table of the report) without an LLM call. `abl_wm_visible` scores the same heuristic under the main checkpoint, the visible-weights reference. **Training needs a GPU; the reference run does not.** Caveat for the write-up: these runs use the weighted-cascade model, $p(u \rightarrow v) = 1/\mathrm{indeg}(v)$, which is recoverable from the degree channel, so this measures whether the model can learn that law from cascades, not arbitrary probabilities.
+
+```bash
+copy_run influence_maximization netscience abl_wm_hidden data
+im_abl RUN=abl_wm_hidden JOB_NAME=abl_im_wm_hidden GRES=gpu:1 START_STAGE=train \
+  HIDE_EDGE_WEIGHTS=1 BASELINES=degree_discount EVALUATOR=world_model CREDIT=0 PROVENANCE=0
+copy_run influence_maximization netscience abl_wm_visible
+im_abl RUN=abl_wm_visible JOB_NAME=abl_im_wm_visible START_STAGE=agent \
+  BASELINES=degree_discount EVALUATOR=world_model CREDIT=0 PROVENANCE=0
+
+copy_run critical_node_detection power_grid abl_wm_hidden data
+cnd_abl RUN=abl_wm_hidden JOB_NAME=abl_cnd_wm_hidden GRES=gpu:1 START_STAGE=train \
+  HIDE_EDGE_WEIGHTS=1 BASELINES=adaptive_degree EVALUATOR=world_model CREDIT=0 PROVENANCE=0
+copy_run critical_node_detection power_grid abl_wm_visible
+cnd_abl RUN=abl_wm_visible JOB_NAME=abl_cnd_wm_visible START_STAGE=agent \
+  BASELINES=adaptive_degree EVALUATOR=world_model CREDIT=0 PROVENANCE=0
+
+for host in influence_maximization/netscience critical_node_detection/power_grid; do
+  python -m scripts.compare_world_models visible=results/$host/final_ic/world_model/sage_IC.json \
+    hidden=results/$host/abl_wm_hidden/world_model/sage_IC.json
+done
+```
+
+### 9.8 Error against horizon
+
+Steps 1 to 10 need no run: every world-model results file already holds the per-step rollout curves, and the table script reads the relative count bias after 1, 2, 5 and 10 steps from them (on the finished netscience run: $-1.5\%$, $-1.9\%$, $-2.2\%$ and $-2.2\%$, which is the no-compounding result). Step 20 needs episodes that long, so a small dataset is generated at `GEN_HORIZON=20` and the main checkpoint is evaluated on it frozen. **No GPU**: the data stage and the frozen evaluation both run on CPU. On netscience the cascades have died by about step 8, so the 20-step column showing the same value as the 10-step one is the expected and useful outcome: no late drift.
+
+```bash
+for host in influence_maximization/netscience critical_node_detection/power_grid; do
+  python -m scripts.compare_world_models main=results/$host/final_ic/world_model/sage_IC.json
+done
+
+im_abl RUN=abl_wm_h20 JOB_NAME=abl_im_wm_h20 START_STAGE=data END_STAGE=data GEN_HORIZON=20 ROLLOUTS=20
+cnd_abl RUN=abl_wm_h20 JOB_NAME=abl_cnd_wm_h20 START_STAGE=data END_STAGE=data GEN_HORIZON=20 ROLLOUTS=20
+
+# after both data jobs finish
+for host in influence_maximization/netscience critical_node_detection/power_grid; do
+  python -m scripts.eval_frozen --checkpoint results/$host/final_ic/world_model/wm_sage_IC.pt \
+    --data-dir results/$host/abl_wm_h20/data --allow-trained-target \
+    --n-samples 20 --max-episodes 50 --device cpu --out results/$host/abl_wm_h20/eval_h20.json
+  python -m scripts.compare_world_models horizon10=results/$host/final_ic/world_model/sage_IC.json \
+    horizon20=results/$host/abl_wm_h20/eval_h20.json
+done
+```
+
+### 9.9 A world model trained without actions, tested on actions
+
+`GEN_ACTION_OPS=none` generates a diffusion-only dataset: no action after the seed commit and no counterfactual forks. A model trained on it is then evaluated, frozen, on the main run's action-rich test split, which it has never seen the like of. It trains under `ACTION_CONDITIONING=none`, because a conditioning module that never receives an action signal stays at its initialization and would add noise at test time, so the fair reference is `abl_wm_sage` from 9.6 (same architecture, trained with actions); the main checkpoint is listed beside it, copied into `abl_wm_reference` so the comparison reads nothing from `final_ic`. Read the action columns: the drop in $\Delta$F1 when actions are zeroed and the counterfactual-effect correlation say whether the model responds to actions it was never trained on, and the count bias says what the missing data costs in calibration. **Training needs a GPU; the frozen evaluation does not.** Run 9.6 first.
+
+```bash
+im_abl RUN=abl_wm_noaction JOB_NAME=abl_im_wm_noaction GRES=gpu:1 START_STAGE=data END_STAGE=train \
+  GEN_ACTION_OPS=none ACTION_CONDITIONING=none NO_PLAN_DEMO=1
+cnd_abl RUN=abl_wm_noaction JOB_NAME=abl_cnd_wm_noaction GRES=gpu:1 START_STAGE=data END_STAGE=train \
+  GEN_ACTION_OPS=none ACTION_CONDITIONING=none NO_PLAN_DEMO=1
+
+copy_run influence_maximization netscience abl_wm_reference
+copy_run critical_node_detection power_grid abl_wm_reference
+
+# after both training jobs finish
+for host in influence_maximization/netscience critical_node_detection/power_grid; do
+  python -m scripts.eval_frozen --checkpoint results/$host/abl_wm_noaction/world_model/wm_sage_IC.pt \
+    --data-dir results/$host/abl_wm_reference/data --allow-trained-target \
+    --n-samples 20 --max-episodes 50 --device cpu --out results/$host/abl_wm_noaction/eval_on_actions.json
+  python -m scripts.compare_world_models main=results/$host/abl_wm_reference/world_model/sage_IC.json \
+    same_architecture=results/$host/abl_wm_sage/world_model/sage_IC.json \
+    no_actions=results/$host/abl_wm_noaction/eval_on_actions.json
+done
+```
+
+### 9.10 Summary
+
+| Section | Runs per host | Stages run | GPU | Time per run | LLM calls per run |
+| --- | --- | --- | --- | --- | --- |
+| 9.1 ladder and timing (four budgets, search at pct10) | 1 | agent to report | required | about 3 h | about 120, probes off |
+| 9.2 digg timing | 1 in total | agent to report | required | about 1 h | 0 |
+| 9.3 LLM comparison (four budgets, search at pct10) | 3 | agent to report | no | about 1 h | about 60 |
+| 9.4 evaluator noise (four budgets, search at pct10) | 3 | agent to report | optional | about 2 h | about 120 |
+| 9.5 discovery baselines (four budgets, search at pct10) | 3 | agent to report | no | 0.5 to 2 h | 20 to 110 |
+| 9.6 backbones | 5 | train | required | about 11 min | 0 |
+| 9.7 hidden weights | 2 | train to report, agent to report | training only | about 15 min | 0 |
+| 9.8 horizon | 1 | data, then a script | no | under 1 h | 0 |
+| 9.9 no-action model | 1 | data to train, then a script | training only | under 1 h | 0 |
+
+**Order.** Submit the training runs (9.6, 9.7, 9.9) and the two data-only runs (9.8) first: they are minutes each and need no gateway. Then 9.1 and 9.2, which produce the timing figures. Then the searches (9.3, 9.4, 9.5), which are bound by the gateway: together about 1,800 LLM calls across both hosts, so pace them to the plan's usage limit rather than to the cluster.
