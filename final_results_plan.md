@@ -2198,17 +2198,17 @@ EOF
 
 ### 9.5 Algorithm-discovery baselines
 
-FunSearch, EoH and OpenEvolve at their own defaults: nothing is overridden, `DISCOVERY_SMOKE` must be unset, and `OUTER_ITERS` does not apply to them. They search against the oracle simulator and never see the world model. Evaluated programs at default: FunSearch 20, EoH 110, OpenEvolve 100, against about 10 for our search, so report `external.info` beside each score. **No GPU.** FunSearch is under half an hour, the other two one to two hours. One run directory per system, so the three can run at once. Four budgets under the same rule as our own arms: the framework runs once, at 10 percent, and the program it returns is replanned at 1, 5 and 20 percent and replayed on the referee, so each side of the comparison gets exactly one search. Those three rows launch nothing and cost seconds. These are the only discovery runs in the plan: section 8's per-task discovery loops were removed on 2026-09-20.
+FunSearch, EoH and OpenEvolve at their own defaults: nothing about their loops is overridden, `DISCOVERY_SMOKE` must be unset, and `OUTER_ITERS` does not apply to them. Their LLM is `gpt-5.6-terra` (`LLM_MODEL` on the call, which `baselines/discovery.py` hands to each framework's own config), not the helpers' `gpt-6-astra`; the matching row of ours is therefore 9.3's `abl_llm_terra`, the same search under the same model, rather than the main run's `gpt-6-astra` row. The frameworks build their own API requests, so `REASONING_EFFORT` does not reach them: they call the model at the gateway's default effort while our arms call it at `high`, and a table that compares the two says so. They search against the oracle simulator and never see the world model. Evaluated programs at default: FunSearch 20, EoH 110, OpenEvolve 100, against about 10 for our search, so report `external.info` beside each score. **No GPU.** FunSearch is under half an hour, the other two one to two hours. One run directory per system, so the three can run at once. Four budgets under the same rule as our own arms: the framework runs once, at 10 percent, and the program it returns is replanned at 1, 5 and 20 percent and replayed on the referee, so each side of the comparison gets exactly one search. Those three rows launch nothing and cost seconds. These are the only discovery runs in the plan: section 8's per-task discovery loops were removed on 2026-09-20.
 
 ```bash
 python -m baselines.setup_baselines --only llm4ad_funsearch eoh openevolve
 
 for s in llm4ad_funsearch eoh openevolve; do
   copy_run influence_maximization netscience abl_disc_$s
-  im_abl RUN=abl_disc_$s JOB_NAME=abl_im_disc_$s START_STAGE=agent \
+  im_abl RUN=abl_disc_$s JOB_NAME=abl_im_disc_$s START_STAGE=agent LLM_MODEL=gpt-5.6-terra \
     BASELINES="discovery:$s" BASELINE_TIMEOUT=86400 TIME=30:00:00 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
   copy_run critical_node_detection power_grid abl_disc_$s
-  cnd_abl RUN=abl_disc_$s JOB_NAME=abl_cnd_disc_$s START_STAGE=agent \
+  cnd_abl RUN=abl_disc_$s JOB_NAME=abl_cnd_disc_$s START_STAGE=agent LLM_MODEL=gpt-5.6-terra \
     BASELINES="discovery:$s" BASELINE_TIMEOUT=86400 TIME=30:00:00 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
 done
 ```
