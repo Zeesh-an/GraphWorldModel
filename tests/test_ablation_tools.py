@@ -29,3 +29,19 @@ def test_bias_by_horizon_reads_the_step_curves() -> None:
 
     row = table_row("m", {"test": {"delta_f1": 0.5}, "rollout": rollout})
     assert row[0] == "m" and row[1] == "0.5000" and row[3] == "-1.0%"
+
+
+def test_timing_reports_seconds_per_sample_once_per_repeat() -> None:
+    from scripts.time_evaluators import seconds_per_sample
+
+    calls = []
+
+    class Environment:
+        def rollout(self, plan: object, horizon: int, budget: int, seed: int) -> None:
+            calls.append(seed)
+
+    timings = seconds_per_sample(Environment(), None, horizon=10, budget=3, samples=200, repeats=3, seed=42, device="cpu")
+
+    # one timed rollout per repeat, each on its own seed, each divided by the sample count
+    assert calls == [42, 43, 44]
+    assert len(timings) == 3 and all(0 <= value < 1e-3 for value in timings)

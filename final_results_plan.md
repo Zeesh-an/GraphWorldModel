@@ -2092,13 +2092,13 @@ Everything outside the main tables. Two hosts only, chosen for speed: influence 
 
 **Fixed in every run of this section:** one search budget, 10 percent, one dynamics (IC), `OUTER_ITERS=10`, `BASELINES=none` and `ARMS=none` unless a run names them, and every other knob at its main-table value. A run changes exactly one thing, which its command shows.
 
-**Budgets.** The helpers default to `BUDGET_PCTS="10"` alone. The four subsections that compare search results against the main table (9.1, 9.3, 9.4, 9.5) pass `BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10` instead, which is what the main runs do: the search happens once, at 10 percent, and its winning program is replanned at 1, 5 and 20 percent and scored through the canned path, referee included, with no further LLM calls (`transferred_from` marks those rows). That costs minutes per run on these two graphs. Since 2026-09-20 the same transfer covers a `discovery:<name>` row, which before then would have rerun the whole framework at every budget.
+**Budgets.** The helpers default to `BUDGET_PCTS="10"` alone. The three subsections that compare search results against the main table (9.3, 9.4, 9.5) pass `BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10` instead, which is what the main runs do: the search happens once, at 10 percent, and its winning program is replanned at 1, 5 and 20 percent and scored through the canned path, referee included, with no further LLM calls (`transferred_from` marks those rows). That costs minutes per run on these two graphs. Since 2026-09-20 the same transfer covers a `discovery:<name>` row, which before then would have rerun the whole framework at every budget.
 
 **Nothing is overwritten.** Every run has its own `RUN` name starting with `abl_` and its own `JOB_NAME` starting with `abl_im_` or `abl_cnd_`. No command in this section writes into `final_ic`. Runs that reuse the main world model copy `data/` and `world_model/`; runs that retrain copy `data/` only, because a copied checkpoint would be reused by the train stage and the run would silently train nothing.
 
 **GPU.** Each subsection states it. In short: training needs a GPU; a search or a canned row with the world model as evaluator runs on either (these graphs are small enough for CPU, a GPU only shortens the evaluator share); the timing runs of 9.1 and 9.2 must use a GPU, since the world model's speed on the hardware it is meant for is what they measure; oracle-only, Monte Carlo, native and discovery runs need none. The helpers default to `GRES=none`, and GPU runs pass `GRES=gpu:1`.
 
-**Four code changes this section relies on** (in the repository since 2026-09-20): `SEARCH_BUDGET` transfers a discovery system's program as it does an LLM arm's; `plot_runtime` draws a second figure, `plots/runtime_with_oracle.png`, beside `plots/runtime.png`, and its title now states the ratio in whichever direction it goes; `GEN_ACTION_OPS=none` asks for a diffusion-only dataset (the pipeline flag accepts an empty list); `scripts/compare_world_models.py` prints one table across world-model results files, including the count bias after 1, 2, 5, 10 and 20 steps.
+**Five code changes this section relies on** (in the repository since 2026-09-20): `scripts/time_evaluators.py` times the world model against NDlib with nothing else in the way (9.1 and 9.2, added 2026-09-21); `SEARCH_BUDGET` transfers a discovery system's program as it does an LLM arm's; `plot_runtime` draws a second figure, `plots/runtime_with_oracle.png`, beside `plots/runtime.png`, and its title now states the ratio in whichever direction it goes; `GEN_ACTION_OPS=none` asks for a diffusion-only dataset (the pipeline flag accepts an empty list); `scripts/compare_world_models.py` prints one table across world-model results files, including the count bias after 1, 2, 5, 10 and 20 steps.
 
 The three helpers live in `sbatch/ablation_helpers.sh`, the one copy of them, so every cluster gets the current version with `git pull`. Source it once per shell, from the repo root; the functions last only as long as that shell, so a new login, SSH session or tmux pane sources it again (`type im_abl cnd_abl copy_run` prints them when they are loaded). On a machine without SLURM, put `SLURM_JOB_ID=local` in front of a call, as in section 8.0.
 
@@ -2112,39 +2112,30 @@ To see what a call would submit without submitting it, add `DRY_RUN=1` to the ca
 
 `copy_run` refuses an existing destination, so rerunning a block never clobbers a run. The path rewrite uses `perl -pi`, which behaves the same on the clusters and on macOS.
 
-### 9.1 Evaluator ladder and the timing figure
+### 9.1 World model against Monte Carlo, timed, on the two hosts
 
-The same search under three evaluators, stripped of everything that is not a scoring rollout: probes off, per-action credit off, provenance off. Read `referee_reward`, `evaluator_seconds` and `real_env_episodes` for the three arms from `summary.csv`. The plots stage writes `plots/runtime.png`, seconds per rollout sample for the world model against Monte Carlo only; the native arm never enters that figure, since it has no rollout timing of its own kind, and the oracle is absent from it by design. `plots/runtime_with_oracle.png` adds the oracle, timed from the referee replays. Four budgets with the search at 10 percent, so `evaluator_seconds` and `real_env_episodes` on the `pct10` rows are the cost of the search, and on the other three rows the cost of scoring one fixed program once; the timing figures average seconds per sample over all four. **Needs a GPU**: the world-model arm's speed is the measurement. About two to three hours per host: three arms at two calls a generation with the probes off, plus the Monte Carlo arm's evaluator time.
+One script, `scripts/time_evaluators.py`, and nothing else: no LLM, no search, no oracle, no referee, no pipeline. It loads a finished run's graph and its world-model checkpoint, rolls one fixed plan forward under each evaluator (the 1 percent highest-degree nodes seeded at $t=0$, horizon 10), and prints seconds per world-model sample against seconds per NDlib episode with the ratio. The first world-model call is an untimed warm-up, each side is timed three times and the median is reported, and a CUDA rollout is synchronized before the clock stops. It reads `final_ic` and writes only `results/timing/<task>_<dataset>.json` and the matching `.png`, drawn by the pipeline's own `plot_runtime` so it looks like every other runtime figure. No `copy_run` and no helper is needed.
 
-```bash
-copy_run influence_maximization netscience abl_ladder
-im_abl RUN=abl_ladder JOB_NAME=abl_im_ladder GRES=gpu:1 START_STAGE=agent \
-  ARMS="evolve_free@world_model evolve_free@native evolve_free@monte_carlo" \
-  PROBE_TURN=0 CREDIT=0 PROVENANCE=0 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
-
-copy_run critical_node_detection power_grid abl_ladder
-cnd_abl RUN=abl_ladder JOB_NAME=abl_cnd_ladder GRES=gpu:1 START_STAGE=agent \
-  ARMS="evolve_free@world_model evolve_free@native evolve_free@monte_carlo" \
-  PROBE_TURN=0 CREDIT=0 PROVENANCE=0 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
-```
-
-### 9.2 One world-model evaluation against one Monte Carlo evaluation on digg
-
-No search and no LLM. A canned row scores one fixed plan once, so `ARMS=none` with one instant heuristic (`high_degree`) under `EVALUATOR=world_model` times exactly one world-model evaluation. `MC_AGREEMENT=1` replays the same plan on NDlib and times it, and the referee replay times the exact oracle, so one job yields all three numbers in `agent/pct1/baseline_high_degree.json` (`cost.rollout_seconds` over `cost.n_samples`, `mc_rollout_seconds` over `mc_agreement_runs`, `referee_rollout_seconds` over `referee_samples`) and both figures: `plots/runtime.png` with Monte Carlo and the world model, `plots/runtime_with_oracle.png` with all three. The Monte Carlo side runs 50 episodes and the figures are per sample, so the smaller count does not bias them. **Needs a GPU** and the finished digg IM run on the same machine. Expect the oracle to be the cheapest of the three: on 2026-09-08 a 200-sample rollout cost 156 s under the world model against 37 s under the oracle.
+**Needs a GPU**, because the world model's speed on a GPU is the claim: on a laptop CPU the same model measured 106 ms per sample against 23 ms per NDlib episode, five times SLOWER, where the finished cluster runs put it at about 7.5 ms per sample on a GPU. **Under a minute per host** once the node is allocated. The world-model settings are whatever the checkpoint was trained with, which for these two rows are section 8's (`sage`, `structured`, hidden 128, `message` conditioning); the script reads them from the checkpoint, so nothing is passed.
 
 ```bash
-copy_run influence_maximization digg abl_timing
-env TASK=influence_maximization DATASET=digg RUN=abl_timing RUN_JOBID=0 JOB_NAME=abl_im_digg_timing \
-  DIFFUSION_MODEL=IC GEN_MODELS=IC START_STAGE=agent \
-  ARMS=none BASELINES=high_degree EVALUATOR=world_model \
-  WM_MODEL=sage HEAD=structured HIDDEN_DIM=128 ACTION_CONDITIONING=message \
-  BUDGET_PCTS="1" HORIZON=10 N_SAMPLES=200 REFEREE=oracle REFEREE_SAMPLES=200 \
-  MC_AGREEMENT=1 MC_AGREEMENT_RUNS=50 CREDIT=0 PROVENANCE=0 SEED=42 \
-  BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
-  CPUS=8 GRES=gpu:1 MEM=62G TIME=12:00:00 ./sbatch/pipeline.sbatch
+srun --gres=gpu:1 --cpus-per-task=4 --mem=31G --time=01:00:00 $SBATCH_ARGS \
+  python -m scripts.time_evaluators --run-dir results/influence_maximization/netscience/final_ic
+srun --gres=gpu:1 --cpus-per-task=4 --mem=31G --time=01:00:00 $SBATCH_ARGS \
+  python -m scripts.time_evaluators --run-dir results/critical_node_detection/power_grid/final_ic
 ```
 
-The digg copy is several GB. `data/` is only read, so `ln -s` in place of the `cp -r` is safe there if disk is short. The same single-shot run works on the two hosts by swapping the task, dataset and `BASELINES` (`high_degree` for IM, `adaptive_degree` for CND) and dropping the digg resources.
+Run them from the repo root with the project's virtualenv active, so `srun` carries it to the node. Defaults: `--wm-samples 200 --mc-episodes 50 --repeats 3 --budget-pct 1 --horizon 10`. The figures are per sample, so the two sample counts need not match.
+
+### 9.2 World model against Monte Carlo, timed, on digg
+
+The same script on the scale graph. NDlib takes about 14 s per episode here (measured 2026-09-21) and the world model about 0.8 s per sample (156 s per 200 samples, measured 2026-09-08), so only the episode count is cut: 20 NDlib episodes per rollout, with the same three timed rollouts per side as 9.1, so every panel is a median of three. **About 25 minutes**: a 2.6 minute warm-up, about 8 minutes for the three timed world-model rollouts of 200 samples, and about 14 minutes for the three NDlib rollouts of 20 episodes. **Needs a GPU** and the finished digg run on the same machine.
+
+```bash
+srun --gres=gpu:1 --cpus-per-task=8 --mem=62G --time=01:00:00 $SBATCH_ARGS \
+  python -m scripts.time_evaluators --run-dir results/influence_maximization/digg/final_ic \
+    --mc-episodes 20 --repeats 3
+```
 
 ### 9.3 LLM comparison
 
@@ -2235,22 +2226,22 @@ done
 
 ### 9.7 Hidden edge weights
 
-With the weights visible the structured head can read the transmission probability off its input, so this trains with them replaced by ones. No coding agent: after training, one canned heuristic is scored under `EVALUATOR=world_model`, which gives the referee gap (`arm_minus_referee` in the row's JSON, and the In-Loop Evaluator Fidelity table of the report) without an LLM call. `abl_wm_visible` scores the same heuristic under the main checkpoint, the visible-weights reference. **Training needs a GPU; the reference run does not.** Caveat for the write-up: these runs use the weighted-cascade model, $p(u \rightarrow v) = 1/\mathrm{indeg}(v)$, which is recoverable from the degree channel, so this measures whether the model can learn that law from cascades, not arbitrary probabilities.
+With the weights visible the structured head can read the transmission probability off its input, so this trains with them replaced by ones. No coding agent: after training, one canned heuristic is scored by the world model (`ARMS="baseline:<name>@world_model"`; a row given through `BASELINES` would be scored on the oracle whatever `EVALUATOR` says, see 9.1, and these commands were written that way until 2026-09-21), which gives the referee gap (`arm_minus_referee` in the row's JSON, and the In-Loop Evaluator Fidelity table of the report) without an LLM call. `abl_wm_visible` scores the same heuristic under the main checkpoint, the visible-weights reference. **Training needs a GPU; the reference run does not.** Caveat for the write-up: these runs use the weighted-cascade model, $p(u \rightarrow v) = 1/\mathrm{indeg}(v)$, which is recoverable from the degree channel, so this measures whether the model can learn that law from cascades, not arbitrary probabilities.
 
 ```bash
 copy_run influence_maximization netscience abl_wm_hidden data
 im_abl RUN=abl_wm_hidden JOB_NAME=abl_im_wm_hidden GRES=gpu:1 START_STAGE=train \
-  HIDE_EDGE_WEIGHTS=1 BASELINES=degree_discount EVALUATOR=world_model CREDIT=0 PROVENANCE=0
+  HIDE_EDGE_WEIGHTS=1 ARMS="baseline:degree_discount@world_model" CREDIT=0 PROVENANCE=0
 copy_run influence_maximization netscience abl_wm_visible
 im_abl RUN=abl_wm_visible JOB_NAME=abl_im_wm_visible START_STAGE=agent \
-  BASELINES=degree_discount EVALUATOR=world_model CREDIT=0 PROVENANCE=0
+  ARMS="baseline:degree_discount@world_model" CREDIT=0 PROVENANCE=0
 
 copy_run critical_node_detection power_grid abl_wm_hidden data
 cnd_abl RUN=abl_wm_hidden JOB_NAME=abl_cnd_wm_hidden GRES=gpu:1 START_STAGE=train \
-  HIDE_EDGE_WEIGHTS=1 BASELINES=adaptive_degree EVALUATOR=world_model CREDIT=0 PROVENANCE=0
+  HIDE_EDGE_WEIGHTS=1 ARMS="baseline:adaptive_degree@world_model" CREDIT=0 PROVENANCE=0
 copy_run critical_node_detection power_grid abl_wm_visible
 cnd_abl RUN=abl_wm_visible JOB_NAME=abl_cnd_wm_visible START_STAGE=agent \
-  BASELINES=adaptive_degree EVALUATOR=world_model CREDIT=0 PROVENANCE=0
+  ARMS="baseline:adaptive_degree@world_model" CREDIT=0 PROVENANCE=0
 
 for host in influence_maximization/netscience critical_node_detection/power_grid; do
   python -m scripts.compare_world_models visible=results/$host/final_ic/world_model/sage_IC.json \
@@ -2308,8 +2299,8 @@ done
 
 | Section | Runs per host | Stages run | GPU | Time per run | LLM calls per run |
 | --- | --- | --- | --- | --- | --- |
-| 9.1 ladder and timing (four budgets, search at pct10) | 1 | agent to report | required | 2 to 3 h | about 65 (3 arms, about 22 each with probes off) |
-| 9.2 digg timing | 1 in total | agent to report | required | about 1 h | 0 |
+| 9.1 timing on the two hosts (one script, world model against NDlib) | 1 | none, reads `final_ic` | required | under 1 min | 0 |
+| 9.2 timing on digg (same script) | 1 in total | none, reads `final_ic` | required | about 25 min | 0 |
 | 9.3 LLM comparison (four budgets, search at pct10) | 3 | agent to report | no | 20 to 45 min | about 30 (1 arm, probes on) |
 | 9.4 evaluator noise (four budgets, search at pct10) | 3 | agent to report | optional | about 1.5 h | about 60 (2 arms, about 30 each) |
 | 9.5 discovery baselines (four budgets, search at pct10) | 3 | agent to report | no | 0.5 to 2 h | 20 to 110 |
@@ -2318,4 +2309,4 @@ done
 | 9.8 horizon | 1 | data, then a script | no | under 1 h | 0 |
 | 9.9 no-action model | 1 | data to train, then a script | training only | under 1 h | 0 |
 
-**Order.** Submit the training runs (9.6, 9.7, 9.9) and the two data-only runs (9.8) first: they are minutes each and need no gateway. Then 9.1 and 9.2, which produce the timing figures. Then the searches (9.3, 9.4, 9.5), which are bound by the gateway: together about 1,800 LLM calls across both hosts, so pace them to the plan's usage limit rather than to the cluster.
+**Order.** Submit the training runs (9.6, 9.7, 9.9) and the two data-only runs (9.8) first: they are minutes each and need no gateway. Then 9.1 and 9.2, the two timing scripts, which take minutes and need only a GPU node and the finished main runs. Then the searches (9.3, 9.4, 9.5), which are bound by the gateway: together about 1,800 LLM calls across both hosts, so pace them to the plan's usage limit rather than to the cluster.
