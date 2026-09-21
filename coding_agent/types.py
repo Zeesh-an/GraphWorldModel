@@ -84,6 +84,9 @@ class GraphInfo:
     # graph-level and would otherwise be recomputed on every refinement turn.
     _community_labels: dict[int, int] | None = field(default=None, repr=False)
     _rr_covers: tuple | None = field(default=None, repr=False)
+    # Static seed rankings, cached by tools.adaptive_algorithms.static_split:
+    # {(algorithm, dynamics): the longest ranking computed so far}
+    _static_rankings: dict | None = field(default=None, repr=False)
 
     @classmethod
     def from_store_entry(cls, entry: dict) -> "GraphInfo":

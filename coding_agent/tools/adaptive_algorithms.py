@@ -265,9 +265,10 @@ def static_split(
     has fewer steps left to spread) from the adaptivity benefit.
 
     Stateless across rounds on purpose: the static ranking is a function of the
-    graph alone, so each call recomputes it and returns the first `batch` entries
-    the cascade has not already reached. No cross-call memory, which is what lets
-    it behave identically under both environments' loop orders.
+    graph alone, so each call returns the first `batch` entries of it that the
+    cascade has not already reached. The only cross-call memory is that ranking,
+    which does not depend on the call, so it behaves identically under both
+    environments' loop orders.
     """
     budget = total_budget if total_budget is not None else graph.num_nodes
     active = set(state.infected) | set(state.frontier)
@@ -278,9 +279,23 @@ def static_split(
     # activations already in `active`: measured as campaign_rewards
     # [33.0, 0.0, 0.0], i.e. two campaigns that seeded nothing at all.
     length = min(graph.num_nodes, budget + len(active))
-    ranking = algorithms.algorithms[base_algorithm](
-        graph, length, diffusion_model
-    )
+
+    # The ranking is a function of the graph alone, and a policy is called once
+    # per round PER ENSEMBLE MEMBER, so recomputing it made a 200-sample, 4-round
+    # rollout on digg 800 rankings of tens of thousands of nodes: about ten hours
+    # for one budget point. Kept on the graph object, so an edited graph (a new
+    # object) never reads another graph's ranking. A longer request recomputes;
+    # a shorter one is a prefix, since the base ranking picks sequentially.
+    if graph._static_rankings is None:
+        graph._static_rankings = {}
+
+    key = (base_algorithm, diffusion_model)
+    if len(graph._static_rankings.get(key, ())) < length:
+        graph._static_rankings[key] = algorithms.algorithms[base_algorithm](
+            graph, length, diffusion_model
+        )
+
+    ranking = graph._static_rankings[key][:length]
 
     return [int(node) for node in ranking if node not in active][:batch]
 

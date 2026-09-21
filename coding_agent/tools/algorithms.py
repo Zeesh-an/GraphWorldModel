@@ -54,17 +54,22 @@ def degree_discount(
     chosen_neighbours = np.zeros(graph.num_nodes, dtype=np.float64)
     probability = float(np.mean(graph.ic_probs)) if graph.ic_probs.size else 0.0
     chosen = []
+    # A list here made every pick cost the number already chosen, twice over (the
+    # mask index and the membership test), which on digg turned one long ranking
+    # into minutes
+    is_chosen = np.zeros(graph.num_nodes, dtype=bool)
 
     for _ in range(min(budget, graph.num_nodes)):
-        masked = discounted.copy()
-        # -inf mask so an already-chosen node can never win argmax, however far
-        # the discounting pushes the remaining scores down.
-        masked[chosen] = float("-inf")
-        node = int(np.argmax(masked))
+        node = int(np.argmax(discounted))
         chosen.append(node)
+        is_chosen[node] = True
+        # -inf so an already-chosen node can never win argmax, however far the
+        # discounting pushes the remaining scores down. Never overwritten, because
+        # the loop below skips chosen neighbours.
+        discounted[node] = float("-inf")
 
         for neighbour in neighbours[node]:
-            if neighbour in chosen:
+            if is_chosen[neighbour]:
                 continue
             chosen_neighbours[neighbour] += 1.0
             hits = chosen_neighbours[neighbour]
