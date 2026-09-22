@@ -106,28 +106,30 @@ def adapt_degree_discount(
     cascade already owns is worth less now than its raw degree says, and that is
     information the static version cannot have at t=0.
     """
-    active = set(state.infected) | set(state.frontier)
-    discounted = primitives.compute_degree(graph).astype(np.float64)
+    active = np.zeros(graph.num_nodes, dtype=bool)
+    active[list(state.infected)] = True
+    active[list(state.frontier)] = True
 
-    for node in range(graph.num_nodes):
-        covered = sum(
-            1
-            for neighbor in graph.out_neighbors(node) + graph.in_neighbors(node)
-            if neighbor in active
-        )
-        discounted[node] -= covered
+    # Every arc counted from both ends, which is what out + in neighbours gives
+    source, target = graph.edge_index
+    covered = np.bincount(source, weights=active[target], minlength=graph.num_nodes)
+    covered += np.bincount(target, weights=active[source], minlength=graph.num_nodes)
+    discounted = primitives.compute_degree(graph) - covered
+    # -inf so an active or chosen node can never win argmax, however far the
+    # discounting pushes the remaining scores down. A Python max over the
+    # susceptible set here cost |batch| x N per round, hours on digg at pct20.
+    discounted[active] = float("-inf")
 
     chosen = []
-    available = set(_susceptible(state, graph))
 
-    for _ in range(min(batch, len(available))):
-        node = max(available, key=lambda candidate: discounted[candidate])
-        chosen.append(int(node))
-        available.discard(node)
+    for _ in range(min(batch, int(graph.num_nodes - active.sum()))):
+        node = int(np.argmax(discounted))
+        chosen.append(node)
+        discounted[node] = float("-inf")
 
-        # Within-round discounting, so a batch does not stack on one neighbourhood
-        for neighbor in graph.out_neighbors(node) + graph.in_neighbors(node):
-            discounted[neighbor] -= 1
+        # Within-round discounting, so a batch does not stack on one neighbourhood;
+        # subtract.at counts a paired arc twice like the neighbour lists do
+        np.subtract.at(discounted, graph.out_neighbors(node) + graph.in_neighbors(node), 1.0)
 
     return chosen
 
