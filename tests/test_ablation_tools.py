@@ -40,7 +40,7 @@ def test_timing_reports_seconds_per_sample_once_per_repeat() -> None:
         def rollout(self, plan: object, horizon: int, budget: int, seed: int) -> None:
             calls.append(seed)
 
-    timings = seconds_per_sample(Environment(), None, horizon=10, budget=3, samples=200, repeats=3, seed=42, device="cpu")
+    timings = seconds_per_sample(Environment(), None, horizon=10, budget=3, samples=200, repeats=3, seed=42, device="cpu", label="test")
 
     # one timed rollout per repeat, each on its own seed, each divided by the sample count
     assert calls == [42, 43, 44]

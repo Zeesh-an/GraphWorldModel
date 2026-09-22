@@ -2129,13 +2129,25 @@ Run them from the repo root with the project's virtualenv active, so `srun` carr
 
 ### 9.2 World model against Monte Carlo, timed, on digg
 
-The same script on the scale graph. NDlib takes about 14 s per episode here (measured 2026-09-21) and the world model about 0.8 s per sample (156 s per 200 samples, measured 2026-09-08), so only the episode count is cut: 20 NDlib episodes per rollout, with the same three timed rollouts per side as 9.1, so every panel is a median of three. **About 25 minutes**: a 2.6 minute warm-up, about 8 minutes for the three timed world-model rollouts of 200 samples, and about 14 minutes for the three NDlib rollouts of 20 episodes. **Needs a GPU** and the finished digg run on the same machine.
+The same script on the scale graph, in two steps because the first attempt (2026-09-21, `--mc-episodes 20 --repeats 3` under a one-hour limit) timed out with nothing written. The script prints every rollout as it finishes, so a second attempt shows where the time goes; the first attempt predated that output and left no trace. The two costs that make digg different: one NDlib episode is about 14 s here (measured on a laptop CPU, so the node may differ either way), and one 200-sample world-model rollout was 156 s on PDE's GPU on 2026-09-08. The 25-minute estimate that was here assumed both of those numbers hold on the timing node, and the timeout says at least one of them does not.
+
+**Step 1, sizing.** One rollout per side, 5 NDlib episodes, 40 world-model samples, under 30 minutes. Read the two per-sample figures it prints, then set step 2's counts and limit from them.
 
 ```bash
-srun --gres=gpu:1 --cpus-per-task=8 --mem=62G --time=01:00:00 $SBATCH_ARGS \
+srun --gres=gpu:1 --cpus-per-task=8 --mem=62G --time=00:30:00 $SBATCH_ARGS \
+  python -m scripts.time_evaluators --run-dir results/influence_maximization/digg/final_ic \
+    --wm-samples 40 --mc-episodes 5 --repeats 1 --out-dir results/timing_sizing
+```
+
+**Step 2, the measurement.** Full sample counts, three repeats, four hours. At the figures above this is about an hour (a 2.6 minute warm-up, 8 minutes of world model, 14 minutes of NDlib); the limit leaves room for the node being slower on either side.
+
+```bash
+srun --gres=gpu:1 --cpus-per-task=8 --mem=62G --time=04:00:00 $SBATCH_ARGS \
   python -m scripts.time_evaluators --run-dir results/influence_maximization/digg/final_ic \
     --mc-episodes 20 --repeats 3
 ```
+
+**Needs a GPU** and the finished digg run on the same machine. If step 1 shows the world model far above 0.8 s per sample, the GPU is not doing the work: check that `world model on cuda` is printed (a `cpu` there means the venv's torch has no CUDA on that node), and that the node is not shared.
 
 ### 9.3 LLM comparison
 
@@ -2324,7 +2336,7 @@ done
 | Section | Runs per host | Stages run | GPU | Time per run | LLM calls per run |
 | --- | --- | --- | --- | --- | --- |
 | 9.1 timing on the two hosts (one script, world model against NDlib) | 1 | none, reads `final_ic` | required | under 1 min | 0 |
-| 9.2 timing on digg (same script) | 1 in total | none, reads `final_ic` | required | about 25 min | 0 |
+| 9.2 timing on digg (same script, sizing run first) | 2 in total | none, reads `final_ic` | required | about 1 h, 4 h limit | 0 |
 | 9.3 LLM comparison (four budgets, search at pct10) | 3 | agent to report | no | 20 to 45 min | about 30 (1 arm, probes on) |
 | 9.4 evaluator noise (four budgets, search at pct10) | 3 | agent to report | optional | about 1.5 h | about 60 (2 arms, about 30 each) |
 | 9.5 discovery baselines (four budgets, search at pct10) | 2 new per host, 5 on digg | agent to report | no | 0.5 to 2 h per host, 0.5 to 3 h on digg | 20 to 130 |

@@ -26,7 +26,7 @@ from pipeline.plots import plot_runtime
 from world_model.wm_data import load_graph_store
 
 
-def seconds_per_sample(environment: object, plan: object, horizon: int, budget: int, samples: int, repeats: int, seed: int, device: str) -> list[float]:
+def seconds_per_sample(environment: object, plan: object, horizon: int, budget: int, samples: int, repeats: int, seed: int, device: str, label: str) -> list[float]:
     timings = []
 
     for repeat in range(repeats):
@@ -37,7 +37,9 @@ def seconds_per_sample(environment: object, plan: object, horizon: int, budget: 
         if device.startswith("cuda"):
             torch.cuda.synchronize()
 
-        timings.append((time.perf_counter() - start) / samples)
+        elapsed = time.perf_counter() - start
+        timings.append(elapsed / samples)
+        print(f"  {label} rollout {repeat + 1}/{repeats}: {elapsed:.1f} s for {samples} -> {1000 * elapsed / samples:.2f} ms each", flush=True)
 
     return timings
 
@@ -67,19 +69,23 @@ if __name__ == "__main__":
     def plan(state: object, timestep: int) -> list:
         return [ActionOp("add_node", int(node)) for node in seeds] if timestep == 0 else []
 
+    task, dataset = args.run_dir.parts[-3], args.run_dir.parts[-2]
     results_json = args.run_dir / "world_model" / f"{args.wm_model}_{args.diffusion_model}.json"
     world_model = WorldModelEnvironment.from_results_json(str(results_json), graph, device=args.device, n_samples=args.wm_samples, base_seed=args.seed)
     monte_carlo = MonteCarloEnvironment(graph, args.diffusion_model, mc_runs=args.mc_episodes, base_seed=args.seed, remove_semantics=world_model.remove_semantics)
 
-    # the first call on a device pays for kernel start-up, which is not the model's speed
-    world_model.rollout(plan, args.horizon, budget, seed=args.seed - 1)
+    print(f"{dataset}: {graph.num_nodes:,} nodes, {graph.edge_index.shape[1]:,} arcs, {budget} seeds, horizon {args.horizon}, world model on {args.device}", flush=True)
 
-    wm_timings = seconds_per_sample(world_model, plan, args.horizon, budget, args.wm_samples, args.repeats, args.seed, args.device)
-    mc_timings = seconds_per_sample(monte_carlo, plan, args.horizon, budget, args.mc_episodes, args.repeats, args.seed, "cpu")
+    # the first call on a device pays for kernel start-up, which is not the model's speed
+    start = time.perf_counter()
+    world_model.rollout(plan, args.horizon, budget, seed=args.seed - 1)
+    print(f"  warm-up rollout: {time.perf_counter() - start:.1f} s", flush=True)
+
+    wm_timings = seconds_per_sample(world_model, plan, args.horizon, budget, args.wm_samples, args.repeats, args.seed, args.device, "world model")
+    mc_timings = seconds_per_sample(monte_carlo, plan, args.horizon, budget, args.mc_episodes, args.repeats, args.seed, "cpu", "Monte Carlo")
     wm_seconds = statistics.median(wm_timings)
     mc_seconds = statistics.median(mc_timings)
 
-    task, dataset = args.run_dir.parts[-3], args.run_dir.parts[-2]
     summary = {
         "run_dir": str(args.run_dir),
         "num_nodes": int(graph.num_nodes),
@@ -106,7 +112,6 @@ if __name__ == "__main__":
     ]
     plot_runtime(rows, args.out_dir / f"{task}_{dataset}.png", f"{dataset} ({graph.num_nodes:,} nodes)")
 
-    print(f"{dataset}: {graph.num_nodes:,} nodes, {budget} seeds, horizon {args.horizon}, world model on {args.device}")
     print(f"  world model : {1000 * wm_seconds:9.2f} ms per sample   (median of {args.repeats} x {args.wm_samples} samples)")
     print(f"  Monte Carlo : {1000 * mc_seconds:9.2f} ms per episode  (median of {args.repeats} x {args.mc_episodes} NDlib episodes)")
     ratio = max(mc_seconds, wm_seconds) / min(mc_seconds, wm_seconds)
