@@ -2094,6 +2094,8 @@ Everything outside the main tables. Two hosts only, chosen for speed: influence 
 
 **Budgets.** The helpers default to `BUDGET_PCTS="10"` alone. The three subsections that compare search results against the main table (9.3, 9.4, 9.5) pass `BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10` instead, which is what the main runs do: the search happens once, at 10 percent, and its winning program is replanned at 1, 5 and 20 percent and scored through the canned path, referee included, with no further LLM calls (`transferred_from` marks those rows). That costs minutes per run on these two graphs. Since 2026-09-20 the same transfer covers a `discovery:<name>` row, which before then would have rerun the whole framework at every budget.
 
+**A training run must name a world-model arm.** The pipeline skips the train stage whenever no arm evaluates against the world model (`active_stages` in `pipeline/run.py`), and the helpers default to `ARMS=none`, so `START_STAGE=train END_STAGE=train` on its own submits a job that trains nothing and exits in seconds (that is what the first 9.6 submission on 2026-09-21 did: ten jobs, no checkpoints). Every command that trains therefore carries `ARMS="baseline:<name>@world_model"`; with `END_STAGE=train` the arm is never run, it only tells the pipeline the checkpoint is wanted.
+
 **Nothing is overwritten.** Every run has its own `RUN` name starting with `abl_` and its own `JOB_NAME` starting with `abl_im_` or `abl_cnd_`. No command in this section writes into `final_ic`. Runs that reuse the main world model copy `data/` and `world_model/`; runs that retrain copy `data/` only, because a copied checkpoint would be reused by the train stage and the run would silently train nothing.
 
 **GPU.** Each subsection states it. In short: training needs a GPU; a search or a canned row with the world model as evaluator runs on either (these graphs are small enough for CPU, a GPU only shortens the evaluator share); the timing runs of 9.1 and 9.2 must use a GPU, since the world model's speed on the hardware it is meant for is what they measure; oracle-only, Monte Carlo, native and discovery runs need none. The helpers default to `GRES=none`, and GPU runs pass `GRES=gpu:1`.
@@ -2129,9 +2131,9 @@ Run them from the repo root with the project's virtualenv active, so `srun` carr
 
 ### 9.2 World model against Monte Carlo, timed, on digg
 
-The same script on the scale graph, in two steps because the first attempt (2026-09-21, `--mc-episodes 20 --repeats 3` under a one-hour limit) timed out with nothing written. The script prints every rollout as it finishes, so a second attempt shows where the time goes; the first attempt predated that output and left no trace. The two costs that make digg different: one NDlib episode is about 14 s here (measured on a laptop CPU, so the node may differ either way), and one 200-sample world-model rollout was 156 s on PDE's GPU on 2026-09-08. The 25-minute estimate that was here assumed both of those numbers hold on the timing node, and the timeout says at least one of them does not.
+The same script on the scale graph, in two steps. The first attempt (2026-09-21, `--mc-episodes 20 --repeats 3` under a one-hour limit) timed out with nothing written, because its 25-minute estimate rested on rates from two other machines. A sizing run then measured the rates on the timing node itself: **2.4 s per world-model sample and 36 s per NDlib episode**, about 2.5 to 3 times slower on both sides than the earlier numbers (0.8 s per sample on PDE's GPU on 2026-09-08, 14 s per episode on a laptop), so the first attempt needed about 68 minutes. Per sample the world model is **15 times faster** than Monte Carlo here, against about 3 times on Network Science, which is the widening the Cost paragraph claims.
 
-**Step 1, sizing.** One rollout per side, 5 NDlib episodes, 40 world-model samples, under 30 minutes. Read the two per-sample figures it prints, then set step 2's counts and limit from them.
+**Step 1, sizing** (done 2026-09-21). One rollout per side, 40 world-model samples, 5 NDlib episodes, written to `results/timing_sizing/` so it does not overwrite the measurement. Its two per-sample figures are the ones above; rerun it only if the node changes.
 
 ```bash
 srun --gres=gpu:1 --cpus-per-task=8 --mem=62G --time=00:30:00 $SBATCH_ARGS \
@@ -2139,15 +2141,15 @@ srun --gres=gpu:1 --cpus-per-task=8 --mem=62G --time=00:30:00 $SBATCH_ARGS \
     --wm-samples 40 --mc-episodes 5 --repeats 1 --out-dir results/timing_sizing
 ```
 
-**Step 2, the measurement.** Full sample counts, three repeats, four hours. At the figures above this is about an hour (a 2.6 minute warm-up, 8 minutes of world model, 14 minutes of NDlib); the limit leaves room for the node being slower on either side.
+**Step 2, the measurement.** The sizing counts with three repeats, so the digg panel is a median of three like the other two. The counts stay small because the per-sample figure does not depend on them: the world model runs two samples per chunk on this graph whatever the total, and an NDlib episode is the same computation whether 5 or 20 are averaged. **About 15 minutes** at the measured rates (a 1.6 minute warm-up, 4.8 minutes of world model, 9 minutes of NDlib), under a two-hour limit.
 
 ```bash
-srun --gres=gpu:1 --cpus-per-task=8 --mem=62G --time=04:00:00 $SBATCH_ARGS \
+srun --gres=gpu:1 --cpus-per-task=8 --mem=62G --time=02:00:00 $SBATCH_ARGS \
   python -m scripts.time_evaluators --run-dir results/influence_maximization/digg/final_ic \
-    --mc-episodes 20 --repeats 3
+    --wm-samples 40 --mc-episodes 5 --repeats 3
 ```
 
-**Needs a GPU** and the finished digg run on the same machine. If step 1 shows the world model far above 0.8 s per sample, the GPU is not doing the work: check that `world model on cuda` is printed (a `cpu` there means the venv's torch has no CUDA on that node), and that the node is not shared.
+**Needs a GPU** and the finished digg run on the same machine. The first line of the output must say `world model on cuda`; a `cpu` there means the venv's torch has no CUDA on that node, and the world-model figure is then not the one to report.
 
 ### 9.3 LLM comparison
 
@@ -2277,10 +2279,10 @@ Training only. `message` conditioning exists for GraphSAGE alone, so all five tr
 for b in sage gat gcn gcnii gt; do layers=3; [ "$b" = gcnii ] && layers=8
   copy_run influence_maximization netscience abl_wm_$b data
   im_abl RUN=abl_wm_$b JOB_NAME=abl_im_wm_$b GRES=gpu:1 START_STAGE=train END_STAGE=train \
-    WM_MODEL=$b N_LAYERS=$layers ACTION_CONDITIONING=none
+    WM_MODEL=$b N_LAYERS=$layers ACTION_CONDITIONING=none ARMS="baseline:high_degree@world_model"
   copy_run critical_node_detection power_grid abl_wm_$b data
   cnd_abl RUN=abl_wm_$b JOB_NAME=abl_cnd_wm_$b GRES=gpu:1 START_STAGE=train END_STAGE=train \
-    WM_MODEL=$b N_LAYERS=$layers ACTION_CONDITIONING=none
+    WM_MODEL=$b N_LAYERS=$layers ACTION_CONDITIONING=none ARMS="baseline:adaptive_degree@world_model"
 done
 
 for host in influence_maximization/netscience critical_node_detection/power_grid; do
@@ -2342,8 +2344,10 @@ done
 
 ```bash
 im_abl RUN=abl_wm_noaction JOB_NAME=abl_im_wm_noaction GRES=gpu:1 START_STAGE=data END_STAGE=train \
+  ARMS="baseline:high_degree@world_model" \
   GEN_ACTION_OPS=none ACTION_CONDITIONING=none NO_PLAN_DEMO=1
 cnd_abl RUN=abl_wm_noaction JOB_NAME=abl_cnd_wm_noaction GRES=gpu:1 START_STAGE=data END_STAGE=train \
+  ARMS="baseline:adaptive_degree@world_model" \
   GEN_ACTION_OPS=none ACTION_CONDITIONING=none NO_PLAN_DEMO=1
 
 copy_run influence_maximization netscience abl_wm_reference
@@ -2365,7 +2369,7 @@ done
 | Section | Runs per host | Stages run | GPU | Time per run | LLM calls per run |
 | --- | --- | --- | --- | --- | --- |
 | 9.1 timing on the two hosts (one script, world model against NDlib) | 1 | none, reads `final_ic` | required | under 1 min | 0 |
-| 9.2 timing on digg (same script, sizing run first) | 2 in total | none, reads `final_ic` | required | about 1 h, 4 h limit | 0 |
+| 9.2 timing on digg (same script, sizing run done) | 1 left | none, reads `final_ic` | required | about 15 min | 0 |
 | 9.3 LLM comparison (four budgets, search at pct10) | 3 | agent to report | no | 20 to 45 min | about 30 (1 arm, probes on) |
 | 9.4 evaluator noise (four budgets, search at pct10) | 3 | agent to report | optional | about 1.5 h | about 60 (2 arms, about 30 each) |
 | 9.5 discovery baselines (four budgets, search at pct10) | 2 new per host, 5 on digg, plus 5 capped runs per graph | agent to report | no | 0.5 to 2 h per host, 0.5 to 3 h on digg; minutes when capped | 20 to 130; 5 when capped |
