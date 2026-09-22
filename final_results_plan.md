@@ -2189,18 +2189,42 @@ EOF
 
 ### 9.5 Algorithm-discovery baselines
 
-FunSearch, EoH and OpenEvolve at their own defaults: nothing about their loops is overridden, `DISCOVERY_SMOKE` must be unset, and `OUTER_ITERS` does not apply to them. Their LLM is `gpt-5.6-terra` (`LLM_MODEL` on the call, which `baselines/discovery.py` hands to each framework's own config), not the helpers' `gpt-6-astra`; the matching row of ours is therefore 9.3's `abl_llm_terra`, the same search under the same model, rather than the main run's `gpt-6-astra` row. The frameworks build their own API requests, so `REASONING_EFFORT` does not reach them: they call the model at the gateway's default effort while our arms call it at `high`, and a table that compares the two says so. They search against the oracle simulator and never see the world model. Evaluated programs at default: FunSearch 20, EoH 110, OpenEvolve 100, against about 10 for our search, so report `external.info` beside each score. **No GPU.** FunSearch is under half an hour, the other two one to two hours. One run directory per system, so the three can run at once. Four budgets under the same rule as our own arms: the framework runs once, at 10 percent, and the program it returns is replanned at 1, 5 and 20 percent and replayed on the referee, so each side of the comparison gets exactly one search. Those three rows launch nothing and cost seconds. These are the only discovery runs in the plan: section 8's per-task discovery loops were removed on 2026-09-20.
+Five published systems at their own defaults: FunSearch, EoH, OpenEvolve, LLaMEA and ReEvo. Nothing about their loops is overridden, `DISCOVERY_SMOKE` must be unset, and `OUTER_ITERS` does not apply to them. Their LLM is `gpt-5.6-terra` (`LLM_MODEL` on the call, which `baselines/discovery.py` hands to each framework's own config), not the helpers' `gpt-6-astra`; the matching row of ours is therefore 9.3's `abl_llm_terra`, the same search under the same model, rather than the main run's `gpt-6-astra` row. The frameworks build their own API requests, so `REASONING_EFFORT` does not reach them: they call the model at the gateway's default effort while our arms call it at `high`, and a table that compares the two says so. They search against the oracle simulator and never see the world model. Evaluated programs at default: FunSearch 20, EoH 110, OpenEvolve 100, LLaMEA 100, ReEvo 100, against about 10 for our search, so report `external.info` beside each score. **No GPU.** On the two hosts FunSearch is under half an hour and the other four one to two hours each; on digg, where one 200-sample oracle evaluation costs about a minute, FunSearch is about half an hour and the other four about three hours each (unmeasured; scaled from the per-call and per-evaluation costs). One run directory per system, so every job can run at once. Four budgets under the same rule as our own arms: the framework runs once, at 10 percent, and the program it returns is replanned at 1, 5 and 20 percent and replayed on the referee, so each side of the comparison gets exactly one search. Those three rows launch nothing and cost seconds. These are the only discovery runs in the plan: section 8's per-task discovery loops were removed on 2026-09-20.
+
+Two systems ReEvo and LLaMEA need that the first three did not: ReEvo's initial population is one request with `n=30`, which our gateway collapses to one choice, so its adapter replicates the request (`baselines/discovery.py`); and LLaMEA has no per-evaluation timeout of its own, so a runaway candidate is bounded only by the scorer's own limit. Neither needs anything from the caller.
+
+**The two hosts, LLaMEA and ReEvo only.** FunSearch, EoH and OpenEvolve already have their `abl_disc_*` runs on `netscience` and `power_grid`, so this loop adds the two new systems without touching those directories.
 
 ```bash
-python -m baselines.setup_baselines --only llm4ad_funsearch eoh openevolve
+python -m baselines.setup_baselines --only llamea reevo
 
-for s in llm4ad_funsearch eoh openevolve; do
+for s in llamea reevo; do
   copy_run influence_maximization netscience abl_disc_$s
   im_abl RUN=abl_disc_$s JOB_NAME=abl_im_disc_$s START_STAGE=agent LLM_MODEL=gpt-5.6-terra \
     BASELINES="discovery:$s" BASELINE_TIMEOUT=86400 TIME=30:00:00 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
   copy_run critical_node_detection power_grid abl_disc_$s
   cnd_abl RUN=abl_disc_$s JOB_NAME=abl_cnd_disc_$s START_STAGE=agent LLM_MODEL=gpt-5.6-terra \
     BASELINES="discovery:$s" BASELINE_TIMEOUT=86400 TIME=30:00:00 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+done
+```
+
+**All five on digg.** Influence maximization on the scale graph, everything else as the two hosts. The helpers are not used because their defaults are the medium tier; the command below carries the digg row's own settings from section 8 (`ROLLOUTS=20 MC_MARGINALS=20 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10`, referee at 200 samples, 8 CPUs, 62 GB) with `GRES=none`, since a discovery row never touches the world model. `copy_run ... data` copies `data/` alone (several GB; `ln -s` in its place is safe, the data is only read), and no `world_model/` is needed: the agent stage asks for a checkpoint only when an arm evaluates against the world model, and `discovery:<name>` never does. `BASELINE_TIMEOUT=172800` gives a framework two days, under the three-day walltime.
+
+```bash
+python -m baselines.setup_baselines --only llm4ad_funsearch eoh openevolve llamea reevo
+
+for s in llm4ad_funsearch eoh openevolve llamea reevo; do
+  copy_run influence_maximization digg abl_disc_$s data
+  env TASK=influence_maximization DATASET=digg RUN=abl_disc_$s RUN_JOBID=0 JOB_NAME=abl_im_digg_disc_$s \
+    DIFFUSION_MODEL=IC GEN_MODELS=IC START_STAGE=agent ARMS=none BASELINES="discovery:$s" \
+    LLM_MODEL=gpt-5.6-terra REASONING_EFFORT=high \
+    WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+    ROLLOUTS=20 MC_MARGINALS=20 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=0 \
+    EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
+    HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+    MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=172800 STRATEGY_TIMEOUT=1800 \
+    FEEDBACK=default ACTION_CONDITIONING=message \
+    CPUS=8 GRES=none MEM=62G TIME=3-00:00:00 ./sbatch/pipeline.sbatch
 done
 ```
 
@@ -2303,7 +2327,7 @@ done
 | 9.2 timing on digg (same script) | 1 in total | none, reads `final_ic` | required | about 25 min | 0 |
 | 9.3 LLM comparison (four budgets, search at pct10) | 3 | agent to report | no | 20 to 45 min | about 30 (1 arm, probes on) |
 | 9.4 evaluator noise (four budgets, search at pct10) | 3 | agent to report | optional | about 1.5 h | about 60 (2 arms, about 30 each) |
-| 9.5 discovery baselines (four budgets, search at pct10) | 3 | agent to report | no | 0.5 to 2 h | 20 to 110 |
+| 9.5 discovery baselines (four budgets, search at pct10) | 2 new per host, 5 on digg | agent to report | no | 0.5 to 2 h per host, 0.5 to 3 h on digg | 20 to 130 |
 | 9.6 backbones | 5 | train | required | about 11 min | 0 |
 | 9.7 hidden weights | 2 | train to report, agent to report | training only | about 15 min | 0 |
 | 9.8 horizon | 1 | data, then a script | no | under 1 h | 0 |
