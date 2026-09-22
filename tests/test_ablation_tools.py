@@ -1,3 +1,9 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from pipeline.plots import plot_runtime
 from scripts.compare_world_models import bias_at, table_row
 
@@ -45,3 +51,33 @@ def test_timing_reports_seconds_per_sample_once_per_repeat() -> None:
     # one timed rollout per repeat, each on its own seed, each divided by the sample count
     assert calls == [42, 43, 44]
     assert len(timings) == 3 and all(0 <= value < 1e-3 for value in timings)
+
+
+def test_backbone_comparison_writes_the_report_and_every_figure_in_both_formats(tmp_path: Path) -> None:
+    results = {
+        "config": {"model": "sage", "hidden_dim": 8, "n_layers": 2, "action_conditioning": None},
+        "test": {"delta_f1": 0.8, "brier_infected": 0.01, "calibration_infected": {"mean_predicted": [0.1, 0.9], "mean_target": [0.12, 0.88], "ece": 0.01}},
+        "rollout": {"count_model_curve": [10.0, 20.0], "count_true_curve": [11.0, 21.0], "ens_count_bias": -1.0, "ens_final_count_true": 21.0, "ens_marg_mae": 0.03},
+        "action_conditioning": {"ablation": {"null_delta_f1_drop": 0.7}, "counterfactual_effect": {"effect_pearson": 0.9, "per_op": {"add_node": {"effect_pearson": 0.9}}}},
+        "train_seconds": 60.0,
+        "best_val_delta_f1": 0.79,
+        "history": [{"epoch": 0, "val_delta_f1": 0.7}, {"epoch": 1, "val_delta_f1": 0.79}],
+    }
+    host = tmp_path / "results" / "influence_maximization" / "toy"
+    for label in ("sage", "gat"):
+        run_dir = host / f"abl_wm_{label}" / "world_model"
+        run_dir.mkdir(parents=True)
+        (run_dir / f"{label}_IC.json").write_text(json.dumps({**results, "config": {**results["config"], "model": label}}))
+
+    subprocess.run(
+        [sys.executable, "-m", "scripts.compare_backbones", "--host", "influence_maximization/toy", "--runs", "sage=abl_wm_sage", "gat=abl_wm_gat"],
+        cwd=tmp_path, check=True, env={**os.environ, "PYTHONPATH": str(Path.cwd())},
+    )
+
+    out = host / "backbone_comparison"
+    report = (out / "comparison.md").read_text()
+    assert "| sage |" in report and "| gat |" in report
+    # the link target is what follows the caption's closing bracket: ![caption](file.png)
+    linked = [line.rsplit("](", 1)[1].rstrip(")") for line in report.splitlines() if line.startswith("![")]
+    assert linked and all((out / name).exists() and (out / name).with_suffix(".pdf").exists() for name in linked)
+

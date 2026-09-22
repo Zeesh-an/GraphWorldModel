@@ -2100,7 +2100,7 @@ Everything outside the main tables. Two hosts only, chosen for speed: influence 
 
 **GPU.** Each subsection states it. In short: training needs a GPU; a search or a canned row with the world model as evaluator runs on either (these graphs are small enough for CPU, a GPU only shortens the evaluator share); the timing runs of 9.1 and 9.2 must use a GPU, since the world model's speed on the hardware it is meant for is what they measure; oracle-only, Monte Carlo, native and discovery runs need none. The helpers default to `GRES=none`, and GPU runs pass `GRES=gpu:1`.
 
-**Six code changes this section relies on** (in the repository since 2026-09-20): `DISCOVERY_MAX_PROGRAMS` caps every discovery system at that many evaluated programs (9.5's matched-budget rows, added 2026-09-21); `scripts/time_evaluators.py` times the world model against NDlib with nothing else in the way (9.1 and 9.2, added 2026-09-21); `SEARCH_BUDGET` transfers a discovery system's program as it does an LLM arm's; `plot_runtime` draws a second figure, `plots/runtime_with_oracle.png`, beside `plots/runtime.png`, and its title now states the ratio in whichever direction it goes; `GEN_ACTION_OPS=none` asks for a diffusion-only dataset (the pipeline flag accepts an empty list); `scripts/compare_world_models.py` prints one table across world-model results files, including the count bias after 1, 2, 5, 10 and 20 steps.
+**Seven code changes this section relies on** (in the repository since 2026-09-20): `scripts/compare_backbones.py` turns 9.6's five checkpoints into a markdown report with figures (added 2026-09-22); `DISCOVERY_MAX_PROGRAMS` caps every discovery system at that many evaluated programs (9.5's matched-budget rows, added 2026-09-21); `scripts/time_evaluators.py` times the world model against NDlib with nothing else in the way (9.1 and 9.2, added 2026-09-21); `SEARCH_BUDGET` transfers a discovery system's program as it does an LLM arm's; `plot_runtime` draws a second figure, `plots/runtime_with_oracle.png`, beside `plots/runtime.png`, and its title now states the ratio in whichever direction it goes; `GEN_ACTION_OPS=none` asks for a diffusion-only dataset (the pipeline flag accepts an empty list); `scripts/compare_world_models.py` prints one table across world-model results files, including the count bias after 1, 2, 5, 10 and 20 steps.
 
 The three helpers live in `sbatch/ablation_helpers.sh`, the one copy of them, so every cluster gets the current version with `git pull`. Source it once per shell, from the repo root; the functions last only as long as that shell, so a new login, SSH session or tmux pane sources it again (`type im_abl cnd_abl copy_run` prints them when they are loaded). On a machine without SLURM, put `SLURM_JOB_ID=local` in front of a call, as in section 8.0.
 
@@ -2286,10 +2286,12 @@ for b in sage gat gcn gcnii gt; do layers=3; [ "$b" = gcnii ] && layers=8
 done
 
 for host in influence_maximization/netscience critical_node_detection/power_grid; do
-  python -m scripts.compare_world_models $(for b in sage gat gcn gcnii gt; do
-    echo "$b=results/$host/abl_wm_$b/world_model/${b}_IC.json"; done)
+  python -m scripts.compare_backbones --host $host \
+    --runs sage=abl_wm_sage gat=abl_wm_gat gcn=abl_wm_gcn gcnii=abl_wm_gcnii gt=abl_wm_gt
 done
 ```
+
+`scripts/compare_backbones.py` (added 2026-09-22) writes `results/<host>/backbone_comparison/comparison.md`, the same table `compare_world_models` prints plus a configuration table, and eleven figures in PNG and PDF that the markdown links: one-step delta F1, Brier, final count bias, marginal MAE, action dependence, training time, the rollout count against the simulator by step, the rollout bias by step, the validation curves, calibration, and the action-effect Pearson per op. It runs on the login node in seconds and reads only the five results files. A run with fewer than five finished checkpoints can be compared by dropping the missing `label=run` pairs.
 
 ### 9.7 Hidden edge weights
 
