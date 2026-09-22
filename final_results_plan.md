@@ -2098,7 +2098,7 @@ Everything outside the main tables. Two hosts only, chosen for speed: influence 
 
 **GPU.** Each subsection states it. In short: training needs a GPU; a search or a canned row with the world model as evaluator runs on either (these graphs are small enough for CPU, a GPU only shortens the evaluator share); the timing runs of 9.1 and 9.2 must use a GPU, since the world model's speed on the hardware it is meant for is what they measure; oracle-only, Monte Carlo, native and discovery runs need none. The helpers default to `GRES=none`, and GPU runs pass `GRES=gpu:1`.
 
-**Five code changes this section relies on** (in the repository since 2026-09-20): `scripts/time_evaluators.py` times the world model against NDlib with nothing else in the way (9.1 and 9.2, added 2026-09-21); `SEARCH_BUDGET` transfers a discovery system's program as it does an LLM arm's; `plot_runtime` draws a second figure, `plots/runtime_with_oracle.png`, beside `plots/runtime.png`, and its title now states the ratio in whichever direction it goes; `GEN_ACTION_OPS=none` asks for a diffusion-only dataset (the pipeline flag accepts an empty list); `scripts/compare_world_models.py` prints one table across world-model results files, including the count bias after 1, 2, 5, 10 and 20 steps.
+**Six code changes this section relies on** (in the repository since 2026-09-20): `DISCOVERY_MAX_PROGRAMS` caps every discovery system at that many evaluated programs (9.5's matched-budget rows, added 2026-09-21); `scripts/time_evaluators.py` times the world model against NDlib with nothing else in the way (9.1 and 9.2, added 2026-09-21); `SEARCH_BUDGET` transfers a discovery system's program as it does an LLM arm's; `plot_runtime` draws a second figure, `plots/runtime_with_oracle.png`, beside `plots/runtime.png`, and its title now states the ratio in whichever direction it goes; `GEN_ACTION_OPS=none` asks for a diffusion-only dataset (the pipeline flag accepts an empty list); `scripts/compare_world_models.py` prints one table across world-model results files, including the count bias after 1, 2, 5, 10 and 20 steps.
 
 The three helpers live in `sbatch/ablation_helpers.sh`, the one copy of them, so every cluster gets the current version with `git pull`. Source it once per shell, from the repo root; the functions last only as long as that shell, so a new login, SSH session or tmux pane sources it again (`type im_abl cnd_abl copy_run` prints them when they are loaded). On a machine without SLURM, put `SLURM_JOB_ID=local` in front of a call, as in section 8.0.
 
@@ -2240,6 +2240,35 @@ for s in llm4ad_funsearch eoh openevolve llamea reevo; do
 done
 ```
 
+**Matched budget, five programs each.** The same five systems capped at 5 evaluated programs, which is about what our own 10-generation search evaluates once its rejected candidates are set aside, so a row here and 9.3's `abl_llm_terra` row spent the same number of scored programs. `DISCOVERY_MAX_PROGRAMS=5` is read by `baselines/discovery.py` when the context is built and applied inside each adapter to the framework's own budget knob (OpenEvolve `max_iterations`, LLaMEA `budget`, FunSearch `max_sample_nums`, ReEvo `max_fe` with the population sizes shrunk to fit inside it, EoH `pop_size` 1 with 3 evolution samples after the 2 initial ones); nothing else about a loop changes, and unset it keeps the published defaults above. The variable travels to the job through `--export=ALL` like `DISCOVERY_SMOKE` does. Run directories and job names carry `_5iter` so nothing overwrites the default-budget rows. **No GPU.** About 5 LLM calls per run, so a few minutes each on the hosts and under half an hour on digg, where each evaluation costs about a minute.
+
+```bash
+# the two hosts
+for s in llm4ad_funsearch eoh openevolve llamea reevo; do
+  copy_run influence_maximization netscience abl_disc_5iter_$s
+  DISCOVERY_MAX_PROGRAMS=5 im_abl RUN=abl_disc_5iter_$s JOB_NAME=abl_im_disc_5iter_$s START_STAGE=agent LLM_MODEL=gpt-5.6-terra \
+    BASELINES="discovery:$s" BASELINE_TIMEOUT=86400 TIME=06:00:00 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+  copy_run critical_node_detection power_grid abl_disc_5iter_$s
+  DISCOVERY_MAX_PROGRAMS=5 cnd_abl RUN=abl_disc_5iter_$s JOB_NAME=abl_cnd_disc_5iter_$s START_STAGE=agent LLM_MODEL=gpt-5.6-terra \
+    BASELINES="discovery:$s" BASELINE_TIMEOUT=86400 TIME=06:00:00 BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10
+done
+
+# digg
+for s in llm4ad_funsearch eoh openevolve llamea reevo; do
+  copy_run influence_maximization digg abl_disc_5iter_$s data
+  DISCOVERY_MAX_PROGRAMS=5 env TASK=influence_maximization DATASET=digg RUN=abl_disc_5iter_$s RUN_JOBID=0 JOB_NAME=abl_im_digg_disc_5iter_$s \
+    DIFFUSION_MODEL=IC GEN_MODELS=IC START_STAGE=agent ARMS=none BASELINES="discovery:$s" \
+    LLM_MODEL=gpt-5.6-terra REASONING_EFFORT=high \
+    WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+    ROLLOUTS=20 MC_MARGINALS=20 HIDDEN_DIM=128 BATCH_SIZE=2 EPOCHS=60 PATIENCE=10 NO_PLAN_DEMO=0 \
+    EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" SEARCH_BUDGET=pct10 \
+    HORIZON=10 OUTER_ITERS=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+    MC_AGREEMENT=0 CREDIT=1 SEED=42 BASELINE_TIMEOUT=43200 STRATEGY_TIMEOUT=1800 \
+    FEEDBACK=default ACTION_CONDITIONING=message \
+    CPUS=8 GRES=none MEM=62G TIME=12:00:00 ./sbatch/pipeline.sbatch
+done
+```
+
 ### 9.6 World-model backbones
 
 Training only. `message` conditioning exists for GraphSAGE alone, so all five train under `ACTION_CONDITIONING=none`, including a fresh GraphSAGE run: comparing the other four with the main `message` checkpoint would mix two variables. GCNII gets the 8 layers its design is for, the rest keep 3. `data/` only is copied. **Needs a GPU.** About 11 minutes each on netscience.
@@ -2339,7 +2368,7 @@ done
 | 9.2 timing on digg (same script, sizing run first) | 2 in total | none, reads `final_ic` | required | about 1 h, 4 h limit | 0 |
 | 9.3 LLM comparison (four budgets, search at pct10) | 3 | agent to report | no | 20 to 45 min | about 30 (1 arm, probes on) |
 | 9.4 evaluator noise (four budgets, search at pct10) | 3 | agent to report | optional | about 1.5 h | about 60 (2 arms, about 30 each) |
-| 9.5 discovery baselines (four budgets, search at pct10) | 2 new per host, 5 on digg | agent to report | no | 0.5 to 2 h per host, 0.5 to 3 h on digg | 20 to 130 |
+| 9.5 discovery baselines (four budgets, search at pct10) | 2 new per host, 5 on digg, plus 5 capped runs per graph | agent to report | no | 0.5 to 2 h per host, 0.5 to 3 h on digg; minutes when capped | 20 to 130; 5 when capped |
 | 9.6 backbones | 5 | train | required | about 11 min | 0 |
 | 9.7 hidden weights | 2 | train to report, agent to report | training only | about 15 min | 0 |
 | 9.8 horizon | 1 | data, then a script | no | under 1 h | 0 |

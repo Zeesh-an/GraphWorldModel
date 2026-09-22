@@ -569,6 +569,13 @@ def build_context(
         # A smoke run shrinks every framework's budget to a handful of samples so
         # the adapter can be exercised end to end without a day of LLM calls
         "smoke": os.environ.get("DISCOVERY_SMOKE") == "1",
+        # A matched-budget run caps every framework at this many evaluated
+        # programs; unset keeps the published defaults, which is the headline row
+        "max_programs": (
+            int(os.environ["DISCOVERY_MAX_PROGRAMS"])
+            if os.environ.get("DISCOVERY_MAX_PROGRAMS")
+            else None
+        ),
     }
 
 
@@ -873,6 +880,11 @@ def _smoke(context: dict) -> bool:
     return bool(context.get("smoke"))
 
 
+def _max_programs(context: dict) -> int | None:
+    """The matched-budget cap on evaluated programs, or None for the published default."""
+    return context.get("max_programs")
+
+
 def _read_best(path: Path, name: str) -> str:
     if not path.exists():
         raise FileNotFoundError(
@@ -954,6 +966,8 @@ def _openevolve_export(graph, work_dir: Path, budget: int, diffusion_model: str)
     if _smoke(context):
         config["max_iterations"] = 2
         config["evaluator"]["parallel_evaluations"] = 1
+    elif _max_programs(context) is not None:
+        config["max_iterations"] = _max_programs(context)
 
     with open(Path(work_dir) / "config.yaml", "w") as handle:
         yaml.safe_dump(config, handle, sort_keys=False)
@@ -1082,6 +1096,11 @@ def _codeevolve_export(graph, work_dir: Path, budget: int, diffusion_model: str)
 
     if _smoke(context):
         config["EVOLVE_CONFIG"]["num_epochs"] = 2
+        config["EVOLVE_CONFIG"]["num_islands"] = 1
+        config["EVOLVE_CONFIG"]["init_pop"] = 1
+    elif _max_programs(context) is not None:
+        # one island, one program per epoch, one initial program: the cap is the epoch count
+        config["EVOLVE_CONFIG"]["num_epochs"] = max(1, _max_programs(context) - 1)
         config["EVOLVE_CONFIG"]["num_islands"] = 1
         config["EVOLVE_CONFIG"]["init_pop"] = 1
 
@@ -1246,7 +1265,7 @@ def _llamea_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> 
         "```python\n" + contract["initial_program"].rstrip() + "\n```"
     )
     # 100 evaluations is the constructor default and the paper's setting
-    search_budget = 3 if _smoke(context) else 100
+    search_budget = 3 if _smoke(context) else (_max_programs(context) or 100)
 
     driver = (
         _llamea_driver.replace("__TASK_PROMPT__", repr(task_prompt))
@@ -1341,8 +1360,16 @@ def _eoh_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> dic
     contract = context["contract"]
     write_scoring_glue(work_dir, context_path)
 
-    # pop_size 5, n_pop 20 and the four operators are EoH's own defaults
+    # pop_size 5, n_pop 20 and the four operators are EoH's own defaults. Under a
+    # cap the initial population (2 x pop_size) and the evolution budget
+    # (max_sample_nums) share it: a cap of 5 is pop_size 2 (4 initial) plus 1
     overrides = {"pop_size": 2, "n_pop": 1} if _smoke(context) else {}
+    if not _smoke(context) and _max_programs(context) is not None:
+        pop_size = max(1, _max_programs(context) // 4)
+        overrides = {
+            "pop_size": pop_size,
+            "max_sample_nums": max(1, _max_programs(context) - 2 * pop_size),
+        }
     driver = (
         _eoh_driver.replace("__WORK_DIR__", repr(str(Path(work_dir).resolve())))
         .replace("__TEMPLATE__", repr(contract["initial_program"]))
@@ -1462,6 +1489,11 @@ def _reevo_export(graph, work_dir: Path, budget: int, diffusion_model: str) -> d
     ]
     if _smoke(context):
         argv += ["max_fe=4", "pop_size=2", "init_pop_size=2"]
+    elif _max_programs(context) is not None:
+        # max_fe counts the initial population too, so the population sizes must
+        # fit inside it or the loop ends before any crossover
+        cap = _max_programs(context)
+        argv += [f"max_fe={cap}", f"pop_size={max(2, cap // 2)}", f"init_pop_size={max(2, cap // 2)}"]
 
     write_launcher(
         work_dir,
@@ -1525,6 +1557,9 @@ def _mcts_ahd_export(graph, work_dir: Path, budget: int, diffusion_model: str) -
     ]
     if _smoke(context):
         argv += ["max_fe=6", "pop_size=2", "init_pop_size=2"]
+    elif _max_programs(context) is not None:
+        cap = _max_programs(context)
+        argv += [f"max_fe={cap}", f"pop_size={max(2, cap // 2)}", f"init_pop_size={max(2, cap // 2)}"]
 
     write_launcher(
         work_dir,
@@ -1672,6 +1707,8 @@ def _llm4ad_export(
     overrides = (
         {"max_sample_nums": 3, "num_samplers": 1, "num_evaluators": 1}
         if _smoke(context)
+        else {"max_sample_nums": _max_programs(context)}
+        if _max_programs(context) is not None
         else {}
     )
     driver = (
@@ -1845,6 +1882,8 @@ def _deepevolve_export(graph, work_dir: Path, budget: int, diffusion_model: str)
     ]
     if _smoke(context):
         argv += ["max_iterations=1", "max_research_reflect=0", "max_coding_reflect=0"]
+    elif _max_programs(context) is not None:
+        argv += [f"max_iterations={_max_programs(context)}"]
 
     write_launcher(
         work_dir,

@@ -168,6 +168,21 @@ def test_context_round_trips_through_json(graph: GraphInfo, tmp_path: Path) -> N
     assert "edge_block" in problem_statement(loaded)
 
 
+def test_max_programs_cap_travels_in_the_context_and_defaults_off(
+    graph: GraphInfo, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    experiment = ExperimentConfig(task="influence_maximization", evaluator=monte_carlo)
+
+    monkeypatch.delenv("DISCOVERY_MAX_PROGRAMS", raising=False)
+    assert discovery._max_programs(build_context(experiment, "influence_maximization", "add_node", tmp_path, graph)) is None
+
+    monkeypatch.setenv("DISCOVERY_MAX_PROGRAMS", "5")
+    context = build_context(experiment, "influence_maximization", "add_node", tmp_path, graph)
+    assert discovery._max_programs(json.loads(json.dumps(context))) == 5
+    # the smoke switch still wins inside every adapter, and both are off by default
+    assert not discovery._smoke(context)
+
+
 def test_run_uid_is_unique_per_task_dataset_run_and_budget(tmp_path: Path) -> None:
     work = tmp_path / "critical_node_detection" / "jazz" / "r1" / "baselines" / "_runs" / "reevo" / "pct10"
 
