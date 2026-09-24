@@ -10,7 +10,7 @@ The experiment matrix for the paper's main results, revised 2026-09-04 after the
 | C2 Efficiency          | How much faster are imagined rollouts than MC or oracle simulation, including the amortized training cost? | `rollout_seconds` vs `mc_rollout_seconds` per rollout sample; `evaluator_seconds` spent by conditions 5 and 6 in the same search (condition 4 only where it is run as an ablation); `train_seconds` plus data-generation seconds, converted to a break-even rollout count. The scale rows are where this claim is largest and where `@monte_carlo` may not finish at all                                                             | T2               |
 | C3 Downstream utility  | Does planning with the GWM improve graph-task performance?                                                 | The ladder replayed on the shared oracle referee: conditions 3, 4, 5, 6 with the method fixed and only the evaluator varying, beside the five baselines; `planning_regret_multi` vs degree and random                                                                                                                                                                              | T3 (main), T1    |
 | C4 Algorithm discovery | Does GWM access let the coding agent find better algorithms under the same interaction budget?             | Condition 6 against condition 9 (three published discovery systems on the plain simulator) at reported `evaluator_calls`, `real_env_episodes` and `evaluator_seconds`; the write-up's trajectory, closest-classical and novelty sections as case studies                                                                                                                           | T4, case studies |
-| C5 Generalization      | Does this hold across datasets, sizes, topologies and dynamics?                                            | T3 repeated over the five datasets per task (medium, large and very large tiers, real and synthetic), IC and LT for every simulator task, SIR/SIS/SEIR for epidemic control, chronological vs random split for cascade prediction, one world model per dataset reused across tasks (`scripts/transfer_matrix.py`), program transfer for source localization (`--sl-transfer-from`) | T5               |
+| C5 Generalization      | Does this hold across datasets, sizes, topologies and dynamics?                                            | T3 repeated over the five datasets per task (medium, large and very large tiers, real and synthetic), IC and LT for every simulator task, SIR/SIS/SEIR for epidemic control, chronological vs random split for cascade prediction, one world model per dataset reused across tasks (`scripts/transfer_matrix.py`), program transfer for source localization (`--transfer-from`) | T5               |
 
 T1 and T2 come free with every run (the `## World Model` section of each report and the timing rows), so they are populated on every dataset in the matrix. T3 is the main table. T4 runs on the critical datasets only. T5 is T3 sliced by axis.
 
@@ -315,7 +315,7 @@ These are already the largest objects in the repo; there is no synthetic row by 
 
 **T4, algorithm discovery** (the two hosts of section 9.5, since the per-task discovery loops were removed on 2026-09-20): condition 6 against the three discovery systems at their published budgets, each row carrying `evaluator_calls`, `real_env_episodes`, `evaluator_seconds` and the LLM call count, plus the routed classical pool and the best single baseline for scale. Beside it, the case studies: for the winner of each critical dataset, the write-up's first-attempt-to-winner trajectory, its closest classical algorithm and the parts marked new, with the top twenty programs across all runs in the supplement.
 
-**T5, generalization**: T3 sliced four ways. By dataset and size tier (the five rows per task, medium through very large), by topology (the synthetic families against the real graphs, and the graphs with ground-truth communities, `email_eu_core` with its 42 departments and the `sbm` rows with their planted blocks, for the region diagnostics), by dynamics (IC against LT everywhere; SIR, SIS, SEIR for epidemic control; SIR at $\gamma = 1$ against IC once), and by transfer (one world model per dataset reused across the tasks that share its dynamics, from `scripts/transfer_matrix.py`; a source-localization program moved to another graph with `--sl-transfer-from`; the chronological against the random split for cascade prediction).
+**T5, generalization**: T3 sliced four ways. By dataset and size tier (the five rows per task, medium through very large), by topology (the synthetic families against the real graphs, and the graphs with ground-truth communities, `email_eu_core` with its 42 departments and the `sbm` rows with their planted blocks, for the region diagnostics), by dynamics (IC against LT everywhere; SIR, SIS, SEIR for epidemic control; SIR at $\gamma = 1$ against IC once), and by transfer (one world model per dataset reused across the tasks that share its dynamics, from `scripts/transfer_matrix.py`; a source-localization program moved to another graph with `--transfer-from`; the chronological against the random split for cascade prediction).
 
 ## 6. Run order and volume
 
@@ -2381,3 +2381,501 @@ done
 | 9.9 no-action model | 1 | data to train, then a script | training only | under 1 h | 0 |
 
 **Order.** Submit the training runs (9.6, 9.7, 9.9) and the two data-only runs (9.8) first: they are minutes each and need no gateway. Then 9.1 and 9.2, the two timing scripts, which take minutes and need only a GPU node and the finished main runs. Then the searches (9.3, 9.4, 9.5), which are bound by the gateway: together about 1,800 LLM calls across both hosts, so pace them to the plan's usage limit rather than to the cluster.
+
+## 10. Transfer experiments: one discovered program on every other graph of its task
+
+### 10.0 The question, and how a transfer runs
+
+**The question.** Every main-table row is a program the search wrote on the graph it is scored on. The transfer experiment asks whether that program is an algorithm or a fit: take the best program the search produced for a task, run it unmodified on the task's other graphs, and score it on the same referee against the same classical rows and against the program that was searched on that graph. `research/source_localization.md` §8.5.1 calls this the graph axis of the amortization claim, and it is a comparison no per-instance method can enter because there is nothing to transfer; section 10 extends it to all eight tasks. Nothing is searched, no LLM is called, and no world model is trained: a transfer run is a canned replay.
+
+**The mechanism** is `--transfer-from <arm results JSON>` (`TRANSFER_FROM` in `pipeline.sbatch`). It was `--transfer-from` until 2026-09-24, added for source localization alone, but the implementation never checked the task, so it was renamed; `--transfer-from` and `TRANSFER_FROM` still work as aliases, and the summary column is `transfer_from`. `coding_agent/run.py` reads the JSON's `script` field and runs it through the canned provider; `pipeline/run.py` forces `outer_iters` to 1; the arm's own evaluator scores the program once at `N_SAMPLES`, and the shared referee replays it at `REFEREE_SAMPLES` exactly as it replays every other arm. The program takes the budget as an argument, so one transfer run evaluates it at every point of the target's sweep (four percent points, five `k` points for influence blocking, the single 10 percent point for the two inverse tasks and cascade prediction). The row lands at `results/<task>/<target>/<run>/agent/<budget>/evolve_free@oracle.json` with `model` equal to `canned`, `condition` 5, `transfer_from` naming the source JSON, and the usual `referee_reward`, `referee_reward_se` and per-task metrics. `llm_usage.calls` reads 1 (the canned provider's one "call") with zero tokens. The probe turn, the credit block and the provenance ranking all check for a canned script and skip themselves.
+
+**Three code changes on 2026-09-24, all required.** The rename above; `pipeline/run.py` skips the gateway preflight when `--transfer-from` is set (the run never calls the gateway, and the preflight would otherwise refuse the job while the gateway is down, which it was that week), and `coding_agent/run.py` writes `transfer_from` into every task's result dict rather than only into the source-localization block. Commit and push both, then `git pull` on each cluster before submitting anything here; a cluster on the old code dies at the preflight. Verified before writing this section: the 462-test suite passes; a `DRY_RUN=1` of the nethept command below maps every variable to the flag it should (`--baselines` empty, `--arms evolve_free@oracle`, `--no-credit`, `--transfer-from`, train stage skipped, CPU-only allocation); and a local end-to-end smoke on a BA-100 graph ran the netscience influence-maximization program through the transfer path and produced a row with `transfer_from` set and no gateway contact.
+
+**Conventions, all of them load-bearing.**
+
+- `RUN=xfer_<source dataset>_<dynamics>` and `JOB_NAME=xfer_<task abbreviation>_<target>_<dynamics>`, so a transfer can never write into a `final_*` tree and two transfers of different sources onto one graph never collide. `RUN_JOBID=0`, as everywhere in section 8, so a resubmission resumes the same directory. Never `FORCE=1`.
+- The target's `data/` is reused through a symlink (`ln -s ../final_<dyn>/data`), the same device the node-lever blocking runs of 8.5 use. `stage_data` reuses any `data/` that carries a `metadata.json`, so nothing is regenerated, and the instance pools, outbreaks, rumours, masked cascades and replayed corpora the transferred program faces are byte-identical to the ones the target's own search faced, seed included.
+- `ARMS="evolve_free@oracle"` and `BASELINES=none`. The oracle arm is the right vehicle whatever evaluator the source program was found under: the program is fixed, so the evaluator only decides the one in-loop score, and the referee number is the same oracle replay every table reads. No world-model arm means the train stage is skipped by `active_stages` and the job queues CPU-only (`GRES=none` makes that explicit). Do not add `routing`: with a transfer set it would make its LLM call and then be overridden by the canned script anyway.
+- `CREDIT=0`. The credit block would run on a canned row and cost up to $2k+1$ batched rollouts per budget without changing `referee_reward`; the transferred row's number is the referee replay and nothing else.
+- **Never pass `SEARCH_BUDGET`.** It hands the pipeline a second canned script (the within-dataset budget transfer of section 8) and `coding_agent/run.py` raises rather than choosing between the two.
+- Every other knob is the target's own section 8 value, copied verbatim (dynamics, protocol knobs, referee samples, tier resources), so a transferred row and the target's searched row differ in exactly one thing: where the program came from.
+- A program that exceeds `STRATEGY_TIMEOUT` on a bigger graph is recorded as a skipped row with the reason in `agent/<budget>/evolve_free@oracle.skipped.json`, not as a hung job. That is a result of the experiment (the program does not scale), and the report prints it as such.
+
+### 10.1 How the source programs were chosen
+
+The candidates are every searched row of `evolve_free@oracle` and `evolve_free@world_model` in the `final_*` trees, read at the budget the search ran at (`pct10`, or `k30` for influence blocking; `netscience` searched at every budget and is read at `pct10` for comparability). Both evaluators count as our method: since 2026-09-24 the pick is the best of the two, not the world-model arm by fiat. Epidemic control and influence blocking never ran a world-model arm at all, so their picks are `@oracle` by necessity rather than by choice.
+
+The metric is `referee_reward` against the best classical row at that budget, where the classical rows are the library pool in `agent/` plus the external repos in `baselines/`. That second half matters: OPIM and SUBSIM are the best classical rows on `nethept` and `digg` and cut the raw influence-maximization margins by more than half (the digg IC program is 23 percent above degree discount and 9 percent above OPIM). AdaptiveIM, the two epidemic externals and SL-VAE never beat the in-pool best anywhere. No FINDER, DITTO, GRIN or CasFlow rows exist in the trees, so those cells are read against the pool only.
+
+Four labels per task, of which only the last is transferred: **best performing** (largest referee margin at the search budget), **most novel** (the mechanism farthest from any library member, read from the `# MECHANISM` line, the write-up and the provenance similarity), **most impressive** (performance weighed with graph size and the strength of the row it beats), and **best overall**, which is the best-performing program unless one of its own budget replays on its own graph lost to a classical row, in which case the program that never lost a replay wins the label, since a program that does not survive a change of $k$ on its own graph is a poor candidate for a change of graph.
+
+### 10.2 The candidates and the picks, per task
+
+Every searched row at the search budget, with its margin over the best classical row on the referee (positive is better for the four maximize tasks and the two inverse tasks, negative is better for critical node detection, epidemic control, influence blocking and cascade prediction).
+
+**Influence maximization.**
+
+| Dataset | Dynamics | Evaluator | Referee | Best classical row | Margin |
+| --- | --- | --- | --- | --- | --- |
+| `digg` | IC | `oracle` | 66,083 | `external opim` 60,594 | +9.1% |
+| `digg` | LT | `oracle` | 97,092 | `external subsim` 90,769 | +7.0% |
+| `nethept` | IC | `oracle` | 7,282 | `external subsim` 6,815 | +6.8% |
+| `nethept` | LT | `oracle` | 8,856 | `external subsim` 8,293 | +6.8% |
+| `netscience` | IC | `oracle` | 621 | `imm` 604 | +2.7% |
+| `netscience` | IC | `world_model` | 621 | `imm` 604 | +2.7% |
+| `netscience` | LT | `oracle` | 743 | `external opim` 720 | +3.3% |
+| `netscience` | LT | `world_model` | 744 | `external opim` 720 | +3.4% |
+
+| Label | Program | Why |
+| --- | --- | --- |
+| Best performing, most impressive, **best overall** | `digg` IC pct10 `@oracle` | +9.1% over OPIM at pct10 and +11.2%, +9.8%, +10.6% at the pct1, pct5, pct20 replays; stratified ten-step RR coverage, a full exchange sweep, then a bounded revisit of seeds with low unique coverage; 117K nodes |
+| Most novel | `nethept` IC pct10 `@oracle` | integrality-penalized cavity consensus: a fractional seed allocation optimized with projected gradients, budget-preserving rounding, consensus crossover between roundings (8 functions, 204 lines); +6.8% over SUBSIM |
+
+**Adaptive online IM.**
+
+| Dataset | Dynamics | Evaluator | Referee | Best classical row | Margin |
+| --- | --- | --- | --- | --- | --- |
+| `digg` | IC | `oracle` | 65,974 | `adapt_degree_discount` 64,003 | +3.1% |
+| `digg` | LT | `oracle` | 97,079 | `adapt_degree_discount` 92,839 | +4.6% |
+| `nethept` | IC | `oracle` | 7,287 | `adapt_degree_discount` 7,106 | +2.5% |
+| `nethept` | LT | `oracle` | 8,861 | `adapt_degree_discount` 8,934 | -0.8% |
+| `netscience` | IC | `oracle` | 621 | `adapt_epic` 607 | +2.3% |
+| `netscience` | IC | `world_model` | 621 | `adapt_epic` 607 | +2.2% |
+| `netscience` | LT | `oracle` | 744 | `static_split` 729 | +2.0% |
+| `netscience` | LT | `world_model` | 744 | `static_split` 729 | +2.0% |
+
+The budget replays decide the label here. Margin of each pct10 program at its own graph's other budgets: `nethept` IC +6.9%, +4.4%, +1.1% (pct1, pct5, pct20); `digg` IC +4.9%, +4.9%, -3.7%; `digg` LT +4.7%, +6.1%, -0.5%; `nethept` LT +2.9%, +0.4%, -2.3%.
+
+| Label | Program | Why |
+| --- | --- | --- |
+| Best performing, most impressive | `digg` LT pct10 `@oracle` | +4.6% at pct10 and +6.1% at pct5; fractional LT relaxation, dependent rounding, adjoint-guided cavity-validated exchanges (303 lines); loses by 0.5% at pct20 |
+| Most novel | `netscience` IC pct10 `@world_model` | Compact Block Allocation: exact rewards for small components from a single triangular solve, singleton-corrected RR beam options for large ones, the budget allocated across components by dynamic programming |
+| **Best overall** | `nethept` IC pct10 `@oracle` | the only adaptive program ahead of the classical pool at all four of its budgets; incremental reverse coverage with a doubled sample refresh and a held-out paired validation before its second exchange sweep; transfers down to `netscience` and up to `digg` |
+
+**Critical node detection** (lower is better).
+
+| Dataset | Dynamics | Evaluator | Referee | Best classical row | Margin |
+| --- | --- | --- | --- | --- | --- |
+| `p2p_gnutella` | IC | `oracle` | 12,190 | `frontier_removal` 13,502 | -9.7% |
+| `p2p_gnutella` | LT | `oracle` | 16,303 | `frontier_removal` 17,865 | -8.7% |
+| `pgp` | IC | `oracle` | 1,758 | `frontier_removal` 2,163 | -18.7% |
+| `pgp` | LT | `oracle` | 2,297 | `frontier_removal` 2,520 | -8.9% |
+| `power_grid` | IC | `oracle` | 853 | `frontier_removal` 926 | -7.9% |
+| `power_grid` | IC | `world_model` | 859 | `frontier_removal` 926 | -7.2% |
+| `power_grid` | LT | `oracle` | 952 | `frontier_removal` 1,007 | -5.5% |
+| `power_grid` | LT | `world_model` | 968 | `frontier_removal` 1,007 | -3.9% |
+
+Budget replays of the pct10 programs: `pgp` IC -2.3%, -8.6%, -22.5% (pct1, pct5, pct20, the last against `frontier_removal`, the first two against `adaptive_degree`); `p2p_gnutella` IC -0.7%, -4.9%, -23.1%.
+
+| Label | Program | Why |
+| --- | --- | --- |
+| All four labels, **best overall** | `pgp` IC pct10 `@oracle` | -18.7% against the ring control and -20.9% against HDA at pct10, -22.5% at pct20; blends the cavity gradient under the original transmission probabilities with the one under probabilities capped at 0.90, adds a bonus where the two disagree, re-estimates every six deletions; only 0.24 similar to its nearest library member |
+| Runner-up | `p2p_gnutella` IC pct10 `@oracle` | nonbacktracking cavity messages, deletions in batches of 24, completed-plan exchanges; -23.1% at pct20 on a 62K-node graph |
+| Most novel among the world-model rows | `power_grid` LT pct10 `@world_model` | scores a cut by prevention minus the exposure increase that LT degree renormalization causes at surviving neighbours; 0.19 similar to anything in the pool |
+
+**Source localization** (consistency, higher is better; the world-model and oracle arms tie to three decimals on every cell).
+
+| Dataset | Dynamics | Evaluator | Referee | Best classical row | Margin |
+| --- | --- | --- | --- | --- | --- |
+| `cora_ml` | IC | `oracle` | -0.1392 | `infected_betweenness` -0.1647 | +15.5% |
+| `cora_ml` | IC | `world_model` | -0.1385 | `infected_betweenness` -0.1647 | +15.9% |
+| `cora_ml` | LT | `oracle` | -0.1063 | `lpsi` -0.1302 | +18.3% |
+| `cora_ml` | LT | `world_model` | -0.1061 | `lpsi` -0.1302 | +18.5% |
+| `power_grid` | IC | `oracle` | -0.0804 | `lpsi` -0.1061 | +24.3% |
+| `power_grid` | IC | `world_model` | -0.0804 | `lpsi` -0.1061 | +24.3% |
+| `power_grid` | LT | `oracle` | -0.0729 | `lpsi` -0.1000 | +27.2% |
+| `power_grid` | LT | `world_model` | -0.0732 | `lpsi` -0.1000 | +26.8% |
+
+| Label | Program | Why |
+| --- | --- | --- |
+| Best performing, most impressive | `power_grid` LT `@oracle` (the `@world_model` row is 0.4 points behind) | CrossPairCavityLocalization: spatially separated proposals, loss-verified exchanges, crossed donor-recipient pairs only after aligned replacements stall, delayed rescue of under-explained regions |
+| Most novel, **best overall** | `power_grid` IC `@world_model` | LPSI initialisation, a nonbacktracking IC forward model with adjoint gradients, curvature-tested exchanges, recombination, component-diverse repair, a closing local search (13 functions, 321 lines); +24.3%, and IC is the dynamics both targets have data for |
+
+**Cascade reconstruction** (likelihood reward, higher is better).
+
+| Dataset | Dynamics | Evaluator | Referee | Best classical row | Margin |
+| --- | --- | --- | --- | --- | --- |
+| `ca_grqc` | IC | `oracle` | -0.5946 | `jordan_backward` -0.7911 | +24.8% |
+| `ca_grqc` | IC | `world_model` | -0.5658 | `jordan_backward` -0.7911 | +28.5% |
+| `ca_grqc` | LT | `oracle` | -0.5490 | `jordan_backward` -0.6917 | +20.6% |
+| `ca_grqc` | LT | `world_model` | -0.5661 | `jordan_backward` -0.6917 | +18.2% |
+| `uci_students` | IC | `oracle` | -0.7371 | `jordan_backward` -0.8524 | +13.5% |
+| `uci_students` | IC | `world_model` | -0.6753 | `jordan_backward` -0.8524 | +20.8% |
+| `uci_students` | LT | `oracle` | -0.7569 | `jordan_backward` -0.9463 | +20.0% |
+| `uci_students` | LT | `world_model` | -0.7172 | `jordan_backward` -0.9463 | +24.2% |
+
+| Label | Program | Why |
+| --- | --- | --- |
+| Best performing, **best overall** | `ca_grqc` IC `@world_model` | +28.5%; cavity-guided component histories, fixed-source causal retiming, then demotion of redundant sources; 92 s of evaluator time for the whole search, so it is cheap to replay anywhere |
+| Most novel | `ca_grqc` LT `@world_model` | a time-expanded electrical-flow relaxation proposes the activation waves and likelihood-scored causally supported repairs fix them (446 lines); the `@oracle` LT row on the same graph (adjoint decoding with 512 candidate parents per node) is the more accurate of the two |
+| Most impressive | `uci_students` IC `@world_model` | exact IC coordinate optimization with dependency closures and up to five widening exact pair-search sweeps (10 functions, 411 lines); +20.8% |
+
+**Cascade prediction** (MSLE, lower is better).
+
+| Dataset | Dynamics | Evaluator | Referee | Best classical row | Margin |
+| --- | --- | --- | --- | --- | --- |
+| `casflow_aps` | IC | `oracle` | 0.0960 | `feature_linear` 0.0760 | +26.3% |
+| `casflow_aps` | IC | `world_model` | 0.0776 | `feature_linear` 0.0760 | +2.1% |
+| `digg_cascades` | IC | `oracle` | 0.8759 | `szabo_huberman` 0.8340 | +5.0% |
+| `digg_cascades` | IC | `world_model` | 0.7744 | `szabo_huberman` 0.8340 | -7.2% |
+| `taoke` | IC | `oracle` | 0.4233 | `feature_linear` 0.4478 | -5.5% |
+| `taoke` | IC | `world_model` | 0.5438 | `feature_linear` 0.4478 | +21.4% |
+
+| Label | Program | Why |
+| --- | --- | --- |
+| Best performing, most impressive, **best overall** | `digg_cascades` `@world_model` | the only corpus on which we beat every classical predictor on the leak-free split, and the row it beats is Szabo-Huberman, the one every paper in §5 of the research file prints; cross-validated temporal ridge regressions on remaining log growth with structural features admitted by model selection |
+| Most novel | `taoke` `@oracle` | the other win (-5.5% against `feature_linear`): transport-matched prefix retrieval with a bounded local log-size correction and light ridge shrinkage; the `casflow_aps` `@world_model` program (entropic optimal transport between annotated adoption forests, calibrated weighted-median transfer) is the most unusual mechanism in the task but loses by 2.1% |
+
+A cascade-prediction program refits on the target corpus's training split (`_fit` runs inside `predict`), so what transfers is the predictor, not a fitted model. That is the amortization claim in this task's own terms: the search paid once for a program and the program fits itself to each corpus.
+
+**Epidemic control** (attack size, lower is better; `@oracle` only, no world-model arm was ever run for this task).
+
+| Dataset | Dynamics | Evaluator | Referee | Best classical row | Margin |
+| --- | --- | --- | --- | --- | --- |
+| `infectious_sociopatterns` | SIR | `oracle` | 111 | `dava` 111 | +0.0% |
+| `infectious_sociopatterns` | SIS | `oracle` | 111 | `dava` 111 | -0.0% |
+| `oregon1` | SIR | `oracle` | 107 | `dava` 107 | +0.0% |
+| `oregon1` | SIS | `oracle` | 107 | `dava` 107 | +0.0% |
+
+At pct10 and pct20 every source-aware method sits on the floor of the index cases, so the search budget cannot separate the programs and the replays at pct1 and pct5 are what carry the information. Each pct10 program's replay against the best classical row at that budget: `infectious_sociopatterns` SIS pct1 -12.7% (2,136 vs `frontier_immunization` 2,447), pct5 -50.8% (449 vs `dava` 913); `infectious_sociopatterns` SIR pct1 +8.4%, pct5 +75.4% (1,344 vs `frontier_immunization` 766, a collapse); `oregon1` SIR pct1 -11.5% (258 vs 291), pct5 a tie at the floor; `oregon1` SIS pct1 +30.6% (457 vs 350), pct5 a tie.
+
+| Label | Program | Why |
+| --- | --- | --- |
+| All four labels, **best overall** | `infectious_sociopatterns` SIS pct10 `@oracle` | the only epidemic program that beats the pool at every budget, halving DAVA's attack size at pct5; source-initialised finite-horizon SIS cavity messages, adjoint gradients, a continuous dose relaxation with joint rounding (260 lines) |
+
+**Influence blocking** (rumour size, lower is better; `@oracle` only, no world-model arm was ever run for this task).
+
+| Dataset | Dynamics | Evaluator | Referee | Best classical row | Margin |
+| --- | --- | --- | --- | --- | --- |
+| `email_eu_core` | IC | `oracle` | 39.38 | `rps` 39.83 | -1.1% |
+| `email_eu_core` | LT | `oracle` | 47.05 | `rps` 48.23 | -2.4% |
+| `p2p_gnutella24` | IC | `oracle` | 1,114 | `rps` 1,152 | -3.3% |
+
+| Label | Program | Why |
+| --- | --- | --- |
+| All four labels, **best overall** | `p2p_gnutella24` IC k30 `@oracle` | a differentiable competitive-cavity relaxation of both cascades, rounded to the budget, with replacements re-scored after the outgoing seed is removed (272 lines); the `email_eu_core` programs are RPS with the bookkeeping stripped (0.76 similar to `rps`) and have nothing to transfer |
+
+The `p2p_gnutella24/final_ic` run is incomplete as of 2026-09-24 (no agent arm at `k20`, no `k40` or `k50` directory), so `k30` is the only searched point on that graph and `email_eu_core` is the only target. The `p2p_gnutella24/final_lt` run has baselines at `k30` only and no agent arm.
+
+### 10.3 The transfer matrix
+
+One source program per task, run on every other graph the task has a `final_*` tree for. Dynamics are never crossed: an IC program is replayed on IC data only, since the LT, SIR and SIS programs are built on their own dynamics (reverse-path coverage, threshold hazards, compartment messages) and would be answering the wrong process.
+
+| Task | Source program (arm JSON under `results/<task>/`) | Targets | Budgets replayed | Run name on each target | Target data |
+| --- | --- | --- | --- | --- | --- |
+| `influence_maximization` | `digg/final_ic/agent/pct10/evolve_free@oracle.json` | `netscience`, `nethept` | pct1, 5, 10, 20 | `xfer_digg_ic` | both present |
+| `adaptive_online_im` | `nethept/final_ic/agent/pct10/evolve_free@oracle.json` | `netscience`, `digg` | pct1, 5, 10, 20 (4 rounds, gap 1, full adoption) | `xfer_nethept_ic` | both present |
+| `critical_node_detection` | `pgp/final_ic/agent/pct10/evolve_free@oracle.json` | `power_grid`, `p2p_gnutella` | pct1, 5, 10, 20 (10 percent random outbreak) | `xfer_pgp_ic` | both present |
+| `source_localization` | `power_grid/final_ic/agent/pct10/evolve_free@world_model.json` | `cora_ml`, `deezer` | pct10 (binary observation, given k) | `xfer_power_grid_ic` | both present under IC; `deezer/final_lt` has no data, so LT has one target only |
+| `cascade_reconstruction` | `ca_grqc/final_ic/agent/pct10/evolve_free@world_model.json` | `uci_students`, `rt_pol` | pct10 (final snapshot, rate 0.3) | `xfer_ca_grqc_ic` | `uci_students` present; **`rt_pol` has no run at all**, the transfer job generates its data |
+| `cascade_prediction` | `digg_cascades/final_ic/agent/pct10/evolve_free@world_model.json` | `casflow_aps`, `taoke` | pct10 (chronological split, MSLE) | `xfer_digg_cascades_ic` | both present |
+| `epidemic_control` | `infectious_sociopatterns/final_sis/agent/pct10/evolve_free@oracle.json` | `oregon1` | pct1, 5, 10, 20 (vaccinate, 1 percent outbreak, $\beta = 1.0$, $\gamma = 0.3$) | `xfer_infectious_sis` | present (`final_sis`) |
+| `influence_blocking` | `p2p_gnutella24/final_ic/agent/k30/evolve_free@oracle.json` | `email_eu_core` | k10, 20, 30, 40, 50 (counter-seed lever, 1 percent rumour) | `xfer_p2p_gnutella24_ic` | present |
+
+Fourteen submissions in all, thirteen of them replays over existing data and one (`rt_pol`) that generates its own.
+
+### 10.4 Two clusters
+
+The sources and the targets do not live on the same machine. Every `final_*` run's `environment.json` records the host it ran on, and on 2026-09-24 the map is: **PDE** holds `digg` (IM and AIM), `pgp` and `p2p_gnutella` (CND) and `deezer` (SL); **finetuner** holds everything else that exists (`netscience`, `power_grid`, `cora_ml`, `ca_grqc`, `uci_students`, `casflow_aps`, `taoke`, `digg_cascades`, `infectious_sociopatterns`, `oregon1`, `email_eu_core`, `p2p_gnutella24`); `nethept` (IM and AIM) ran on a Lambda instance (hostname `129-213-21-92`), exists only in the Windows tree, and is being copied to finetuner, which is where its two transfers run once the copy is verified; `rt_pol` exists nowhere. Both clusters are reached from the Windows desktop only. A transfer job needs the target's `final_<dyn>/data`, which is large and stays where it is, and the source program's JSON, which is small (the eight together are 34 MB). So every transfer runs on the cluster that holds its target, and the eight source JSONs are pushed to both clusters from the Windows desktop, which is the one machine that reaches both clusters and whose merged tree at `C:\Users\Risha\Downloads\GraphWorldModel_results\results` holds every arm JSON from both machines since the aggregation of 2026-09-23. With every source present on both clusters, the readiness check below confirms that map, refuses a target whose source did not arrive, and creates the run directories and symlinks; every command in 10.5 also carries a `# Run on:` line so the map does not have to be looked up.
+
+| Target run | Cluster | Source program (where it lives) |
+| --- | --- | --- |
+| IM `netscience` | finetuner | `digg` IC `@oracle` (PDE) |
+| IM `nethept` | finetuner, after the nethept copy from Windows | `digg` IC `@oracle` (PDE) |
+| AIM `netscience` | finetuner | `nethept` IC `@oracle` (Windows tree only) |
+| AIM `digg` | PDE | `nethept` IC `@oracle` (Windows tree only) |
+| CND `power_grid` | finetuner | `pgp` IC `@oracle` (PDE) |
+| CND `p2p_gnutella` | PDE | `pgp` IC `@oracle` (PDE) |
+| SL `cora_ml` | finetuner | `power_grid` IC `@world_model` (finetuner) |
+| SL `deezer` | PDE | `power_grid` IC `@world_model` (finetuner) |
+| CR `uci_students` | finetuner | `ca_grqc` IC `@world_model` (finetuner) |
+| CR `rt_pol` | finetuner (no data anywhere; PDE would do as well) | `ca_grqc` IC `@world_model` (finetuner) |
+| CP `casflow_aps` | finetuner | `digg_cascades` `@world_model` (finetuner) |
+| CP `taoke` | finetuner | `digg_cascades` `@world_model` (finetuner) |
+| EC `oregon1` | finetuner | `infectious_sociopatterns` SIS `@oracle` (finetuner) |
+| IB `email_eu_core` | finetuner | `p2p_gnutella24` IC k30 `@oracle` (finetuner) |
+
+Eleven submissions on finetuner, three on PDE. Four of the eight sources are needed on a cluster that does not have them (`digg` IM and `pgp` to finetuner, `nethept` AIM and `power_grid` SL to PDE), which is why step 1 pushes all eight to both rather than tracking which.
+
+**Step 1, from the Windows desktop (PowerShell).** One tar of the eight files, built with their `results/`-relative paths so it unpacks straight into each cluster's tree; then one `scp` and one `ssh` per cluster. `tar` is the one bundled with Windows 10 and later. Extracting over a cluster that already holds one of the eight (its own search) overwrites it with the identical file.
+
+```powershell
+# Run on: Windows (PowerShell)
+$root = "C:\Users\Risha\Downloads\GraphWorldModel_results\results"
+$tar  = "C:\Users\Risha\Downloads\GraphWorldModel_results\xfer_sources.tar"
+tar -cf $tar -C $root `
+  influence_maximization/digg/final_ic/agent/pct10/evolve_free@oracle.json `
+  adaptive_online_im/nethept/final_ic/agent/pct10/evolve_free@oracle.json `
+  critical_node_detection/pgp/final_ic/agent/pct10/evolve_free@oracle.json `
+  source_localization/power_grid/final_ic/agent/pct10/evolve_free@world_model.json `
+  cascade_reconstruction/ca_grqc/final_ic/agent/pct10/evolve_free@world_model.json `
+  cascade_prediction/digg_cascades/final_ic/agent/pct10/evolve_free@world_model.json `
+  epidemic_control/infectious_sociopatterns/final_sis/agent/pct10/evolve_free@oracle.json `
+  influence_blocking/p2p_gnutella24/final_ic/agent/k30/evolve_free@oracle.json
+tar -tf $tar
+
+scp $tar rrishab@finetuner.mathcs.emory.edu:/home/rrishab/GraphWorldModel/xfer_sources.tar
+ssh rrishab@finetuner.mathcs.emory.edu "cd /home/rrishab/GraphWorldModel && tar -xf xfer_sources.tar -C results && rm xfer_sources.tar"
+
+scp $tar rrishab@emory-pdelogin:/local/scratch2/rrishab/GraphWorldModel/xfer_sources.tar
+ssh rrishab@emory-pdelogin "cd /local/scratch2/rrishab/GraphWorldModel && tar -xf xfer_sources.tar -C results && rm xfer_sources.tar"
+```
+
+`tar -tf $tar` must list exactly the eight paths before anything is sent.
+
+**Step 2, on each cluster, from the repo root, after `git pull`.** This creates the run directory and the data symlink only for the targets whose `final_<dyn>/data` is on that machine, refuses a target whose source JSON is missing, and prints which commands of 10.5 to submit there:
+
+```bash
+# Run on: PDE and finetuner (both), from the repo root, after git pull
+while read task ds run dyn src; do
+  d=results/$task/$ds
+  if [ ! -f "$d/final_$dyn/data/metadata.json" ]; then echo "elsewhere: $task/$ds"; continue; fi
+  [ -f "$src" ] || { echo "MISSING SOURCE for $task/$ds: $src"; continue; }
+  mkdir -p "$d/$run"
+  [ -e "$d/$run/data" ] || ln -s "../final_$dyn/data" "$d/$run/data"
+  echo "READY HERE: $task/$ds  (submit its command on this cluster)"
+done <<'READY'
+influence_maximization netscience xfer_digg_ic ic results/influence_maximization/digg/final_ic/agent/pct10/evolve_free@oracle.json
+influence_maximization nethept xfer_digg_ic ic results/influence_maximization/digg/final_ic/agent/pct10/evolve_free@oracle.json
+adaptive_online_im netscience xfer_nethept_ic ic results/adaptive_online_im/nethept/final_ic/agent/pct10/evolve_free@oracle.json
+adaptive_online_im digg xfer_nethept_ic ic results/adaptive_online_im/nethept/final_ic/agent/pct10/evolve_free@oracle.json
+critical_node_detection power_grid xfer_pgp_ic ic results/critical_node_detection/pgp/final_ic/agent/pct10/evolve_free@oracle.json
+critical_node_detection p2p_gnutella xfer_pgp_ic ic results/critical_node_detection/pgp/final_ic/agent/pct10/evolve_free@oracle.json
+source_localization cora_ml xfer_power_grid_ic ic results/source_localization/power_grid/final_ic/agent/pct10/evolve_free@world_model.json
+source_localization deezer xfer_power_grid_ic ic results/source_localization/power_grid/final_ic/agent/pct10/evolve_free@world_model.json
+cascade_reconstruction uci_students xfer_ca_grqc_ic ic results/cascade_reconstruction/ca_grqc/final_ic/agent/pct10/evolve_free@world_model.json
+cascade_prediction casflow_aps xfer_digg_cascades_ic ic results/cascade_prediction/digg_cascades/final_ic/agent/pct10/evolve_free@world_model.json
+cascade_prediction taoke xfer_digg_cascades_ic ic results/cascade_prediction/digg_cascades/final_ic/agent/pct10/evolve_free@world_model.json
+epidemic_control oregon1 xfer_infectious_sis sis results/epidemic_control/infectious_sociopatterns/final_sis/agent/pct10/evolve_free@oracle.json
+influence_blocking email_eu_core xfer_p2p_gnutella24_ic ic results/influence_blocking/p2p_gnutella24/final_ic/agent/k30/evolve_free@oracle.json
+READY
+```
+
+`rt_pol` is deliberately absent from that list: it has no data on either cluster, prints nothing, and its command in 10.5 generates the data itself, so submit it on whichever cluster has room for a 24-hour CPU job (the source JSON is on both after step 1). A target that prints READY on both clusters is a run that exists in both trees; submit on one and skip the other. Results land in that cluster's own `results/` under the `xfer_*` run names, which no other run uses, so the same aggregation as section 8's (full copies to the desktop, `robocopy /MOVE` merge, slim subset to the Mac) merges them without collisions.
+
+**Step 3.** Submit the commands marked READY on that cluster, from the repo root, exactly as written in 10.5.
+
+### 10.5 Commands
+
+Each command is the target's own section 8 command with exactly these changes: `RUN`, `JOB_NAME`, `BASELINES=none`, `ARMS="evolve_free@oracle"`, `TRANSFER_FROM`, `CREDIT=0`, `GRES=none`, the `SEARCH_BUDGET` removed, the training and generation knobs dropped (the train stage does not run and the data stage reuses the symlink), and a shorter `TIME`. The transferred rows of section 8 took under an hour per budget on every graph (the slowest was the `p2p_gnutella` referee at 34 minutes for pct5; `digg` influence maximization took about 22 minutes per budget), so the times below are generous. `FEEDBACK` and `ACTION_CONDITIONING` are kept only so the recorded config matches the target's; neither is read on a canned row. Every command starts with a `# Run on:` line. The three PDE commands carry section 8.0's PDE additions, `PARTITION=pdeday` (every transfer fits in a day, and the day partition schedules soonest) and `SBATCH_ARGS="--no-requeue --open-mode=append"` (so a node drop ends the job with its log intact rather than restarting it from line 1); add `VENV=.venv` to them if that checkout was set up with `uv`. The finetuner commands need nothing added.
+
+```bash
+# Influence maximization: digg IC pct10 (@oracle) -> netscience, nethept
+SRC=results/influence_maximization/digg/final_ic/agent/pct10/evolve_free@oracle.json
+
+# Run on: finetuner
+TASK=influence_maximization DATASET=netscience RUN=xfer_digg_ic RUN_JOBID=0 JOB_NAME=xfer_im_netscience_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=900 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=4 GRES=none MEM=31G TIME=06:00:00 \
+./sbatch/pipeline.sbatch
+
+# Run on: finetuner (after the nethept copy from Windows has been verified)
+TASK=influence_maximization DATASET=nethept RUN=xfer_digg_ic RUN_JOBID=0 JOB_NAME=xfer_im_nethept_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=1800 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=8 GRES=none MEM=62G TIME=12:00:00 \
+./sbatch/pipeline.sbatch
+```
+
+```bash
+# Adaptive online IM: nethept IC pct10 (@oracle) -> netscience, digg
+SRC=results/adaptive_online_im/nethept/final_ic/agent/pct10/evolve_free@oracle.json
+
+# Run on: finetuner
+TASK=adaptive_online_im DATASET=netscience RUN=xfer_nethept_ic RUN_JOBID=0 JOB_NAME=xfer_aim_netscience_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=900 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=4 GRES=none MEM=31G TIME=06:00:00 \
+./sbatch/pipeline.sbatch
+
+# Run on: PDE
+TASK=adaptive_online_im DATASET=digg RUN=xfer_nethept_ic RUN_JOBID=0 JOB_NAME=xfer_aim_digg_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" ROUNDS=4 ROUND_GAP=1 FEEDBACK_MODEL=full_adoption \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=1800 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=8 GRES=none MEM=62G TIME=24:00:00 PARTITION=pdeday SBATCH_ARGS="--no-requeue --open-mode=append" \
+./sbatch/pipeline.sbatch
+```
+
+```bash
+# Critical node detection: pgp IC pct10 (@oracle) -> power_grid, p2p_gnutella
+SRC=results/critical_node_detection/pgp/final_ic/agent/pct10/evolve_free@oracle.json
+
+# Run on: finetuner
+TASK=critical_node_detection DATASET=power_grid RUN=xfer_pgp_ic RUN_JOBID=0 JOB_NAME=xfer_cnd_power_grid_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=900 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=4 GRES=none MEM=31G TIME=06:00:00 \
+./sbatch/pipeline.sbatch
+
+# Run on: PDE
+TASK=critical_node_detection DATASET=p2p_gnutella RUN=xfer_pgp_ic RUN_JOBID=0 JOB_NAME=xfer_cnd_p2p_gnutella_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node" \
+EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" OUTBREAK_PCT=10 OUTBREAK_SELECTOR=random \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=1800 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=8 GRES=none MEM=62G TIME=12:00:00 PARTITION=pdeday SBATCH_ARGS="--no-requeue --open-mode=append" \
+./sbatch/pipeline.sbatch
+```
+
+```bash
+# Source localization: power_grid IC (@world_model) -> cora_ml, deezer (deezer has IC data only)
+SRC=results/source_localization/power_grid/final_ic/agent/pct10/evolve_free@world_model.json
+
+# Run on: finetuner
+TASK=source_localization DATASET=cora_ml RUN=xfer_power_grid_ic RUN_JOBID=0 JOB_NAME=xfer_sl_cora_ml_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
+EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=900 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=4 GRES=none MEM=31G TIME=06:00:00 \
+./sbatch/pipeline.sbatch
+
+# Run on: PDE
+TASK=source_localization DATASET=deezer RUN=xfer_power_grid_ic RUN_JOBID=0 JOB_NAME=xfer_sl_deezer_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
+EVALUATOR=oracle BUDGET_PCTS="10" SL_OBSERVATION=binary SL_BUDGET_MODE=episode SL_SELECT_SPLIT=train SL_EVAL_SPLIT=test \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=1800 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=8 GRES=none MEM=62G TIME=12:00:00 PARTITION=pdeday SBATCH_ARGS="--no-requeue --open-mode=append" \
+./sbatch/pipeline.sbatch
+```
+
+```bash
+# Cascade reconstruction: ca_grqc IC (@world_model) -> uci_students (data reused), rt_pol (data generated here)
+SRC=results/cascade_reconstruction/ca_grqc/final_ic/agent/pct10/evolve_free@world_model.json
+
+# Run on: finetuner
+TASK=cascade_reconstruction DATASET=uci_students RUN=xfer_ca_grqc_ic RUN_JOBID=0 JOB_NAME=xfer_cr_uci_students_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
+EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=900 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=4 GRES=none MEM=31G TIME=06:00:00 \
+./sbatch/pipeline.sbatch
+
+# Run on: finetuner (no data on either cluster; PDE would do as well)
+TASK=cascade_reconstruction DATASET=rt_pol RUN=xfer_ca_grqc_ic RUN_JOBID=0 JOB_NAME=xfer_cr_rt_pol_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" ROLLOUTS=50 MC_MARGINALS=20 \
+EVALUATOR=oracle BUDGET_PCTS="10" CR_SETTING=final_snapshot CR_OBSERVATION_RATE=0.3 CR_SELECT_SPLIT=train CR_EVAL_SPLIT=test \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=1800 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=8 GRES=none MEM=62G TIME=24:00:00 \
+./sbatch/pipeline.sbatch
+```
+
+```bash
+# Cascade prediction: digg_cascades (@world_model) -> casflow_aps, taoke (the program refits on each corpus's training split)
+SRC=results/cascade_prediction/digg_cascades/final_ic/agent/pct10/evolve_free@world_model.json
+
+# Run on: finetuner
+TASK=cascade_prediction DATASET=casflow_aps RUN=xfer_digg_cascades_ic RUN_JOBID=0 JOB_NAME=xfer_cp_casflow_aps_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
+EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MAX_NODES=30000 CP_MAX_CASCADES=5000 \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=200 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=1800 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=8 GRES=none MEM=62G TIME=12:00:00 \
+./sbatch/pipeline.sbatch
+
+# Run on: finetuner
+TASK=cascade_prediction DATASET=taoke RUN=xfer_digg_cascades_ic RUN_JOBID=0 JOB_NAME=xfer_cp_taoke_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="" \
+EVALUATOR=oracle BUDGET_PCTS="10" CP_SPLIT=chronological CP_METRIC=msle CP_SELECT_SPLIT=train CP_EVAL_SPLIT=test CP_MIN_SIZE=3 CP_MAX_CASCADES=2000 \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=1800 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=8 GRES=none MEM=62G TIME=12:00:00 \
+./sbatch/pipeline.sbatch
+```
+
+```bash
+# Epidemic control: infectious_sociopatterns SIS pct10 (@oracle) -> oregon1
+SRC=results/epidemic_control/infectious_sociopatterns/final_sis/agent/pct10/evolve_free@oracle.json
+
+# Run on: finetuner
+TASK=epidemic_control DATASET=oregon1 RUN=xfer_infectious_sis RUN_JOBID=0 JOB_NAME=xfer_ec_oregon1_sis \
+DIFFUSION_MODEL=SIS GEN_MODELS=SIS BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="remove_node remove_edge set_edge_weight" \
+EVALUATOR=oracle BUDGET_PCTS="1 5 10 20" EPI_LEVER=vaccinate EPI_BETA=1.0 EPI_GAMMA=0.3 EPI_ALPHA=0.5 OUTBREAK_PCT=1 \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=1800 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=8 GRES=none MEM=62G TIME=12:00:00 \
+./sbatch/pipeline.sbatch
+```
+
+```bash
+# Influence blocking: p2p_gnutella24 IC k30 (@oracle) -> email_eu_core, all five k
+SRC=results/influence_blocking/p2p_gnutella24/final_ic/agent/k30/evolve_free@oracle.json
+
+# Run on: finetuner
+TASK=influence_blocking DATASET=email_eu_core RUN=xfer_p2p_gnutella24_ic RUN_JOBID=0 JOB_NAME=xfer_ib_email_eu_core_ic \
+DIFFUSION_MODEL=IC GEN_MODELS=IC BASELINES=none ARMS="evolve_free@oracle" TRANSFER_FROM=$SRC \
+WM_MODEL=sage HEAD=structured GEN_ACTION_OPS="add_node remove_node remove_edge set_edge_weight" \
+EVALUATOR=oracle BUDGETS="10 20 30 40 50" BLOCKING_LEVER=counter_seed OUTBREAK_PCT=1 TIE_BREAK=auto \
+HORIZON=10 N_SAMPLES=200 MC_RUNS=200 REFEREE=oracle REFEREE_SAMPLES=1000 \
+MC_AGREEMENT=0 CREDIT=0 SEED=42 STRATEGY_TIMEOUT=900 FEEDBACK=default ACTION_CONDITIONING=message \
+CPUS=4 GRES=none MEM=31G TIME=06:00:00 \
+./sbatch/pipeline.sbatch
+```
+
+### 10.6 The other dynamics, and second sources
+
+**LT, SIR and the reverse epidemic direction** are the same commands with three substitutions: `DIFFUSION_MODEL=LT GEN_MODELS=LT` (or `SIR`), `RUN=xfer_<source>_lt` (or `_sir`) with the symlink taken from `final_lt/data` (or `final_sir/data`), and the source's own LT (or SIR) JSON. The LT sources by the same rule are `digg/final_lt` for influence maximization (+7.0% over SUBSIM), `digg/final_lt` for adaptive IM (+4.6%, the best performer; `nethept/final_lt` lost at pct10 and is not a candidate), `pgp/final_lt` for critical node detection (-8.9%), `power_grid/final_lt` (`@oracle`, +27.2%) for source localization with `cora_ml` as the only target (`deezer/final_lt` has no data), `ca_grqc/final_lt` (`@oracle`, +20.6%) for cascade reconstruction, and `email_eu_core/final_lt` (-2.4%) for influence blocking, whose only LT target, `p2p_gnutella24/final_lt`, has data and baselines at `k30` but no searched program of its own to compare against. For epidemic control the SIR source is `oregon1/final_sir` (-11.5% at pct1; the `infectious_sociopatterns` SIR program collapsed at pct5 and is not a candidate), and the reverse SIS direction, `oregon1/final_sis` onto `infectious_sociopatterns`, is a second, cheap run on the same data.
+
+**A second influence-maximization source.** The `nethept` IC program (the most novel one, and the only source that would test the transfer in both directions, down to `netscience` and up to `digg`) runs with `SRC=results/influence_maximization/nethept/final_ic/agent/pct10/evolve_free@oracle.json`, `RUN=xfer_nethept_ic`, and the `netscience` and `digg` commands of 8.1 edited exactly as 10.5 edits them (the `digg` one keeps `REFEREE_SAMPLES=200`, `MEM=62G`, `TIME=24:00:00`). It is not part of the fourteen submissions above; add it if the digg program's transfer is clean and a second point is wanted.
+
+### 10.7 Reading the results
+
+Each transfer writes one row per budget at `results/<task>/<target>/xfer_<source>_<dyn>/agent/<budget>/evolve_free@oracle.json`, plus the run's `summary.json`, `summary.csv`, `report.md` and `plots/` over that single arm. The number to read is `referee_reward` (with `referee_reward_se`), and `transfer_from` names the program; `reward` is the arm's own 200-sample evaluation and is not read across rows, as everywhere else. Three comparisons make the table, all at the same budget on the same referee:
+
+- **Transferred against searched here**: the target's own `final_<dyn>/agent/<budget>/evolve_free@oracle.json` and `evolve_free@world_model.json` (where they exist). The ratio of the transferred referee number to the searched one is the transfer retention; a ratio near 1 says the program is an algorithm, a ratio near the classical best says the search was fitting the graph. Note that on `nethept`, `digg`, `pgp` and `p2p_gnutella` the searched row itself exists only at the search budget and was replayed at the other three (`transferred_from` set), so at those budgets both rows being compared are replays.
+- **Transferred against the best classical row**, including the externals in `baselines/<budget>/`: the question the main table asks, answered by a program that never saw the graph.
+- **Transferred against the searched row's own budget replays**: whether a change of graph costs more than a change of $k$ did in section 8.
+
+The per-task metrics come along unchanged: `spread_curve`, `outbreak_ring`, `ring_fits` and the connectivity functionals on critical node detection; the post-search label metrics (F1, precision, recall, AUC, `generalization_gap`, `f1_generalization_gap`) on source localization; path precision, event F1, timing NRMSE and the tree score on cascade reconstruction; every MSLE variant, `n_failed`, `trivial_predictor_error` and `persistence_error` on cascade prediction; `auc_infectious` on epidemic control; and `prevented_influence` and the blocking ratio on influence blocking. The two inverse tasks and cascade prediction score the transferred program on the same held-out split the target's own search was scored on, so their generalization gaps are read exactly as before.
+
+**What to expect, and what a bad-looking row means.**
+
+- **Timeouts on the big graphs.** The `nethept` adaptive program on `digg`, and any RR-sampling program with sample counts sized for its own graph, may exceed `STRATEGY_TIMEOUT` on a graph ten times larger. The row is then `evolve_free@oracle.skipped.json` with the reason, the pipeline continues to the next budget, and the report lists it. That is a finding about scale, not an infrastructure failure, and it is reported as such; do not raise the timeout to make it go away, because the searched rows ran under the same limit.
+- **Memory on `digg`.** `MEM=62G` is the tier value the `digg` searches ran under; a transferred program that materialises more RR sets than the `digg` program did can exceed it, in which case Slurm kills the job and the `.out` says so. Resubmit with `MEM=124G` only for that one job, and record it.
+- **Epidemic control is read at pct1 and pct5.** At pct10 and pct20 the floor is the index cases and every source-aware program ties DAVA and `frontier_immunization`, so a transferred row that ties there says nothing; the pct1 and pct5 rows are the experiment.
+- **Cascade prediction transfers a predictor, not a fit.** The `digg_cascades` program refits on `casflow_aps` and `taoke`; its `generalization_gap` on `digg_cascades` was 0.51 (selection MSLE 0.26 against held-out 0.77, the chronological shift), so a large gap on a target is not a transfer artefact.
+- **`rt_pol`** generates its data inside the transfer run. When the main `final_ic` run for `rt_pol` is eventually submitted, point it at that data first (`mkdir -p results/cascade_reconstruction/rt_pol/final_ic && ln -s ../xfer_ca_grqc_ic/data results/cascade_reconstruction/rt_pol/final_ic/data`) so the generation is not paid twice; a symlink needs none of `copy_run`'s path rewriting.
+- **A transfer row is condition 5 in every reader.** `pipeline/conditions.py` labels the arm by its evaluator, so the transferred rows appear in the run's own report as "agent + oracle"; the `transfer_from` field and the `xfer_` run name are what distinguish them when the tables are built, and `scripts/` has no reader for them yet; the table script is to be written once the rows exist, reading every `xfer_*` row beside its target's searched row and classical best.
+
+### 10.8 Summary
+
+| Task | Source | Targets | Submissions | Cluster | Stages run | GPU | Time per submission | LLM calls |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| influence maximization | `digg` IC `@oracle` | `netscience`, `nethept` | 2 | finetuner, both | data (reused), agent, plots, report | no | 0.5 to 2 h | 0 |
+| adaptive online IM | `nethept` IC `@oracle` | `netscience`, `digg` | 2 | finetuner, then PDE | same | no | 0.5 h on netscience, up to 4 h on digg | 0 |
+| critical node detection | `pgp` IC `@oracle` | `power_grid`, `p2p_gnutella` | 2 | finetuner, then PDE | same | no | 0.5 h on power_grid, up to 3 h on p2p_gnutella | 0 |
+| source localization | `power_grid` IC `@world_model` | `cora_ml`, `deezer` | 2 | finetuner, then PDE | same | no | under 1 h | 0 |
+| cascade reconstruction | `ca_grqc` IC `@world_model` | `uci_students`, `rt_pol` | 2 | finetuner, both | same, plus data generation on rt_pol | no | under 1 h; a few hours on rt_pol | 0 |
+| cascade prediction | `digg_cascades` `@world_model` | `casflow_aps`, `taoke` | 2 | finetuner, both | same | no | under 1 h | 0 |
+| epidemic control | `infectious_sociopatterns` SIS `@oracle` | `oregon1` | 1 | finetuner | same | no | about 0.5 h | 0 |
+| influence blocking | `p2p_gnutella24` IC k30 `@oracle` | `email_eu_core` | 1 | finetuner | same | no | about 0.5 h | 0 |
+
+Fourteen CPU-only submissions, eleven on finetuner and three on PDE, no gateway traffic, no training, and nothing written into any `final_*` tree. **Order**: push the source JSONs (10.4 step 1), pull the code on both clusters, run the readiness check on each (10.4 step 2), submit what it marks READY, then `rt_pol` wherever there is room. They can all run at once; none depends on another.

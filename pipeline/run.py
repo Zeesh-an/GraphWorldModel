@@ -370,7 +370,7 @@ class PipelineConfig:
     sl_observation: str = "marginal"
     sl_budget_mode: str = episode_budget
     sl_source_tolerance: float = 0.5
-    sl_transfer_from: str | None = None
+    transfer_from: str | None = None
     # Cascade reconstruction; every field is inert unless the task decodes, so one
     # sweep configuration serves all six runnable tasks
     cr_setting: str = partial_times
@@ -1417,7 +1417,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 sl_observation=config.sl_observation,
                 sl_budget_mode=config.sl_budget_mode,
                 sl_source_tolerance=config.sl_source_tolerance,
-                sl_transfer_from=config.sl_transfer_from,
+                transfer_from=config.transfer_from,
                 # ...and inert unless the task decodes
                 cr_setting=config.cr_setting,
                 cr_observation_rate=config.cr_observation_rate,
@@ -1446,7 +1446,7 @@ def stage_agent(config: PipelineConfig, layout: Layout) -> list[dict]:
                 outer_iters=(
                     1
                     if not arm.is_agent
-                    or config.sl_transfer_from is not None
+                    or config.transfer_from is not None
                     or source is not None
                     else config.outer_iters
                 ),
@@ -1872,8 +1872,10 @@ def run_pipeline(config: PipelineConfig) -> dict:
 
     # Preflight the gateway before the data stage: every LLM arm (ours, routing,
     # and the discovery systems, which call the same gateway with the same model)
-    # would otherwise fail hours later, after generation and training
-    if "agent" in selected:
+    # would otherwise fail hours later, after generation and training. A transfer
+    # run replays a stored program through the canned provider and never calls
+    # the gateway, so it must not be refused when the gateway is down.
+    if "agent" in selected and config.transfer_from is None:
         needing_llm = [
             arm
             for arm in arms
@@ -2766,13 +2768,17 @@ if __name__ == "__main__":
         "sweep keeps an episode in (default: 0.5).",
     )
     parser.add_argument(
+        "--transfer-from",
         "--sl-transfer-from",
+        dest="transfer_from",
         type=str,
         default=None,
-        help="source localization: run the winning program named by ANOTHER run's "
-        "results JSON, unmodified, on this dataset. This is the graph axis of the "
-        "amortization claim, and a comparison no per-instance method can enter: "
-        "SL-VAE has no artifact to transfer (default: None).",
+        help="run the winning program named by ANOTHER run's results JSON, "
+        "unmodified, on this dataset, for any task: its script is replayed through "
+        "the canned path at every budget and scored on the referee, with no LLM "
+        "call. The graph axis of the amortization claim, and a comparison no "
+        "per-instance method can enter. --sl-transfer-from is the historical "
+        "spelling (default: None).",
     )
     parser.add_argument(
         "--cr-setting",
@@ -3307,7 +3313,7 @@ if __name__ == "__main__":
         sl_observation=args.sl_observation,
         sl_budget_mode=args.sl_budget_mode,
         sl_source_tolerance=args.sl_source_tolerance,
-        sl_transfer_from=args.sl_transfer_from,
+        transfer_from=args.transfer_from,
         cr_setting=args.cr_setting,
         cr_observation_rate=args.cr_observation_rate,
         cr_hidden_rate=args.cr_hidden_rate,

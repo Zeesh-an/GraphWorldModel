@@ -180,7 +180,7 @@ summary_columns = (
     "sl_eval_instances",
     "sl_forward_calls",
     "sl_forward_calls_per_instance",
-    "sl_transfer_from",
+    "transfer_from",
     "sl_resim_error",
     "sl_resim_error_true_sources",
     # Cascade reconstruction: the decoding task's own metric set. Empty for every
@@ -550,7 +550,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "sl_eval_instances": result.get("n_eval_instances"),
         "sl_forward_calls": result.get("forward_calls"),
         "sl_forward_calls_per_instance": result.get("forward_calls_per_instance"),
-        "sl_transfer_from": result.get("transfer_from"),
+        "transfer_from": result.get("transfer_from"),
         "sl_resim_error": (
             result.get("resim_error") if not result.get("reconstruction") else None
         ),

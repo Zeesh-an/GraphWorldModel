@@ -41,7 +41,7 @@
 #
 #   TASK=source_localization DATASET=cora_ml RUN=transfer_from_jazz \
 #   ARMS=none BASELINES=none \
-#   SL_TRANSFER_FROM=results/source_localization/jazz/default/agent/pct10/evolve_free@world_model.json \
+#   TRANSFER_FROM=results/source_localization/jazz/default/agent/pct10/evolve_free@world_model.json \
 #       ./sbatch/pipeline.sbatch
 
 set -euo pipefail

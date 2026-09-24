@@ -313,7 +313,7 @@ class ExperimentConfig:
     # is one no per-instance method can even enter: SL-VAE has no artifact to
     # transfer. Points at another arm's results JSON; its `script` field is run as
     # a canned strategy here.
-    sl_transfer_from: str | None = None
+    transfer_from: str | None = None
     # Cascade reconstruction. `cr_setting` is the load-bearing one
     # (research/cascade_reconstruction.md §8.3): the four settings of §2.7 are four
     # PROTOCOLS, not four knobs, and a decoder selected under `final_snapshot` is
@@ -1377,22 +1377,23 @@ def run_experiment(
         config.baseline = _parse_routing_choice(routing_reply, menu)
         print(f"[run] routing picked {config.baseline!r}")
 
-    # §8.5.1's graph axis: the winning program of another run, executed here
-    # unmodified. Read before the canned-baseline branch so a transfer arm is a
-    # transfer arm regardless of what else was set.
-    if config.sl_transfer_from is not None:
+    # The graph axis of the amortization claim (source localization §8.5.1, and
+    # section 10 of final_results_plan.md for every task): the winning program of
+    # another run, executed here unmodified. Read before the canned-baseline
+    # branch so a transfer arm is a transfer arm regardless of what else was set.
+    if config.transfer_from is not None:
         if canned_script is not None:
             raise ValueError(
-                "--sl-transfer-from supplies the script to run and cannot be "
+                "--transfer-from supplies the script to run and cannot be "
                 "combined with another canned script"
             )
 
-        source = json.loads(Path(config.sl_transfer_from).read_text())
+        source = json.loads(Path(config.transfer_from).read_text())
         canned_script = source.get("script")
 
         if not canned_script:
             raise ValueError(
-                f"{config.sl_transfer_from} has no `script` field to transfer; "
+                f"{config.transfer_from} has no `script` field to transfer; "
                 f"point at an arm's results JSON that synthesized a program"
             )
 
@@ -1623,6 +1624,9 @@ def run_experiment(
         "method": config.method,
         "evaluator": config.evaluator,
         "model": provider_label,
+        # The results JSON whose program this row replayed, None when the program
+        # was written here; recorded for every task, not only source localization
+        "transfer_from": config.transfer_from,
         # num_edges counts directed arcs (edge_index columns), matching the
         # graph stats shown in the agent prompts
         "graph": {
@@ -1935,7 +1939,7 @@ def run_experiment(
             "forward_calls_per_instance"
         )
         result["scoring_calls"] = reported.cost.get("scoring_calls")
-        result["transfer_from"] = config.sl_transfer_from
+        result["transfer_from"] = config.transfer_from
         # The generalization gap §8.5.1 exists to expose, on the REWARD and on
         # the reported F1: a large negative gap means the program memorized the
         # episodes it was selected on rather than learning an algorithm
@@ -2778,13 +2782,15 @@ if __name__ == "__main__":
         "sweep keeps an episode in (default: 0.5).",
     )
     parser.add_argument(
+        "--transfer-from",
         "--sl-transfer-from",
+        dest="transfer_from",
         type=str,
         default=None,
-        help="source localization: run the winning program named by ANOTHER arm's "
-        "results JSON, unmodified, on this dataset. The graph axis of the "
-        "amortization claim, and a comparison no per-instance method can enter "
-        "(default: None).",
+        help="run the winning program named by ANOTHER arm's results JSON, "
+        "unmodified, on this dataset, for any task. The graph axis of the "
+        "amortization claim, and a comparison no per-instance method can enter. "
+        "--sl-transfer-from is the historical spelling (default: None).",
     )
     # Cascade reconstruction
     parser.add_argument(
@@ -3184,7 +3190,7 @@ if __name__ == "__main__":
         sl_observation=args.sl_observation,
         sl_budget_mode=args.sl_budget_mode,
         sl_source_tolerance=args.sl_source_tolerance,
-        sl_transfer_from=args.sl_transfer_from,
+        transfer_from=args.transfer_from,
         cr_setting=args.cr_setting,
         cr_observation_rate=args.cr_observation_rate,
         cr_hidden_rate=args.cr_hidden_rate,

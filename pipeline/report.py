@@ -53,7 +53,7 @@ reported_config_keys = (
     "sl_instances",
     "sl_observation",
     "sl_budget_mode",
-    "sl_transfer_from",
+    "transfer_from",
     "cr_setting",
     "cr_observation_rate",
     "cr_hidden_rate",

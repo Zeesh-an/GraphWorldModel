@@ -297,8 +297,7 @@
 #   SL_BUDGET_MODE  episode = each instance's own source count, the published
 #                   given-k convention; sweep = the pipeline's k, with the pool
 #                   filtered to that source fraction
-#   SL_TRANSFER_FROM  run ANOTHER run's winning program here, unmodified: the
-#                   graph axis of the amortization claim
+#   (TRANSFER_FROM, once SL-only, is a general knob now: see the list above)
 #
 # CASCADE RECONSTRUCTION (--task cascade_reconstruction). Every one is inert for
 # every other task, exactly like the SL block above.
@@ -339,6 +338,12 @@
 #                   every other point replans that winner at its own k and
 #                   replays it on the referee (transferred_from). UNSET = search
 #                   at every point
+#   TRANSFER_FROM   run ANOTHER run's winning program here, unmodified, for any
+#                   task: the results JSON of a searched arm, whose `script` is
+#                   replayed through the canned path at every budget and scored
+#                   on the referee, no LLM call (section 10 of
+#                   final_results_plan.md). Never combine it with SEARCH_BUDGET.
+#                   SL_TRANSFER_FROM is the old spelling and still works.
 #   REFEREE         oracle (default) or monte_carlo: the shared referee every winner is replayed on.
 #   REFEREE_SAMPLES rollout samples for that replay (default 1000).
 #   MC_AGREEMENT    1 = also replay every winner on NDlib: the independent check on the oracle and the timing row.
@@ -635,7 +640,8 @@ SL_INSTANCES="${SL_INSTANCES:-}"
 SL_OBSERVATION="${SL_OBSERVATION:-}"
 SL_BUDGET_MODE="${SL_BUDGET_MODE:-}"
 SL_SOURCE_TOLERANCE="${SL_SOURCE_TOLERANCE:-}"
-SL_TRANSFER_FROM="${SL_TRANSFER_FROM:-}"
+# Once source-localization-only, now any task; the old spelling still works
+TRANSFER_FROM="${TRANSFER_FROM:-${SL_TRANSFER_FROM:-}}"
 
 # Cascade reconstruction. `CR_SETTING` is the load-bearing one: the four settings
 # are four PROTOCOLS rather than four knobs, and a decoder selected under
@@ -1015,7 +1021,7 @@ flags+=(--referee "$REFEREE" --referee-samples "$REFEREE_SAMPLES")
 [ -n "$SL_OBSERVATION" ]       && flags+=(--sl-observation "$SL_OBSERVATION")
 [ -n "$SL_BUDGET_MODE" ]       && flags+=(--sl-budget-mode "$SL_BUDGET_MODE")
 [ -n "$SL_SOURCE_TOLERANCE" ]  && flags+=(--sl-source-tolerance "$SL_SOURCE_TOLERANCE")
-[ -n "$SL_TRANSFER_FROM" ]     && flags+=(--sl-transfer-from "$SL_TRANSFER_FROM")
+[ -n "$TRANSFER_FROM" ]        && flags+=(--transfer-from "$TRANSFER_FROM")
 [ -n "$CR_SETTING" ]           && flags+=(--cr-setting "$CR_SETTING")
 [ -n "$CR_OBSERVATION_RATE" ]  && flags+=(--cr-observation-rate "$CR_OBSERVATION_RATE")
 [ -n "$CR_HIDDEN_RATE" ]       && flags+=(--cr-hidden-rate "$CR_HIDDEN_RATE")

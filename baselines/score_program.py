@@ -57,7 +57,7 @@ if __name__ == "__main__":
         resume=False,
         routing=False,
         baseline=None,
-        sl_transfer_from=None,
+        transfer_from=None,
     )
     config = ExperimentConfig(**experiment)
     program = Path(args.program).read_text()
