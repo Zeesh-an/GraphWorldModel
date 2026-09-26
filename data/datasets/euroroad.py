@@ -10,8 +10,7 @@ Source: http://konect.cc/networks/subelj_euroroad/
 The RAW file, which is what CoreHD and BPD's Table I print (1,177 / 1,417 there;
 the three-node difference is their own preprocessing). `--dataset road_eu` is the
 1,039-node giant component GND uses. Both are in the literature under the same
-name, so which one a number belongs to has to be stated
-(research/critical_node_detection.md §6.4).
+name, so which one a number belongs to has to be stated.
 
 Original paper: Šubelj & Bajec, "Robust network community detection using
     balanced propagation", Eur. Phys. J. B 81, 2011

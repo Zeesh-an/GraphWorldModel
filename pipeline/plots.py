@@ -1476,8 +1476,8 @@ def plot_dismantling_curve(
     None for every sweep that removes nothing. This is the curve the published
     dismantling numbers collapse to a scalar, so plotting it is what lets a reader
     place our arms next to that literature at all. It can and does disagree with
-    the spread figure: research/critical_node_detection.md §5.8 shows the same
-    centralities rank in opposite orders under the two objectives.
+    the spread figure: the published literature shows the same centralities rank
+    in opposite orders under the two objectives.
     """
     with_curve = [
         result
@@ -1534,9 +1534,9 @@ def plot_structural_vs_spread(
     Every arm as one point: what its removals did to CONNECTIVITY against what they
     did to the CASCADE.
 
-    The figure that makes §5.8 visible. If the two objectives agreed the points
-    would lie on a line; the literature says they do not, and this is where our own
-    data either confirms that or does not.
+    The figure that makes the objective disagreement visible. If the two objectives
+    agreed the points would lie on a line; the literature says they do not, and this
+    is where our own data either confirms that or does not.
     """
     with_structural = [
         result for result in results if result.get("structural") is not None
@@ -1590,7 +1590,7 @@ def plot_prevented_influence(
 
     None for every sweep that is not two-cascade. The y-axis is
     `sigma(S_N, empty) - sigma(S_N | blockers)` on the SHARED referee, which is the
-    quantity all five published names in research/influence_blocking.md §8.1 refer to,
+    quantity this literature reports under five different published names,
     and it is what makes our table readable next to SandIMIN's Table 5 (which reports
     exactly this, as "decreased spread"). The dashed line is the whole cascade: an arm
     touching it stopped the rumour outright.
@@ -1644,7 +1644,7 @@ def plot_blocking_ratio(
     """
     Prevented fraction against the `|S_P| / |S_N|` ratio: CLDAG's Table 2 as a figure.
 
-    §8.2: the informative budget axis here is the ratio to the ATTACKER's budget, not
+    The informative budget axis here is the ratio to the ATTACKER's budget, not
     the fraction of the graph. CLDAG's own reading of this curve is the design fact
     the whole task is configured around: it takes 20-30x the rumour's seeds to cut it
     to 10%, and "first mover has a clear advantage".
@@ -1693,9 +1693,9 @@ def plot_epidemic_curve(
     None for every non-compartmental sweep. The y-axis is the CURRENTLY-infectious
     count, not the cumulative one, and that is the whole reason the figure exists:
     the attack-rate column already reports the total, while "flatten the curve" is a
-    statement about this shape and nothing else (research/epidemic_control.md §2.6,
-    §8.2 trap 4). Two arms with the same attack rate and different peaks are two
-    different policies, and only this plot says so.
+    statement about this shape and nothing else. Two arms with the same attack
+    rate and different peaks are two different policies, and only this plot says
+    so.
 
     The dashed curve is the outbreak with nobody dosed, so the vertical gap at each
     `t` is what that arm's allocation actually bought at that moment.
@@ -1763,7 +1763,7 @@ def plot_eigendrop_vs_attack(
     results: list[dict], out_path: Path, title_prefix: str
 ) -> Path | None:
     """
-    Eigendrop against prevented infections, one point per arm: §8.2 trap 1, drawn.
+    Eigendrop against prevented infections, one point per arm.
 
     None for every sweep without a NODE lever (the edge levers spend arcs and have
     no spectral column). The x-axis is what the spectral line optimizes and the
@@ -1772,8 +1772,8 @@ def plot_eigendrop_vs_attack(
     because `lambda_1` is a global property of the graph that says nothing about
     where the outbreak currently is.
 
-    That disagreement is DAVA's entire contribution and the reason §9.4 says to
-    position this task against DAVA rather than against NetShield. A scatter with a
+    That disagreement is DAVA's entire contribution and the reason this task is
+    positioned against DAVA rather than against NetShield. A scatter with a
     visible negative region is the result; a tight positive line would mean the
     surrogate was sufficient on this graph and the task had nothing to add.
     """
@@ -1832,7 +1832,7 @@ def plot_localization_metrics(
     because the split between precision and recall is where this literature's
     failure modes live: IVGD hits `RE = 1.0000` on five of six graphs and lets
     precision carry F1, which is the signature of a thresholded relaxation
-    over-predicting (research/source_localization.md §5.2).
+    over-predicting.
     """
     # `result.get("metrics")` is NOT a discriminator any more: localization,
     # reconstruction and prediction all write one, so this filters on the family's
@@ -1927,7 +1927,7 @@ def plot_localization_cost(
     """
     F1 against what each arm spent to get it: the cost claim, as one figure.
 
-    The load-bearing claim of §2.3.2 is a SEARCH-time one: with `P ~ 100` programs,
+    The load-bearing cost claim is a SEARCH-time one: with `P ~ 100` programs,
     `M ~ 100` instances and `C ~ 100` candidate evaluations the product is a
     million rollouts before the MC multiplier, which is why nobody has run a
     program search over an inverse problem. This plots the axis that shows it.
@@ -1986,10 +1986,10 @@ def plot_generalization_gap(
     """
     Selection score against held-out score: did the program learn an algorithm or memorize?
 
-    §8.5.1's episode axis, plotted. A point on the diagonal transferred perfectly;
-    a point far below it scored well on the episodes the outer loop optimized
-    against and badly on ones it never saw, which is the failure that would make
-    the whole amortization claim vacuous.
+    The episode generalization axis, plotted. A point on the diagonal transferred
+    perfectly; a point far below it scored well on the episodes the outer loop
+    optimized against and badly on ones it never saw, which is the failure that would
+    make the whole amortization claim vacuous.
     """
     paired = [
         result
@@ -2090,8 +2090,7 @@ def plot_reconstruction_metrics(
     because the whole point of this task is the GAP between them: Zong ICDM'12
     reports 100% node precision alongside 78% edge precision and DIPT's best path
     precision thirteen years later is 0.680, so a figure showing only the score
-    would hide the finding it exists to show
-    (research/cascade_reconstruction.md §5.2, §8.1).
+    would hide the finding it exists to show.
 
     `path_recall` and `jaccard` are drawn beside `path_precision` on purpose: an
     arm that names few edges scores well on precision alone, which is the
@@ -2139,7 +2138,7 @@ def plot_reconstruction_metrics(
         for index in range(len(reconstruction_metric_keys))
     ]
 
-    # The reward-sanity line §2.11 risk 1 requires: if an arm sits near it, the
+    # The reward-sanity line: if an arm sits near it, the
     # reward is wrong rather than the arm good
     trivial = next(
         (
@@ -2199,8 +2198,8 @@ def plot_tree_vs_node(
     diagonal is where an arm recovers both equally well; every published method
     sits far BELOW it, because the node set is nearly free and the edges are not.
     An arm hugging the right wall with nothing above the floor has solved the easy
-    half and reported it as a reconstruction, which is the failure §2.6 weights the
-    reward to prevent.
+    half and reported it as a reconstruction, which is the failure the
+    reward is weighted to prevent.
     """
     scored = [
         result
@@ -2261,10 +2260,9 @@ def plot_prediction_metrics(
     Every error column per arm, with the two floors drawn across them.
 
     None for every sweep that does not forecast. Four bars per arm rather than one,
-    because research/cascade_prediction.md §5.7 difference 4 records that these are
-    not variants of one number: MSLE and MALE disagree on how much a single huge
-    cascade counts, MAPE is a relative error IN LOG SPACE (named MAPE, is not MAPE),
-    and WroPerc is the only one measured on raw counts at all.
+    because these are not variants of one number: MSLE and MALE disagree on how
+    much a single huge cascade counts, MAPE is a relative error IN LOG SPACE (named
+    MAPE, is not MAPE), and WroPerc is the only one measured on raw counts at all.
 
     The two horizontal lines are the point of the figure. Under a LOG-space error an
     instance-blind constant is far stronger than intuition suggests, and "predict
@@ -2442,16 +2440,16 @@ def plot_prediction_cost(
     """
     Error against evaluator seconds: the cost claim, as one figure.
 
-    The axis research/cascade_prediction.md §2.4 says the whole comparison is read
-    on. An @monte_carlo arm pays `mc_runs` real episodes per kernel evaluation and a
-    @world_model arm pays one batched matmul, at `steps * forecast_samples`
-    evaluations per cascade; the interesting outcome is not which corner wins but
-    whether the cheap corner is empty.
+    The axis the whole comparison is read on. An @monte_carlo arm pays `mc_runs`
+    real episodes per kernel evaluation and a @world_model arm pays one batched
+    matmul, at `steps * forecast_samples` evaluations per cascade; the interesting
+    outcome is not which corner wins but whether the cheap corner is empty.
 
     Arms with NO forward model (@native, and every classical baseline) sit at
     essentially zero seconds by construction, and that is the point rather than an
-    artifact: §3.1 records that feature-driven regression sometimes beats deep
-    models outright here, so a native arm in the bottom-left is a real result.
+    artifact: the published literature records that feature-driven regression
+    sometimes beats deep models outright here, so a native arm in the bottom-left
+    is a real result.
     """
     scored = [
         result

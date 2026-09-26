@@ -6,7 +6,7 @@ Source: https://snap.stanford.edu/data/gemsec-Deezer.html
     - Undirected, unweighted CSV with a `node_1,node_2` header, 0-based ids
     - No inherent node features: uses log(1 + degree)
 
-RLGN's `GEMSEC-RO` column (`research/epidemic_control.md` §5.1), and one of only
+RLGN's `GEMSEC-RO` column, and one of only
 five graphs that paper reports: the single most comparable published table to what
 this task produces, since it runs SIR-style dynamics with a per-step test budget
 and reports % healthy at a fixed horizon.

@@ -1,12 +1,12 @@
 """
 Multi-round IM: `r` separate campaigns of `k` seeds, scored on their union.
 
-Branch (e) of research/adaptive_online_im.md §1.5, and the one genuinely distinct
-from adaptive IM: adaptive IM is ONE diffusion observed in stages, multi-round is
+The multi-round branch of the IM literature, and the one genuinely distinct from
+adaptive IM: adaptive IM is ONE diffusion observed in stages, multi-round is
 `r` separate DIFFUSIONS whose activated sets are unioned. A node activated in
 campaign i counts once in the union and may still be re-seeded later.
 
-§2.4e costs this at "reset `frontier` between campaigns, keep `infected` as the
+The obvious costing is "reset `frontier` between campaigns, keep `infected` as the
 union. A `State` bookkeeping change." That is the right idea and slightly
 optimistic about where the bookkeeping goes. Surgically clearing the frontier
 mid-episode is not equivalent to a fresh diffusion under either dynamics: under
@@ -16,9 +16,9 @@ thresholds forever and the campaigns never actually separate.
 
 So a campaign here is a genuinely fresh inner rollout. That gives real separation
 under both dynamics (LT even re-draws its hidden thresholds, which is correct:
-they are per-episode), needs no change to either environment, and matches §1.5's
-"separate diffusions" exactly. The wrapper only has to carry the union across
-them, which is the bookkeeping §2.4e names.
+they are per-episode), needs no change to either environment, and matches the
+"separate diffusions" definition exactly. The wrapper only has to carry the
+union across them, which is the bookkeeping that costing names.
 
 WHY THE UNION IS COMPUTED FROM MARGINALS. Campaigns are independent diffusions
 given their seed sets, so for a fixed schedule
@@ -92,7 +92,7 @@ class MultiRoundEnvironment:
                 state: State, timestep: int, union: list = union_so_far
             ) -> list:
                 # `infected` carries the union, `frontier` stays this campaign's
-                # own wave: §2.4e's bookkeeping, and the reason a policy can tell
+                # own wave: multi-round bookkeeping, and the reason a policy can tell
                 # campaign 3 from campaign 1 without a round counter. Default-arg
                 # binding, not closure capture, so the loop variable cannot leak.
                 merged = State(

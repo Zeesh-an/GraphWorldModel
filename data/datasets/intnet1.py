@@ -8,7 +8,7 @@ Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
     - No node labels
 
 The autonomous-system peering graph in CoreHD / BPD Table I, also reported by
-GND, Wandelt, GDM and MIND (research/critical_node_detection.md §7). Extremely
+GND, Wandelt, GDM and MIND. Extremely
 hub-dominated, so it is where a degree heuristic is hardest to beat.
 """
 

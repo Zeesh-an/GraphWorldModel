@@ -7,7 +7,7 @@ Source: https://snap.stanford.edu/data/Oregon-2.html
     - No inherent node features: uses log(1 + degree)
 
 GreedyWalk's Table 2 row, at 10,900 / 31,180 with a published **lambda_1 = 70.74**
-[verified, `research/epidemic_control.md` §5.2]. Loaded alongside `oregon1` because
+[verified]. Loaded alongside `oregon1` because
 the two are the spectral line's standard pair and the lambda_1 gap between them
 (58.72 vs 70.74) is a controlled test of whether our eigensolver reproduces
 published numbers on two graphs of nearly the same size.
@@ -16,8 +16,8 @@ Warning: THREE Oregon-2 snapshots are in play here and the key names disambiguat
 them. `oregon2_010331` is this one, the 31 March 2001 week GreedyWalk, Gelling and
 DAVA report. `oregon2` in this repo is `oregon2_010526` at 11,461 / 32,730, the LAST
 of SNAP's nine weekly snapshots and the file DITTO's own loader fetches: a
-different graph under the same paper-facing name, which is §6.4's collision hazard
-in its purest form.
+different graph under the same paper-facing name, which is the name-collision
+hazard in its purest form.
 """
 
 from pathlib import Path

@@ -11,8 +11,8 @@ both and `GWM_CASFLOW_SRC` picks which clone's `src` directory to import from.
 applies CasFlow's corpus-specific publication filters and then splits 70/15/15 at
 RANDOM, and both halves are wrong for us: our cascades were already filtered by
 `data/wm_cascades.py` at the protocol we are reporting, and
-`research/cascade_prediction.md` §8.3 is the single most transferable finding in
-that file: the random-over-cascades split LEAKS, and reproducing it here would put
+the single most transferable finding in
+this literature is that the random-over-cascades split LEAKS, and reproducing it here would put
 this arm on a different protocol from every other arm in the table. So the driver
 reimplements `gene_cas.py`'s `file_write` loop (thirty lines, and the trivially
 correct part) honoring OUR split, and calls the repo's own code for the two stages
@@ -27,7 +27,7 @@ the cascade id is recovered.
 
 **The repo's label is the INCREMENT** (`gene_cas.py`: `label = str(label -
 len(observation_path))`), and our harness scores a TOTAL. The conversion is one line
-at the end and it is stated here because §5.7 difference 3 records that the two
+at the end and it is stated here because the two
 quantities share a symbol in this literature.
 """
 
@@ -298,7 +298,7 @@ if __name__ == "__main__":
                 break
 
             # The repo regresses the INCREMENT (gene_cas: label = P(t_p) - P(t_o)),
-            # and our harness scores a TOTAL. §5.7 difference 3.
+            # and our harness scores a TOTAL.
             increment = max(float(values[row]), 0.0)
             predictions[cascade_id] = observed.get(cascade_id, 0) + increment
 

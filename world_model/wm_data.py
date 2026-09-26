@@ -25,7 +25,7 @@ torch.sparse.check_sparse_tensor_invariants.disable()
 in_channels = 6
 ch_infected, ch_frontier, ch_degree, ch_add, ch_remove, ch_edge = range(6)
 
-# ...and the COMPETITIVE layout (research/influence_blocking.md §2.1): the same
+# ...and the COMPETITIVE layout: the same
 # (infected, frontier) pair per cascade, then the same four structure/action
 # channels. 6 -> 8, and nothing in the encoders changes: they take (N, in_channels)
 # and are agnostic to what the columns mean, so only this table and the feature
@@ -53,8 +53,8 @@ competitive_in_channels = 8
 out_channels = 2
 competitive_out_channels = 4
 
-# ...and the COMPARTMENTAL layout (research/epidemic_control.md §2.3). §2.3's own
-# table gives 7 channels for SIR and 8 for SEIR; ONE 9-channel layout covers SIR,
+# ...and the COMPARTMENTAL layout. A per-dynamics
+# layout would need 7 channels for SIR and 8 for SEIR; ONE 9-channel layout covers SIR,
 # SIS and SEIR together instead, and the two channels that buys are worth their
 # weight column: the unused compartment reads exactly zero under the models that do
 # not have it, so one head class, one dataset layout and one `channels_for` case
@@ -231,14 +231,13 @@ def build_graph_input(
     # information state: the graph is known, the transmission probabilities are
     # not, and the encoder has to infer them from structure. It is also the
     # honest ablation for the wrinkle that our IC heads otherwise consume the
-    # true w as an input feature; see research/adaptive_online_im.md §2.4b, §9.3
-    # item 7. The SIMULATOR still uses the true probabilities: this masks the
-    # model's view of the world, not the world.
+    # true w as an input feature. The SIMULATOR still uses the true probabilities:
+    # this masks the model's view of the world, not the world.
     #
     # SIR/SIS/SEIR belong on the IC side of this branch, and that is exactly why
-    # research/epidemic_control.md §2.2 says to write our own stepper: NDlib's
-    # compartmental models carry no per-arc parameter at all, so under them this
-    # would degenerate to ones and take `structured_residual` with it.
+    # we wrote our own stepper: NDlib's compartmental models carry no per-arc
+    # parameter at all, so under them this would degenerate to ones and take
+    # `structured_residual` with it.
     if diffusion_model in weighted_dynamics and not hide_edge_weights:
         weights = torch.as_tensor(edge_weight, dtype=torch.float32, device=device)
     else:
@@ -681,8 +680,7 @@ def load_episode_endpoints(
     Regroup `transitions_<dm>_<split>.jsonl` by episode into (x, y) pairs.
 
     The labelled data source localization needs, recovered from transitions that
-    already exist: no new simulator, no new action op, no regeneration
-    (research/source_localization.md §2.1). Per episode:
+    already exist: no new simulator, no new action op, no regeneration. Per episode:
 
       * **sources `x`**: the `t = 0`, `branch = "main"` record's action IS the seed
         commit, a bag of `add_node` ops, and the generator writes it for every
@@ -690,10 +688,10 @@ def load_episode_endpoints(
       * **observation `y`**: the LAST main record's view of the terminal state, in
         two forms. `marginal` is that record's `next_marginal_infected`, i.e. the
         MC-averaged `P(infected)`; `binary` is its realized `next_state.infected`.
-        §2.9 risk 5 is why both are kept: our marginals are averaged over
-        `--mc-marginals` draws while SL-VAE observes a single binary realization,
-        so the marginal column is strictly MORE informative than the literature's
-        and only the binarized one is comparable to §5.1.
+        Both are kept because our marginals are averaged over `--mc-marginals`
+        draws while SL-VAE observes a single binary realization, so the marginal
+        column is strictly MORE informative than the literature's and only the
+        binarized one is comparable to published results.
 
     Warning: `marginal` is the marginal of the LAST STEP, conditioned on the realized
     trajectory up to it, not the marginal of the whole cascade from `x`. Every
@@ -747,7 +745,7 @@ def load_episode_endpoints(
 
         # The whole observed path, one row per step. Free here (every main record
         # already carries its own next_state) and it is a genuine observation
-        # SETTING rather than plumbing for one baseline: §8.3 lists the full
+        # SETTING rather than plumbing for one baseline: the literature lists the full
         # trajectory alongside the snapshot, and DDMSL / DDMIX / DIPT reconstruct
         # it rather than assuming it. PDSL conditions on intermediate snapshots
         # and cannot be run from the endpoint alone.
@@ -782,18 +780,18 @@ def load_episode_trajectories(
     Regroup `transitions_<dm>_<split>.jsonl` by episode into whole HISTORIES.
 
     The labelled data cascade reconstruction needs, recovered from transitions that
-    already exist (research/cascade_reconstruction.md §2.2). `load_episode_endpoints`
+    already exist. `load_episode_endpoints`
     keeps only the two ends of an episode because a localizer inverts a snapshot;
     a trajectory decoder is scored on every step in between, so this keeps all of
     them. Per episode:
 
       * **activation time `t(v)`**: the step at which `v` first appears in
-        `next_state.frontier`. §2.2's central asset: the `frontier` channel IS the
+        `next_state.frontier`. The central asset: the `frontier` channel IS the
         quantity DITTO's NRMSE scores and Rozenshtein's `FR` scheme samples, and
         the generator has been writing it every step all along.
       * **the transmission edge**: `parents`, which only exists under
         `--trace-parents`. Absent means the tree half cannot be scored and the
-        caller must say so rather than silently reporting the easy half (§2.6).
+        caller must say so rather than silently reporting the easy half.
       * **`states` / `frontiers`**: `(T + 1, N)` binary, one row per step, so a
         decoder's whole output can be compared against the whole truth.
 
@@ -926,7 +924,7 @@ def dataset_is_epidemic(out_dir: Path) -> bool:
     9-channel head fed 6-channel features fails loudly at the first matmul, but a
     6-channel head fed a compartmental dataset would silently fit the ever-infected
     marginal alone: losing recovery entirely, which is the exact failure mode
-    research/epidemic_control.md §2.4 says this task exists to expose.
+    this task exists to expose.
     """
     metadata_path = Path(out_dir) / "metadata.json"
 
@@ -943,7 +941,7 @@ def epidemic_rates(out_dir: Path, diffusion_model: str) -> dict:
     Read back rather than taken from a flag, for the same reason the competitive
     tie-break is: a head whose recovery rate disagrees with the simulator that made
     the targets is fit against a transition that never happened, and nothing about
-    the loss curve would say so. §8.2 trap 2 is the other half: beta and gamma are
+    the loss curve would say so. The other half: beta and gamma are
     free parameters nobody standardizes, so a run that cannot state its own is
     comparable to nothing.
     """

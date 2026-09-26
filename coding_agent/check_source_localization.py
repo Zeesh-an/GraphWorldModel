@@ -235,7 +235,8 @@ def labels_come_from_the_t0_seed_commit() -> None:
             directory, "IC", "train", graph_id="toy", limit=0, observation="binary"
         )
         # Our marginal is strictly MORE informative than the binary draw, which is
-        # why both are kept and only the binary column is comparable to §5.1
+        # why both are kept and only the binary column is comparable to published
+        # results
         assert set(np.unique(binary[0].observation)) <= {0.0, 1.0}
         assert not set(np.unique(instances[0].observation)) <= {0.0, 1.0}
 
@@ -291,8 +292,8 @@ def lpsi_finds_the_planted_source() -> None:
     which is a CENTRE-of-the-infected-region estimator: on a path 0-1-2 with all
     three infected, node 1 accumulates more field than either endpoint and LPSI
     names it, even though the cascade started at an endpoint. That is the
-    ill-posedness §1 describes, showing up on a seven-node graph, not a bug, and
-    exactly why §2.9 risk 3 says the achievable ceiling is uncharacterized.
+    ill-posedness of the inverse problem, showing up on a seven-node graph, not a
+    bug, and exactly why the achievable ceiling is uncharacterized.
 
     So the two things asserted here are the two LPSI actually promises: it never
     names a node the observation says was uninfected, and on a star seeded at the

@@ -12,7 +12,7 @@ school traces: a method that only works by cutting between classes has nothing t
 cut here.
 
 Warning: 403, not 405. The dataset page says 405 participants; 403 appear in the
-contacts [derived, §6.2].
+contacts [derived].
 """
 
 from pathlib import Path

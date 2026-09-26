@@ -13,13 +13,13 @@ Source: https://snap.stanford.edu/data/memetracker9.html
     - No node labels
 
 Topo-LSTM's Table II reports Memes at 5,000 nodes / 313,669 edges / 54,847
-cascades, avg size 17.0 [verified, §6.2]. **We do not reproduce those counts and
+cascades, avg size 17.0 [verified]. **We do not reproduce those counts and
 say so here rather than in a footnote:** that row is Topo-LSTM's own extraction,
 top-5,000 hosts, their own phrase filter, their own month selection, and the
 authors publish the extraction script for none of it. Ours is the same construction
 applied to one month with `--cp-max-nodes` deciding the host cap, so a Memes number
-from this loader is comparable to itself and to nothing published. §6.4 already
-records five corpora sharing the name "Twitter"; this is the same hazard with a
+from this loader is comparable to itself and to nothing published. Five published
+corpora already share the name "Twitter"; this is the same hazard with a
 different name, and the honest response is a loader that states its own version.
 
 **The diffusion tree is not observed.** A quote record says a host carried a phrase
@@ -37,7 +37,7 @@ identical to Digg's convention and stated for the same reason.
     Q   <quoted phrase>            (zero or more)
     L   <hyperlink>                (zero or more)
 
-Used by: Topo-LSTM, FOREST (§7).
+Used by: Topo-LSTM, FOREST.
 """
 
 import gzip
@@ -121,7 +121,7 @@ def stream_phrase_adoptions(path: Path) -> dict[str, list[tuple[str, int]]]:
     Never decompresses to disk and never holds a whole month: the file is read as a
     line stream and only the retained phrases' adoption lists survive. A host that
     carries a phrase twice keeps its first time, which is the progressive-cascade
-    assumption every method in §3 and §4 makes.
+    assumption every method in this literature makes.
     """
     adoptions = {}
     seen = {}
@@ -214,7 +214,7 @@ def load_memetracker(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray,
     return adjacency, node_feats, node_labels, num_nodes
 
 # Corpus time is SECONDS since a phrase's first appearance. **These windows are
-# OURS, not published**, for the same reason Digg's are: §6.2 lists MemeTracker as a
+# OURS, not published**, for the same reason Digg's are: this literature uses MemeTracker as a
 # first-`k`-adopters corpus and the methods that use it are microscopic. 1 d / 7 d
 # reflects how phrase reuse actually decays in this stream (most phrases are dead
 # within a week), and it is stated as a choice rather than a convention.

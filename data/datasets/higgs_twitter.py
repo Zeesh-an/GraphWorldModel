@@ -8,7 +8,7 @@ Source: https://snap.stanford.edu/data/higgs-twitter.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-Tong & Wu's source graph (NeurIPS 2018, §5.8). Warning: THEY DO NOT RUN ON THIS FILE,
+Tong & Wu's source graph (NeurIPS 2018). Warning: THEY DO NOT RUN ON THIS FILE,
 they run on 10K- and 100K-node SUBGRAPHS of it, with activity-proportional
 probabilities on the first and uniform p = 0.1 on the second, and describe neither
 extraction. Their numbers are therefore not reproducible from this loader; it is here

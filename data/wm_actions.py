@@ -21,9 +21,9 @@ spine_algorithms = (
 
 # How an episode's t=0 BLOCKER set is chosen when generating competitive
 # (influence-blocking) data. Not the same list as the spine selectors, and the
-# difference is the single most useful design fact in
-# research/influence_blocking.md §5.4: the degree heuristic "cannot be used for
-# influence blocking maximization at all", while PROXIMITY (out-neighbours of the
+# difference is the single most useful design fact in the influence-blocking
+# literature: the degree heuristic "cannot be used for influence blocking
+# maximization at all", while PROXIMITY (out-neighbours of the
 # negative seeds) is the strong cheap baseline. `degree` is kept so the data
 # contains the failure mode too, and `none` so some episodes carry an unopposed
 # rumour: the sigma(S_N, empty) reference every prevented-influence number needs.
@@ -33,7 +33,7 @@ blocking_selectors = ("none", "random", "proximity", "degree", "pagerank")
 # "given the outbreak's own sources, choose k nodes that are not sources", so the
 # five rules and `select_blockers` cover both tasks rather than each needing its
 # own. `proximity` is the ring the outbreak reaches first, which is the family DAVA
-# belongs to (research/epidemic_control.md §3.3), and `none` leaves the outbreak
+# belongs to, and `none` leaves the outbreak
 # unprotected and supplies the sigma(outbreak, empty) reference every
 # prevented-infections number divides by.
 immunizer_selectors = blocking_selectors
@@ -227,7 +227,7 @@ def select_blockers(
         return sorted(int(candidates[int(index)]) for index in chosen)
 
     if algorithm == "proximity":
-        # §5.4: pick the out-neighbours of the negative seeds, the nodes the rumour
+        # Pick the out-neighbours of the negative seeds, the nodes the rumour
         # reaches FIRST: ranked by degree, topped up by hop 2 and then by degree
         degrees = _out_degree(graph)
         ring = []

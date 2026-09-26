@@ -81,8 +81,8 @@ modulated_conditioning = (
 )
 
 #: Backbones with an action-conditioned message path. GraphSAGE is the backbone
-#: the project settled on (world_model/checkpoints/RESULTS.md: the only one
-#: faithful on both IC and LT rollouts), and the brief asks for the smallest
+#: the project settled on (the only one faithful on both IC and LT rollouts
+#: in the five-backbone comparison), and the brief asks for the smallest
 #: defensible change, not the same change five times.
 conditionable_backbones = ("sage",)
 

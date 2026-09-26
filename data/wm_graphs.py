@@ -35,10 +35,10 @@ real_directed = {
     "facebook": False,
     "ca_grqc": False,
     "lastfm_asia": False,
-    # Network-dismantling benchmarks (research/critical_node_detection.md §6.2).
+    # Network-dismantling benchmarks.
     # Every one is loaded undirected: that literature is undirected almost
     # end to end, and symmetrizing to reuse a published baseline is a stated
-    # preprocessing choice rather than an accident (§8.2 trap 9).
+    # preprocessing choice rather than an accident.
     "usair97": False,
     "crime": False,
     "corruption": False,
@@ -51,19 +51,19 @@ real_directed = {
     "pgp": False,
     "openflights": False,
     "p2p_gnutella": False,
-    # Source-localization benchmarks (research/source_localization.md §6.2).
+    # Source-localization benchmarks.
     # `dolphins` is the only graph that literature uses which the other task
     # files did not already need; `deezer` is IVGD's scalability column and has no
     # published F1 row at all, so it is a cost target rather than a comparison.
     "dolphins": False,
     "deezer": False,
-    # Influence-blocking benchmarks (research/influence_blocking.md §6.2). Every one
+    # Influence-blocking benchmarks. Every one
     # is loaded with its own file's directedness rather than symmetrized, because
     # unlike the dismantling literature this one is largely DIRECTED and its
     # published probabilities are 1/in-degree, which is only defined on arcs.
     #
     # Warning: two of these collide by name with graphs we already load, and both
-    # collisions are recorded in §6.3 rather than resolved by renaming theirs:
+    # collisions are recorded here rather than resolved by renaming theirs:
     # `epinions1` is SNAP's soc-Epinions1 (75,879) while `epinions` is the SIGNED
     # soc-sign-epinions (131,828), and `p2p_gnutella08` is the 08 snapshot NIE and
     # NAMM use while `p2p_gnutella` is Gnutella31's giant component (62,561).
@@ -83,9 +83,9 @@ real_directed = {
     # `youtube`, and each loader's docstring says so
     "higgs_twitter": True,
     "pokec": True,
-    # Cascade-reconstruction benchmarks (research/cascade_reconstruction.md §6).
+    # Cascade-reconstruction benchmarks.
     # All undirected: like the dismantling literature, this one is undirected end
-    # to end: every Steiner-tree method in §3 is defined on the symmetric contact
+    # to end: every published Steiner-tree method is defined on the symmetric contact
     # graph, and DITTO's own loaders call `nx.read_edgelist` without `create_using`.
     #
     # `oregon2` and `rt_pol` are DITTO's two graphs we did not already have;
@@ -100,15 +100,15 @@ real_directed = {
     "uci_students": False,
     "infectious": False,
     "citeseer": False,
-    # Epidemic-control benchmarks (research/epidemic_control.md §6). Two families.
+    # Epidemic-control benchmarks. Two families.
     #
-    # The SOCIOPATTERNS contact traces (§6.2) are the field's canonical EMPIRICAL
+    # The SOCIOPATTERNS contact traces are the field's canonical EMPIRICAL
     # networks: RFID proximity at 20-second resolution in a hospital, a school, a
     # conference, an office, a village. All undirected, all aggregated from a `tij`
     # stream by one parser (`data/datasets/sociopatterns.py`), and every count is
     # [derived] because SocioPatterns publishes no statistics page at all. Warning:
     # aggregating a contact trace DISCARDS the ordering that makes the epidemic
-    # non-trivial (§8.2 trap 5), and §7 records that no paper in the CS immunization
+    # non-trivial, and no paper in the CS immunization
     # line uses one: they buy realism and community structure, not a published
     # baseline.
     "hospital_lh10": False,
@@ -123,13 +123,13 @@ real_directed = {
     "malawi_village": False,
     "kenya_households": False,
     "infectious_sociopatterns": False,
-    # ...and the SPECTRAL LINE's own benchmarks (§5.2, §6.3), which DO carry
+    # ...and the SPECTRAL LINE's own benchmarks, which DO carry
     # published numbers: GreedyWalk's Table 2 gives `lambda_1` per graph, so
     # `wm_metrics.spectral_radius` is checkable against somebody else's arithmetic
     # on `oregon1` (58.72), `oregon2_010331` (70.74), `brightkite` (101.49) and the
     # `youtube` we already load (210.4).
     #
-    # Warning: THREE name collisions, all recorded rather than renamed away (§6.4).
+    # Warning: THREE name collisions, all recorded rather than renamed away.
     # `oregon2_010331` is the 2001-03-31 snapshot the spectral line reports while
     # `oregon2` is `oregon2_010526`, DITTO's; `p2p_gnutella05`/`06` are GreedyWalk's
     # while `p2p_gnutella08`/`24`/`p2p_gnutella` are three other snapshots; and
@@ -147,7 +147,7 @@ real_directed = {
     # degree, so it is the control that shows what happens when the heavy tail the
     # degree heuristic feeds on is gone.
     "football": False,
-    # The REAL CASCADE CORPORA (research/cascade_prediction.md §6.2), and the only
+    # The REAL CASCADE CORPORA, and the only
     # datasets here that carry diffusion TRACES rather than topology alone. Every one
     # is loaded undirected: the graph we build is the union of the observed
     # propagation paths (CasFlow's own `generate_global_graph`), and an observed
@@ -155,8 +155,8 @@ real_directed = {
     # is the exception in construction but not in directedness: it has a real
     # published friendship graph and uses it, symmetrized.
     #
-    # Warning: THREE of these collide by name with graphs we already load, and §6.1
-    # and §6.4 record all three rather than renaming theirs. `digg_cascades` is the
+    # Warning: THREE of these collide by name with graphs we already load, and all
+    # three are recorded here rather than renamed away. `digg_cascades` is the
     # ISI/Lerman Digg 2009 corpus (279,632 nodes WITH 3,553 vote cascades) while
     # `digg` is the Syracuse friendship graph (116,893, no cascades): different
     # graph, and ours has no traces. `weibo_cascades` is the AMiner retweet TRACES
@@ -287,9 +287,9 @@ def bundle_from_nx(
     )
 
 
-# ConTinEst's three 2x2 Kronecker seed matrices (research/adaptive_online_im.md
-# 6.3b). The generator is the k-fold tensor power of one of these; edge (i, j)
-# is sampled with the resulting probability.
+# ConTinEst's three 2x2 Kronecker seed matrices. The generator is the k-fold
+# tensor power of one of these; edge (i, j) is sampled with the resulting
+# probability.
 kronecker_seeds = {
     "core_periphery": ((0.9, 0.5), (0.5, 0.3)),
     "random": ((0.5, 0.5), (0.5, 0.5)),
@@ -392,7 +392,7 @@ def make_synthetic_bundle(
             f"_s{instance_seed}"
         )
     elif family == "powerlaw_cluster":
-        # RL4IM's family (research/adaptive_online_im.md 6.3b): BA growth plus a
+        # RL4IM's family: BA growth plus a
         # triangle-closing step, so it has the clustering BA lacks while keeping
         # the heavy tail. Defaults are RL4IM's, read from its repo rather than
         # its paper: RL4IM's own basic_env.yaml sets m=3, p=0.05 (avg degree 5.9), which is what its graph.py passes to nx.powerlaw_cluster_graph. The paper's "average degree 3" disagrees with its own code; the code wins.
@@ -496,8 +496,8 @@ def load_cascade_corpus(
         raise ValueError(
             f"dataset {dataset!r} carries no cascades, so it cannot be replayed for "
             f"--task cascade_prediction. Real cascade corpora: "
-            f"{sorted(cascade_corpora)}. research/cascade_prediction.md §6.1 records "
-            f"that NONE of the graphs we load for the other tasks carry a trace: "
+            f"{sorted(cascade_corpora)}. "
+            f"NONE of the graphs we load for the other tasks carry a trace: "
             f"that is the whole reason this task needed new loaders."
         )
 

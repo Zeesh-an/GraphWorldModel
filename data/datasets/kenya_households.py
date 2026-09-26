@@ -11,8 +11,8 @@ this family whose community labels are households rather than institutional role
 which makes it the closest empirical analogue of the SBM this pipeline generates
 synthetically.
 
-Warning: THE PUBLISHED NODE COUNT OF 47 IS WRONG, and `research/epidemic_control.md`
-§6.2 says why: member ids restart at 1 in every household, so a global dedup on the
+Warning: THE PUBLISHED NODE COUNT OF 47 IS WRONG, and the reason is this: member
+ids restart at 1 in every household, so a global dedup on the
 member id alone collapses distinct people. A person is the PAIR `(household,
 member)`, which gives 75: B=15, E=17, F=8, H=29, L=6, verified against the file.
 Netzschleuder's mirror reports the collapsed 47.

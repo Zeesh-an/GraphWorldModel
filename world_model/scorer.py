@@ -15,9 +15,9 @@ implementation — a scorer that reimplemented the rollout would be a second thi
 to keep in sync with the evaluation suite, and the two would diverge on the first
 bug fix.
 
-Offline use only. §0 of the brief is explicit that the world model ranks
-candidate algorithms during design and is not packaged into the algorithm that
-ships; nothing here is imported by generated strategy code.
+Offline use only. The world model ranks candidate algorithms during design and
+is not packaged into the algorithm that ships; nothing here is imported by
+generated strategy code.
 """
 
 from dataclasses import dataclass
@@ -332,7 +332,7 @@ class WorldModelScorer:
             wm = WorldModelScorer.load(ckpt).diagnostics(graph, context)
             wm.evaluate(plan); wm.probe_drop(plan, v); wm.explain_plan(plan)
 
-        The probe surface of research §Part 4, reached from a checkpoint rather
+        The probe surface, reached from a checkpoint rather
         than from an already-built environment, which is what an offline analysis
         script has. Imported lazily for the same reason `environment` is: the
         `coding_agent` package imports `world_model`.

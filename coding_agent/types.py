@@ -171,14 +171,14 @@ class TaskSpec:
     # Timesteps of diffusion between consecutive rounds. 1 = seed again on the
     # very next step; larger lets each batch's cascade run further first.
     round_gap: int = 1
-    # What the policy may READ at a round boundary (research/adaptive_online_im.md
-    # §1.1). full_adoption = the whole realized state; myopic = the current wave
-    # only. The theory literature's central axis, and free from our channel layout.
+    # What the policy may READ at a round boundary. full_adoption = the whole
+    # realized state; myopic = the current wave only. The theory literature's
+    # central axis, and free from our channel layout.
     feedback_model: str = full_adoption
-    # Dynamic / streaming IM (§1.4): exogenous edge edits per timestep, as a
+    # Dynamic / streaming IM: exogenous edge edits per timestep, as a
     # fraction of |E|. 0 = the static graph every other setting assumes.
     edit_rate: float = 0.0
-    # Multi-round IM (§1.5): r SEPARATE campaigns of k seeds each, scored on the
+    # Multi-round IM: r SEPARATE campaigns of k seeds each, scored on the
     # union of what they activate. 1 = a single campaign, i.e. every other task.
     campaigns: int = 1
     # Source localization: the program INVERTS the transition instead of choosing
@@ -193,11 +193,11 @@ class TaskSpec:
     # that does not invert.
     instances: tuple = ()
     # Where each instance's k comes from: `episode` (its own source count, the
-    # published given-k convention) or `sweep` (the pipeline's k, for §8.5.1's
+    # published given-k convention) or `sweep` (the pipeline's k, for the
     # source-fraction axis)
     source_budget_mode: str = "episode"
     # Whether the arm's evaluator provides a forward model at all. False is the
-    # `@native` condition (research/source_localization.md §2.4.3): the harness
+    # `@native` condition: the harness
     # scores with one real episode and the canned kernel-using baselines get a
     # raiser instead of a kernel. A GENERATED program is offline under every
     # condition and never sees the evaluator, so for it this flag only changes
@@ -211,13 +211,13 @@ class TaskSpec:
     # Narrows `recovers` exactly as `blocks` narrows `contains`.
     reconstructs: bool = False
     # Weight on PathPrecision in that reward. >= 0.5 is a REQUIREMENT rather than a
-    # taste (research/cascade_reconstruction.md §2.6): the node set is nearly free,
+    # taste: the node set is nearly free,
     # so a search rewarded mostly on Event F1 discovers the tree contributes
     # nothing to its score and converges on decoders that never attempt it.
     tree_weight: float = 0.6
-    # Which of §2.7's four settings this run masks under. Four PROTOCOLS, not four
-    # knobs: a decoder selected under final_snapshot is solving a different problem
-    # from one selected under partial_times, so the rows are never pooled (§8.3).
+    # Which of the four observation settings this run masks under. Four PROTOCOLS,
+    # not four knobs: a decoder selected under final_snapshot is solving a different
+    # problem from one selected under partial_times, so the rows are never pooled.
     observation_setting: str = "partial_times"
     # Influence blocking: TWO cascades. The planner fights a rumour seeded from
     # `outbreak` (which is S_N here) and its own counter-cascade is the instrument
@@ -226,11 +226,11 @@ class TaskSpec:
     # feature builder or the 4-target head.
     competitive: bool = False
     # Which cascade wins a node both reach on the same step, RESOLVED (never `auto`).
-    # §8.4 calls this a reported hyperparameter rather than an implementation detail
+    # This is a reported hyperparameter rather than an implementation detail
     # and most papers never state theirs, so it reaches the prompt, the head and the
     # simulator from one place. Inert unless `competitive`.
     tie_break: str = "positive"
-    # Budak's detection delay r (§8.3): the rumour is detected r steps late and the
+    # Budak's detection delay r: the rumour is detected r steps late and the
     # blocker emits nothing before then. 0 is every published table's setting.
     detection_delay: int = 0
     # Epidemic control: the state is four EXCLUSIVE compartments rather than two
@@ -239,21 +239,21 @@ class TaskSpec:
     # path that has to pick the compartmental simulator, the 9-channel feature
     # builder or the 5-target head. Narrows `contains` exactly as `blocks` does.
     epidemic: bool = False
-    # Which of research/epidemic_control.md §2.5's four interventions the budget
-    # buys. Carried as a FIELD rather than derived from `budget_op`, because
-    # `vaccinate` and `quarantine` both spend `remove_node` and differ only in what
-    # the harness expands it into: the first deletes the node, the second isolates
-    # it and leaves it counted (§8.2 trap 7).
+    # Which of the four epidemic-control interventions the budget buys. Carried
+    # as a FIELD rather than derived from `budget_op`, because `vaccinate` and
+    # `quarantine` both spend `remove_node` and differ only in what the harness
+    # expands it into: the first deletes the node, the second isolates it and
+    # leaves it counted.
     epi_lever: str = "vaccinate"
     # Multiplier `set_edge_weight` writes under the `contact_reduce` lever. 0.0 is a
     # full cut through the weight channel, so it is directly comparable to
     # `edge_cut` at the same k; a value in (0, 1) is graded social distancing, which
-    # is expressible only because we wrote our own stepper (§2.2).
+    # is expressible only because we wrote our own stepper.
     contact_reduction: float = 0.0
     # The compartmental rates, RESOLVED, so the prompt can state what is being
-    # simulated. §8.2 trap 2: beta and gamma are free parameters nobody
-    # standardizes, and a table that fixes them without saying so is comparable
-    # only to itself. Inert unless `epidemic`.
+    # simulated. Beta and gamma are free parameters nobody standardizes, and a
+    # table that fixes them without saying so is comparable only to itself. Inert
+    # unless `epidemic`.
     epi_beta: float = 1.0
     epi_gamma: float = 0.3
     epi_alpha: float = 0.5
@@ -266,15 +266,15 @@ class TaskSpec:
     #
     # `observes` is the narrowing one, and it narrows `forecasts` exactly as
     # `decodes` narrows `recovers`: the transitions were REPLAYED FROM A LOG, so the
-    # dynamics that produced them are not IC, not LT and not known
-    # (research/cascade_prediction.md §2.2). The prompt has to say so: a system
+    # dynamics that produced them are not IC, not LT and not known.
+    # The prompt has to say so: a system
     # message asserting IC dynamics over Weibo retweets would be a lie the model
     # would then optimize against.
     observational: bool = False
     # Which quantity `predict()` is scored on. `increment` is CasFlow's own code
-    # (`label = P(t_p) - P(t_o)`), `total` is CasFT's Eq. 26. §5.7 difference 3
-    # records that the two share a symbol and are not the same quantity, so the
-    # choice is reported rather than assumed.
+    # (`label = P(t_p) - P(t_o)`), `total` is CasFT's Eq. 26. The
+    # two share a symbol and are not the same quantity, so the choice is reported
+    # rather than assumed.
     prediction_target: str = "increment"
     # Which error the reward IS. Every one of these MINIMIZES, which is why
     # `Task.sense` maps `forecast` onto `minimize` rather than reading the objective
@@ -282,10 +282,10 @@ class TaskSpec:
     prediction_metric: str = "msle"
     # Steps of history a predictor may see, and steps it must predict over. Both in
     # the replayed corpus's own timesteps rather than seconds, so they are readable
-    # beside `horizon` (§8.2 pairs two observation windows per corpus deliberately:
-    # a single-window result is not publishable in this literature).
+    # beside `horizon` (published protocols pair two observation windows per corpus
+    # deliberately: a single-window result is not publishable in this literature).
     observation_window: int = 5
-    # Unrolls averaged inside one `forecast_marginals` call. The cost knob of §2.4:
+    # Unrolls averaged inside one `forecast_marginals` call. The cost knob:
     # each unroll pays `steps` metered kernel evaluations, so an @monte_carlo arm
     # pays `steps * samples * mc_runs` real episodes per call and a @world_model arm
     # pays `steps * samples` matmuls.
@@ -338,7 +338,7 @@ class TaskSpec:
         which nodes RECOVER and (under SIS) become susceptible again. That
         non-monotonicity is what needs a different simulator, a different feature
         layout and a head that composes a transition matrix rather than a
-        probability (research/epidemic_control.md §2.4).
+        probability.
         """
         return self.epidemic
 
@@ -376,8 +376,7 @@ class TaskSpec:
         The fourth problem family. It changes the contract as much as `recovers`
         does and gives up more: `predict(graph, observation, horizon) -> float`,
         scored on a prediction error, with `a_t` NULL at every step so no action is
-        ever emitted and no budget is ever spent
-        (research/cascade_prediction.md §2.1).
+        ever emitted and no budget is ever spent.
         """
         return self.objective_kind == forecast
 
@@ -389,7 +388,7 @@ class TaskSpec:
         Same relationship `decodes` has to `recovers`, and the difference is where
         the DATA came from rather than what is predicted: these transitions were
         replayed from a real log, so the process behind them is not IC, not LT and
-        not known. That is the one thing the prompt must not get wrong: §2.2 lists
+        not known. That is the one thing the prompt must not get wrong: there are
         three specific mechanisms (Hawkes self-excitation, repeated exposure,
         exogenous arrivals) by which real adoption violates the composition rule our
         structured head hard-codes, and a model told it is predicting IC would tune
@@ -450,7 +449,7 @@ class Trajectory:
     # cumulative one. Only a compartmental task fills it, and it is a separate
     # field rather than a reinterpretation of `spread_curve` because the two are
     # genuinely different curves there: the attack set is monotone and the
-    # prevalence is not, and §2.6's peak, time-to-peak and AUC are all functions of
+    # prevalence is not, and the peak, time-to-peak and AUC are all functions of
     # the second. Padding it by holding the last value would be WRONG for the same
     # reason (a dead epidemic's prevalence is 0, not its last non-zero value) so
     # it is padded with zeros instead.
@@ -493,7 +492,7 @@ class Strategy(Protocol):
     # `{node: (activation timestep, inferred parent)}` for every node believed
     # infected, with `parent = None` marking a source and uninfected nodes simply
     # absent. The program is offline: the arm's transition kernel scores the
-    # history it returns (research/cascade_reconstruction.md §2.5), never runs
+    # history it returns, never runs
     # inside it.
     def reconstruct(
         self, graph: GraphInfo, observation: object, horizon: int
@@ -504,8 +503,8 @@ class Strategy(Protocol):
     # popularity it will have reached by `t_p`. Return None (or a non-finite value)
     # to DECLINE: a generative model that cannot score a supercritical cascade is
     # counted in `n_failed` rather than charged a wild guess, which is the column
-    # research/cascade_prediction.md §8.4 says almost nobody publishes. The
-    # program is offline: no forward model runs inside it (§2.1).
+    # almost nobody in this literature publishes. The program is offline: no
+    # forward model runs inside it.
     def predict(
         self, graph: GraphInfo, observation: object, horizon: int
     ) -> float | None: ...
@@ -528,7 +527,7 @@ class ScoredStrategy:
     free-form programs or composition over the library.
 
     The inverse-task half (`source_score` + the fixed top-k `localize`) is the
-    analogue described in research/source_localization.md §2.4.2, and it makes the
+    scored-mode analogue for the inverse tasks, and it makes the
     search space directly comparable to the classical methods: LPSI, the
     Comin-Costa centralities and rumor centrality are all exactly node-scoring
     functions over the observed state.
@@ -667,12 +666,12 @@ class ScoredStrategy:
         Scored mode for cascade prediction, and the tightest fit of the four:
         Szabo & Huberman's founding result is that `log P(t_p)` is near-linear in
         `log P(t_o)`, i.e. that the whole problem is a multiplier, so a search over
-        multipliers is a search over exactly the space §3.1's feature line occupies,
-        rather than a subset of it. `features` is `cascade_features(...)`: Cheng et
-        al.'s five classes (root, structural, temporal, community, and the observed
-        counts) computed once per instance, so a rule can key off the reshare rate
-        in the second half of the window, which is the single best feature that
-        paper found.
+        multipliers is a search over exactly the space the published feature line
+        occupies, rather than a subset of it. `features` is `cascade_features(...)`:
+        Cheng et al.'s five classes (root, structural, temporal, community, and the
+        observed counts) computed once per instance, so a rule can key off the
+        reshare rate in the second half of the window, which is the single best
+        feature that paper found.
 
         The default is the doubling constant Cheng et al. built their whole
         classification framing around: predict that a cascade reaches twice what it
@@ -705,7 +704,7 @@ class ScoredStrategy:
         How implausible the transmission `source -> target` is. LOWER = more likely.
 
         Scored mode for cascade reconstruction, and the tightest fit of the three:
-        every ordered-Steiner method in `research/cascade_reconstruction.md` §3 IS
+        every published ordered-Steiner method IS
         exactly a shortest-path computation under an arc cost, so the constrained
         search space is directly comparable to the classical methods rather than a
         subset of them. The default is the likelihood metric they all use: a

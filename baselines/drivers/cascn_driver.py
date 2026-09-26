@@ -3,11 +3,11 @@ Drive CasCN (ICDE'19) on OUR cascades and dump per-cascade predictions.
 
 CasCN is the first method in this literature to use both structure and time
 properly: a cascade as a SEQUENCE of sub-cascade graphs, a GCN over each snapshot
-and an LSTM across them. `research/cascade_prediction.md` §5.3 is why it is worth
+and an LSTM across them. It is worth
 running rather than citing: under CasTemp's leak-free split it is the BEST of the
 six re-run baselines on Twitter (MSLE 1.206) and second on APS, which is a larger
 reordering than any other row in that table. Under the leaky split it sits mid-pack
-(2.7931 on Weibo 0.5 h), so it is the clearest single case of §8.3's finding
+(2.7931 on Weibo 0.5 h), so it is the clearest single case of the leak-free split
 changing a ranking rather than just a level.
 
 **This driver reuses the repo's own preprocessing rather than reimplementing it**,
@@ -20,7 +20,7 @@ the per-split file `casflow_driver.py` already knows how to write:
 `seq2graph` builds the per-timestep sub-cascade graphs, and
 `caslaplacian.calculate_scaled_laplacian_dir` builds the scaled directed Laplacian.
 All of that is the method, and none of it is ours. What the driver supplies is the
-split: OUR split, not the repo's, for the reason §8.3 gives.
+split: OUR split, not the repo's, because a random split over cascades leaks.
 
 **Two things my own earlier blocker got wrong, corrected here rather than quietly.**
 The repo's `num_nodes` is `tf.flags.DEFINE_integer("num_nodes", 100, "number of max

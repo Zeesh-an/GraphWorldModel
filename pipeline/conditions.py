@@ -48,7 +48,7 @@ valid_evaluators = (native, monte_carlo, oracle, world_model)
 # thing: the program is a per-round policy called on the realized state instead
 # of a static plan decided up front. Pairing `adaptive_<mode>@E` with
 # `evolve_<mode>@E` at the same budget is what makes the adaptivity gap an A/B
-# on that one variable (research/adaptive_online_im.md §9.3 item 3).
+# on that one variable.
 valid_methods = (
     "one_shot",
     "per_step",
@@ -88,7 +88,7 @@ selection_evaluator = oracle
 
 # The classical pool run as condition 1: one representative per major IM family
 # (heuristic, discount, centrality, RIS/sketch) plus the random floor; celf_pp was
-# dropped from the final tables (final_results_plan.md) and stays callable as
+# dropped from the final tables and stays callable as
 # `baseline:celf_pp`
 default_baselines = (
     "high_degree",
@@ -434,17 +434,17 @@ def adaptivity_gaps(results: list[dict]) -> list[dict]:
     Pair every adaptive arm with its matched non-adaptive control.
 
     gap = sigma(adaptive policy) / sigma(best static seed set) at the SAME budget
-    and the SAME evaluator (research/adaptive_online_im.md §8.1). Both sides are
+    and the SAME evaluator. Both sides are
     read on the shared referee replay, because each arm's own reward is measured
     by its own evaluator and a ratio of two different rulers means nothing.
 
     Calibration, so a small number is not misread as a failure: theory caps the
     myopic gap at 4 and proves non-adaptive greedy is no worse than adaptive
-    greedy across all graphs (§5.1). A gap near 1 is the expected outcome; the
+    greedy across all graphs. A gap near 1 is the expected outcome; the
     claim this task makes is about COST, not spread.
 
     The denominator is the BEST non-adaptive arm at that (budget, evaluator), not
-    a nominated one: §1.1 defines the gap against `max_{|S|=k} E[sigma(S)]`, so
+    a nominated one: the gap is defined against `max_{|S|=k} E[sigma(S)]`, so
     the closest available estimate is the strongest static seed set anyone
     produced under the same measurement conditions. `control_arm` records which
     it was, since that changes with the arm set.

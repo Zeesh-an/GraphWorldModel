@@ -7,7 +7,7 @@ Source: https://snap.stanford.edu/data/email-Enron.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-The proactive-rumour-control paper's mid-size graph (§6.2). Its counts match the
+The proactive-rumour-control paper's mid-size graph. Its counts match the
 published row digit for digit, which makes it one of the cleaner comparison targets
 in a literature where most graphs are quoted three different ways.
 """

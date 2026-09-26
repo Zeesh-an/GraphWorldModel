@@ -2,23 +2,22 @@
 Shared loader body for the SocioPatterns empirical CONTACT TRACES.
 
 These are the field's canonical empirical networks and what makes epidemic control
-on networks an empirical problem rather than a synthetic one
-(`research/epidemic_control.md` §6.2): RFID proximity sensors worn by real people
+on networks an empirical problem rather than a synthetic one: RFID proximity sensors worn by real people
 at 20-second resolution, in a hospital ward, a school, a conference, an office, a
 village.
 
 Warning: AGGREGATING A CONTACT TRACE DESTROYS HALF THE PROBLEM, and every loader
-here does it. §8.2 trap 5 states it plainly: a contact at `t = 10` followed by one
+here does it. Put plainly: a contact at `t = 10` followed by one
 at `t = 20` transmits, and the reverse order does not, so flattening a `tij` stream
 to a static graph throws away the ordering that makes the epidemic non-trivial.
 Papers that aggregate report systematically LARGER outbreaks. Our pipeline consumes
-a static adjacency, so we aggregate, and say so here, in the loader's own print
-line, and in `research/epidemic_control.md` §9.8, rather than leaving a reader to
-discover it. §9.8 also records the cheap route out: `reconstruct_episode_adjacency`
+a static adjacency, so we aggregate, and say so here and in the loader's own print
+line rather than leaving a reader to discover it. There is a cheap route out:
+`reconstruct_episode_adjacency`
 already replays a different adjacency per step, so a per-step contact graph is
 reachable without new machinery whenever it is worth building.
 
-Warning: THESE GRAPHS HAVE NO PUBLISHED BASELINE. §7 records that no paper in the
+Warning: THESE GRAPHS HAVE NO PUBLISHED BASELINE. No paper in the
 CS immunization line uses a SocioPatterns trace: that family belongs to the
 epidemiology side (Vanhems, Stehlé, Génois & Barrat, Machens) and the CS line
 standardized on Oregon + Portland + collaboration graphs. Adding them buys realism
@@ -26,7 +25,7 @@ and community structure, not a number to compare against.
 
 **Every count below is [derived]**: SocioPatterns publishes no statistics page at
 all, so each loader's docstring states what we counted from the file and each was
-checked against `research/epidemic_control.md` §6.2's own derivation. All twelve
+checked against an earlier independent count. All twelve
 match to the digit.
 
 One parser covers the family because the format is: `timestamp node_i node_j
@@ -34,7 +33,7 @@ One parser covers the family because the format is: `timestamp node_i node_j
 graph is `set()` over the dyads. Where the file carries class or department labels
 they become `node_labels`, exactly as `email_eu_core`'s 42 departments do: the
 primary school's ten classes are the ground-truth community structure our SBM
-experiments only approximate (§6.6).
+experiments only approximate.
 """
 
 import csv
@@ -53,7 +52,7 @@ def download_trace(name: str, filename: str) -> Path:
     """
     Fetch one SocioPatterns file, expanding a `.gz` and leaving an archive alone.
 
-    §6.2's own warning applies here rather than to the URL: these hosts return
+    A known hazard of these hosts applies here rather than to the URL: they return
     HTTP 200 and then stall mid-transfer on anything over ~10 MB. `fetch` writes
     the whole body before renaming nothing, so a stalled download leaves a short
     file that fails to parse rather than a silently truncated graph: delete the
@@ -172,7 +171,7 @@ def build_contact_graph(
     print(
         f"[ok] {title} loaded: {num_nodes} nodes, {adjacency.nnz // 2} undirected "
         f"edges (aggregated from {contacts} timestamped contacts: the ORDERING "
-        f"is discarded, see research/epidemic_control.md §8.2 trap 5)"
+        f"is discarded)"
     )
     print(f"    Avg degree: {degrees.mean():.1f}, max degree: {degrees.max():.0f}")
 
@@ -189,7 +188,7 @@ def load_kilifi(paths: list[Path]) -> tuple[list[tuple], dict, int]:
 
     Its rows carry `h1,m1,h2,m2,...,duration,day,hour` rather than a timestamp, and
     a person is identified by the PAIR `(household, member)`: member ids restart at
-    1 in every household. §6.2 records that Netzschleuder's node count of 47 is
+    1 in every household. Netzschleuder's node count of 47 is
     wrong for exactly this reason: a global dedup on the member id collapses
     distinct people. Keying on the pair gives 75 (B=15, E=17, F=8, H=29, L=6),
     verified against the file.

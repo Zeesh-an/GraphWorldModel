@@ -11,43 +11,43 @@ and returns what its LEVER spends: node ids under `vaccinate` and `quarantine`,
 reconciles the two shapes into one plan, which is what keeps a published algorithm
 runnable without rewriting it to know what a plan is.
 
-`research/epidemic_control.md` organizes this literature into three lines and all
-three are here, because they optimize DIFFERENT objectives and a table with only
-one of them is a table that cannot see its own blind spot:
+This literature splits into three lines and all three are here, because they
+optimize DIFFERENT objectives and a table with only one of them is a table that
+cannot see its own blind spot:
 
-  * **The physics line (§3.1)**: targeted degree immunization
+  * **The physics line**: targeted degree immunization
     (Pastor-Satorras & Vespignani PRE'02), acquaintance immunization
     (Cohen PRL'03), and Holme's recalculated-degree/betweenness taxonomy. These
-    are two-line heuristics and §8.3 names `acquaintance` specifically as "the
-    baseline that most embarrasses learned methods on sparse graphs".
-  * **The spectral line (§3.2)**: NetShield, NetShield+, NetMelt, ProductDegree,
+    are two-line heuristics, and `acquaintance` is specifically "the baseline
+    that most embarrasses learned methods on sparse graphs".
+  * **The spectral line**: NetShield, NetShield+, NetMelt, ProductDegree,
     EigenScore, GreedyWalk, Preciado's allocation. They minimize `lambda_1`, which
     is a MODEL-INDEPENDENT surrogate that needs no simulator at all. Warning: they
-    are optimizing something we do not score them on, and §8.2 trap 1 is the whole
+    are optimizing something we do not score them on, and that is the whole
     point: a method can win on eigendrop and lose on simulated final size, because
     `lambda_1` says nothing about WHERE the infection currently is.
-  * **The simulation / data-aware line (§3.3)**: DAVA and DAVA-fast
+  * **The simulation / data-aware line**: DAVA and DAVA-fast
     (Zhang & Prakash SDM'14), frontier immunization, and the MC greedy. These
-    condition on the OBSERVED infected set, and §9.4 is emphatic that this is the
-    line to position against: "DAVA makes exactly our argument (condition on the
-    observed infection state and the optimal allocation changes) but does it with a
-    dominator-tree heuristic on a single observed snapshot."
+    condition on the OBSERVED infected set, and this is the line to position
+    against: DAVA makes exactly our argument (condition on the observed infection
+    state and the optimal allocation changes) but does it with a dominator-tree
+    heuristic on a single observed snapshot.
 
 Three conventions everything here obeys:
 
-  * **Undirected**, like the dismantling literature and for the same reason (§8.2
-    trap 9): every routine works over `containment.neighbour_sets`, the symmetrized
+  * **Undirected**, like the dismantling literature and for the same reason:
+    every routine works over `containment.neighbour_sets`, the symmetrized
     view, and our directed datasets are symmetrized to be scored at all.
   * **The outbreak is an input, not a discovery.** Every member takes
     `outbreak=(...)` and the data-aware ones use it; the structural ones absorb it
-    through `**kw` and ignore it. That asymmetry IS the §3.2-vs-§3.3 split and is
+    through `**kw` and ignore it. That asymmetry IS the spectral-vs-data-aware split and is
     the thing the table is meant to expose.
   * **No member may return an outbreak source.** Dosing patient zero ends the
     outbreak rather than containing it, `executor.validate_actions` rejects it, and
     `immunization_plan` filters it, but the members exclude it themselves so their
     budget is spent on legal picks rather than lost to a top-up.
 
-Read §9.4 before treating any of these as a weak floor. `degree_immunization` is
+None of these is a weak floor. `degree_immunization` is
 the row a learned method has to beat outright: RLGN's own Table 2 has Degree and
 Eigenvector tying to within 0.1 on CA-GrQc (25.5 vs 25.4) and on GEMSEC-RO (2.4 vs
 2.4), which is the same heuristic-collapse the BA-100 result already showed us on
@@ -173,7 +173,7 @@ def _rank_arcs(
     return [tuple(int(node) for node in arc) for arc in ranked[:budget]]
 
 
-# The physics line (§3.1) --------------------------------------------------------
+# The physics line ---------------------------------------------------------------
 def degree_immunization(
     graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
@@ -184,7 +184,7 @@ def degree_immunization(
     founding result of this literature is that this restores a finite epidemic
     threshold on a power-law network with a vanishing immunized fraction, while
     random immunization needs a fraction approaching 1, and it is the row a learned
-    method has to beat outright (§9.4).
+    method has to beat outright.
     """
     degrees = primitives.compute_degree(graph)
     banned = _excluded(graph, outbreak)
@@ -245,10 +245,10 @@ def acquaintance_immunization(
     knowledge at all and still hits hubs, because following an edge lands on a node
     with probability proportional to its degree (the friendship paradox).
 
-    §8.3 names it explicitly: "it needs no global information, is two lines of code,
-    and is the baseline that most embarrasses learned methods on sparse graphs. It
-    should be in our table." A method that reads the whole graph and does not
-    clearly beat this has bought nothing with the information.
+    It needs no global information, is two lines of code, and is the baseline that
+    most embarrasses learned methods on sparse graphs, so it belongs in the table. A
+    method that reads the whole graph and does not clearly beat this has bought
+    nothing with the information.
     """
     neighbours = _undirected(graph)
     banned = _excluded(graph, outbreak)
@@ -293,7 +293,7 @@ def eigenvector_immunization(
     In the table rather than the appendix for one reason: NetShield's own
     contribution is that COLLECTIVE selection beats top-k of an individual score,
     and this is the top-k it beats. RLGN's Table 2 also has it tying with Degree to
-    0.1 on two of five graphs (§5.1), which is the heuristic-collapse signature
+    0.1 on two of five graphs, which is the heuristic-collapse signature
     worth being able to see.
     """
     scores = primitives.compute_centrality(graph, kind="eigenvector")
@@ -355,7 +355,7 @@ def random_immunization(
     return [int(pool[index]) for index in rng.choice(len(pool), size=count, replace=False)]
 
 
-# The spectral line (§3.2) -------------------------------------------------------
+# The spectral line --------------------------------------------------------------
 def netshield(
     graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[int]:
@@ -369,15 +369,16 @@ def netshield(
 
     is submodular, so a greedy selection is `(1 - 1/e)`-optimal against it, and
     Table 3 of the paper measures its approximation to the true eigendrop at
-    0.977-1.000 across four conference co-authorship graphs [verified, §5.3].
+    0.977-1.000 across four conference co-authorship graphs [verified].
 
     Warning: it optimizes `lambda_1`, which is a surrogate that ignores WHERE the
     outbreak currently is. It is expected to beat every centrality here on the
     eigendrop column and it is NOT expected to beat `dava` on the attack rate once
-    the outbreak is small and localized: that disagreement is §8.2 trap 1 and is
-    the figure `eigendrop_vs_attack.png` exists to show.
+    the outbreak is small and localized: that disagreement between the spectral
+    surrogate and the simulated objective is the figure `eigendrop_vs_attack.png`
+    exists to show.
 
-    Warning: NO PUBLIC RELEASE by the authors. §11 records the widely-repeated claim
+    Warning: NO PUBLIC RELEASE by the authors. There is a widely-repeated claim
     that EpiLearn ships a NetShield implementation, and it is WRONG: that repo's
     tree has no shield, immunization or intervention code at all [derived,
     2026-08-05]. `external:netimm_netshield` is the one runnable third-party
@@ -422,8 +423,8 @@ def netshield_plus(
     few high-`u` nodes are gone, that vector no longer describes the graph the next
     pick is being made on.
 
-    A separate entry rather than a flag on `netshield` for the reason §8.2 trap 2 of
-    the dismantling review gives about reinsertion variants: `X` and `X+` get cited
+    A separate entry rather than a flag on `netshield` for the same reason the
+    dismantling library keeps reinsertion variants apart: `X` and `X+` get cited
     under one name and are not the same method.
     """
     banned = _excluded(graph, outbreak)
@@ -489,8 +490,8 @@ def greedy_walk(
     Computed by repeated sparse matvec rather than by forming `A^k`, so it stays
     `O(k * E)` per removal.
 
-    Warning: the paper's code link is a `tinyurl` printed in the PDF and §11 records
-    it as unverified. `allogn/Network-Immunization`'s README states independently
+    Warning: the paper's code link is a `tinyurl` printed in the PDF and is
+    unverified. `allogn/Network-Immunization`'s README states independently
     that the Walk8 solver was supplied by these authors and is MATLAB, so this is a
     reimplementation from the paper's prose and is labelled as one.
     """
@@ -554,12 +555,11 @@ def preciado_allocation(
     thresholded at the top `k`.
 
     Labelled a DISCRETIZATION rather than the method, and the difference is real,
-    §8.2 trap 3 of the dismantling review makes the same point about cost-weighted
-    versus cardinality budgets. Their own instance is 56 airports with passenger
-    weights, which is not reconstructable (§6.5), so there is no cell of theirs to
-    match anyway.
+    the same way cost-weighted and cardinality budgets differ in the dismantling
+    literature. Their own instance is 56 airports with passenger weights, which is
+    not reconstructable, so there is no cell of theirs to match anyway.
 
-    Warning: no public code (§11).
+    Warning: no public code.
     """
     banned = _excluded(graph, outbreak)
     vector, _ = _leading_eigenvector(graph)
@@ -584,7 +584,7 @@ def preciado_allocation(
     )
 
 
-# The data-aware / simulation line (§3.3) ----------------------------------------
+# The data-aware / simulation line -----------------------------------------------
 def dava(
     graph: GraphInfo,
     budget: int,
@@ -596,14 +596,14 @@ def dava(
     """
     DAVA (Zhang & Prakash, SDM 2014): data-aware vaccine allocation.
 
-    Warning: THE ROW THIS TASK IS POSITIONED AGAINST. §9.4: "NetShield optimizes
+    Warning: THE ROW THIS TASK IS POSITIONED AGAINST. NetShield optimizes
     `lambda_1`, needs no simulator, and runs in milliseconds: we cannot beat it on
     its own metric and should not try. DAVA makes exactly our argument (condition on
     the OBSERVED infection state and the optimal allocation changes) but does it
     with a dominator-tree heuristic on a single observed snapshot. A learned
     action-conditioned model is the natural generalization: same claim, learned
     rather than hand-derived, and it extends to multi-step allocation where DAVA
-    does not."
+    does not.
 
     The algorithm, from the paper:
 
@@ -619,7 +619,7 @@ def dava(
          rebuild and takes the top `k` from one tree, which is the near-linear
          variant.
 
-    Warning: no public code by the authors (§11). `external:netimm_dava` is
+    Warning: no public code by the authors. `external:netimm_dava` is
     `allogn/Network-Immunization`'s implementation and is the cross-check on this
     one; both are readings of the same prose and neither is authoritative.
     """
@@ -847,9 +847,9 @@ def frontier_immunization(
 
     The simplest data-aware rule there is, and the control DAVA has to beat to have
     contributed anything: it conditions on WHERE the outbreak is, which is the whole
-    §3.2-vs-§3.3 distinction, but spends nothing on figuring out which boundary
-    nodes matter. If `dava` does not clearly beat this, its dominator tree bought
-    nothing.
+    spectral-vs-data-aware distinction, but spends nothing on figuring out which
+    boundary nodes matter. If `dava` does not clearly beat this, its dominator tree
+    bought nothing.
     """
     banned = _excluded(graph, outbreak)
     if not banned:
@@ -895,7 +895,7 @@ def mc_greedy_immunization(
     Greedy on the SIMULATED attack rate: add the dose that lowers it most, repeat.
 
     The objective every other member here approximates, computed directly, and
-    therefore the practical ceiling for a classical method: §1.1 records that it is
+    therefore the practical ceiling for a classical method: the problem is
     NP-hard and, unlike influence maximization, NOT submodular in general, so this
     carries no approximation guarantee and is a strong heuristic rather than a
     `(1 - 1/e)` bound.
@@ -942,7 +942,7 @@ def mc_greedy_immunization(
     return _pad(chosen, graph, budget, banned)
 
 
-# The edge levers (§1.1 / §3.2) --------------------------------------------------
+# The edge levers ----------------------------------------------------------------
 def netmelt(
     graph: GraphInfo, budget: int, diffusion_model: str = "SIR", outbreak: tuple[int, ...] | list[int]=(), **_: object
 ) -> list[tuple[int, int]]:
@@ -954,7 +954,7 @@ def netmelt(
     leading eigenvector entries, which on a symmetric adjacency is `u(i) * u(j)`.
     This is the canonical edge baseline of the spectral line.
 
-    Warning: no public code found (§5.5).
+    Warning: no public code found.
     """
     vector, _ = _leading_eigenvector(graph)
     scores = {arc: vector[arc[0]] * vector[arc[1]] for arc in _arc_list(graph)}
@@ -986,9 +986,9 @@ def eigen_score(
     EigenScore (Van Mieghem et al., PRE 84:016101, 2011): score arc `(u, v)` by `|x(u) * x(v)|`.
 
     Algebraically the same expression as `netmelt` on a symmetric graph, and kept as
-    its own row for the reason §8.2 of every file in `research/` gives: two papers
-    proposing the same rule under different names is a fact worth being able to
-    read off a table rather than one a reader has to already know. Any gap between
+    its own row because two papers proposing the same rule under different names is
+    a fact worth being able to read off a table rather than one a reader has to
+    already know. Any gap between
     the two rows here is our eigenvector solver's tolerance, not a method
     difference.
     """
@@ -1065,8 +1065,9 @@ def frontier_edge_cut(
     The data-aware edge control, and the edge lever's answer to
     `frontier_immunization`: it conditions on where the outbreak is rather than on
     the graph's global structure. On a small localized outbreak it should beat
-    `netmelt` outright, which is §8.2 trap 1 in its sharpest form: the spectral
-    method is optimizing a quantity that does not know where the infection is.
+    `netmelt` outright, which is the spectral-surrogate trap in its sharpest form:
+    the spectral method is optimizing a quantity that does not know where the
+    infection is.
     """
     banned = _excluded(graph, outbreak)
     if not banned:
@@ -1184,16 +1185,16 @@ def emittable(name: str, lever: str) -> bool:
 
 # Condition-1 pool per lever, each led by the row that actually has to be beaten.
 #
-#   * `vaccinate` / `quarantine` lead with `degree_immunization` (§9.4: RLGN's own
-#     table has Degree tying Eigenvector to 0.1 on two of five graphs) and carry
-#     `acquaintance_immunization` because §8.3 names it as the row that most
-#     embarrasses learned methods. `netshield` and `dava` are the two published
+#   * `vaccinate` / `quarantine` lead with `degree_immunization` (RLGN's own table
+#     has Degree tying Eigenvector to 0.1 on two of five graphs) and carry
+#     `acquaintance_immunization` because it is the row that most embarrasses
+#     learned methods. `netshield` and `dava` are the two published
 #     methods this task is positioned between, and `random_immunization` is not a
 #     throwaway floor: the GAP between it and degree is Pastor-Satorras &
 #     Vespignani's founding result.
 #   * The edge levers lead with `netmelt`, the canonical spectral edge baseline, and
 #     carry `frontier_edge_cut` as the data-aware control that should beat it on a
-#     localized outbreak (§8.2 trap 1 in its sharpest form).
+#     localized outbreak (the spectral-surrogate trap in its sharpest form).
 #
 # `mc_greedy_immunization` is deliberately absent for the same reason `celf`,
 # `greedy_blocking` and `resim_greedy` are: it re-simulates every candidate on its

@@ -319,10 +319,10 @@ class WorldModelEnvironment:
         """
         `P(v newly infected at t + 1 | s_t)` in ONE forward pass of f_theta.
 
-        The world-model binding of research/cascade_reconstruction.md §2.5.2, and
-        the reason that file calls this the task where the model most clearly earns
-        its place: the sampling bindings pay `mc_runs` real episodes per call and
-        this pays one batched matmul, at ~10^4 calls per decoded instance (§2.4.2).
+        The world-model binding of the transition kernel, and the reason this is
+        the task where the model most clearly earns its place: the sampling
+        bindings pay `mc_runs` real episodes per call and this pays one batched
+        matmul, at ~10^4 calls per decoded instance.
 
         Column 1 of the head is `next_frontier`: the nodes that activate on THIS
         step, which is exactly the kernel a decoder proposes against. Column 0
@@ -459,7 +459,8 @@ class WorldModelEnvironment:
         # rather than whatever the representative sample happened to do
         sample_curves = [[float(len(seeds))] for _ in range(num_samples)]
         # ...and the PREVALENCE, |I(t)|, which under a compartmental task is a
-        # different curve from the cumulative one and is the one §2.6 grades on
+        # different curve from the cumulative one and is the one the epidemic
+        # metrics (peak, time-to-peak, AUC) are graded on
         sample_prevalence = [[0.0] for _ in range(num_samples)]
 
         representative_states = [State(sorted(seeds), sorted(seeds))]

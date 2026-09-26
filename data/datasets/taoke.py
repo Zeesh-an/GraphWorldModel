@@ -22,18 +22,18 @@ Digg and MemeTracker publish adoption times with no parent, and the CasFlow bund
 and it is the corpus to reach for if a cascade-prediction result ever needs a
 tree-level diagnostic.
 
-**Warning: `research/cascade_prediction.md` §6.5 lists this under "Not
-recommended"** - "too new, single-paper". That verdict stands and this loader does
+**Warning: this corpus is "Not recommended"**: it is too new and appears in a
+single paper. That verdict stands and this loader does
 not overturn it: the corpus exists in exactly one paper, its own, and the only
 published numbers on it are CasTemp's Table 4 (MSLE 0.685, MALE 0.548, against
 CasCN's 2.795 / 1.308 - a gap far larger than any on the three standard corpora,
 which is itself a reason to be careful). It is loaded because it is the one corpus
-in §6.2 that is BOTH auto-downloadable and carries a real tree, and because §5.3's
+here that is BOTH auto-downloadable and carries a real tree, and because CasTemp's
 leakage finding is reported on it. Lead with Weibo/Twitter/APS.
 
 **Warning: node and item feature embeddings are ignored.** The repo ships
-`taoke_node_feat.npy` (128-d per member) and `taoke_item_feat_emb.npy`. §5.3 records
-that Taoke "is the only one of the four with cascade AND node features", and using
+`taoke_node_feat.npy` (128-d per member) and `taoke_item_feat_emb.npy`. Taoke is
+the only one of CasTemp's four corpora with cascade AND node features, and using
 them would make our row incomparable to every other corpus we run - our feature
 builder is 6 channels of state and structure by construction (`world_model/
 wm_data.py`), and a corpus with private side information is not the place to break
@@ -57,7 +57,7 @@ taoke_url = "https://raw.githubusercontent.com/Lucas-PJ/CasTemp-ALGO/master/Taok
 data_dir = Path(__file__).resolve().parent.parent / "raw" / "taoke"
 
 # The repo's own split files. We read all three and re-split chronologically
-# ourselves, because §8.3's whole finding is that the SPLIT is the trap and our
+# ourselves, because CasTemp's whole finding is that the SPLIT is the trap and our
 # protocol has to be one we control.
 relation_files = (
     "taoke_train_forward_relations.csv.csv",
@@ -208,7 +208,7 @@ def load_taoke(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, int]:
 
 # Corpus time is SECONDS since the item's first forward.
 #
-# CasTemp's own segment length for Taoke is 1 DAY (§8.3) and its protocol observes
+# CasTemp's own segment length for Taoke is 1 DAY and its protocol observes
 # one segment and predicts over the next, which under the elapsed-time convention
 # every other corpus here uses would be `t_o = 1 d, t_p = 2 d`. **That does not fit
 # the released file**: `taoke_*_forward_relations.csv` spans about THREE days

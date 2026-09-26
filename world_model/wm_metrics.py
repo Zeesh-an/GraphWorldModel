@@ -9,19 +9,17 @@ ends up reporting one thing under another's name.
     simulator: one-step forward prediction.
   * `roc_auc` through `resimulation_error` score an INVERSE prediction: a
     recovered source set against the true one, in the PR / RE / F1 / AUC form the
-    source-localization literature reports (`research/source_localization.md` §8.1).
+    source-localization literature reports.
   * Everything from `gcc_threshold` down is computed exactly by BFS on the
-    residual graph and is never a training target,
-    `research/critical_node_detection.md` §2.1 argues at length that a k-layer
-    message-passing model provably cannot represent giant-component membership on
-    a diameter-46 graph, and §8.3 therefore puts the connectivity functionals in
-    the report as descriptive context beside the diffusion number that the arm was
-    actually optimized for. The epidemic block (`spectral_radius`,
-    `epidemic_curve_metrics`, `immunization_metrics`) sits in the same category and
-    carries the same warning from the other side: `research/epidemic_control.md`
-    §8.2 trap 1 records that a method can win on eigendrop and lose on simulated
-    final size, so the eigendrop is reported BESIDE the attack rate rather than as
-    the score.
+    residual graph and is never a training target: a k-layer message-passing
+    model provably cannot represent giant-component membership on a diameter-46
+    graph, so the connectivity functionals go in the report as descriptive context
+    beside the diffusion number that the arm was actually optimized for. The
+    epidemic block (`spectral_radius`, `epidemic_curve_metrics`,
+    `immunization_metrics`) sits in the same category and carries the same warning
+    from the other side: a method can win on eigendrop and lose on simulated final
+    size, so the eigendrop is reported BESIDE the attack rate rather than as the
+    score.
 """
 
 import numpy as np
@@ -206,7 +204,7 @@ def localization_metrics(
     PR / RE / F1 / AUC / ACC for one recovered source set: the SL literature's set.
 
     Node-level binary classification over V with the source set as the positive
-    class (research/source_localization.md §8.1). Four notes on the columns, each
+    class. Four notes on the columns, each
     one a trap that file names explicitly:
 
       * **F1 is the headline.** SL-VAE calls it "the most commonly used", IVGD "the
@@ -219,7 +217,7 @@ def localization_metrics(
         node tied: a real, monotone number, but not the continuous AUC SL-VAE
         reports. Which rule an arm used is recorded per result.
       * **`RE` is an overloaded column name in this literature**: Recall in
-        SL-Diff and SIDSL, re-simulated error elsewhere (§8.1). Here `recall` is
+        SL-Diff and SIDSL, re-simulated error elsewhere. Here `recall` is
         recall, and the re-simulated error has its own key.
     """
     truth = np.zeros(num_nodes, dtype=bool)
@@ -259,7 +257,7 @@ def resimulation_error(predicted_marginal: np.ndarray, observation: np.ndarray) 
     """
     Mean squared error between re-simulating the RECOVERED sources and the observed y.
 
-    The metric this literature should report and does not: §11 records that no
+    The metric this literature should report and does not: no
     surveyed paper reports a genuine re-simulated error, so this column is
     self-contained and must not be presented as a cross-paper comparison. Its
     negative IS the source-localization reward (`localization.consistency_score`):
@@ -280,8 +278,7 @@ def matthews_corrcoef(predicted: np.ndarray, truth: np.ndarray) -> float:
 
     Kept beside F1 rather than instead of it: MCC uses the true negatives, so on a
     cascade that reached 5% of the graph it is far less flattering than accuracy
-    and far more stable than F1 when the predicted set is nearly empty
-    (research/cascade_reconstruction.md §8.1).
+    and far more stable than F1 when the predicted set is nearly empty.
     """
     predicted = np.asarray(predicted).astype(bool)
     truth = np.asarray(truth).astype(bool)
@@ -316,7 +313,7 @@ def reconstruction_metrics(
     horizon: int,
 ) -> dict[str, float]:
     """
-    The metric suite for one reconstructed trajectory: §8.1's whole table.
+    The metric suite for one reconstructed trajectory: the whole published table.
 
     `predicted` and the two truth maps are `node -> activation step` and
     `node -> (activation step, inferred parent)`; a node absent from either was
@@ -331,7 +328,7 @@ def reconstruction_metrics(
         at the wrong step is a miss. DITTO's `F1` column.
       * **TREE level** (`path_precision`, `jaccard`, `order_accuracy`): the
         who-infected-whom edges. DIPT's `Path Precision` + `Jaccard Index`. This is
-        the hard half, and §2.6 is why it must carry the outer loop's reward:
+        the hard half, and it must carry the outer loop's reward:
         rewarded on the node set alone, a program SEARCH discovers the tree
         contributes nothing to its score and converges on decoders that never
         attempt it.
@@ -341,7 +338,7 @@ def reconstruction_metrics(
     rather than 0.0, so a missing capability never reads as a failed one.
 
     A parent set (LT, where activation is a threshold crossing over the whole
-    active neighbourhood and there is no single transmitting edge, §2.6) counts a
+    active neighbourhood and there is no single transmitting edge) counts a
     predicted parent as correct if it is IN the set. That is the honest reading and
     it makes LT's path precision structurally easier than IC's; the two are never
     compared.
@@ -389,7 +386,7 @@ def reconstruction_metrics(
         "event_f1": event_f1,
         "mcc": matthews_corrcoef(predicted_infected, truth_infected),
         "time_mae": float(np.mean(np.abs(predicted_hitting - true_hitting))),
-        # DITTO normalizes by 2n(T+1)^2 under the root [verified, §5.1]
+        # DITTO normalizes by 2n(T+1)^2 under the root [verified]
         "time_nrmse": float(
             np.sqrt(squared_error / (2.0 * num_nodes * (horizon + 1) ** 2))
         ),
@@ -398,7 +395,7 @@ def reconstruction_metrics(
     }
 
     # The recovered SOURCES fall out for free: the nodes a decoder gave no parent
-    # ARE its seed-set estimate, which is why §2.5.1 calls source localization the
+    # ARE its seed-set estimate, which is why source localization is the
     # projection of this task rather than a sibling of it
     predicted_sources = {node for node, (_, parent) in predicted.items() if parent is None}
     true_sources = {node for node, time in true_times.items() if int(time) == 0}
@@ -476,7 +473,7 @@ def reconstruction_metrics(
 
 
 # Weight on Path Precision in the outer loop's reward. >= 0.5 is a REQUIREMENT
-# rather than a taste (research/cascade_reconstruction.md §2.6): the node set is
+# rather than a taste: the node set is
 # nearly free, so a search rewarded mostly on Event F1 discovers that the tree
 # contributes nothing to its score and converges on decoders that do not attempt
 # the hard half. The reward is the specification.
@@ -485,19 +482,20 @@ default_tree_weight = 0.6
 
 def reconstruction_reward(metrics: dict[str, float], tree_weight: float) -> float:
     """
-    `lambda * PathPrecision + (1 - lambda) * EventF1`: §2.6's Score, verbatim.
+    `lambda * PathPrecision + (1 - lambda) * EventF1`: the published tree-weighted
+    Score, verbatim.
 
     Falls back to Event F1 alone when the dataset carries no transmission edge
     (LT-set-valued truth still has one; a dataset generated without
-    `--trace-parents` does not). That fallback is the failure mode §2.6 describes,
+    `--trace-parents` does not). That fallback is the node-set-only failure mode,
     so every caller records `tree_weight` alongside the number and the harness
     refuses to run the full search without parents.
 
-    Warning: PathPrecision is a PRECISION, and §2.6 does not say so because no
+    Warning: PathPrecision is a PRECISION, which nobody flags because no
     published method has a search that could exploit it. A decoder that names three
     transmission edges and gets them right scores 1.0 on the half the reward is
-    weighted toward, so UNDER-PREDICTING is a second gaming corner beside the one
-    §2.6 names. `path_recall` and `jaccard` are computed for exactly this, and
+    weighted toward, so UNDER-PREDICTING is a second gaming corner beside the
+    node-set-only one. `path_recall` and `jaccard` are computed for exactly this, and
     `reconstruction.summarize_reconstruction` prints a diagnostic whenever an arm
     names fewer than half the real edges. Keeping the published column as the
     reward and surfacing the hazard beats silently switching to a tree F1 the
@@ -515,32 +513,32 @@ def reconstruction_reward(metrics: dict[str, float], tree_weight: float) -> floa
 
 # Cascade / popularity prediction -------------------------------------------
 #
-# research/cascade_prediction.md §8.1 opens with "Get MSLE right or nothing else
-# matters", and it means three independent choices that all hide inside one name:
-# the log BASE (2 in CasFlow and CasFT, natural in CTCP's loss: a constant factor
-# of (ln 2)^2 ~ 0.48 between them), the QUANTITY (total `P(t_p)` versus the
-# increment `dP`), and the SMOOTHING offset (CasFlow's code clamps to >= 1 and adds
-# nothing; CasFT's stated definition adds 1). §5.7 difference 4 records that §5.1
-# prints two of those variants in ONE table. So every variant this repo can report
-# is computed and named, and the reward names which one it used.
+# Get MSLE right or nothing else matters, because three independent choices all
+# hide inside that one name: the log BASE (2 in CasFlow and CasFT, natural in
+# CTCP's loss: a constant factor of (ln 2)^2 ~ 0.48 between them), the QUANTITY
+# (total `P(t_p)` versus the increment `dP`), and the SMOOTHING offset (CasFlow's
+# code clamps to >= 1 and adds nothing; CasFT's stated definition adds 1). A
+# published results table has printed two of those variants in ONE table. So every
+# variant this repo can report is computed and named, and the reward names which
+# one it used.
 
 # CasFlow's own `casflow.py`, verbatim:
 #     predictions = [1 if p < 1 else p for p in predictions]
 #     msle  = mean((log2(pred) - log2(label))^2)
 #     mape  = mean(|log2(pred + 1) - log2(label + 1)| / log2(label + 2))
 # Note the asymmetry in MAPE: +1 inside the absolute value, +2 in the denominator.
-# §8.1 quotes CasFT's caption as `|log2(P+2) - log2(P_hat+2)| / log2(P+2)`, which is
+# CasFT's caption gives it as `|log2(P+2) - log2(P_hat+2)| / log2(P+2)`, which is
 # a THIRD form. Both are computed; `mape` is the code's and `mape_casft` the
 # caption's, and a table has to say which.
 popularity_floor = 1.0
 
 # WroPerc's epsilon: CoupledGNN counts a cascade "wrong" when its relative error on
-# the RAW count exceeds this [verified, §8.1]. The practitioner's metric, and the
+# the RAW count exceeds this [verified]. The practitioner's metric, and the
 # only one here that is not in log space.
 wroperc_epsilon = 0.5
 
 # COV-k's k, as a fraction of the scored set. CasFlow reports Coverage at
-# `k = floor(N/10)`: "did we find the viral ones" [verified, §8.1].
+# `k = floor(N/10)`: "did we find the viral ones" [verified].
 coverage_fraction = 0.1
 
 
@@ -555,18 +553,18 @@ def popularity_metrics(
     declined: int = 0,
 ) -> dict[str, float]:
     """
-    Every metric §8.1 tabulates, over one arm's scored cascades.
+    Every published popularity metric, over one arm's scored cascades.
 
     `predicted` and `actual` are TOTAL popularities at `t_p`; `observed` is
     `P(t_o)`, so the increment variants are derivable here rather than needing a
     second pass. `declined` is how many cascades the predictor refused to score at
-    all, and it is a first-class column for the reason §8.4 gives: generative models
+    all, and it is a first-class column because generative models
     decline on supercritical cascades (SEISMIC failed on 1,022 of ~20K News cascades
     at 5 minutes), papers report the mean over SCOREABLE cascades only, and that
     "silently favours the model that gives up more often". Mishra et al. publish the
     failure counts; almost nobody else does, so we always do.
 
-    Direction, because §8.4 warns the table mixes them: MSLE / MALE / MAPE / MRSE /
+    Direction, because the published tables mix them: MSLE / MALE / MAPE / MRSE /
     WroPerc are LOWER-is-better; PCC / R2 / COV-k are HIGHER-is-better.
     """
     predicted = np.asarray(predicted, dtype=np.float64)
@@ -609,11 +607,11 @@ def popularity_metrics(
         "msle_offset": float(
             np.mean((np.log2(predicted + 1.0) - np.log2(actual + 1.0)) ** 2)
         ),
-        # CTCP's loss, natural log: a factor of (ln 2)^2 from `msle`, and §8.1's
-        # warning that the two are printed under one name
+        # CTCP's loss, natural log: a factor of (ln 2)^2 from `msle`, and the
+        # two are printed under one name in the literature
         "msle_natural": float(np.mean((np.log(np.maximum(predicted, popularity_floor))
                                        - np.log(np.maximum(actual, popularity_floor))) ** 2)),
-        # CasFlow's code form, then §8.1's caption form
+        # CasFlow's code form, then CasFT's caption form
         "mape": float(
             np.mean(
                 np.abs(np.log2(predicted + 1.0) - np.log2(actual + 1.0))
@@ -626,7 +624,7 @@ def popularity_metrics(
                 / np.log2(actual + 2.0)
             )
         ),
-        # The increment, which is what CasFlow's own label IS (§5.7 difference 3)
+        # The increment, which is what CasFlow's own label IS
         "msle_increment": float(np.mean(increment_error**2)),
         "male_increment": float(np.mean(np.abs(increment_error))),
         # CoupledGNN's three, on raw counts
@@ -634,7 +632,7 @@ def popularity_metrics(
         "mrse_median": float(np.median(relative**2)),
         "wroperc": float(np.mean(absolute_relative >= wroperc_epsilon)),
         # SEISMIC reports APE as QUANTILES because the mean is outlier-dominated
-        # [verified, §5.4]; its own 10-minute row is 71% / 44% / 25%
+        # [verified]; its own 10-minute row is 71% / 44% / 25%
         "ape_median": float(np.median(absolute_relative)),
         "ape_p75": float(np.percentile(absolute_relative, 75)),
         "ape_p95": float(np.percentile(absolute_relative, 95)),
@@ -649,7 +647,7 @@ def popularity_metrics(
         ),
         "n_scored": scored,
         "n_failed": int(declined),
-        # The column §8.4 asks for and almost nobody publishes: a mean over
+        # The column almost nobody publishes: a mean over
         # scoreable cascades favours whoever gives up more often, so the give-up
         # rate travels beside the mean rather than in a footnote
         "decline_rate": float(declined / max(scored + declined, 1)),
@@ -668,7 +666,7 @@ def coverage_at_k(predicted: np.ndarray, actual: np.ndarray) -> float:
 
     "Did we find the viral ones", and the one metric here that asks a question MSLE
     cannot: a model can be well calibrated on the bulk and rank the tail wrong,
-    which is the outcome §1.4's whole motivating debate (Salganik/Watts vs Cheng et
+    which is the outcome the whole motivating debate (Salganik/Watts vs Cheng et
     al.) is about.
     """
     count = int(len(actual) * coverage_fraction)
@@ -725,7 +723,7 @@ def doubling_accuracy(
     """
     Cheng et al.'s balanced framing: did the cascade at least DOUBLE, and did we say so?
 
-    §1.3 and §5.6: the WWW'14 paper reframed size prediction as "given `k` observed
+    The WWW'14 paper reframed size prediction as "given `k` observed
     reshares, will it reach `2k`" precisely because that holds the base rate at 50%
     and makes accuracy interpretable: their own numbers are 0.795 accuracy / 0.877
     AUC at `k = 5`. Reported rather than optimized, because our reward is MSLE and a
@@ -746,7 +744,7 @@ def doubling_accuracy(
 # Fraction of N the giant component must fall below for the graph to count as
 # dismantled. 0.01 is the Min-Sum / CoreHD / GND convention; the set size is
 # steeply sensitive to it near the percolation transition, so it is stated with
-# every number (research/critical_node_detection.md §8.2 trap 6).
+# every number.
 gcc_threshold = 0.01
 
 
@@ -795,7 +793,7 @@ def connectivity_profile(
     neighbours: list[set[int]], removed: set[int]
 ) -> dict[str, float]:
     """
-    Objectives 1, 2 and 4 of research/critical_node_detection.md §1.1, computed exactly.
+    Three of the published critical-node objectives, computed exactly.
 
     pairwise_conn is THE canonical CNP objective (Arulselvan et al. 2009);
     largest_cc_size is MinMaxC / the dismantling curve's y-axis; n_components is
@@ -819,11 +817,11 @@ def dismantling_curve(
     """
     s(q) = |GCC(G - S_q)| / N after each of the removals in `order`, sequentially.
 
-    This is objective 6 (§1.1): the physics branch removes nodes ONE AT A TIME and
-    recomputes the residual graph after each, which is a strictly stronger setting
-    than the OR branch's one-batch evaluation at equal k and produces numbers that
-    are NOT interconvertible with it (§8.2 trap 1). Index 0 is the intact graph, so
-    a length-k order yields k + 1 entries.
+    This is the sequential dismantling objective: the physics branch removes nodes ONE
+    AT A TIME and recomputes the residual graph after each, which is a strictly
+    stronger setting than the OR branch's one-batch evaluation at equal k and produces
+    numbers that are NOT interconvertible with it. Index 0 is the intact graph, so a
+    length-k order yields k + 1 entries.
     """
     num_nodes = len(neighbours)
     removed = set()
@@ -862,7 +860,7 @@ def accumulated_normalized_connectivity(
 
     Parametric in sigma on purpose: FINDER instantiates pairwise connectivity,
     GCC size and component count, and the three are different scales. A paper
-    quoting "ANC" without naming sigma is unusable as a baseline (§8.2 trap 3), so
+    quoting "ANC" without naming sigma is unusable as a baseline, so
     every caller here records which sigma it passed.
     """
     if not values or initial <= 0:
@@ -929,18 +927,17 @@ def spectral_radius(
     """
     `lambda_1(A)` of the undirected adjacency after deleting `removed`.
 
-    The one number the entire epidemic-control literature agrees on
-    (research/epidemic_control.md §1.2): for essentially every propagation model,
-    the epidemic dies out iff `lambda_1 * beta / delta < 1`, which is what
-    NetShield, NetMelt, Gelling, GreedyWalk and Preciado are all actually
-    optimizing. It needs no simulator at all, which is exactly §9.9's point,
-    computing it costs one `eigsh` call on a graph we already hold, and it is the
-    only bridge between our simulated-outbreak table and the spectral line's.
+    The one number the entire epidemic-control literature agrees on: for
+    essentially every propagation model, the epidemic dies out iff
+    `lambda_1 * beta / delta < 1`, which is what NetShield, NetMelt, Gelling,
+    GreedyWalk and Preciado are all actually optimizing. It needs no simulator at
+    all: computing it costs one `eigsh` call on a graph we already hold, and it is
+    the only bridge between our simulated-outbreak table and the spectral line's.
 
-    Warning: it is a SURROGATE and §8.2 trap 1 is emphatic that reporting only the
-    eigendrop grades us on the quantity the classical methods were built to
-    optimize: a comparison we cannot win and that does not test the world model.
-    It is reported BESIDE the simulated attack rate, never instead of it.
+    Warning: it is a SURROGATE, and reporting only the eigendrop grades us on the
+    quantity the classical methods were built to optimize: a comparison we cannot
+    win and that does not test the world model. It is reported BESIDE the
+    simulated attack rate, never instead of it.
     """
     if num_nodes <= 0:
         return 0.0
@@ -991,10 +988,11 @@ def epidemic_curve_metrics(
     burn_in: float = 0.5,
 ) -> dict:
     """
-    The SHAPE of an outbreak, from its `|I(t)|` curve: §2.6's four new quantities.
+    The SHAPE of an outbreak, from its `|I(t)|` curve: four quantities the attack
+    rate misses.
 
-    The attack rate says how many were infected; none of these do, and §8.3 lists
-    them because flattening a curve without shrinking its integral is precisely
+    The attack rate says how many were infected; none of these do, and they
+    matter because flattening a curve without shrinking its integral is precisely
     what an epidemic-control policy is judged on:
 
       * **peak prevalence** `max_t |I(t)| / N`: the health-system-capacity metric,
@@ -1003,7 +1001,7 @@ def epidemic_curve_metrics(
         response time even when it saves nobody.
       * **AUC** `sum_t |I(t)|`: the integrated load.
       * **endemic prevalence**: the time average after burn-in, which is the ONLY
-        one of the four that is defined for SIS. §8.2 trap 6: SIS has no terminal
+        one of the four that is defined for SIS. SIS has no terminal
         state, so final size is undefined there and every rollout metric that
         assumes one is silently wrong.
     """
@@ -1045,15 +1043,15 @@ def immunization_metrics(
     """
     The spectral and structural description of one arm's dose allocation.
 
-    §8.3's context columns, and the same role `containment_metrics` plays for
+    Context columns only, the same role `containment_metrics` plays for
     dismantling: never a training target and never the arm's reward, which is the
     simulated attack rate. What this adds over that function is the EIGENDROP,
     `lambda_1(A) - lambda_1(A - S)`, because that is the quantity NetShield,
     NetMelt, Gelling and GreedyWalk report and therefore the only number our table
     and theirs share.
 
-    Reported together with the connectivity profile on purpose. §5.8 of the
-    dismantling review and §8.2 trap 1 here make the same point from two sides: a
+    Reported together with the connectivity profile on purpose. The dismantling
+    and immunization literatures make the same point from two sides: a
     method can win on eigendrop and lose on simulated final size, because
     `lambda_1` says nothing about WHERE the infection currently is. Printing both
     beside the attack rate is what makes that disagreement visible rather than a
@@ -1099,16 +1097,16 @@ def containment_metrics(
     threshold: float = gcc_threshold,
 ) -> dict:
     """
-    The structural description of one arm's removal set: §8.3's context column.
+    The structural description of one arm's removal set: a context column.
 
     Never a training target and never the arm's reward. The reward is the
     ground-truth MC spread; this says what the same set did to the graph's
     connectivity, which is the quantity every published dismantling number is
     measured in and therefore the only bridge between our table and theirs.
 
-    `degree_rank_spearman` is the self-measurement §9.5 asks for: MIND found GDM's
-    dismantling order correlates at 0.762 with a PCA of its own handcrafted input
-    features. We feed log1p(degree) as channel 2, so a removal order that
+    `degree_rank_spearman` is a self-measurement against a known failure: MIND found
+    GDM's dismantling order correlates at 0.762 with a PCA of its own handcrafted
+    input features. We feed log1p(degree) as channel 2, so a removal order that
     correlates with degree at ~0.76 has re-derived the degree heuristic with extra
     steps. Measure it, do not assume it.
     """

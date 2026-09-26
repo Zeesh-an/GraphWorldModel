@@ -128,10 +128,10 @@ summary_columns = (
     "blocking_n_spent",
     # Epidemic control: the compartmental columns. `epi_prevented` is the headline
     # this literature publishes in, and the three curve columns beside it are the
-    # SHAPE: §8.2 trap 4 records that a good policy flattens rather than
+    # SHAPE: a good policy flattens rather than
     # eliminates, so a terminal-state number alone can rank two policies backwards.
-    # `epi_eigendrop` is the spectral line's own metric, carried as CONTEXT: §8.2
-    # trap 1 is that a method can win it and lose the attack rate.
+    # `epi_eigendrop` is the spectral line's own metric, carried as CONTEXT: a
+    # method can win it and lose the attack rate.
     "epidemic",
     "epi_compartments",
     "epi_lever",
@@ -250,7 +250,7 @@ summary_columns = (
     "cp_r2",
     "cp_coverage",
     "cp_doubling_accuracy",
-    # The column §8.4 says almost nobody publishes: a mean over SCOREABLE cascades
+    # The column almost nobody publishes: a mean over SCOREABLE cascades
     # silently favours whoever gives up more often
     "cp_n_scored",
     "cp_n_failed",
@@ -262,8 +262,8 @@ summary_columns = (
     # The two floors a reader needs to interpret any of the above
     "cp_trivial_error",
     "cp_persistence_error",
-    # The protocol. Four of §5.7's five incompatibilities live here, and a number
-    # without them is comparable to nothing.
+    # The protocol. Four of the literature's five incompatibilities live here, and
+    # a number without them is comparable to nothing.
     "cp_corpus",
     "cp_time_unit",
     "cp_target",
@@ -283,7 +283,7 @@ summary_columns = (
     "cp_kernel_calls",
     "cp_kernel_calls_per_instance",
     # MODELLING error: what the arm's own forward model predicts with no program in
-    # the loop, which is the falsification number §9.1 is about
+    # the loop, which is the falsification number this task exists for
     "cp_model_msle",
     "cp_model_male",
     "cp_model_pcc",
@@ -433,7 +433,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "campaign_rewards": result.get("campaign_rewards"),
         # Critical node detection. Empty for every seeding arm, so one table holds
         # both families; the connectivity functionals are DESCRIPTIVE context, never
-        # the objective (research/critical_node_detection.md §8.3).
+        # the objective.
         "containment": result.get("containment"),
         "outbreak_pct": result.get("outbreak_pct"),
         "outbreak_selector": result.get("outbreak_selector"),
@@ -561,10 +561,10 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         ),
         # Cascade reconstruction. Empty for every other arm. The tree columns are
         # the ones to read: `cr_path_precision` is what DIPT publishes and
-        # `cr_event_f1` what DITTO does, and the reward is a weighted sum of the two
-        # (research/cascade_reconstruction.md §2.6). `cr_path_recall` and
-        # `cr_jaccard` ride along because PathPrecision alone rewards naming FEW
-        # edges, which is the under-prediction corner a search would otherwise find.
+        # `cr_event_f1` what DITTO does, and the reward is a weighted sum of the two.
+        # `cr_path_recall` and `cr_jaccard` ride along because PathPrecision alone
+        # rewards naming FEW edges, which is the under-prediction corner a search
+        # would otherwise find.
         "reconstruction": result.get("reconstruction"),
         # The reward is the label-free kernel likelihood per node minus observation
         # violations on the arm's own kernel, `cr_reward_referee` its re-measurement
@@ -601,7 +601,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "cr_hidden_rate": result.get("hidden_rate"),
         "cr_tree_weight": result.get("tree_weight"),
         "cr_has_tree_truth": result.get("has_tree_truth"),
-        # §2.11 risk 1's required check, in the same row as the result it
+        # The reward sanity check, in the same row as the result it
         # qualifies: a trivial decoder has to score badly or the reward is wrong
         "cr_trivial_decoder_reward": result.get("trivial_decoder_reward"),
         "cr_select_split": (
@@ -616,7 +616,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         "cr_eval_instances": (
             result.get("n_eval_instances") if result.get("reconstruction") else None
         ),
-        # The cost axis §2.4.2 exists to measure and §11 says nobody has published
+        # The cost axis this task exists to measure, which nobody has published
         "cr_kernel_calls": result.get("kernel_calls"),
         "cr_kernel_calls_per_instance": result.get("kernel_calls_per_instance"),
         "cr_resim_error": (
@@ -630,7 +630,7 @@ def _row(result: dict, sense: str = "maximize") -> dict:
         # Cascade prediction. Empty for every other arm. `cp_error` is the reward
         # and it MINIMIZES; `cp_n_failed` is the decline count, which travels beside
         # every error because a mean over scoreable cascades alone favours the model
-        # that gives up more often (research/cascade_prediction.md §8.4).
+        # that gives up more often.
         "prediction": result.get("prediction"),
         "cp_error": spread if result.get("prediction") else None,
         "cp_metric": result.get("prediction_metric"),

@@ -2,7 +2,7 @@
 Epinions Dataset Loader
 
 Downloads and loads the SNAP signed Epinions who-trusts-whom network: Han et
-al.'s adaptive-IM benchmark (research/adaptive_online_im.md §5.2, §6.2).
+al.'s adaptive-IM benchmark.
 
 Source: https://snap.stanford.edu/data/soc-sign-epinions.html
     - 131,828 nodes (members), 841,372 arcs (trust/distrust statements)

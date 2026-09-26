@@ -2,20 +2,20 @@
 Digg 2009 Cascade Corpus Loader
 
 The ISI/Lerman Digg 2009 release: a directed friendship graph plus a month of
-story votes, which is the third-cheapest real cascade corpus in
-`research/cascade_prediction.md` §6.5 and the only one of the four that needs no
+story votes, which is the third-cheapest of the four real cascade corpora considered
+here and the only one of the four that needs no
 registration, no request form and no Drive interstitial.
 
 Source: KONECT's mirror of the ISI extraction (both halves, one `extr: digg`)
     - `digg-friends`  279,630 users / 1,731,653 directed friend arcs
     - `digg-votes`    bipartite (user, story, vote time), one month of 2009
-    - Undirected here: §6.2's own row quotes 279,632 / 2,617,993 for the
-      symmetrized graph, and every method in §4 that uses this corpus symmetrizes
+    - Undirected here: the published count is 279,632 / 2,617,993 for the
+      symmetrized graph, and every published method that uses this corpus symmetrizes
     - No inherent node features - uses log(1 + degree)
     - No node labels
 
-**Warning: the publisher's own page is gone.** `research/cascade_prediction.md` §6.3
-lists `isi.edu/~lerman/downloads/digg2009.html` as plain HTTP and auto-downloadable
+**Warning: the publisher's own page is gone.** It used to be
+`isi.edu/~lerman/downloads/digg2009.html` over plain HTTP, auto-downloadable
 [checked 2026-07-28]; as of 2026-08-05 that URL 301s to a personal landing page and
 `digg/digg2009.zip` returns an HTML 404 body under a 200 status, which is worse than
 a clean failure because `urlretrieve` accepts it. KONECT mirrors both halves of the
@@ -24,21 +24,20 @@ The ids are consistent between the two files because KONECT records them under o
 `extr: digg` extraction.
 
 **Warning: this is NOT the `digg` we already load.** `data/datasets/digg.py` is the
-Syracuse friendship graph at 116,893 nodes and carries no cascades at all
-(§6.1). This is the 279,632-node ISI graph WITH its 3,553 vote cascades, and §6.1
-records the pair explicitly as "different graph, and ours has no cascades". Quoting
-a number from one under the other's name is the §6.4 error this file exists to
-avoid.
+Syracuse friendship graph at 116,893 nodes and carries no cascades at all.
+This is the 279,632-node ISI graph WITH its 3,553 vote cascades: a different graph,
+and ours has no cascades. Quoting a number from one under the other's name is the
+name-collision error this file exists to avoid.
 
 **The diffusion tree is not observed.** A vote records that a user promoted a story
 and when, never from whom - so every adopter is attributed to the story's first
-voter and the observed "path" has length 2 throughout. §6.2 classifies this corpus
-as first-`k`-adopters (microscopic) for exactly that reason. The FRIENDSHIP graph is
+voter and the observed "path" has length 2 throughout. This corpus is
+classed as first-`k`-adopters (microscopic) for exactly that reason. The FRIENDSHIP graph is
 still the real one, so the transitions this replays are over genuine social ties;
 only the parent attribution is a convention, and `--cp-graph votes` is what switches
 to the star construction if you want to see the difference.
 
-Used by: Topo-LSTM, DeepDiffuse, FOREST (§7).
+Used by: Topo-LSTM, DeepDiffuse, FOREST.
 """
 
 import os
@@ -174,7 +173,7 @@ def load_digg_cascades_pair(
     Cascades and the FRIENDSHIP adjacency, renumbered onto one shared id space.
 
     Only the users who actually voted survive: the full graph is 279,630 nodes and
-    §6.5 records that the point of a cascade corpus here is the traces, not a
+    the point of a cascade corpus here is the traces, not a
     scalability run. The induced subgraph keeps every friend tie between two voters,
     which is the graph over which the observed adoptions actually happened.
     """
@@ -233,9 +232,9 @@ def load_digg_cascades(
     """
     The graph half: the Digg friendship network induced on the voters.
 
-    Deliberately NOT the union of diffusion paths every other corpus here uses -
-    Digg publishes the real social graph and it is the object every method in §7
-    runs on, so falling back to a union of stars would throw away the one thing
+    Deliberately NOT the union of diffusion paths every other corpus here uses:
+    Digg publishes the real social graph and it is the object every published
+    method on this corpus runs on, so falling back to a union of stars would throw away the one thing
     this corpus has that MemeTracker does not.
     """
     _, adjacency, num_nodes = load_digg_cascades_pair(path)
@@ -259,9 +258,9 @@ def load_digg_cascades_star(
     return cascade_arrays(cascades, num_nodes)
 
 # Corpus time is SECONDS since a story's first vote. **These windows are OURS, not
-# published**: §6.2 classifies Digg as a first-`k`-adopters (microscopic) corpus
-# with no clock at all, because the methods that use it rank the next adopter rather
-# than forecast a size. 1 h / 24 h mirrors the Weibo macroscopic convention, which
+# published**: this literature treats Digg as a first-`k`-adopters (microscopic)
+# corpus with no clock at all, because the methods that use it rank the next adopter
+# rather than forecast a size. 1 h / 24 h mirrors the Weibo macroscopic convention, which
 # is the closest published analogue for a fast social corpus, and every number from
 # this loader is self-contained for that reason.
 observation_windows = (3600, 7200)

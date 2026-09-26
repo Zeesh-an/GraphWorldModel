@@ -8,7 +8,7 @@ Source: https://snap.stanford.edu/data/cit-HepTh.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-DiffIM's citation graph (§6.2). A citation network is nearly acyclic, so the
+DiffIM's citation graph. A citation network is nearly acyclic, so the
 rumour's reachable set is shallow and wide rather than deep, which is where an edge
 lever should do best and a counter-seeding one worst.
 """

@@ -3,8 +3,7 @@ Adaptive IM: the round schedule, the feedback model, and the ActionFn that turns
 a generated policy into something an environment can roll out.
 
 Adaptive IM picks `k` seeds in `r` batches instead of all at once, choosing each
-batch AFTER observing the diffusion the previous one produced
-(research/adaptive_online_im.md §1.1). Our transition function already accepts a
+batch AFTER observing the diffusion the previous one produced. Our transition function already accepts a
 bag of add_node ops at any timestep, so the whole difference from static IM lives
 in this file: when the batches land, how big each one is, and what the policy is
 allowed to see when it picks them.
@@ -46,7 +45,7 @@ def round_batches(
     """
     Seeds per round, summing to exactly `budget`.
 
-    Two conventions, matching Han et al.'s two sweeps (§8.2 trap 3):
+    Two conventions, matching Han et al.'s two sweeps:
     fix `b` and derive `r = ceil(k / b)`, or fix `r` and split `k` as evenly as
     possible. `per_round_budget` wins when both are given.
     """

@@ -5,7 +5,6 @@ Source: https://snap.stanford.edu/data/p2p-Gnutella31.html
     - SNAP's raw crawl is 62,586 nodes / 147,892 arcs; we load its giant
       component **62,561 / 147,878**, UNDIRECTED, as CoreHD's "P2P" and FINDER's
       headline ND network both do
-      (research/critical_node_detection.md §8.2 traps 7 and 9)
     - Sparse original ids: remapped by `load_edge_list` via the adjacency
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
@@ -17,7 +16,7 @@ a scalable-simulation follow-up, not a day-one dataset. Generation on it will be
 slow, and `--baselines greedy_blocking` will not finish.
 
 `lcc=True` because SNAP ships the raw crawl including disconnected fragments and
-every dismantling paper runs on the giant component (§8.2 trap 7).
+every dismantling paper runs on the giant component.
 
 Original paper: Ripeanu, Foster, Iamnitchi, "Mapping the Gnutella network",
     IEEE Internet Computing 6(1), 2002

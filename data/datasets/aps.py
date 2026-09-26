@@ -2,8 +2,8 @@
 APS Citation Cascade Corpus Loader (from the publisher's own release)
 
 The American Physical Society citation dataset, parsed directly rather than through
-CasFlow's redistributed bundle. `research/cascade_prediction.md` §6.5 ranks APS the
-corpus to do first, and §11 flags the one reason to have this route as well as
+CasFlow's redistributed bundle. APS is the cascade corpus to do first, and there is
+one open reason to have this route as well as
 `casflow_aps`: **whether the redistributed bundle is licensed for our use was never
 established**, and a licence problem would invalidate that recommendation. Obtaining
 the release directly settles it.
@@ -29,7 +29,7 @@ archive alone gives `(citing_doi, cited_doi)` with no dates; the metadata archiv
 gives each DOI its publication date. Without the second there is no elapsed time
 and no cascade at all.
 
-**Warning: our counts will not match CasFlow's.** §6.4 lists three APS versions
+**Warning: our counts will not match CasFlow's.** Three APS versions are published
 (207,685 / 48,575 / 90,768 cascades) and this is a fourth: our filters are the
 pipeline's own (`--cp-min-size`, `--cp-truncate`), applied to whatever release year
 you were granted. `casflow_aps` is the comparable one; this one is the licensed one.
@@ -82,9 +82,8 @@ install it:
        pathlib.Path('metadata.json').write_text(json.dumps(out))
        EOF
 
-research/cascade_prediction.md 6.5 explains why APS is the entry point; 11 records
-that its licensing for redistribution is an open question, which is what this route
-exists to sidestep."""
+APS is the entry point among the cascade corpora, and its licensing for
+redistribution is an open question, which is what this route exists to sidestep."""
 
 
 def download_aps() -> Path:

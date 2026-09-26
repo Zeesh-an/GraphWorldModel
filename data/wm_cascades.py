@@ -2,32 +2,31 @@
 Replay real logged cascades as `(s_t, NULL, s_{t+1})` transitions.
 
 The data stage for `--task cascade_prediction`, and the only one in this repo that
-runs no simulator at all. `research/cascade_prediction.md` §9.4 is what it exists
-for: `research_notes/Baselines - Oracle vs MC vs GWM.md` §4 Q2 answers the
-chicken-and-egg objection by ASSERTING that in deployment the world model's training
-data comes from historical observations rather than a simulator, and Weibo/APS/
-Twitter are that assertion made downloadable. This module is where the assertion
+runs no simulator at all. It exists for one reason: the answer to the
+chicken-and-egg objection is that in deployment the world model's training data
+comes from historical observations rather than a simulator, and Weibo/APS/
+Twitter are that answer made downloadable. This module is where the assertion
 becomes a file on disk.
 
 Four things it does that `generate_wm_data.py` does not, each forced rather than
 chosen:
 
-  * **The action is NULL at every step.** §2.1: nothing intervenes, the cascade is
+  * **The action is NULL at every step.** Nothing intervenes: the cascade is
     only watched, so `T_exo` is the identity and the factorization collapses to
     `s_{t+1} = T_endo(s_t)`. The `t = 0` record still carries the root as an
     `add_node` bag, because that is how every reader in this repo recovers an
     episode's sources, but there is no injection at any later step and no
     counterfactual fork, because a log has nothing to fork on.
 
-  * **The targets are HARD.** §2.4 calls this the main technical risk of the whole
+  * **The targets are HARD.** This is the main technical risk of the whole
     exercise and it is not a config flag: our soft targets are `P(infected)`
     averaged over `--mc-marginals` re-runs, and a real cascade **happened once**.
-    So `next_marginal_infected` is the realized 0/1 indicator. §11 records that
-    how much that costs our one-step `delta_f1` is unestablished by anything in
+    So `next_marginal_infected` is the realized 0/1 indicator. How much that
+    costs our one-step `delta_f1` is unestablished by anything in
     the literature: they never had soft targets to lose.
 
-  * **The split is CHRONOLOGICAL.** §8.3 is the most transferable finding in that
-    file: the field's standard 70/15/15-random-over-cascades split LEAKS, because
+  * **The split is CHRONOLOGICAL.** The most transferable finding in this
+    literature is that the field's standard 70/15/15-random-over-cascades split LEAKS, because
     cascades overlap in wall-clock time and a training cascade's prediction window
     can sit inside a test cascade's observation window. Under CasTemp's leak-free
     fix CasFlow and CasDO fall below a plain MLP and the whole field's APS band
@@ -37,7 +36,7 @@ chosen:
 
   * **Elapsed time is BINNED into timesteps.** The corpora publish seconds (or days,
     for APS) since publication; our simulator is discrete-time. `--cp-step` is the
-    bin width, and §6.5 notes the happy case: APS's 3-year and 5-year windows are
+    bin width, and there is a happy case: APS's 3-year and 5-year windows are
     long enough that one step can be a whole year with no resampling at all.
 
 Everything else is byte-identical to what the simulator writes, deliberately:
@@ -67,8 +66,8 @@ from data.wm_simulator import ActionOp, State
 
 # How the corpus is cut into train / val / test.
 #
-# `chronological` is CasTemp's leak-free protocol generalized to arbitrary windows
-# (§8.3): partition by PUBLICATION TIME into three contiguous bins of equal
+# `chronological` is CasTemp's leak-free protocol generalized to arbitrary windows:
+# partition by PUBLICATION TIME into three contiguous bins of equal
 # duration, and drop any cascade whose prediction window runs past its own bin. The
 # second half is what makes it leak-free rather than merely ordered, without it a
 # late training cascade still predicts over a span a test cascade is observed in.
@@ -80,9 +79,9 @@ chronological_split = "chronological"
 random_split = "random"
 valid_splits = (chronological_split, random_split)
 
-# Which quantity a predictor is scored on. §5.7 difference 3: CasFlow's own code
+# Which quantity a predictor is scored on. CasFlow's own code
 # regresses `label = P(t_p) - P(t_o)` and CasFT's Eq. 26 regresses `P`. Same symbol,
-# different quantity, printed in one table in §5.1.
+# different quantity, printed side by side in one published results table.
 increment_target = "increment"
 total_target = "total"
 valid_targets = (increment_target, total_target)
@@ -94,7 +93,7 @@ random_proportions = (0.7, 0.15, 0.15)
 #
 # `native` is whatever the CORPUS's own loader returns, and it is the default
 # because the loader is where that judgement belongs: `digg_cascades` returns the
-# real published FRIENDSHIP network (the object every method in §7 runs on) while
+# real published FRIENDSHIP network (the object every published method on it runs on) while
 # every other corpus returns the union of its observed propagation paths, because
 # that is all it has.
 #
@@ -121,9 +120,9 @@ def corpus_defaults(dataset: str) -> tuple[int, int]:
     `(observation window, prediction horizon)` a corpus publishes, in its own units.
 
     Read off the loader module rather than hardcoded here, because the windows are a
-    property of the CORPUS and §8.2 tabulates them per corpus: Weibo 0.5 h / 1 h
+    property of the CORPUS and differ per corpus: Weibo 0.5 h / 1 h
     predicted to 24 h, Twitter 1 d / 2 d to 32 d, APS 3 y / 5 y to 20 y. The first of
-    each pair is the default; §8.2 pairs two deliberately, so a sweep runs both.
+    each pair is the default; the literature pairs two deliberately, so a sweep runs both.
     """
     import importlib
 
@@ -135,8 +134,8 @@ def corpus_defaults(dataset: str) -> tuple[int, int]:
         raise ValueError(
             f"the loader for {dataset!r} publishes no observation_windows / "
             f"prediction_horizon, so --cp-observation and --cp-horizon have no "
-            f"default and must be given explicitly. research/cascade_prediction.md "
-            f"§8.2 has the standard settings per corpus."
+            f"default and must be given explicitly: use the observation window and "
+            f"horizon the corpus publishes."
         )
 
     return int(windows[0]), int(horizon)
@@ -165,8 +164,8 @@ class ReplayConfig:
     dataset: str
     out_dir: str
     # Both in the CORPUS's own time unit (seconds for the social corpora, days for
-    # APS). §8.2 pairs two observation windows per corpus deliberately: "a
-    # single-window result is not publishable in this literature", so a sweep runs
+    # APS). Published results pair two observation windows per corpus, and a
+    # single-window result is not publishable in this literature, so a sweep runs
     # this twice rather than averaging.
     observation: int
     horizon: int
@@ -241,7 +240,7 @@ def replay_records(
     One logged cascade as a list of transition records in the shipped JSONL shape.
 
     The `t = 0` action is the root's `add_node` bag and every later action is EMPTY,
-    which is §2.1's `a_t = NULL` written down. `next_marginal_infected` carries the
+    which is `a_t = NULL` written down. `next_marginal_infected` carries the
     realized indicator rather than an MC average, and `parents` carries the corpus's
     own transmission edge where it logs one: free here, because two of these
     corpora (Taoke, the AMiner Weibo release) record it and the field's tree metrics
@@ -284,7 +283,7 @@ def replay_records(
                 next_state=next_state,
                 reward=float(len(next_infected) - len(infected)),
                 # HARD 0/1: a real cascade happened once, so there is nothing to
-                # average (§2.4). Written as a marginal anyway so `build_features`
+                # average. Written as a marginal anyway so `build_features`
                 # takes the identical path it takes on simulated data.
                 next_marginal_infected={node: 1.0 for node in next_infected},
                 next_marginal_frontier={node: 1.0 for node in gained},
@@ -317,7 +316,7 @@ def assign_splits(cascades: list[Cascade], config: ReplayConfig) -> dict[str, st
     proportions, then DROPS (maps to the empty string) any cascade whose prediction
     window `[publish, publish + t_p]` runs past its own bin's closing time. That
     second rule is what makes it leak-free rather than merely ordered, and it is the
-    whole content of §8.3: without it a late training cascade still predicts over a
+    whole content of CasTemp's fix: without it a late training cascade still predicts over a
     span the next bin's cascades are being observed in, which is the global temporal
     shortcut CasTemp showed two SOTA models were exploiting.
 
@@ -330,7 +329,7 @@ def assign_splits(cascades: list[Cascade], config: ReplayConfig) -> dict[str, st
     and on the drop rule, not on where the boundaries fall, so cutting at fixed
     proportions preserves the property and holds the pool sizes fixed. That also
     makes `chronological` versus `random` a clean A/B on ORDER alone, which is the
-    variable §8.3 is actually about; changing the sizes too would confound it.
+    variable the leak is actually about; changing the sizes too would confound it.
 
     `random` is the field's own 70/15/15 shuffled over cascades (CasFlow §5.1,
     CasFT "Datasets and Preprocessing"), seeded so a rerun reproduces it. It is here
@@ -371,7 +370,7 @@ def assign_splits(cascades: list[Cascade], config: ReplayConfig) -> dict[str, st
     if config.split == random_split:
         return assignment
 
-    # The leak §8.3 names, stated exactly: a TRAINING cascade's prediction window
+    # The leak CasTemp names, stated exactly: a TRAINING cascade's prediction window
     # `[p, p + t_p]` must close before the first TEST cascade is observed, or the
     # model can learn "there was a burst around time T": a global temporal shortcut
     # unavailable at deployment. Enforced train-to-test rather than bin-to-bin
@@ -392,7 +391,7 @@ def assign_splits(cascades: list[Cascade], config: ReplayConfig) -> dict[str, st
         print(
             f"[replay] chronological split dropped {dropped}/{train_end} training "
             f"cascades whose prediction window reached past the first test "
-            f"observation: that drop IS the leak-free protocol (§8.3), not a loss"
+            f"observation: that drop IS the leak-free protocol, not a loss"
         )
 
     return assignment
@@ -448,7 +447,7 @@ def replay_corpus(config: ReplayConfig) -> dict:
     print(
         f"[replay] filters kept {len(cascades)}/{total} cascades "
         f"(>= {config.min_observed} participants inside the observation window, "
-        f"first {config.truncate} observed kept): both are §8.4 landmines and both are in "
+        f"first {config.truncate} observed kept): both are known pitfalls and both are in "
         f"metadata.json"
     )
 
@@ -460,8 +459,8 @@ def replay_corpus(config: ReplayConfig) -> dict:
         cascades = [cascades[int(index)] for index in chosen]
         print(f"[replay] subsampled to {len(cascades)} cascades (--cp-max-cascades)")
 
-    # CoupledGNN's own move, and what makes a 6.7M-node corpus runnable at all
-    # (§6.5): keep the busiest participants and drop whatever is left with fewer
+    # CoupledGNN's own move, and what makes a 6.7M-node corpus runnable at all:
+    # keep the busiest participants and drop whatever is left with fewer
     # than two events. The bundle is renumbered onto the surviving ids, so the
     # GRAPH and the cascades cannot disagree about what a node is, which is why
     # this happens here rather than being pushed onto the loader.
@@ -471,7 +470,7 @@ def replay_corpus(config: ReplayConfig) -> dict:
         print(
             f"[replay] reduced to the {len(mapping)} busiest participants "
             f"(--cp-max-nodes {config.max_nodes}), keeping {len(cascades)}/{before} "
-            f"cascades: §6.4: a corpus reduced this way is a NEW version of its "
+            f"cascades: a corpus reduced this way is a NEW version of its "
             f"own name, and its numbers are comparable only to themselves"
         )
 
@@ -621,9 +620,9 @@ def replay_corpus(config: ReplayConfig) -> dict:
             f"of the first (median {int(np.median(times))}).\n"
             f"{remedy}\n"
             f"  --cp-split random reproduces the field's own leaky protocol and is "
-            f"the other half of the A/B research/cascade_prediction.md §8.3 "
-            f"describes, but it is a LAST resort here rather than the only option: "
-            f"the leak-free split is what that section argues for, so widen the "
+            f"the other half of the leaky vs leak-free A/B, but it is a LAST resort "
+            f"here rather than the only option: the leak-free split is the one "
+            f"to trust, so widen the "
             f"pool first and fall back to random only if nothing opens the gap."
         )
 
@@ -651,7 +650,7 @@ def replay_corpus(config: ReplayConfig) -> dict:
         ],
         # The block that says these transitions were REPLAYED rather than simulated.
         # Every other reader in this repo treats `transitions_IC_train.jsonl` as an
-        # NDlib rollout, and §2.2's whole argument is that fitting the IC head to
+        # NDlib rollout, and this task's whole argument is that fitting the IC head to
         # something else is the experiment, so the file has to say which it is.
         "observed": {
             "corpus": config.dataset,
@@ -672,7 +671,7 @@ def replay_corpus(config: ReplayConfig) -> dict:
             "avg_size": float(sizes.mean()),
             "median_size": float(np.median(sizes)),
             "avg_observed": float(observed.mean()),
-            # §2.4: a real cascade happened ONCE, so `--mc-marginals` has nothing to
+            # A real cascade happened ONCE, so `--mc-marginals` has nothing to
             # average and the training signal is genuinely different from every
             # other dataset in this tree
             "hard_targets": True,
@@ -716,7 +715,7 @@ def observed_protocol(out_dir: Path) -> dict:
         raise ValueError(
             f"the dataset at {out_dir} was SIMULATED, not replayed from a log "
             f"(task={metadata.get('task')!r}). Cascade prediction is defined on real "
-            f"observed traces: research/cascade_prediction.md §2.2 is explicit that "
+            f"observed traces: "
             f"running it on NDlib output closes exactly the loop the task exists to "
             f"break. Regenerate with --task cascade_prediction and a corpus dataset."
         )

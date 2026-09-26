@@ -168,8 +168,7 @@ def build_record(
     # The three CURRENT compartments plus the incidence, present only on a
     # compartmental episode so an IC/LT/competitive JSONL is byte-identical to what
     # it was. `next_marginal_infected` above stays the EVER-infected marginal under
-    # this layout too, which is what lets every existing reader keep working
-    # (research/epidemic_control.md §2.3).
+    # this layout too, which is what lets every existing reader keep working.
     if next_marginal_incidence is not None:
         for key, marginal in (
             ("next_marginal_incidence", next_marginal_incidence),
@@ -182,7 +181,7 @@ def build_record(
                 for node, probability in (marginal or {}).items()
             }
 
-    # S_N is a property of the EPISODE rather than of any action (§2.1), so it is
+    # S_N is a property of the EPISODE rather than of any action, so it is
     # stamped on every record instead of being recoverable from the t=0 bag the way
     # a seeding task's seed set is
     if negative_seeds is not None:
@@ -300,18 +299,17 @@ class GenConfig:
     # Record the transmission edge (`parents`) on every record. Off by default
     # because NDlib never produces it and only cascade reconstruction scores it,
     # but it is a HARD PRECONDITION there: the outer-loop reward is tree-weighted
-    # and a tree-weighted reward is not computable without a ground-truth parent
-    # (research/cascade_reconstruction.md §2.6, §2.10 item 1).
+    # and a tree-weighted reward is not computable without a ground-truth parent.
     trace_parents: bool = False
     # Two-cascade (influence blocking) generation. `competitive` swaps the NDlib
     # Simulator for data.wm_competitive.CompetitiveSimulator and doubles the state
-    # and the targets; the three below are the dynamics parameters
-    # research/influence_blocking.md §8.4 and §5.1 say must be recorded rather than
-    # left implicit, and they are written into metadata.json for exactly that reason.
+    # and the targets; the three below are the dynamics parameters that must be
+    # recorded rather than left implicit, because each one moves the published
+    # numbers, and they are written into metadata.json for exactly that reason.
     competitive: bool = False
     tie_break: str = auto_dominance
     positive_prob: str = shared_positive_prob
-    # |S_N| as a percentage of N. §5.4 is the reason this defaults small: at
+    # |S_N| as a percentage of N. It defaults small because at
     # |S_N| = 1000 on NetHEPT even 1000 blockers remove only 17% of the negative
     # spread, so a large rumour lands every method in a regime where nothing works.
     negative_pct: float = 1.0
@@ -320,8 +318,7 @@ class GenConfig:
     # Compartmental (epidemic control) generation. `--models SIR/SIS/SEIR` swaps the
     # NDlib Simulator for data.wm_epidemic.EpidemicSimulator and widens the state
     # from two overlapping indicators to four exclusive compartments; the three
-    # parameters are what research/epidemic_control.md §8.2 trap 2 says must be
-    # recorded rather than left implicit, because a table that fixes beta and gamma
+    # parameters must be recorded rather than left implicit, because a table that fixes beta and gamma
     # without stating them is comparable only to itself. All land in metadata.json.
     epi_beta: float = 1.0
     epi_gamma: float = 0.3
@@ -337,9 +334,10 @@ class GenConfig:
     # Cascade prediction: REPLAY a real logged corpus instead of simulating. The one
     # flag here that changes where the data comes from at all: when it is set,
     # `run_generation` hands the whole stage to `data/wm_cascades.py` and no
-    # simulator runs. research/cascade_prediction.md §9.4: these corpora are the
-    # concrete, downloadable form of the "logged trajectories" our methodology note
-    # asserts exist, and §2.2 is why replaying them rather than NDlib is the point.
+    # simulator runs. These corpora are the concrete, downloadable form of the
+    # "logged trajectories" our methodology note asserts exist, and replaying them
+    # rather than NDlib output is the point: only real traces can test the IC/LT
+    # assumption.
     cascade_corpus: bool = False
     cp_observation: int = 0
     cp_horizon: int = 0
@@ -604,8 +602,8 @@ def _competitive_episode_transitions(
 
     `algorithm` is a PAIR here ("<negative selector>+<blocker selector>") because
     a blocking transition is only labelled by both. The attacker model is the second
-    experimental axis this literature has and IM does not
-    (research/influence_blocking.md §8.3), and the blocker selector is what supplies
+    experimental axis this literature has and IM does not,
+    and the blocker selector is what supplies
     action diversity, including the `none` arm whose episodes are the unopposed
     sigma(S_N, empty) reference every prevented-influence number divides by.
     """
@@ -644,7 +642,7 @@ def _competitive_episode_transitions(
     simulator.reset(model, negative_seeds)
 
     # S_N is already committed at t=0: the rumour moved first, which is the whole
-    # premise (§5.4: "first mover has a clear advantage"), so s_0 is NOT empty here
+    # premise ("first mover has a clear advantage"), so s_0 is NOT empty here
     s_t = simulator.current_state()
     blocker_bag = [ActionOp("add_node", node) for node in blockers]
 
@@ -930,7 +928,7 @@ def run_generation(config: GenConfig) -> dict[str, object]:
     # because the cascade happened once and we are reading it back. Delegating
     # rather than branching keeps the two paths honestly separate: a reader of
     # either one can see which artifacts it writes without tracing a flag through
-    # 300 lines (research/cascade_prediction.md §2.4).
+    # 300 lines.
     if config.cascade_corpus:
         from data.wm_cascades import ReplayConfig, replay_corpus
 
@@ -1156,7 +1154,7 @@ def run_generation(config: GenConfig) -> dict[str, object]:
     }
 
     # The competitive dynamics parameters, RESOLVED. `auto` is not a value anything
-    # downstream can act on, and §8.4's whole point is that the tie-break is a
+    # downstream can act on, and the tie-break has to be a
     # reported hyperparameter rather than an implementation detail, so what was
     # actually simulated is written per dynamics, not what was typed.
     if config.competitive:
@@ -1169,7 +1167,7 @@ def run_generation(config: GenConfig) -> dict[str, object]:
             model: competitive.resolved(model) for model in config.models
         } | {"negative_pct": config.negative_pct}
 
-    # ...and the compartmental ones, for the reason §8.2 trap 2 gives: beta and
+    # ...and the compartmental ones, because beta and
     # gamma are free parameters nobody standardizes, so a table that fixes them
     # without stating them is comparable only to itself. `train_wm` reads these back
     # rather than taking them from a flag, so a head can never be fit against

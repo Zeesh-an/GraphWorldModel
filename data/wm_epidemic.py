@@ -1,15 +1,14 @@
 """
 Compartmental SIR / SIS / SEIR simulator: the dynamics `epidemic_control` runs on.
 
-Written rather than borrowed, and `research/epidemic_control.md` §2.2 and §9.2 are
-the argument. NDlib DOES ship `SIRModel`, `SISModel` and `SEIRModel`, and reusing
+Written rather than borrowed, for a specific reason. NDlib DOES ship `SIRModel`, `SISModel` and `SEIRModel`, and reusing
 them would have been ~60 lines, but all three declare an EMPTY edge-parameter dict
 and compare a uniform draw against the single scalar `params['model']['beta']` for
 every susceptible neighbour. There is no per-arc transmission probability at all,
 and three things die with it:
 
   * `set_edge_weight` becomes a no-op, which deletes the graded contact-reduction
-    lever: the entire social-distancing branch of §3 and DURLECA's whole action
+    lever: the entire social-distancing branch of the literature and DURLECA's whole action
     space.
   * `GraphInput.edge_weight` degenerates to ones, so the encoder and both anchored
     heads lose the one continuous input they have.
@@ -82,7 +81,7 @@ model_compartments = {
 
 # Steps of burn-in discarded before the endemic prevalence is time-averaged.
 # SIS has no absorbing state, so "final size" is undefined and the reported
-# quantity is `lim |I(t)| / N` (research/epidemic_control.md §8.2 trap 6); a
+# quantity is `lim |I(t)| / N`; a
 # fraction rather than a count so it scales with the horizon.
 default_burn_in = 0.5
 
@@ -136,7 +135,7 @@ class EpidemicSimulator:
 
     `remove_node` is VACCINATION and is `blocked` throughout, as every containment
     task needs: the node leaves the graph, is not counted in the attack set, and
-    can neither transmit nor be infected. §8.2 trap 7 is why that matters here more
+    can neither transmit nor be infected. That matters here more
     than elsewhere: a node in `R` is still in the graph and still occupied a dose
     it did not need, so "recovered" and "removed" are different objects and the
     simulator keeps them apart.
@@ -361,7 +360,7 @@ class EpidemicSimulator:
 
         All three dynamics are stochastic (they draw against `beta`, `gamma` and
         `alpha` per step exactly as IC draws against `p`), so all three take the
-        full `num_mc` draws. §2.1 item 5 records that reusing IC's
+        full `num_mc` draws. Reusing IC's
         `draws = num_mc if model == "IC" else 1` line here would collapse every
         target onto a single realization.
         """
@@ -472,7 +471,7 @@ def endemic_prevalence(curve: list[float], burn_in: float = default_burn_in) -> 
     """
     Time-averaged `|I(t)|` after burn-in: the metric SIS needs and final size is not.
 
-    §8.2 trap 6: SIS has no terminal state, so "final epidemic size" is undefined
+    SIS has no terminal state, so "final epidemic size" is undefined
     and the quantity the literature reports is `lim_t |I(t)| / N`, estimated by
     averaging after the transient. Reported for every dynamics rather than only SIS,
     because under SIR it is a legitimate (and near-zero) description of the tail and
@@ -503,7 +502,7 @@ def run_epidemic(
     spread estimator and the self-check, so all three agree on what "run this
     vaccination set" means down to the recovery draw. Returns the terminal state and
     the prevalence curve, because the shape of the outbreak is half of what this
-    task is graded on (§2.6) and recomputing it would need a second run.
+    task is graded on and recomputing it would need a second run.
 
     The early break needs BOTH an empty infectious set and an empty exposed one:
     under SEIR a latent node with nobody left infectious is still going to become

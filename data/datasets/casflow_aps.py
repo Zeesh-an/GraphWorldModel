@@ -2,8 +2,7 @@
 CasFlow APS Cascade Corpus Loader (APS-A)
 
 American Physical Society citation cascades (papers 1893-1997), as preprocessed in
-CasFlow's bundle. **This is APS-A**, and `research/cascade_prediction.md` §6.5 ranks
-it the corpus to do FIRST: no rate limits, no Chinese-platform registration, and
+CasFlow's bundle. **This is APS-A**, and it is the corpus to do FIRST: no rate limits, no Chinese-platform registration, and
 3-year/5-year windows long enough that one replayed timestep can be a whole year,
 which maps onto our discrete-time simulator with no resampling at all.
 
@@ -16,14 +15,14 @@ Source: CasFlow's Drive bundle (manual; see `casflow_bundle.instructions`)
     - Undirected here: the union of the observed citation paths
     - No inherent node features - uses log(1 + degree)
 
-Reported by: CasCN, VaCas, CasFlow, CCGL, MUCas, CTCP, CasDO, CasFT (§7). CasFT's
+Reported by: CasCN, VaCas, CasFlow, CCGL, MUCas, CTCP, CasDO, CasFT. CasFT's
 own row at `t_o = 3 y` is **MSLE 1.2468 / MAPE 0.2282** against CasFlow's 1.4370 /
-0.2401 [verified, §5.1], and §5.3 is the reason to read those two numbers with
+0.2401 [verified], and those two numbers need to be read with
 care, because under CasTemp's leak-free split the whole field moves from that
 1.19-2.11 band to 2.28-4.82.
 
 **Warning: two other things are called APS.** CTCP re-preprocessed to 48,575
-cascades and CasTemp to 90,768. **Warning: licensing is unchecked.** §11 flags it as
+cascades and CasTemp to 90,768. **Warning: licensing is unchecked.** It is
 an open gap: `journals.aps.org/datasets` requires a request form (403 to `curl`,
 re-verified 2026-08-05) and whether the redistributed CasFlow bundle is licensed for
 our use was never established. `data/datasets/aps.py` is the direct route for anyone

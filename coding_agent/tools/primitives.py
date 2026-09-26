@@ -106,7 +106,7 @@ def mc_simulate_epidemic(
 
     The compartmental counterpart of `mc_simulate_containment`, and the honest
     classical cost of scoring one allocation: LOWER is better. It returns the CURVE
-    as well as the total, because research/epidemic_control.md §2.6 grades this task
+    as well as the total, because this task is graded
     on the outbreak's shape and recomputing the curve would mean a second run.
 
     `doses` are node ids under the node levers and `(u, v)` arcs under the edge
@@ -180,7 +180,7 @@ def mc_simulate_blocking(
 
     `lever` decides what a "blocker" is: a node to counter-seed, a node to delete, or
     an `(u, v)` arc to cut or zero. All four run through the same simulator, which is
-    the point of §7: no published work scores them under one metric.
+    the point: no published work scores them under one metric.
     """
     from coding_agent.blocking import blocking_plan
 
@@ -353,7 +353,7 @@ def predict_marginals_mc(
     per-node marginal rather than its sum. That vector is what an INVERSE problem
     needs: source localization compares a hypothesis's predicted marginal against
     the observed one, and the sum throws away exactly the spatial information the
-    comparison runs on (research/source_localization.md §2.4.3).
+    comparison runs on.
 
     This is the raw classical estimator on its own private NDlib simulator, so it
     is invisible to `MonteCarloEnvironment.episodes_used`. A generated program gets
@@ -401,8 +401,7 @@ def mc_simulate_containment(
     cost of scoring one blocker set: LOWER is better. Runs under `blocked`
     semantics, so a deleted node is uncounted, cannot transmit and cannot be
     infected: the `spent` reading would report each blocker as infected and
-    inflate every number by exactly +k
-    (research/critical_node_detection.md §2.3).
+    inflate every number by exactly +k.
     """
     if not outbreak:
         return 0.0

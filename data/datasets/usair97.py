@@ -12,8 +12,7 @@ Matrix Market coordinate format: `%` comment lines, then ONE dimension header
 (`332 332 2126`) that is not commented, then `row col value` triples in the lower
 triangle only. `skip_rows=1` drops the header; `edges_to_adjacency` mirrors.
 
-The smallest graph in the Ventresca CNP benchmark that Wandelt also dismantles
-(research/critical_node_detection.md §7), so it is one of the few networks where
+The smallest graph in the Ventresca CNP benchmark that Wandelt also dismantles, so it is one of the few networks where
 the OR branch and the physics branch actually meet.
 """
 

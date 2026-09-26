@@ -20,7 +20,7 @@ optimizer**, not GRIN's published training recipe. `GWM_IMPUTE_EPOCHS` is the
 first number to raise before quoting it as parity.
 
 WHY IT IS WORTH THE TROUBLE ANYWAY. GRIN is the strongest supervised baseline in
-`research/cascade_reconstruction.md` §5.1 and the one DITTO uses as the **ideal
+this literature and the one DITTO uses as the **ideal
 upper bound**: every `Gap` column in its Tables 4-5 is measured against a GRIN
 trained with the TRUE `beta`. It is therefore the single most useful reference
 number in this literature, and it is the row that shows what a method WITH labels
@@ -28,9 +28,9 @@ achieves against our own unsupervised arms.
 
 Warning: this arm is SUPERVISED and every other arm on the table is not. It fits on
 the selection split's labelled histories, so its row is not comparable to a
-decoder that never sees one, and §5.1.2 is the reason that matters rather than
-being a technicality: the supervised family collapses from `F1 ~ 0.80` on
-simulated diffusion to `F1 ~ 0.32` on real, which is §2.11 risk 4 in one table.
+decoder that never sees one, and the published results are why that matters rather
+than being a technicality: the supervised family collapses from `F1 ~ 0.80` on
+simulated diffusion to `F1 ~ 0.32` on real.
 
 `GRINet.forward(x, mask)` takes `[batch, steps, nodes, channels]` and returns
 `(imputation, prediction)` in training and `imputation` in eval, where

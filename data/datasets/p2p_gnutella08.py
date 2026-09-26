@@ -7,8 +7,8 @@ Source: https://snap.stanford.edu/data/p2p-Gnutella08.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-NIE's smallest real network (`research/influence_blocking.md` §5.5, Table II:
-6,301 / 20,777, avg degree 3.30) and NAMM's `Gnutella`. §6.3 records a NAME COLLISION
+NIE's smallest real network (its Table II: 6,301 / 20,777, avg degree 3.30) and
+NAMM's `Gnutella`. There is a NAME COLLISION
 worth stating in the loader: our `p2p_gnutella` is SNAP's Gnutella31 giant component
 at 62,561 nodes, the proactive-rumour-control paper's "Gnutella" is a third snapshot
 at 8,800 / 63,000, and this is the 08 file the NIE and NAMM rows are computed on.

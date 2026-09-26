@@ -8,8 +8,8 @@ Source: https://snap.stanford.edu/data/soc-Slashdot0902.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-Warning: THE COUNTS DISAGREE WITH THE PAPER THAT USES IT. `research/influence_blocking.md`
-§6.2 records fair-IBM 2026's Slashdot row as 70,000 / 358,600 undirected, while SNAP's
+Warning: THE COUNTS DISAGREE WITH THE PAPER THAT USES IT. The fair-IBM 2026 paper
+reports its Slashdot row as 70,000 / 358,600 undirected, while SNAP's
 own soc-Slashdot0902 page states 82,168 nodes and 948,464 arcs, which is what this
 loader reports, from the file. Either they used a different snapshot (0811 is 77,357 /
 905,468, also not a match) or an undirected largest-component extraction they did not

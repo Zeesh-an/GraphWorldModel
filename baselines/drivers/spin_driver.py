@@ -13,8 +13,8 @@ datasets, none of which is a cascade. `spin.models.SPINModel` itself needs only
 ARCHITECTURE and trains it with our own Adam loop: **SPIN's model, our
 optimizer**, on the same terms as the GRIN driver beside it.
 
-WHY IT IS HERE. SPIN is the one method in `research/cascade_reconstruction.md`
-§5.1.2 that BEATS DITTO outright on a real-diffusion row (BrFarmers, `F1 .8268`
+WHY IT IS HERE. SPIN is the one method in
+this literature that BEATS DITTO outright on a real-diffusion row (BrFarmers, `F1 .8268`
 against `.8206`) while running OUT OF MEMORY on Oregon2, Prost and Pol. That OOM
 pattern is the useful half: it is the clearest published statement of the scale
 ceiling on attention-based reconstruction, and our own graphs sit on both sides
@@ -94,8 +94,8 @@ if __name__ == "__main__":
         raise SystemExit(
             f"[spin] OUT OF MEMORY on {data['num_nodes']} nodes x {data['steps']} "
             f"steps. That is the published behaviour rather than a wiring bug: "
-            f"SPIN OOMs on Oregon2, Prost and Pol in its own comparison table "
-            f"(research/cascade_reconstruction.md §5.1.2). Report it as the scale "
+            f"SPIN OOMs on Oregon2, Prost and Pol in its own comparison table. "
+            f"Report it as the scale "
             f"ceiling it is, or lower GWM_IMPUTE_HIDDEN / GWM_IMPUTE_BATCH. "
             f"({error})"
         ) from error

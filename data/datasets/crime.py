@@ -7,7 +7,7 @@ Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-Warning: Name collision (research/critical_node_detection.md §6.4). KONECT's
+Warning: Name collision. KONECT's
 `moreno_crime` is the RAW BIPARTITE St. Louis person-crime network, 1,380 nodes
 (829 persons + 551 crimes) and 1,476 edges. The "Crime" that GND, FINDER, NIRM
 and SPR all report is this one: the PERSON PROJECTION restricted to its giant

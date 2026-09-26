@@ -3,11 +3,10 @@ Epidemic control: the four intervention levers, the outbreak, and prevented infe
 
 The harness piece `epidemic_control` needs and the other tasks do not, in the same
 shape `coding_agent/blocking.py` has for influence blocking. Three things live here
-and each is a decision `research/epidemic_control.md` §2.5 forces rather than a
-convenience:
+and each is a decision the published literature forces rather than a convenience:
 
-  * **The four levers.** §2.5's table maps the intervention vocabulary of this
-    literature onto our action ops, and the map is not one-to-one: two different
+  * **The four levers.** The intervention vocabulary of this literature maps onto
+    our action ops, and the map is not one-to-one: two different
     interventions both spend `remove_node`:
 
       - `vaccinate`: the node is IMMUNE. It leaves the graph, cannot be infected,
@@ -15,8 +14,8 @@ convenience:
         Pastor-Satorras & Vespignani's and Cohen et al.'s intervention, and under
         `blocked` semantics it is exactly what `remove_node` already means.
       - `quarantine`: the node is ISOLATED, not immune. Its incident arcs are cut
-        but the node stays in the graph, stays susceptible, and stays counted. §8.2
-        trap 7 is why the distinction is worth a lever rather than a footnote:
+        but the node stays in the graph, stays susceptible, and stays counted. The
+        distinction is worth a lever rather than a footnote:
         "Recovered is not removed", and papers that report nodes-saved against
         "no intervention" versus against "random vaccination" differ by a large
         constant for precisely this reason. A quarantined node also cannot be
@@ -24,7 +23,7 @@ convenience:
         DOSE ACCOUNTING rather than in the epidemic, which is the honest version of
         the difference and is measurable.
       - `edge_cut`: `remove_edge`, the Van Mieghem / NetMelt / Kimura lever.
-      - `contact_reduce`: `set_edge_weight`, and the reason §2.2 says to write our
+      - `contact_reduce`: `set_edge_weight`, and the reason to write our
         own stepper: NDlib's SIR/SIS/SEIR carry no per-edge parameter, so this
         entire branch of the literature (social distancing, DURLECA's mobility
         multiplier, Fractional Immunization's continuous allocation) is
@@ -38,19 +37,19 @@ convenience:
     planner neither chooses nor pays for: identical to critical node detection, and
     it reuses `containment.Outbreak` for the seeding half.
 
-  * **Prevented infections (§8.3).** `|R(inf)| unprotected - |R(inf)| with doses`.
+  * **Prevented infections.** `|R(inf)| unprotected - |R(inf)| with doses`.
     The reward the search optimizes is the remaining attack rate (lower is better,
     so no sign work is needed anywhere); prevented infections is that subtracted
     from the unprotected reference, which is what an immunization table reports.
 
-Warning: WHAT THIS DELIBERATELY DOES NOT DO. §2.5 lists two more rows and both are
-out of scope with a stated reason. **Contact tracing is not an action**: it changes
+Warning: WHAT THIS DELIBERATELY DOES NOT DO. Two more interventions exist and both
+are out of scope with a stated reason. **Contact tracing is not an action**: it changes
 the OBSERVATION, not the graph or the state, and belongs in a POMDP observation
 model we do not have. **Quarantine with a DURATION** is not expressible either: a
 release timer is hidden state, the compartment head is Markov in (state, action),
 and a head that cannot see the timer would be fit against a transition it cannot
 explain. The `quarantine` lever above is therefore isolation for the rest of the
-episode, which is what every static immunization baseline in §3 does anyway.
+episode, which is what every static immunization baseline does anyway.
 """
 
 from dataclasses import dataclass
@@ -60,7 +59,7 @@ from coding_agent.types import ActionFn, ActionOp, GraphInfo, State, TaskSpec
 from data.wm_epidemic import default_burn_in
 from world_model.wm_metrics import epidemic_curve_metrics, immunization_metrics
 
-# §2.5's table, as the (budget_op, allowed_ops) pair each row implies
+# The four published interventions, as the (budget_op, allowed_ops) pair each implies
 vaccinate = "vaccinate"
 quarantine = "quarantine"
 edge_cut = "edge_cut"
@@ -328,7 +327,7 @@ def epidemic_metrics(
     burn_in: float = default_burn_in,
 ) -> dict:
     """
-    The block an immunization table reports (§8.3), in one place.
+    The block an immunization table reports, in one place.
 
     Four groups, and the order is the argument this task makes:
 
@@ -337,13 +336,13 @@ def epidemic_metrics(
          means nothing, which is why `unprotected` is measured on this arm's own
          evaluator and the referee replay re-measures both on the shared referee.
       2. **The outbreak SHAPE**: peak prevalence, time to peak, AUC, endemic
-         prevalence. §8.2 trap 4 is the reason these are not optional: a good policy
+         prevalence. These are not optional: a good policy
          flattens rather than eliminates, so a terminal-state number alone can rank
          two policies backwards.
       3. **The eigendrop**: `lambda_1(A) - lambda_1(A - S)`, which is what the
          spectral line optimizes and therefore the only column our table and theirs
          share. Reported as CONTEXT beside the simulated number, never as the score:
-         §8.2 trap 1 records that a method can win here and lose on final size, and
+         a method can win here and lose on final size, and
          grading ourselves on the surrogate the classical methods were built for is
          a comparison we cannot win and that does not test the world model.
       4. **What was spent**, so an under-spent budget stays visible.
@@ -395,7 +394,7 @@ def unprotected_reference(
     One rollout, charged to the arm like every other, because computing it on a
     private simulator would make prevented infections a comparison between two
     different measurement processes. It doubles as the floor any allocation has to
-    beat and as the denominator §8.3 reports against.
+    beat and as the denominator immunization tables report against.
 
     Warning: THE EMPTY PLAN IS WRAPPED, and it has to be. Influence blocking's
     counterpart can hand the environment a bare `lambda: []` because `S_N` is

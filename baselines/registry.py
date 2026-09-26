@@ -96,8 +96,8 @@ gnd_min_target = 1
 #
 # We run **3**, and the reason is measurable rather than a preference. Our budget
 # is a CARDINALITY budget (k nodes), and pricing removal by degree optimizes a
-# different objective that a node-count metric scores unfairly: research
-# §8.2 trap 4. On `crime` (754/2127), driving the giant component to 7:
+# different objective that a node-count metric scores unfairly. On
+# `crime` (754/2127), driving the giant component to 7:
 #
 #     strategy 1 (weighted)   needs 290 nodes;  its first 75 leave a GCC of 269
 #     strategy 3 (unweighted) needs 110 nodes;  its first 75 leave a GCC of  12
@@ -1788,7 +1788,7 @@ def _rl4im_command(
 
     No pretrained checkpoint ships, so this TRAINS before it selects. Its own
     defaults cap training at max_global_t=2000 steps, which is minutes rather
-    than hours (research/adaptive_online_im.md §11).
+    than hours.
     """
     return [
         "python",
@@ -2039,7 +2039,7 @@ def _reconstruction_export(
     Everything a decoder needs and nothing it may not see. The SOURCE SET is
     deliberately absent: only the source COUNT crosses, because DITTO reads `I0`
     off `y[:, 0]` in its own pipeline and our own protocol hands every inverse
-    method its `k` (research/source_localization.md §2.4.1).
+    method its `k`.
 
     `reported` / `reported_times` are the mask, `final_state` the terminal
     snapshot, and `visible` the hidden-node mask. A repo that only consumes the
@@ -2174,15 +2174,14 @@ def _reconstruction_parse(work_dir: Path, stdout: str, instances: list) -> dict:
 #
 # The inverse export turned around: a predictor is handed the observed PREFIX of a
 # real cascade and hands back one NUMBER per cascade. Everything here is a
-# SUPERVISED regressor (that is what the whole §4.1 line is) so the split flag is
+# SUPERVISED regressor (that is what every learned method here is) so the split flag is
 # the load-bearing field, exactly as it is for the three imputers on the
 # reconstruction side: a label may reach a repo's `fit`, never its evaluation-row
 # prediction.
 #
 # The exported shape is CasFlow's own canonical five-field line format
-# (`research/cascade_prediction.md` §6.3), because §8.5's finding is that there is
-# no benchmark for this task and that format IS the de-facto standard artefact,
-# every repo in §4.1 either reads it or reads something one rename away from it.
+# because this task has no benchmark and that format IS the de-facto standard
+# artefact: every published repo either reads it or reads something one rename away from it.
 
 
 def _prediction_export(
@@ -2198,8 +2197,8 @@ def _prediction_export(
 
     `labels` is the INCREMENT (`P(t_p) - P(t_o)`), which is CasFlow's own label and
     what every repo here regresses; the drivers convert back to a total on the way
-    out. `splits` carries our protocol so a repo cannot re-split at random, which is
-    §8.3's whole warning.
+    out. `splits` carries our protocol so a repo cannot re-split at random, which
+    would leak.
 
     Two invariants are ASSERTED rather than trusted, the same pair
     `_reconstruction_export` asserts for its supervised drivers: no evaluation row
@@ -2524,7 +2523,7 @@ def _ditto_entry(
     (the original code covers only SEIRS) and `cri.py` is its implementation of
     CRI, whose authors published none. Both also exist in our own pool, so these
     two arms are a CROSS-CHECK on our reimplementations rather than new coverage,
-    and a valuable one, because §5.1's Tables 4-5 report DHREC and CRI only as
+    and a valuable one, because DITTO's Tables 4-5 report DHREC and CRI only as
     DITTO reports them.
     """
     return ExternalBaseline(
@@ -2571,15 +2570,14 @@ def _forecasting_entry(
     name: str, title: str, venue: str, repo: str, paper: str
 ) -> ExternalBaseline:
     """
-    One of §4.3's forecasting GNNs, registered BLOCKED for a reason they all share.
+    One of the published forecasting GNNs, registered BLOCKED for a reason they all share.
 
     All three have live, maintained public code, which is exactly why they are
     registered rather than omitted: a reader who sees "Cola-GNN, code available" in
-    §4.3 will reasonably ask why it is not a baseline, and the answer has to be on
+    the literature will reasonably ask why it is not a baseline, and the answer has to be on
     the row rather than in someone's memory.
 
-    They predict CASE COUNTS per region on a metapopulation and never intervene.
-    §4.3 says so outright: "these predict case counts; none of them intervene",
+    They predict CASE COUNTS per region on a metapopulation and never intervene,
     so there is no k-node set, no arc set and no allocation of any kind to score.
     They matter to this file only because they define the benchmark suite the
     2024-2026 GNN-for-epidemics surveys use, and because EpiLearn packages them.
@@ -2599,7 +2597,7 @@ def _forecasting_entry(
             "2026-08-05], but the model maps a history of regional case counts to "
             "future case counts: there is no action space, no budget and no node "
             "set to read back, so there is nothing for our referee to score. "
-            "research/epidemic_control.md §4.3 lists this whole family under "
+            "This whole family counts as "
             "'not control, but the source of the datasets'. TO UNBLOCK: nothing; "
             "this is a category difference, not a missing adapter."
         ),
@@ -2712,9 +2710,9 @@ def _netimm_entry(
     One arm per solver in `allogn/Network-Immunization`, all sharing its single install.
 
     Six arms from one clone, and three of them are methods
-    `research/epidemic_control.md` §11 lists as having NO public release:
+    usually listed as having NO public release:
     **NetShield** (Tong ICDM'10), **DAVA** and **DAVA-fast** (Zhang & Prakash
-    SDM'14). §3.2's claim that EpiLearn ships a NetShield is wrong: that repo's
+    SDM'14). The claim that EpiLearn ships a NetShield is wrong: that repo's
     tree has no shield, immunization or intervention code at all [derived,
     2026-08-05], so this clone is the only third-party NetShield or DAVA anywhere,
     and each of these arms is the cross-check on our own reimplementation in
@@ -2789,9 +2787,9 @@ def _shared_dismantler_entry(
     The registry's `task` field exists so one task's baselines never join another's
     sweep, and re-registering under a second task with a SHARED install is the
     sanctioned way to say "this method answers both". It genuinely does here:
-    `research/epidemic_control.md` §2.5 maps vaccination onto `remove_node`, so a
-    dismantler's output IS an allocation under the `vaccinate` lever, and §4.2 lists
-    FINDER under this task explicitly.
+    vaccination maps onto `remove_node`, so a
+    dismantler's output IS an allocation under the `vaccinate` lever, and the
+    epidemic-control literature lists FINDER under this task explicitly.
 
     Everything but `name`, `task` and `notes` is inherited from the critical-node
     entry, so the two arms share a clone, a venv, a build and an adapter, and a fix
@@ -3049,7 +3047,7 @@ external_baselines = {
             "from OUR graphs. Note genim.py then TRAINS a VAE + SpGAT per "
             "(dataset, diffusion model, budget): it is not an inference-only "
             "baseline, so budget its runtime accordingly. Published tables are "
-            "in research/influence_maximization.md §5.1 and are directly "
+            "directly "
                 "comparable on Jazz and "
             "Power Grid."
         ),
@@ -3088,7 +3086,7 @@ external_baselines = {
             "Our BA/SBM/ER graphs are synthetic and Jazz/Power Grid/NetScience "
             "ship no cascade logs, so there is nothing for it to train on. It "
             "can only run on Digg/Weibo/MAG, which our pipeline cannot simulate "
-            "at scale (see research/influence_maximization.md §6.1)."
+            "at scale."
         ),
         notes=(
             "Included in the registry for completeness and to document exactly "
@@ -3299,8 +3297,7 @@ external_baselines = {
             "Unblocking means reimplementing it from the paper."
         ),
         notes=(
-            "Appears in DeepIM's comparison table; those published numbers are "
-            "transcribed in research/influence_maximization.md §5.1."
+            "Appears in DeepIM's comparison table."
         ),
     ),
     "oim": ExternalBaseline(
@@ -3317,7 +3314,7 @@ external_baselines = {
         build=["make"],
         notes=(
             "CORRECTED 2026-08-01, interface read from source 2026-08-03. Code "
-            "IS published by a co-author (research/adaptive_online_im.md §3.2) "
+            "IS published by a co-author "
             "and the method is online IM, so it belongs to this task.\n\n"
             "  argv    ./oim real <graph> <exploit> <budget> <k> [model] "
             "[samples]  (positional, src/main.cpp)\n"
@@ -3329,14 +3326,13 @@ external_baselines = {
             "from observed activations, and reports the UNION over trials. There "
             "is no single seed set to hand back, and the union grows "
             "monotonically in the trial count, so it is not comparable to a "
-            "single-campaign spread (§8.2 trap 2). A faithful arm needs a "
+            "single-campaign spread. A faithful arm needs a "
             "repeated-campaign external protocol that our contract does not "
             "have. DeepIM sidestepped this by re-running OIM under its own "
-            "single-campaign protocol; those numbers are transcribed in "
-            "research/influence_maximization.md §5.1."
+            "single-campaign protocol."
         ),
     ),
-    # Adaptive / online IM (research/adaptive_online_im.md §3.1, §3.2, §4.2).
+    # Adaptive / online IM.
     #
     # None of the five below is WIRED, and that is deliberate rather than
     # unfinished. An adapter has to know a repo's input format, its CLI, and
@@ -3434,9 +3430,9 @@ external_baselines = {
         ),
         notes=(
             "Our own --campaigns flag now implements the multi-round SETTING "
-            "(r separate diffusions scored on their union, §1.5), so the "
-            "protocol side is no longer the obstacle; the algorithm is. §11 "
-            "also records that this paper's tables were never extracted, so "
+            "(r separate diffusions scored on their union), so the "
+            "protocol side is no longer the obstacle; the algorithm is. "
+            "This paper's tables were also never extracted, so "
             "there would be no published number to check an adapter against."
         ),
     ),
@@ -3488,7 +3484,7 @@ external_baselines = {
             "It TRAINS before it selects (no checkpoint ships). Budget from its "
             "own config: max_global_t=2000 steps, minutes rather than hours; the "
             "540k IC simulations that bound implies were measured at about half "
-            "a minute total (research/adaptive_online_im.md §11).\n\n"
+            "a minute total.\n\n"
             "TWO HONEST LIMITS on the arm. (1) It generates its own graphs: "
             "there is no flag for 'run on this graph', so the adapter matches "
             "our graph on size and family (powerlaw_cluster, m=3, p=0.05, its "
@@ -3500,12 +3496,12 @@ external_baselines = {
             "did not spend, since our action space has no notion of a seed "
             "declining.\n\n"
             "The closest published thing to our setting and the ONLY genuinely "
-            "multi-round RL baseline in the literature (§4.1: DISCO, PIANO, "
+            "multi-round RL baseline in the literature (DISCO, PIANO, "
             "GCOMB and ToupleGDD are all RL over seed-set CONSTRUCTION, with no "
             "cascade between actions, so they belong to static IM). Our claim "
             "against it is model-based vs model-free: RL4IM learns a policy "
             "Q(s,a), we learn a transition function and plan against it. "
-            "Protocol from §5.5: powerlaw-cluster graphs (now loadable as "
+            "Its published protocol: powerlaw-cluster graphs (now loadable as "
             "--dataset powerlaw_cluster), |V|=200, T=2 rounds, B=4 per round, "
             "IC p=0.1, 100 sims per number. Two mismatches to resolve before "
             "wiring: its `willingness` q=0.6 (a seed may DECLINE, which our "
@@ -3556,7 +3552,7 @@ external_baselines = {
         status="needs_setup",
         notes=(
             "THIRD-PARTY, not the authors'. Wen et al. released no code; this is "
-            "a temporal port found by the review (§3.2), so any number it "
+            "a temporal port, so any number it "
             "produces is attributable to this repo and not to the paper, and "
             "must be labelled that way if it is ever reported.\n\n"
             "Inspected 2026-08-03: the surface is library functions, not a CLI "
@@ -3565,26 +3561,26 @@ external_baselines = {
             "first (get_features_nodes / generate_node2vec_fetures, with a "
             "vendored node2vec/). Same repeated-campaign obstacle as the other "
             "two bandit entries: it optimizes cumulative regret over rounds, "
-            "not one seed set. Scale note from §5.4: the strongest theory "
+            "not one seed set. Scale note: the strongest theory "
             "result in bandit IM was validated on a 327-node Facebook subgraph, "
-            "and §6.2 records that the exact subgraph is unpublished, so its own "
+            "and the exact subgraph is unpublished, so its own "
             "figure cannot be reproduced regardless."
         ),
     ),
     # -- critical node detection -------------------------------------------
     # Registered, none wired. Every one of these solves the STRUCTURAL variant:
     # it returns a removal set optimizing a connectivity functional, whereas our
-    # arms are scored on the diffusion the removal set fails to stop
-    # (research/critical_node_detection.md §2.2). That is not a blocker for
+    # arms are scored on the diffusion the removal set fails to stop. That is
+    # not a blocker for
     # comparison: their seed set crosses the process boundary and OUR referee
     # scores it, exactly as on the IM side, but it does mean a fair report has to
     # show both columns, which is what the report's structural section is for.
-    # Warning: Two shared traps before any of these is wired (§8.2): almost all of them
-    # run on the LARGEST CONNECTED COMPONENT of the input silently (trap 7), and
+    # Warning: Two shared traps before any of these is wired: almost all of them
+    # run on the LARGEST CONNECTED COMPONENT of the input silently, and
     # several ship a REINSERTION pass that makes `X` and `X+R` different methods
-    # cited under one name (trap 2).
-    # Influence blocking (research/influence_blocking.md §3.2, §4). Only FOUR repos
-    # exist in this entire literature: §11 records that no public code was found for
+    # cited under one name.
+    # Influence blocking. Only FOUR repos exist in this entire literature: no
+    # public code was found for
     # NIE, CMIA-H/CMIA-O, CLDAG, the DRL rumour-minimization line, OCIM or JCCIM
     # after searching GitHub for each, so these are its whole reproducible surface.
     "sandimin": ExternalBaseline(
@@ -3645,8 +3641,8 @@ external_baselines = {
             "Warning: the shipped `el2bin` is a prebuilt x86 binary with no source, so "
             "the adapter writes its packed `(int, int, double)` graph_ic.inf "
             "directly instead: verified against `graph.h::readGraph`, which mmaps "
-            "the file and steps by 2*sizeof(int)+sizeof(double). Read its own §5.3 "
-            "row before reading ours: its trivial LHGA heuristic beats both of its "
+            "the file and steps by 2*sizeof(int)+sizeof(double). Read its own published "
+            "table before reading ours: its trivial LHGA heuristic beats both of its "
             "principled methods in 6 of that table's 30 cells."
         ),
     ),
@@ -3761,13 +3757,13 @@ external_baselines = {
             "needs 2500 labelled attacker/protector PAIRS whose protector is a "
             "best-known approximation, i.e. solving the blocking problem near-"
             "optimally 2500 times is the PREREQUISITE for running the method we "
-            "would be benchmarking. Its published Table 1 is still transcribed in "
-            "research/influence_blocking.md §5.6 and is usable as a reference "
+            "would be benchmarking. Its published Table 1 is still "
+            "usable as a reference "
             "without running it: including the row that matters most to us, plain "
             "proximity at 0.770/0.776 against a GCN at 0.281/0.091."
         ),
         notes=(
-            "Kept registered rather than deleted because §5.6 is one of the two most "
+            "Kept registered rather than deleted because its table is one of the two most "
             "useful tables in this literature for us: a plain GCN scores 0.091-0.657 "
             "on the SAME task depending only on the graph family, which is the "
             "sharpest published argument for a structured head over an unstructured "
@@ -3798,8 +3794,8 @@ external_baselines = {
             "budget. TO WIRE: clone, build the Cython extensions, read which of "
             "`FINDER_CN` / `FINDER_ND` the entry point drives and what its graph "
             "format is. Warning: TensorFlow 1.x and Cython pin this to Python 3.7, which "
-            "is why it is the most expensive entry here to install. Warning: §11 records "
-            "that its per-network results are HEATMAP-ONLY (no arXiv version, "
+            "is why it is the most expensive entry here to install. Warning: its "
+            "per-network results are HEATMAP-ONLY (no arXiv version, "
             "paywalled PDF, and the `results/` directory its README advertises does "
             "not exist in master), so there is no published table to validate an "
             "adapter against: you would be generating the number, not checking it."
@@ -3832,9 +3828,9 @@ external_baselines = {
             "Supervised (not RL) on brute-force-optimal dismantling of small "
             "graphs, and STATIC: one scoring pass with no recomputation, which "
             "makes it the cheapest learned entry to run. `GDM+R` adds reinsertion "
-            "and is a different method with different numbers (§8.2 trap 2). "
+            "and is a different method with different numbers. "
             "Relevant to us beyond its score: MIND measured GDM's dismantling order "
-            "at Spearman 0.762 against a PCA of its own input features (§9.5), which "
+            "at Spearman 0.762 against a PCA of its own input features, which "
             "is the correlation our report's `degree_rank_spearman` column measures "
             "for our arms; the converted checkpoint reproduces that at 0.72 against "
             "degree on a BA-120 [measured 2026-09-04].\n\n"
@@ -3882,11 +3878,11 @@ external_baselines = {
             "comparison target in this literature. Drops handcrafted structural "
             "features entirely; O(|V|+|E|). TO WIRE: clone, read the graph format "
             "and which of MIND-AM / MIND-MP the entry point drives. Warning: Its table is "
-            "published AUC RELATIVE TO ITSELF = 100 (§8.2 trap 5), so it is "
+            "published AUC RELATIVE TO ITSELF = 100, so it is "
             "internally consistent and externally useless: you cannot combine it "
             "with an absolute number, only re-run it. The rows to read first are "
-            "adaptive degree at 119.9 vs FINDER at 115.0 (§9.3) and the "
-            "power-grid rows where FINDER scores 161.7 against EI's 80.6 (§9.4)."
+            "adaptive degree at 119.9 vs FINDER at 115.0 and the "
+            "power-grid rows where FINDER scores 161.7 against EI's 80.6."
         ),
     ),
     "spr": ExternalBaseline(
@@ -3903,13 +3899,13 @@ external_baselines = {
             "THE REPOSITORY IS EMPTY. `git clone` succeeds and yields a bare .git "
             "with no commits on its default branch ('your current branch main does "
             "not have any commits yet'), so there is no code to wire: verified "
-            "2026-08-03. research/critical_node_detection.md §4 lists this URL as "
+            "2026-08-03. The paper lists this URL as "
             "the paper's code link; that link resolves but publishes nothing. "
             "Re-check upstream before spending time here."
         ),
         notes=(
             "The one learned dismantler with an ABSOLUTE per-network table that "
-            "beats FINDER, GDM, NIRM and DCRS in one printed comparison (§5.4), so "
+            "beats FINDER, GDM, NIRM and DCRS in one printed comparison, so "
             "it is the cheapest published number to check an adapter against. Its "
             "graphs overlap ours: `netscience`, Yeast PPI, Crime and Human PPI "
             "(Vidal / Figeys) are all loadable here. TO WIRE: clone, read the graph "
@@ -3936,10 +3932,10 @@ external_baselines = {
         notes=(
             "Supervised on brute-forced optimal removal sets of 20-30-node "
             "synthetic graphs, applied zero-shot: the same train-tiny/apply-large "
-            "claim our BA-100 regime makes (§9.5). Its Table 3 is the ONLY numeric "
-            "table in this file that separates adaptive from one-pass removal on "
+            "claim our BA-100 regime makes. Its Table 3 is the ONLY numeric "
+            "table in this literature that separates adaptive from one-pass removal on "
             "the same method and graph (`UsPower`: rho 8.58% vs 16.81%, a 1.96x "
-            "gap), which is the measurement §8.2 trap 1 exists for and which our "
+            "gap), a measurement our "
             "`degree_removal` vs `adaptive_degree` pair reproduces. TO WIRE: clone, "
             "read its graph format; note it runs on the LCC (its `Ca-GrQc` is "
             "4,158/13,422 where ours is 5,242/14,484)."
@@ -3965,7 +3961,7 @@ external_baselines = {
         notes=(
             "The direct NIRM follow-up, and the learned entry closest in spirit to "
             "what we do: it encodes a node's DIFFUSION COMPETENCE rather than pure "
-            "topology, which is the same observation §2.2 builds our variant on. "
+            "topology, which is the same observation our diffusion variant is built on. "
             "Best on 21 of 22 networks in its own table. TO WIRE: clone, read its "
             "graph format; same LCC caveat as NIRM."
         ),
@@ -4041,7 +4037,7 @@ external_baselines = {
             "`Datasets_*` files), so the graphs already match byte for byte. "
             "Warning: Its contribution is COST-weighted dismantling, so comparing its "
             "cost-optimal set against a cardinality budget is unfair in both "
-            "directions (§8.2 trap 4): run it with unit costs, or report a cost "
+            "directions: run it with unit costs, or report a cost "
             "budget. TO WIRE: clone, make, read the flag that selects unit vs "
             "degree cost and whether reinsertion is on."
         ),
@@ -4104,7 +4100,7 @@ external_baselines = {
             "O(N log N) tree breaking, then reverse-greedy reinsertion. Our "
             "`decycling` reproduces the SHAPE with a greedy first stage and is "
             "explicitly not this; wire it before quoting any Min-Sum comparison. "
-            "Warning: §11 records that its real-network table does not exist, the PNAS "
+            "Warning: its real-network table does not exist, the PNAS "
             "paper reports two graphs in prose, and the Hamsterster/PGP/Enron rows "
             "commonly attributed to Min-Sum actually come from CoreHD and BPD."
         ),
@@ -4130,7 +4126,7 @@ external_baselines = {
             "The authors' O(N log N) CI, and the reference for our own "
             "`collective_influence_removal`, which reproduces the score and the "
             "adaptive removal but NOT the greedy reinsertion pass the paper runs "
-            "afterwards (§8.2 trap 2). Cheap to wire relative to the learned "
+            "afterwards. Cheap to wire relative to the learned "
             "entries: one C binary, no framework. Third-party alternative at "
             "zhfkt/ComplexCi if the original does not build."
         ),
@@ -4178,7 +4174,7 @@ external_baselines = {
             "is our degree tie-break rather than EI's answer. "
             "The authors' inverse/Achlioptas construction, and the reference for "
             "our `explosive_immunization`, which uses one regime rather than their "
-            "two. Worth wiring specifically for §9.4: MIND's Table 5 puts EI at "
+            "two. Worth wiring specifically to test our own prediction: MIND's Table 5 puts EI at "
             "80.6 on `eu-powergrid` and 23.4 on `roads-california` where FINDER "
             "scores 161.7 and 116.3: the physics heuristic beating the RL method "
             "by up to 5x on mesh graphs is the limitation we predict and should "
@@ -4202,8 +4198,8 @@ external_baselines = {
             "Not one method: the survey's harness, which already wires CI, "
             "CoreHD, GND, EI, MinSum, FINDER and GDM behind one interface. Wiring "
             "THIS instead of the seven repos above is almost certainly the right "
-            "trade (§9.2 item 5), and it is also the only practical route to a "
-            "FINDER number given §11's note that FINDER publishes no table. TO "
+            "trade, and it is also the only practical route to a "
+            "FINDER number, since FINDER publishes no table. TO "
             "WIRE: clone, follow its own install (it builds several C++ "
             "dependencies), and read which of its drivers emits a removal ORDER "
             "rather than a curve."
@@ -4232,17 +4228,17 @@ external_baselines = {
             "\n\nREWIRED 2026-09-04 after the August sweep died at `ModuleNotFoundError: network_dismantling`: `thirdparty/GDM-slim` is a flat directory (`GAT.py`, one `.h5`, an empty `__init__.py`), not a package. The runner now follows the repo's own `eval_utils.evaluate_gdm` path through `agent/gdm.py` (its `compute_gdm_features` and GAT class), with the checkpoint keys converted by `baselines/gdm_support.py` because the file is GDM's 2019 PyG 1.x state dict and the repo's own strict `load_state_dict` cannot succeed on the PyG its requirements pin. Verified locally end to end: it returns the same order as the `gdm` row, byte for byte, because it is the same model on the same checkpoint. Keep it as a cross-check on the gdm adapter, not as coverage."
         ),
     ),
-    # SOURCE LOCALIZATION (research/source_localization.md §4, §10).
+    # SOURCE LOCALIZATION.
     # Registered, none wired. The contract here differs from every other task's in
     # a way that matters before any adapter is written: these methods do not
     # return a seed set from a graph, they return a SOURCE set from a (graph,
     # observation) pair, so the process boundary has to carry `y` across as well.
     # Our own referee then scores it exactly as it scores our arms.
-    # Warning: Two shared traps (§8.4): the SOURCE FRACTION is not standardized (10%
+    # Warning: Two shared traps: the SOURCE FRACTION is not standardized (10%
     # uniform-random in SL-VAE, first 5% by infection time in SL-Diff, top 10% by
     # influence time in SIDSL), and NOTHING in this literature evaluates under IC
-    # or LT: SL-VAE uses SI/SIR, everything else uses real cascades. §11 calls
-    # that the single biggest comparability gap in the file, and it is bigger than
+    # or LT: SL-VAE uses SI/SIR, everything else uses real cascades. That is
+    # the single biggest comparability gap for this task, and it is bigger than
     # any graph-version disagreement.
     # Six published methods behind one package, one arm each, one shared install.
     # This is the entry that makes SL-VAE, IVGD and GCNSI runnable at all: the
@@ -4280,7 +4276,7 @@ external_baselines = {
         "GCNSI: multiple rumor source detection with graph convolutional networks",
         "CIKM 2019",
         "The first GNN for this task and every later paper's WEAKEST learned "
-        "baseline: lowest-scoring learned method in §5.1, §5.2, §5.3 and §5.5 "
+        "baseline: lowest-scoring learned method in the published result tables "
         "without exception. Its `ACC 0.8840` with `F1 0.0218` on Network Science "
         "is the single clearest demonstration that accuracy is useless alone "
         "here. Trained at `graphsl_epochs`, which is far below the paper's.",
@@ -4301,11 +4297,11 @@ external_baselines = {
         "SL-VAE: source localization with a learned generative prior",
         "KDD 2022",
         "The seed paper, and the method arm A reimplements against OUR likelihood. "
-        "Running the original matters precisely because §2.2's argument is that "
+        "Running the original matters precisely because our argument is that "
         "swapping the forward model is a no-op the authors already published: "
         "the way to show that rather than assert it is to run both. Its inference "
-        "is itself a per-instance gradient loop, which is what puts it in the "
-        "non-amortized row of §1's table and what the cost columns should show.",
+        "is itself a per-instance gradient loop, which is what puts it among the "
+        "non-amortized methods and what the cost columns should show.",
     ),
     "graphsl": ExternalBaseline(
         name="graphsl",
@@ -4331,7 +4327,7 @@ external_baselines = {
             "methods including two of the three seed papers. It also packages the "
             "six benchmark graphs (Karate, Dolphins, Jazz, Network Science, "
             "Cora-ML, Power Grid) (five of which we now load) and it packages "
-            "OUR version of Network Science (1,589 / 2,742), which §6.4.1 shows is "
+            "OUR version of Network Science (1,589 / 2,742), which is "
             "the version IVGD, SIDSL and Network Repository agree on and SL-VAE "
             "does not. Written by IVGD's first author. WIRED as six per-method "
             "entries rather than one, so a row names the method it ran: "
@@ -4366,15 +4362,15 @@ external_baselines = {
         ),
         notes=(
             "The seed paper, and the method our arm A reimplements against our own "
-            "likelihood. Worth wiring the ORIGINAL anyway: §2.2's whole argument is "
+            "likelihood. Worth wiring the ORIGINAL anyway: our whole argument is "
             "that swapping the forward model is a no-op the paper already "
             "published, and the way to show that rather than assert it is to run "
-            "both. Its Table 1/2 are the (key) comparable tables (§5.1): five of its "
-            "seven graphs are ours, but read §5.1's column-order warning first: "
+            "both. Its Table 1/2 are the (key) comparable tables: five of its "
+            "seven graphs are ours, but mind the column order first: "
             "Table 1 is RE·PR·F1·AUC and Table 2 is PR·RE·F1·AUC, and a summarizer "
             "that assumes one ordering transposes precision and recall for a whole "
             "table. Warning: Its Network Science is 1,565 / 13,532, which is NOT ours and "
-            "is not publicly downloadable (§6.4.1), so that row is not comparable "
+            "is not publicly downloadable, so that row is not comparable "
             "in either direction. TO WIRE: clone, read which diffusion estimator "
             "the entry point defaults to (it tries GAT / MONSTOR / DeepIS) and how "
             "its observation tensor is laid out."
@@ -4400,14 +4396,14 @@ external_baselines = {
             "second copy of a number graphsl_ivgd already produces."
         ),
         notes=(
-            "The near-miss on §1's amortization axis: its inversion is a single "
+            "The near-miss on the amortization axis: its inversion is a single "
             "backward pass, but the validity-aware projection layers are an "
             "unrolled per-instance optimization, so its inference cost still scales "
             "with an inner loop. `pretrain.py` exists purely so `main.py` has "
             "something to invert, which is the cleanest statement in the literature "
             "that the forward model is a component. Warning: Its Table 3 numbers are far "
             "higher than SL-VAE's on the identical graph NAMES and the two are not "
-            "comparable (§5.2): different protocol, different unstated seed "
+            "comparable: different protocol, different unstated seed "
             "fraction, and a different Network Science. Its recall is 1.0000 on "
             "five of six graphs, which means the projection is tuned to "
             "over-predict and let precision carry F1: worth knowing before "
@@ -4419,7 +4415,7 @@ external_baselines = {
         name="cnsl",
         kind=learned,
         title="CNSL: cross-network source localization",
-        venue="preprint 2024 (Emory)",
+        venue="arXiv preprint 2024",
         repo="https://github.com/tanmoysr/CNSL",
         paper="https://arxiv.org/abs/2404.14668",
         entry="PyTorch",
@@ -4437,7 +4433,7 @@ external_baselines = {
         notes=(
             "Diffusion crosses from an UNOBSERVED source network into an observed "
             "one, with network-specific propagation learned jointly. Registered as "
-            "the closest published relative of our transfer experiment (§8.5.1): it "
+            "the closest published relative of our transfer experiment: it "
             "is the only entry here that evaluates a method on a graph other than "
             "the one it was fit to, though its setting is genuinely different: two "
             "coupled networks in one instance, rather than one artifact reused "
@@ -4462,8 +4458,8 @@ external_baselines = {
             "`PDSL.py` then takes `initial_x[initial_x_prec.index(max(...))]`, "
             "i.e. the iterate closest to the answer. Verified by reading the repo "
             "at HEAD on 2026-08-03, not inferred from the paper. Under our "
-            "contract a label may never reach an evaluation-split prediction "
-            "(research/source_localization.md §2.3.3), so wiring it as-is would "
+            "contract a label may never reach an evaluation-split prediction, "
+            "so wiring it as-is would "
             "put an oracle-selected row in the same column as label-free ones. "
             "TO WIRE HONESTLY: replace that selection with a label-free rule (its "
             "own `loss`, which is what it already computes and optimizes), report "
@@ -4476,7 +4472,7 @@ external_baselines = {
             "`argmax p_psi(Y_T | s*, Y_t, G) * p_phi(s* | z, Y_t, G) * p(z)`, which "
             "is a world-model-shaped factorization with an explicit forward term. "
             "Still per-instance: it optimizes s* rather than producing a reusable "
-            "artifact, so it sits in §1's occupied cell, not the empty one. Worth "
+            "artifact, so it is not amortized, and the amortized forward-model cell stays empty. Worth "
             "wiring precisely because a referee will ask how we differ from it."
         ),
     ),
@@ -4493,7 +4489,7 @@ external_baselines = {
         blocker=(
             "the METRIC does not fit. It is single-source, scored by top-k "
             "accuracy under SIR; our table is multi-source F1 at matched k. "
-            "research/source_localization.md §8.2 states the two literatures' "
+            "The two literatures' "
             "numbers never mix, so a wired adapter would emit a value that looks "
             "comparable in the spread column and is not. Run it as its own study "
             "against a --budgets 1 sweep if the single-source question is wanted; "
@@ -4505,11 +4501,11 @@ external_baselines = {
             "SIR, SINGLE-source, top-k accuracy on six contact networks against "
             "Jordan centre, betweenness, SME and MCMF. Warning: Its framing is not ours: "
             "single-source ranking is a different problem from multi-source "
-            "classification and the two never mix (§8.2), so its numbers cannot "
+            "classification and the two never mix, so its numbers cannot "
             "join our table without a dedicated `--budgets 1` run. Its value is the "
             "CEILING it establishes: the best GNN reaches 72.9% top-5 on a "
             "34-node graph where random already gets 39.4%, which is the honest "
-            "picture of how hard this problem is, against §5.2's near-perfect F1. "
+            "picture of how hard this problem is, against the near-perfect F1 reported elsewhere. "
             "Its Karate is 34 / 77, one edge fewer than `nx.karate_club_graph()`."
         ),
     ),
@@ -4553,11 +4549,11 @@ external_baselines = {
         "code, so our `rumor_centrality` is reimplemented from the paper's prose "
         "and cosasi's is an independent reading of the same text. Warning: "
         "SINGLE-SOURCE: under a multi-source protocol at k = 10% of N it scores "
-        "near zero by construction (§8.2), so compare it at `--budgets 1`.",
+        "near zero by construction, so compare it at `--budgets 1`.",
     ),
-    # Cascade reconstruction (research/cascade_reconstruction.md §3, §4).
-    # Three arms, one install: DITTO's clone is the only public code in the group
-    # of §4.2 (the methods that invert a LEARNED forward operator) and it ships the
+    # Cascade reconstruction.
+    # Three arms, one install: DITTO's clone is the only public code among
+    # the methods that invert a LEARNED forward operator, and it ships the
     # paper's two MLE baselines beside it.
     "ditto": _ditto_entry(
         "ditto",
@@ -4566,10 +4562,10 @@ external_baselines = {
         "DITTO: reconstructing graph diffusion history from a single snapshot",
         "KDD 2023",
         "(key) THE reference point for this task, and the method arm A reimplements "
-        "against our own kernel. §2.3's whole argument is that swapping the forward "
+        "against our own kernel. Our whole argument is that swapping the forward "
         "model is a second-order result inside DITTO's frame, and the way to show "
         "that rather than assert it is to run both. Its Tables 4-5 are the "
-        "comparable ones (§5.1) and TWO of its four synthetic rows are graphs we "
+        "comparable ones and TWO of its four synthetic rows are graphs we "
         "generate natively (`--dataset ba --ba-m 4` and `--dataset er --er-p 0.008` "
         "at n=1,000). Warning: DITTO always solves the DASH (final-snapshot) problem "
         "whatever --cr-setting the sweep runs, because `ditto.py` conditions on "
@@ -4578,8 +4574,8 @@ external_baselines = {
         "strictly harder instance than every other arm and its row must say so. It "
         "outputs per-step node STATES and no propagation tree, so its Path "
         "Precision is measured on a tree derived by our shared `finalize` rule; "
-        "§5.8 records that DIPT is the only method in this literature that emits "
-        "edges, and DIPT has no public code. §2.11 risk 6 is why this arm matters: "
+        "DIPT is the only method in this literature that emits "
+        "edges, and DIPT has no public code. This arm matters because "
         "DITTO beats a supervised model trained with the TRUE beta on BA-SIR and "
         "ER-SIR, so it is genuinely hard to beat and a weak version of it makes "
         "6-vs-A meaningless.",
@@ -4595,7 +4591,7 @@ external_baselines = {
         "PCDSVC for SI and SIR, which means this arm and ours are two independent "
         "readings of one paper's prose, and their spread bounds how much of a DHREC "
         "number is the method and how much is the harness. DITTO's Table 5 puts it "
-        "at F1 .50-.66, i.e. 10-35% behind the supervised ideal [verified, §5.1], "
+        "at F1 .50-.66, i.e. 10-35% behind the supervised ideal [verified], "
         "which is the bar an interesting result has to clear rather than the one it "
         "has to beat.",
     ),
@@ -4638,8 +4634,8 @@ external_baselines = {
         notes=(
             "The source of `delayed_bfs`, the row that actually has to be beaten. "
             "Its `closure` gives O(sqrt(k)) and `delayed-bfs` a k-approximation in "
-            "O(m + k log k) [verified, §5.6]. Warning: it publishes ZERO result "
-            "tables (everything in §5.6 is [figure]) so running it would produce "
+            "O(m + k log k) [verified]. Warning: it publishes ZERO result "
+            "tables (every result is a figure) so running it would produce "
             "the per-cell baselines this literature does not have, which is exactly "
             "why the blocker above is worth revisiting. Three of its four graphs "
             "(email-Eu-core, ca-GrQc, facebook) are ones we load."
@@ -4665,9 +4661,9 @@ external_baselines = {
             "a documented approximation of the sampler rather than of the method."
         ),
         notes=(
-            "The only classical method in §3 that outputs calibrated per-node "
-            "PROBABILITIES rather than a binary set. It is also the source of §8.2 "
-            "trap 4, the most specific warning in that file: on `grqc` "
+            "The only classical method in this literature that outputs calibrated per-node "
+            "PROBABILITIES rather than a binary set. It is also the source of "
+            "the most specific warning for this task: on `grqc` "
             "(assortativity 0.164) a Personalized PageRank baseline BEATS this "
             "method, and loses elsewhere [verified]. We load that graph as "
             "`ca_grqc`, `personalized_pagerank` is in the default pool for exactly "
@@ -4690,8 +4686,8 @@ external_baselines = {
             "(`print len(TS), ...`) throughout, as does every module under "
             "`experiments/utils/`, so it does not parse under Python 3 at all. The "
             "deeper problem is the contract rather than the syntax: CulT consumes a "
-            "temporal INTERACTION STREAM `TS` (§5.5: 'works on interaction "
-            "streams, not a static G') and our episodes are diffusion states on a "
+            "temporal INTERACTION STREAM `TS` (it works on interaction "
+            "streams, not a static G) and our episodes are diffusion states on a "
             "static graph, so `readFile(..., mode='general')` has nothing to read. "
             "TO WIRE: a 2to3 pass over `experiments/` plus a synthetic interaction "
             "stream built from our per-step frontiers, which would be a different "
@@ -4699,8 +4695,8 @@ external_baselines = {
             "alpha-TempSteinerTree objective on the static graph instead."
         ),
         notes=(
-            "The honest ceiling for 'what can you do without a kernel' (§5.5): the "
-            "only method in §3 that assumes NO propagation model at all, which "
+            "The honest ceiling for 'what can you do without a kernel': the "
+            "only method in this literature that assumes NO propagation model at all, which "
             "makes it the right thing for a learned kernel to beat. Warning: it "
             "publishes zero tables: `grep -c \"Table\"` on the KDD'16 text returns "
             "0 [verified], so its MCC 0.60-0.90 is [figure] and no per-cell "
@@ -4720,9 +4716,9 @@ external_baselines = {
         blocker=(
             "the SETTING is one we deliberately do not run. Active reconstruction "
             "lets the decoder CHOOSE which nodes to query, which turns the "
-            "observation mask into an action: §2.11 risk 7 records that as the fix "
-            "for this task exercising none of the five action ops, and recommends "
-            "deferring it for the same reason source localization defers its "
+            "observation mask into an action: that is the fix "
+            "for this task exercising none of the five action ops, and it is "
+            "deferred for the same reason source localization defers its "
             "analogue. Wiring it before we run the passive setting would put an "
             "arm with a different information budget in the same column. It also "
             "inherits both of `cascade_tree_samples`' dependency blockers."
@@ -4769,7 +4765,7 @@ external_baselines = {
             "aggregated snapshot into node states at ALL T steps, which is exactly "
             "the object `reconstruct()` returns. DIPT reports it at Path Precision "
             "0.062-0.327 and Jaccard 0.031-0.195 across five graphs: the WEAKEST "
-            "row of §5.2's table [verified], and its own paper says accuracy "
+            "row of DIPT's table [verified], and its own paper says accuracy "
             "degrades as T grows because the solution space blows up, so a low "
             "number here is the expected outcome rather than a wiring failure. "
             "Warning: SUPERVISED. It fits on the selection split's labelled "
@@ -4809,15 +4805,15 @@ external_baselines = {
         extra_env={},
         notes=(
             "(key) DITTO's STRONGEST supervised baseline, and the one it uses as the "
-            "IDEAL upper bound when trained with the true beta [verified, §5.1]: "
+            "IDEAL upper bound when trained with the true beta [verified]: "
             "every `Gap` column in its Tables 4-5 is measured against this row, "
             "which makes it the single most useful reference number in this "
             "literature. Warning: SUPERVISED, and that is the caveat its row must "
             "carry: it fits on the selection split's labelled histories while every "
-            "other arm on the table never sees one. §5.1.2 is why that matters "
+            "other arm on the table never sees one. The published results are why that matters "
             "concretely rather than pedantically: the supervised family collapses "
-            "from F1 ~ 0.80 on simulated diffusion to F1 ~ 0.32 on real, which is "
-            "§2.11 risk 4 in one table. Driven through `GRINet` directly rather "
+            "from F1 ~ 0.80 on simulated diffusion to F1 ~ 0.32 on real. "
+            "Driven through `GRINet` directly rather "
             "than through `scripts/run_imputation.py`, a Lightning experiment over "
             "four hardcoded traffic and air-quality datasets: the authors' MODEL, "
             "our optimizer, so GWM_IMPUTE_EPOCHS is the first number to raise "
@@ -4862,7 +4858,7 @@ external_baselines = {
         parse_seeds=_reconstruction_parse,
         extra_env={},
         notes=(
-            "GRIN's attention-based successor, and the one method in §5.1.2 that "
+            "GRIN's attention-based successor, and the one method in DITTO's comparison that "
             "BEATS DITTO outright on a real-diffusion row (BrFarmers, F1 .8268 "
             "against .8206) while running OUT OF MEMORY on Oregon2, Prost and Pol "
             "[verified]. That OOM pattern is the useful half: it is the clearest "
@@ -4894,7 +4890,7 @@ external_baselines = {
             "the one input this whole task is conditioned on and its row would "
             "measure the difficulty of the imputation rather than of the "
             "reconstruction. DITTO includes it as the weakest supervised baseline "
-            "and it OOMs on Pol [verified, §5.1.2]. Registered because it is in "
+            "and it OOMs on Pol [verified]. Registered because it is in "
             "that table, not because it belongs in ours; run it only if a "
             "'does the graph help at all' ablation is wanted, and label it as one."
         ),
@@ -4909,25 +4905,22 @@ external_baselines = {
         name="dipt",
         kind=learned,
         title="DIPT: deep identification of propagation trees",
-        venue="preprint 2025 (Emory)",
+        venue="arXiv preprint 2025",
         repo="https://arxiv.org/abs/2503.00646",
         paper="https://arxiv.org/abs/2503.00646",
         entry="none published",
         task="cascade_reconstruction",
         status="blocked",
         blocker=(
-            "NO PUBLIC CODE. §4.1 records that the anonymous 4open.science link in "
+            "NO PUBLIC CODE. The anonymous 4open.science link in "
             "the paper is the compartmental-disease SIMULATOR, not the model, and "
             "no other release was found. Registered rather than omitted because it "
             "is the only method in this literature that outputs explicit "
             "who-infected-whom EDGES: i.e. the only published Path Precision "
-            "comparison that exists, and because §9 item 12 notes it is an Emory "
-            "paper (Memon, Ling, Kong, Seshagiri, Zufle, Liang Zhao) using two of "
-            "our graphs, which makes it a collaboration surface rather than only a "
-            "citation."
+            "comparison that exists, and it reports on two of our graphs."
         ),
         notes=(
-            "(key) The ONLY published propagation-TREE table (§5.2): Path Precision "
+            "(key) The ONLY published propagation-TREE table: Path Precision "
             "0.421-0.680 and Jaccard 0.266-0.515 across five graphs, against DDMSL "
             "at 0.119-0.412 and DDMIX at 0.062-0.327 [verified, Table 1]. Two of "
             "its five graphs are ours (`cora_ml`, `power_grid`) and its protocol is "
@@ -4953,13 +4946,13 @@ external_baselines = {
             "network from many cascades, which is NETWORK INFERENCE: a task reviewed "
             "and not pursued, rather than trajectory decoding. It is "
             "registered here only because Farajtabar's 'Back to the Past' fits it "
-            "FIRST and then inverts the result, so it is a component of a §3 method "
+            "FIRST and then inverts the result, so it is a component of that method "
             "rather than a method of its own."
         ),
         notes=(
             "Supplies the `p(y | x, G)` that Farajtabar AISTATS'15 inverts. "
-            "Farajtabar itself has no public code and publishes no tables, so that "
-            "whole row of §5.7 is [figure] and [verified] prose: its headline "
+            "Farajtabar itself has no public code and publishes no tables, so its "
+            "results are [figure] and [verified] prose only: its headline "
             "number is a ~1% absolute success probability on MemeTracker, which is "
             "the sober reminder that retrospective reconstruction on real data is "
             "very hard."
@@ -4993,9 +4986,8 @@ external_baselines = {
             "JOSS paper names."
         ),
     ),
-    # Epidemic control (research/epidemic_control.md §3, §4). SIX arms from ONE
-    # clone, and three of them are methods §11 lists as having no public release at
-    # all: NetShield, DAVA and DAVA-fast. `allogn/Network-Immunization` is the only
+    # Epidemic control. SIX arms from ONE clone, and three of them are methods
+    # usually listed as having no public release at all: NetShield, DAVA and DAVA-fast. `allogn/Network-Immunization` is the only
     # third-party implementation of any of them, which makes this clone the single
     # highest-value install in the file: without it every spectral and every
     # data-aware number in our table is our own reimplementation and nobody else's.
@@ -5008,8 +5000,8 @@ external_baselines = {
         "our own `netshield`. Its Shield-value is submodular, so its greedy is "
         "(1 - 1/e)-optimal against it, and the paper's own Table 3 measures that "
         "surrogate against the TRUE eigendrop at 0.977-1.000 across four "
-        "co-authorship graphs [verified, §5.3]. Warning: the authors published NO "
-        "code, and §3.2's widely-repeated claim that EpiLearn ships a NetShield "
+        "co-authorship graphs [verified]. Warning: the authors published NO "
+        "code, and the widely-repeated claim that EpiLearn ships a NetShield "
         "implementation is WRONG: that repo's tree has no shield, immunization or "
         "intervention code at all [derived, 2026-08-05]. This clone is therefore "
         "the only third-party NetShield anywhere and the only cross-check our own "
@@ -5021,13 +5013,13 @@ external_baselines = {
         "Dom",
         "DAVA: data-aware vaccine allocation",
         "SDM 2014 / ACM TKDD 2015",
-        "(key) THE ROW THIS TASK IS POSITIONED AGAINST (§9.4). NetShield optimizes "
+        "(key) THE ROW THIS TASK IS POSITIONED AGAINST. NetShield optimizes "
         "lambda_1, needs no simulator and runs in milliseconds: we cannot beat it "
         "on its own metric and should not try. DAVA makes exactly OUR argument, that "
         "conditioning on the observed infection state changes the optimal "
         "allocation, and does it with a dominator-tree heuristic on a single "
         "snapshot; a learned action-conditioned model is the natural generalization. "
-        "No public code by the authors (§11), so this is the only third-party "
+        "No public code by the authors, so this is the only third-party "
         "implementation and the cross-check on our own `dava`. Its results are "
         "[figure]-only (expected saved nodes vs budget), so per-cell numbers do not "
         "exist upstream either.",
@@ -5039,8 +5031,8 @@ external_baselines = {
         "SDM 2014",
         "The near-linear variant of the entry above: ONE dominator tree and the top "
         "`k` of its root's children, rather than rebuilding after each dose. A "
-        "separate arm rather than a flag for the reason §8.2 trap 2 of the "
-        "dismantling review gives about reinsertion variants: `X` and `X-fast` get "
+        "separate arm rather than a flag for the same reason the "
+        "dismantling literature separates reinsertion variants: `X` and `X-fast` get "
         "cited under one name and are not the same method, and the gap between these "
         "two rows is exactly what the rebuild buys.",
         fast=True,
@@ -5052,7 +5044,7 @@ external_baselines = {
         "KDD 2014",
         "Khalil, Dilkina & Song's continuous relaxation: minimize the spectral "
         "radius of the hazard matrix by projected subgradient, then threshold. The "
-        "third line of §3 (neither a centrality nor a simulation) and the only "
+        "third line of methods (neither a centrality nor a simulation) and the only "
         "convex method in the pool. Warning: it runs `ceil((R/eps)^2)` iterations, "
         "each a DENSE N x N eigendecomposition, so it is the arm most likely to hit "
         "--baseline-timeout on anything past a few thousand nodes; raise "
@@ -5064,7 +5056,7 @@ external_baselines = {
         "Targeted degree immunization, as implemented in Network-Immunization",
         "PRE 65:036104, 2002",
         "A CROSS-CHECK on our `degree_immunization`, not new coverage, and worth "
-        "one arm precisely because it is the row §9.4 says has to be beaten. Two "
+        "one arm precisely because it is the row that has to be beaten. Two "
         "independent implementations of a five-line heuristic agreeing is the "
         "cheapest possible confirmation that our outbreak, budget and referee are "
         "wired the way this repo's are.",
@@ -5080,7 +5072,7 @@ external_baselines = {
         "between this row and `netimm_degree` is the finding that founded the field.",
     ),
     # Registered and BLOCKED, each with a verified reason. Every one of these is
-    # named in research/epidemic_control.md §4 as a candidate; listing them with the
+    # named in the epidemic-control literature as a candidate; listing them with the
     # reason is what stops the same investigation being repeated.
     "rlgn": ExternalBaseline(
         name="rlgn",
@@ -5095,23 +5087,23 @@ external_baselines = {
         blocker=(
             "NO PUBLIC CODE. Checked arXiv, the PMLR proceedings page, the NVIDIA "
             "Research project page and a GitHub search for the method name and the "
-            "authors [verified, 2026-08-05, and independently in §4.1 and §11]. "
+            "authors [verified, 2026-08-05]. "
             "Reproducing it means reimplementing two GNNs, a PPO loop and its "
             "temporal contact-graph environment from the paper's prose. TO UNBLOCK: "
             "reimplement it, or write to the authors."
         ),
         notes=(
-            "(key) THE most comparable published table to what this task produces "
-            "(§5.1): a per-step test budget of 1% of N over 20 steps, SIR-style "
+            "(key) THE most comparable published table to what this task produces: "
+            "a per-step test budget of 1% of N over 20 steps, SIR-style "
             "dynamics with a latent period, and % healthy at the horizon. Two of its "
             "five graphs are ours to the digit: `ca_grqc` at 5,242 / 14,496 and "
             "`deezer_ro`, whose row we load at its own true edge count (its Table S4 "
             "pairs Romania's node count with Hungary's edge count). Warning: its "
-            "budget convention is PER STEP and ours is a one-shot k, which §8.2 trap "
-            "3 records as non-comparable: cite its numbers as context, not as a "
+            "budget convention is PER STEP and ours is a one-shot k, which makes the two "
+            "non-comparable: cite its numbers as context, not as a "
             "run. Its own Table 2 also has Degree and Eigenvector tying to within "
             "0.1 on two of five graphs, which is the heuristic-collapse signature "
-            "§9.4 predicts for us."
+            "we predict for ourselves."
         ),
     ),
     "durleca": ExternalBaseline(
@@ -5136,7 +5128,7 @@ external_baselines = {
         ),
         notes=(
             "Its intervention IS our `contact_reduce` lever: a continuous per-edge "
-            "multiplier, which is the branch §2.2 says NDlib's compartmental models "
+            "multiplier, which is the branch NDlib's compartmental models "
             "cannot express at all and the reason we wrote our own stepper. So the "
             "lever is comparable in KIND even though the instance is not, and that "
             "is worth saying in a table rather than leaving the row absent."
@@ -5153,7 +5145,7 @@ external_baselines = {
         task="epidemic_control",
         status="blocked",
         blocker=(
-            "IT HAS NO INTERVENTION CODE. Warning: §3.2 and §11 both state that a "
+            "IT HAS NO INTERVENTION CODE. Warning: it is widely stated that a "
             "`NetShield` implementation ships in EpiLearn, and that is WRONG: "
             "verified by listing the repo's whole tree and grepping every module "
             "[derived, 2026-08-05]. What it ships is FORECASTING (`STGCN`, `EpiGNN`, "
@@ -5161,15 +5153,15 @@ external_baselines = {
             "`NetworkSIR` forward simulator, `DMP`, and graph transforms. There is "
             "no shield value, no immunization selector, no intervention API and no "
             "`tasks/intervention.py`. It cannot choose k nodes, so there is nothing "
-            "to adapt. TO UNBLOCK: nothing, this is a correction to the review, not "
+            "to adapt. TO UNBLOCK: nothing, this is a correction to that claim, not "
             "a missing adapter. `external:netimm_netshield` is the runnable "
             "NetShield."
         ),
         notes=(
-            "From the Emory Melody lab and the nearest thing this space has to a "
+            "The nearest thing this space has to a "
             "shared harness, so the mis-attribution is worth recording rather than "
             "silently dropping: every secondary source that says 'NetShield ships in "
-            "EpiLearn' traces back to §3.2 of our own review. Its FORWARD models "
+            "EpiLearn' traces back to our own earlier literature review. Its FORWARD models "
             "(NetworkSIR, DMP) are a legitimate future cross-check on "
             "`data/wm_epidemic.py`, which is a different use than a baseline."
         ),
@@ -5195,7 +5187,7 @@ external_baselines = {
             "rather than theirs."
         ),
         notes=(
-            "§4.4 lists it as a software baseline rather than a method, and that is "
+            "It is usually listed as a software baseline rather than a method, and that is "
             "the right reading: its contribution is the SIMULATOR and its "
             "household/school/work layer structure. Its `change_beta` intervention is "
             "our `contact_reduce` lever by another name."
@@ -5220,15 +5212,15 @@ external_baselines = {
             "contact graph and no k-node set to read back."
         ),
         notes=(
-            "§4.1 records that the simulator is the contribution as much as the "
+            "The simulator is the contribution as much as the "
             "policy. Same category as Covasim: a forward model to compare "
             "`data/wm_epidemic.py` against some day, not a selector to score."
         ),
     ),
-    # ...and the rest of §3 and §4, registered with a verified reason rather than
+    # ...and the rest of the published methods, registered with a verified reason rather than
     # left absent. The registry's own norm: a listed reason is what stops the same
     # investigation being repeated, and every one of these is a method a reader of
-    # research/epidemic_control.md would reasonably ask about.
+    # the epidemic-control literature would reasonably ask about.
     "idrleca": ExternalBaseline(
         name="idrleca",
         kind=learned,
@@ -5242,15 +5234,15 @@ external_baselines = {
         blocker=(
             "NO PUBLIC CODE. Searched arXiv, the ACM DL entry, the authors' pages "
             "and GitHub by method name and by all four authors [verified, "
-            "2026-08-05, and independently in §4.1]. Same Tsinghua group as "
+            "2026-08-05]. Same Tsinghua group as "
             "DURLECA, whose repo IS public, so the absence here is specific to "
             "this paper rather than a group policy."
         ),
         notes=(
             "Per-node isolate/test actions over an infection graph, which is the "
-            "closest ACTION SPACE in §4.1 to our `quarantine` lever: closer than "
+            "closest ACTION SPACE in this literature to our `quarantine` lever: closer than "
             "DURLECA's per-edge mobility multiplier. Warning: it models contact "
-            "TRACING as part of the policy, which §2.5 records is not an action in "
+            "TRACING as part of the policy, which is not an action in "
             "our formulation at all: tracing changes the OBSERVATION, not the graph "
             "or the state, and belongs in a POMDP observation model we do not have."
         ),
@@ -5274,7 +5266,7 @@ external_baselines = {
             "is no k-node set to read back even with an R bridge."
         ),
         notes=(
-            "§4.4 lists it as a software baseline rather than a method, and that is "
+            "It is usually listed as a software baseline rather than a method, and that is "
             "the right reading: it is the reference implementation of stochastic "
             "network epidemic models. A future cross-check on `data/wm_epidemic.py`, "
             "not a selector to score."
@@ -5312,9 +5304,9 @@ external_baselines = {
         task="epidemic_control",
         status="blocked",
         blocker=(
-            "NO PUBLIC CODE FOUND (§3.2, §5.5). Unlike NetShield and DAVA, whose "
+            "NO PUBLIC CODE FOUND. Unlike NetShield and DAVA, whose "
             "third-party implementations turned up in "
-            "`allogn/Network-Immunization` (§0.0): that repo has no EDGE solver at "
+            "`allogn/Network-Immunization`: that repo has no EDGE solver at "
             "all, so there is no third-party route either. Our `netmelt` scores an "
             "arc by `u(i) * u(j)` per the paper's own rule and is a "
             "reimplementation from prose."
@@ -5338,7 +5330,7 @@ external_baselines = {
         task="epidemic_control",
         status="blocked",
         blocker=(
-            "NO PUBLIC CODE FOUND (§3.2, §5.5), and its instance is unobtainable "
+            "NO PUBLIC CODE FOUND, and its instance is unobtainable "
             "besides: the paper is motivated by hospital-transfer networks that "
             "were never released. `allogn/Network-Immunization`'s `NetShape` solver "
             "(Khalil KDD'14) is the nearest RUNNABLE convex relaxation and is wired "
@@ -5347,7 +5339,7 @@ external_baselines = {
         notes=(
             "The method our `contact_reduce` lever is closest to in kind: it drops "
             "the all-or-nothing assumption and allocates a CONTINUOUS amount of "
-            "resource per node or edge under a budget. §2.2 records that this whole "
+            "resource per node or edge under a budget. This whole "
             "branch is inexpressible against NDlib's compartmental models, which is "
             "why `data/wm_epidemic.py` exists."
         ),
@@ -5363,7 +5355,7 @@ external_baselines = {
         task="epidemic_control",
         status="blocked",
         blocker=(
-            "NO PUBLIC CODE FOUND (§3.2), AND ITS INSTANCE CANNOT BE REBUILT. §6.5: "
+            "NO PUBLIC CODE FOUND, AND ITS INSTANCE CANNOT BE REBUILT: "
             "its 56-airport network was never published as a file, and while it is "
             "reconstructable from OpenFlights with a >10 MPPY filter, the PASSENGER "
             "WEIGHTS that make it a weighted digraph are not in OpenFlights. A "
@@ -5380,18 +5372,18 @@ external_baselines = {
     ),
     # Cascade prediction ------------------------------------------------------
     #
-    # research/cascade_prediction.md 8.5's finding is that this literature has NO
+    # This literature has NO
     # benchmark: no OGB or TGB analogue, no leaderboard to enter, no split to
     # inherit, so every entry here is scored on OUR protocol against OUR replayed
     # corpus, and the published numbers in each `notes` are context markers rather
-    # than comparisons. 9.9 is emphatic: do not chase the leaderboard, CasFlow is a
+    # than comparisons. Do not chase the leaderboard: CasFlow is a
     # 2M-parameter model tuned for this one task and we will not beat it.
     #
     # Warning: FOUR of the eight most-cited methods here are PYTHON 2 and two more
     # are TensorFlow 1. That is not neglect on our part: this line of work peaked
     # in 2017-19 and its reference implementations were never ported. Each is
     # registered with the exact evidence, because a reader who sees "DeepHawkes,
-    # code available" in 4.1 will reasonably ask why it is not a baseline.
+    # code available" in the literature will reasonably ask why it is not a baseline.
     "casflow": _casflow_entry(
         "casflow",
         "CasFlow: hierarchical structures and propagation uncertainty for cascade prediction",
@@ -5406,14 +5398,14 @@ external_baselines = {
         [("requirements.txt", "tensorflow==2.9.3", "tensorflow")],
         "(key) THE reference SOTA of 2021-23 and the baseline every later paper "
         "reports. Its own dataset bundle is the de-facto benchmark artefact of this "
-        "literature (8.5), which is why `data/datasets/casflow_bundle.py` parses "
+        "literature, which is why `data/datasets/casflow_bundle.py` parses "
         "exactly its line format. Warning: its headline result table (TKDE'21 Table "
-        "3) is a RASTER IMAGE: 0 records that `pdftotext -layout` returns the "
-        "caption and nothing else, so every CasFlow number in 5 is a RE-RUN by a "
+        "3) is a RASTER IMAGE: `pdftotext -layout` returns the "
+        "caption and nothing else, so every CasFlow number we cite is a RE-RUN by a "
         "later paper and those three disagree with each other. CasFT's re-run puts "
         "it at MSLE 2.3370 on Weibo 0.5h, 4.7799 on Twitter 1d, 1.4370 on APS 3y "
-        "[verified, 5.1]; under CasTemp's leak-free split the same method reads "
-        "1.685 / 1.329 / 2.438 [verified, 5.3], and 5.3's diagnosis is that "
+        "[verified]; under CasTemp's leak-free split the same method reads "
+        "1.685 / 1.329 / 2.438 [verified], and CasTemp's diagnosis is that "
         "CasFlow 'exhibit[s] low training losses but significantly higher test "
         "losses' because its architecture 'learned dataset-specific shortcuts "
         "enabled by temporal leakage'. Run it under BOTH --cp-split values; the gap "
@@ -5468,18 +5460,18 @@ external_baselines = {
         parse_seeds=_prediction_parse,
         notes=(
             "(key) The most interesting arm to run BESIDE CasFlow rather than "
-            "instead of it. 5.3: under CasTemp's leak-free split CTCP is one of only "
+            "instead of it. Under CasTemp's leak-free split CTCP is one of only "
             "two methods whose train-vs-test loss curves stay flat while CasFlow's "
             "and CasDO's diverge [verified, Fig 2], so it is the published method "
-            "least likely to be exploiting the temporal shortcut 8.3 describes, and "
+            "least likely to be exploiting the temporal shortcut a leaky split allows, and "
             "the one whose ranking should move LEAST between our two --cp-split "
             "settings. It is also the easiest to wire: its input is a plain (id, "
             "src, dst, cas, time) event table and its split crosses as TIME "
             "BOUNDARIES rather than as flags, so our chronological protocol is "
             "reproduced inside the repo rather than fought. Its own Table 2 reports "
             "MSLE 4.6916 / 2.5929 / 1.6289 on its OWN re-preprocessing of "
-            "Twitter/Weibo/APS (19,718 / 39,076 / 48,575 cascades: 6.4's versions "
-            "C, B and B), which is 3-10x smaller than CasFlow's and NOT comparable "
+            "Twitter/Weibo/APS (19,718 / 39,076 / 48,575 cascades), "
+            "which is 3-10x smaller than CasFlow's and NOT comparable "
             "to it."
         ),
     ),
@@ -5510,8 +5502,8 @@ external_baselines = {
             "tractable but is a reimplementation rather than an adapter."
         ),
         notes=(
-            "(key) The paper 5.3 and 8.3 both lean on, and the source of the single "
-            "most transferable finding in that file: the field's standard 70/15/15 "
+            "(key) The source of the single "
+            "most transferable finding in this literature: the field's standard 70/15/15 "
             "random-over-cascades split LEAKS, and under its 1:1:1 chronological fix "
             "CasFlow and CasDO fall BELOW a plain MLP while the whole field's APS "
             "band moves from 1.19-2.11 to 2.28-4.82 [verified, Table 4]. **We "
@@ -5519,9 +5511,9 @@ external_baselines = {
             "chronological` IS its fix, and it is our default from the first commit "
             "for exactly that reason, so the finding is inherited even though the "
             "code is not. Its `Taoke.zip` IS wired, as `data/datasets/taoke.py`. "
-            "Warning: 11 records that this is an arXiv preprint carrying an ACM "
+            "Warning: this is an arXiv preprint carrying an ACM "
             "template with placeholder conference metadata, not yet independently "
-            "replicated, and that its leakage claim deserves a second source before "
+            "replicated, and its leakage claim deserves a second source before "
             "being treated as settled."
         ),
     ),
@@ -5551,11 +5543,11 @@ external_baselines = {
             "interpretability-vs-accuracy bridge: it injects the three Hawkes "
             "ingredients (user influence, self-excitation, time decay) into a GRU "
             "over diffusion PATHS. Its release is also the origin of Weibo-A, the "
-            "corpus 6.4 lists first and the one carrying almost every published "
+            "corpus carrying almost every published "
             "number, so its data reaches us through "
             "`data/datasets/casflow_weibo.py` even though its code does not. "
             "CasFT's re-run puts it at MSLE 2.8741 on Weibo 0.5h against CasFlow's "
-            "2.3370 [verified, 5.1]. Our `hawkes` and `hawkes_hybrid` implement the "
+            "2.3370 [verified]. Our `hawkes` and `hawkes_hybrid` implement the "
             "same generative ingredients without the GRU."
         ),
     ),
@@ -5581,9 +5573,9 @@ external_baselines = {
             "(key) The founding deep model of this literature: random walks over "
             "the cascade graph, bi-GRU with attention, regressing log dP, and the "
             "paper that killed hand-crafted features as the default. CasFT's re-run "
-            "puts it at MSLE 4.6460 on Weibo 0.5h [verified, 5.1], which is WORSE "
+            "puts it at MSLE 4.6460 on Weibo 0.5h [verified], which is WORSE "
             "than DeepHawkes and only slightly better than the feature baseline: "
-            "3.1's point that feature models remain competitive is visible in that "
+            "the point that feature models remain competitive is visible in that "
             "column."
         ),
     ),
@@ -5637,11 +5629,11 @@ external_baselines = {
             "The first method in this literature to use both structure and time "
             "properly: a cascade as a SEQUENCE of sub-cascade graphs, a GCN per "
             "snapshot and an LSTM across them. **The row worth running rather than "
-            "citing**, because 5.3 shows it is where the leak-free split changes a "
+            "citing**, because CasTemp's re-run shows it is where the leak-free split changes a "
             "RANKING rather than a level: under the field's own leaky protocol it "
             "sits mid-pack (MSLE 2.7931 on Weibo 0.5h, behind CasFlow's 2.3370), and "
             "under CasTemp's fix it is the BEST of the six re-run baselines on "
-            "Twitter (1.206) and second on APS [verified, 5.3 Table 4]. Run it under "
+            "Twitter (1.206) and second on APS [verified, CasTemp's Table 4]. Run it under "
             "both --cp-split values. Its own preprocessing is reused rather than "
             "reimplemented: it reads exactly the per-split line format "
             "`casflow_driver.py` writes, and `caslaplacian."
@@ -5682,8 +5674,8 @@ external_baselines = {
         notes=(
             "The graph-capsule entry, with directional / dynamic / position-aware "
             "cascade encoding. Reports on the Weibo-A / Twitter-A / APS-A triple "
-            "(7) so it would be directly comparable to `casflow` if it ran; it "
-            "appears in this file only through other papers' comparison tables."
+            "so it would be directly comparable to `casflow` if it ran; it "
+            "is known here only through other papers' comparison tables."
         ),
     ),
     "coupledgnn": ExternalBaseline(
@@ -5735,8 +5727,8 @@ external_baselines = {
             "the global graph: is structurally what our structured head does with "
             "`infected` and `frontier`, so a difference in this row is a statement "
             "about the architecture rather than about a feature pipeline. It is also "
-            "the only entry here whose protocol withholds TIMESTAMPS entirely "
-            "(research/cascade_prediction.md 5.5): it sees the early adopter SET "
+            "the only entry here whose protocol withholds TIMESTAMPS entirely: "
+            "it sees the early adopter SET "
             "plus the global graph and nothing else, which is the protocol our own "
             "`neighborhood_size` and `degree_scaled` rows sit under, and its "
             "published numbers are MRSE / mRSE / MAPE / WroPerc rather than MSLE for "
@@ -5776,11 +5768,11 @@ external_baselines = {
             "waves rather than exact event times."
         ),
         notes=(
-            "(key) The generative baseline every paper in 5 prints, and the one "
+            "(key) The generative baseline every paper in this literature prints, and the one "
             "whose FAILURE MODE matters most to us: it produces no prediction at "
             "all for supercritical cascades (507 of ~30K Tweet-1Mo at five minutes, "
             "1,022 of ~20K News) because the branching factor exceeds 1 and the "
-            "expected size diverges [verified, 5.4]. 3.2 records that this is the "
+            "expected size diverges [verified]. This is the "
             "same runaway our `ens_count_bias` metric was built to catch and the "
             "same reason our structured head gates on `frontier_u`. Its own "
             "breakout coverage is 78 of the top-100 most-reshared tweets identified "
@@ -5809,12 +5801,12 @@ external_baselines = {
         notes=(
             "(key) Its Table 2 is the ONLY place in this literature where a "
             "generative model's failure COUNT is published beside its error, which "
-            "is why 8.4 singles it out: Hawkes reaches ARE 0.36 against SEISMIC's "
+            "is why it is singled out here: Hawkes reaches ARE 0.36 against SEISMIC's "
             "2.61 on Tweet-1Mo at five minutes AND fails on 302 cascades against "
-            "SEISMIC's 507: better on both axes [verified, 5.4]. Its hybrid row "
+            "SEISMIC's 507: better on both axes [verified]. Its hybrid row "
             "(0.17 / 0.15 / 0.11 against pure Hawkes 0.27 / 0.22 / 0.17) is "
             "structurally OUR `structured_residual` head: a learned corrective layer "
-            "on a generative core (3.2)."
+            "on a generative core."
         ),
     ),
     "hip": ExternalBaseline(
@@ -5841,8 +5833,8 @@ external_baselines = {
             "own is YouTube share counts against view counts."
         ),
         notes=(
-            "The one method in 3.2 that models EXOGENOUS arrivals: search, front "
-            "pages, off-platform sharing, which 2.2 names as one of three specific "
+            "The one generative method that models EXOGENOUS arrivals: search, front "
+            "pages, off-platform sharing, which is one of three specific "
             "mechanisms by which real cascades violate our structured head's "
             "composition rule (a node adopts with no infected in-neighbour at all). "
             "That makes it the most diagnostically interesting row in the pool and "
@@ -5864,13 +5856,13 @@ external_baselines = {
             "PYTHON 2. Verified at HEAD: `code/data_utils.py` uses py2 print "
             "STATEMENTS (`print 'pickle exists.'`), so the module does not parse "
             "under Python 3. It is also MICROSCOPIC rather than macroscopic: it "
-            "ranks the NEXT ADOPTER and is scored with Hits@k / MAP@k (1.2), not a "
+            "ranks the NEXT ADOPTER and is scored with Hits@k / MAP@k, not a "
             "popularity, so even ported it would answer a different question than "
             "`predict()` asks and would need its own contract and its own metric "
             "layer."
         ),
         notes=(
-            "The source of 6.2's Digg / Twitter-URL / Memes rows, and therefore of "
+            "The source of the published Digg / Twitter-URL / Memes rows, and therefore of "
             "the counts `data/datasets/digg_cascades.py` and "
             "`data/datasets/memetracker.py` are measured against. Its Table II is "
             "where Digg 2009's 279,632 / 2,617,993 / 3,553 comes from [verified]. "
@@ -5891,7 +5883,7 @@ external_baselines = {
         blocker=(
             "IT ANSWERS A DIFFERENT QUESTION. Verified by reading `src/` at HEAD: it "
             "is a BINARY classifier over (user, cascade) pairs: 'will `v` adopt', "
-            "scored with AUC and F1 (1.2): built on each user's r-hop ego network "
+            "scored with AUC and F1 and built on each user's r-hop ego network "
             "plus its active-neighbour states. There is no popularity to read back, "
             "so nothing our `predict()` contract or `popularity_metrics` can score. "
             "This is a category difference, not a missing adapter. Its code is "
@@ -5899,13 +5891,13 @@ external_baselines = {
         ),
         notes=(
             "(key) Registered rather than omitted because it is the purest "
-            "NODE-LEVEL analogue of our own head anywhere in this folder: given a "
+            "NODE-LEVEL analogue of our own head anywhere in this literature: given a "
             "node's neighbourhood and which neighbours are active, predict whether "
             "it activates. That is exactly `p_new(v)`, and a one-step accuracy "
             "comparison against our structured head on real cascades would be a "
             "genuinely interesting experiment that neither this task's contract nor "
             "its metric layer currently supports. Worth its own microscopic task "
-            "entry rather than a forced fit into this one (1.2)."
+            "entry rather than a forced fit into this one."
         ),
     ),
     "forest": ExternalBaseline(
@@ -5929,7 +5921,7 @@ external_baselines = {
         notes=(
             "The one microscopic method that also optimizes a macroscopic objective, "
             "which makes it the natural first entry if a next-adopter task is ever "
-            "added. Reports on 6.2's Digg / Twitter-URL / Memes triple (7), all "
+            "added. Reports on the Digg / Twitter-URL / Memes triple, all "
             "three of which we now load."
         ),
     ),
@@ -5946,12 +5938,12 @@ external_baselines = {
         blocker=(
             "MICROSCOPIC, same as `topolstm` and `forest`. Additionally, CTCP's own "
             "Table 2 records it as OOM on Weibo and APS at that paper's scale "
-            "[verified, 5.2], so even with a contract it would not complete on two "
+            "[verified], so even with a contract it would not complete on two "
             "of the three standard corpora."
         ),
         notes=(
             "The hypergraph entry: user-cascade interaction as a hyperedge, with a "
-            "memory of past cascades. Present in 5.2's table as the only row with "
+            "memory of past cascades. Present in CTCP's Table 2 as the only row with "
             "OOM cells, which is itself the useful datum: it is the scale ceiling "
             "of the microscopic line."
         ),
@@ -5981,7 +5973,7 @@ external_baselines = {
             "A cheaper CasCN: the node STATE varies across snapshots rather than "
             "the structure, which is a modelling simplification worth comparing "
             "against ours: our own state is exactly two channels varying over a "
-            "fixed graph. Not in any of 5's comparison tables."
+            "fixed graph. Not in any published comparison table."
         ),
     ),
     "ccasgnn": ExternalBaseline(
@@ -6000,8 +5992,8 @@ external_baselines = {
             "example data shipped at all. Same blocker, one step worse."
         ),
         notes=(
-            "GAT and GCN with positional encoding, fused in sequence. Catalogued "
-            "from 4.1; not in any published comparison table this review could "
+            "GAT and GCN with positional encoding, fused in sequence. Not in "
+            "any published comparison table we could "
             "extract."
         ),
     ),
@@ -6022,13 +6014,13 @@ external_baselines = {
             "reader will look for it."
         ),
         notes=(
-            "(key) The source of 5.1, which is the widest baseline set in this "
+            "(key) The source of the widest baseline set in this "
             "literature and the only recent result table that survives "
             "`pdftotext`: every published number our report prints as a context "
             "marker comes from its Table 2. Its own rows are MSLE 2.1728 (Weibo "
             "0.5h) / 3.8546 (Twitter 1d) / 1.2468 (APS 3y) [verified]. Warning: it "
             "regresses TOTAL popularity (its Eq. 26) while CasFlow regresses the "
-            "INCREMENT, and 5.1 prints both in one table: 5.7 difference 3, and "
+            "INCREMENT, and that table prints both side by side, which is "
             "the reason `--cp-target` exists."
         ),
     ),
@@ -6043,17 +6035,17 @@ external_baselines = {
         task="cascade_prediction",
         status="blocked",
         blocker=(
-            "NO PUBLIC CODE that this review could locate, despite being a 2024 "
-            "TKDE paper and despite CasTemp having re-run it: 11 records that "
+            "NO PUBLIC CODE that we could locate, despite being a 2024 "
+            "TKDE paper and despite CasTemp having re-run it: "
             "CasTemp presumably obtained it privately. GitHub search returned "
             "nothing [verified]."
         ),
         notes=(
             "Registered for one reason, and it is a cautionary one: under CasTemp's "
             "leak-free split CasDO is the WORST method on all four corpora and falls "
-            "below a plain MLP on the diagnostic scenarios [verified, 5.3], despite "
-            "being the most recent published architecture in that comparison. 8.3 is "
-            "the lesson and this row is the evidence."
+            "below a plain MLP on the diagnostic scenarios [verified], despite "
+            "being the most recent published architecture in that comparison. The leakage "
+            "finding is the lesson and this row is the evidence."
         ),
     ),
     "greedywalk": ExternalBaseline(
@@ -6067,8 +6059,8 @@ external_baselines = {
         task="epidemic_control",
         status="blocked",
         blocker=(
-            "MATLAB, AND THE LINK IS A TINYURL PRINTED IN THE PDF. §11 records the "
-            "URL as unverified; independently, `allogn/Network-Immunization`'s own "
+            "MATLAB, AND THE LINK IS A TINYURL PRINTED IN THE PDF. The "
+            "URL is unverified; independently, `allogn/Network-Immunization`'s own "
             "README states that its Walk8 solver 'is not available as the code was "
             "provided by authors of Scalable Approximation Algorithm for Network "
             "Immunization and the algorithm is implemented in MATLAB' [verified, "
@@ -6077,7 +6069,7 @@ external_baselines = {
             "reimplementations from the paper's prose and are labelled as such."
         ),
         notes=(
-            "(key) Its Table 2 is the SPECTRAL BENCHMARK DEFINITION (§5.2) and is why "
+            "(key) Its Table 2 is the SPECTRAL BENCHMARK DEFINITION and is why "
             "`oregon1`, `oregon2_010331`, `brightkite`, `p2p_gnutella05` and "
             "`p2p_gnutella06` are loaded: it publishes `lambda_1` per graph, so four "
             "of those are checkable against somebody else's arithmetic. All four "
@@ -6092,8 +6084,8 @@ external_baselines = {
 # Four already-wired NODE-REMOVAL repos re-registered under `epidemic_control`.
 # Applied AFTER the dict literal rather than inside it, because each one COPIES
 # its critical-node twin's entry and that twin has to exist first.
-# research/epidemic_control.md §2.5 maps vaccination onto `remove_node`, so a
-# dismantler's output IS an allocation under the `vaccinate` lever; §4.2 lists
+# Vaccination maps onto `remove_node`, so a dismantler's output IS an
+# allocation under the `vaccinate` lever, and the literature lists
 # FINDER under this task explicitly. Each shares its twin's clone, venv, build
 # and adapter, so one install serves both tasks and a fix to one is a fix to both.
 external_baselines |= {
@@ -6104,8 +6096,8 @@ external_baselines |= {
         "Needs a system CPython 3.7 to install; see the `finder` entry. "
         "The strongest LEARNED node-removal baseline, scored here on the simulated "
         "attack rate rather than on the structural objective it was trained for. "
-        "That gap is the point: §4.2 lists FINDER under this task while noting its "
-        "objective is structural, and §8.2 trap 1 says a method can win the "
+        "That gap is the point: FINDER is listed under this task although its "
+        "objective is structural, and a method can win the "
         "connectivity metric and lose the epidemic one. Running it under BOTH tasks "
         "and reading the two rows against each other is a comparison neither "
         "literature currently makes.",
@@ -6125,7 +6117,7 @@ external_baselines |= {
         "explosive_immunization",
         "Explosive Immunization, run as a vaccination allocation",
         "Literally an immunization paper (Clusella et al., PRL 117:208301), and the "
-        "one physics method §9.4's prediction turns on: MIND's Table 5 puts EI at "
+        "one physics method our own prediction turns on: MIND's Table 5 puts EI at "
         "80.6 on `eu-powergrid` against FINDER's 161.7, so a hand-built heuristic "
         "beating a learned method by 2x on mesh graphs is the limitation we predict "
         "and should confirm rather than discover. Warning: its output flag is "
@@ -6137,11 +6129,11 @@ external_baselines |= {
         "gdm",
         "Graph Dismantling with Machine learning, run as a vaccination allocation",
         "The second LEARNED allocation beside `finder_epi`, and the one "
-        "research/critical_node_detection.md §9.5's self-measurement was written "
+        "the degree-correlation self-check was written "
         "for: MIND found GDM's removal order correlates at 0.762 with a PCA of its "
         "own handcrafted input features. We feed `log1p(degree)` as a channel, so "
         "`degree_rank_spearman` near that value means a method re-derived the "
-        "degree heuristic with extra steps, which is exactly what §9.4 predicts "
+        "degree heuristic with extra steps, which is exactly what we predict "
         "for this task too. Running it here as well as under critical node "
         "detection is what makes the prediction checkable on both objectives.",
     ),
@@ -6152,7 +6144,7 @@ external_baselines |= {
         "The Artime et al. survey harness, which already wires CI, CoreHD, GND, EI, "
         "MinSum, FINDER and GDM behind one interface. Wiring THIS rather than the "
         "seven repos separately is the right trade under either task, and it is also "
-        "the only practical route to a FINDER number given §11's note that FINDER "
+        "the only practical route to a FINDER number given that FINDER "
         "publishes no table.",
     ),
 }

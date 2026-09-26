@@ -102,7 +102,7 @@ class TrainConfig:
     # reporting the negative cascade alone. The two dynamics parameters below are
     # likewise defaulted FROM the data, because a head whose tie-break disagrees with
     # the simulator that made the targets is fit against a transition that never
-    # happened (research/influence_blocking.md §8.4).
+    # happened.
     competitive: bool | None = None
     tie_break: str = auto_dominance
     positive_prob: float | None = None
@@ -173,10 +173,10 @@ def compute_pos_weight(
 
     Diffusion changes are sparse (few infected/frontier nodes per step), so a plain
     BCE would collapse to predicting all zeros. Blocking makes that WORSE rather than
-    better: §5.3 shows blocking 50 YouTube nodes prevents 0.29% of the spread, so the
-    positive class in the columns that matter is rarer than it is under IM, which is
-    why the calibration columns are worth re-checking rather than assuming they carry
-    over from the seeding tasks.
+    better: in published results blocking 50 YouTube nodes prevents 0.29% of the
+    spread, so the positive class in the columns that matter is rarer than it is under
+    IM, which is why the calibration columns are worth re-checking rather than
+    assuming they carry over from the seeding tasks.
     """
     columns = dataset[0]["y"].shape[1]
     positives = [0.0] * columns
@@ -566,7 +566,7 @@ def train_world_model(config: TrainConfig) -> dict:
         if config.pos_weight == "auto"
         else [None] * model_out_channels
     )
-    # One BCE term per target column: 2 single-cascade, 4 competitive (§2.5)
+    # One BCE term per target column: 2 single-cascade, 4 competitive
     losses = [nn.BCEWithLogitsLoss(pos_weight=weight) for weight in weights]
 
     os.makedirs(config.ckpt_dir, exist_ok=True)

@@ -3,32 +3,32 @@ Cascade reconstruction: the masked episodes, the transition-kernel binding, and
 the tree-weighted reward that scores one trajectory decoder.
 
 This is the harness for the second INVERSE problem, and it differs from
-`localization.py` in exactly the way `research/cascade_reconstruction.md` §2.5
-says it should: the recovered object is a whole history rather than a set, the
+`localization.py` in exactly the way the task demands: the recovered object is a
+whole history rather than a set, the
 primitive is the raw kernel evaluated at arbitrary proposed states rather than a
 seed-set forward pass, and the reward is weighted toward the half of the problem
 that is actually hard. Four pieces:
 
   * **`load_cascades`**: the labelled `(G, O, Y)` episodes, regrouped from
-    transitions that already exist (§2.2). No new simulator, no new action op, no
+    transitions that already exist. No new simulator, no new action op, no
     regeneration run, but they must have been generated with `--trace-parents`,
-    because NDlib emits no transmission edge and §2.6 makes one a precondition
-    rather than an enhancement.
+    because NDlib emits no transmission edge and the reward below makes one a
+    precondition rather than an enhancement.
 
-  * **`mask_observation`**: the four settings of §2.7 as four masks over data
+  * **`mask_observation`**: the four observation settings as four masks over data
     already on disk. Which one is running is a PROTOCOL parameter and the four are
-    four separate experiments, never pooled (§8.3).
+    four separate experiments, never pooled.
 
-  * **`bind_step_marginals`**: the ONE new primitive (§2.5.2), and its four
+  * **`bind_step_marginals`**: the ONE new primitive, and its four
     bindings. `@native` gets a raiser; `@monte_carlo` / `@oracle` / `@world_model`
     each get their own environment's `step_marginals`. The generated decoder is
     byte-identical across arms 3-6 and only its oracle changes, which is what
     makes conditions 3-6 an ablation on one variable, and at ~10^4 kernel calls
-    per instance it is where the cost claim of §2.4.2 is measured.
+    per instance it is where the cost claim is measured.
 
   * **`evaluate_reconstructor`**: the outer loop's reward,
-    `lambda * PathPrecision + (1 - lambda) * EventF1`. §2.6 is the section to read
-    twice: the obvious reward (Event F1 alone) is actively dangerous here, because
+    `lambda * PathPrecision + (1 - lambda) * EventF1`. The obvious reward
+    (Event F1 alone) is actively dangerous here, because
     the node set is nearly free and a program SEARCH rewarded on it discovers that
     the tree contributes nothing to its score and converges on decoders that never
     attempt the hard half. The reward is the specification.
@@ -36,8 +36,8 @@ that is actually hard. Four pieces:
 Like source localization, the reward is EXACT: it is computed against a history we
 stored, so it carries no evaluator noise and is comparable across conditions
 without the referee. The referee still runs and measures something
-else: re-simulating the RECOVERED sources against what was observed (§8.5.5's
-analogue), which is the column no paper in this literature reports.
+else: re-simulating the RECOVERED sources against what was observed, which is
+the column no paper in this literature reports.
 """
 
 import time
@@ -61,17 +61,17 @@ from world_model.wm_metrics import (
     resimulation_error,
 )
 
-# The four settings of §2.7, and they are four PROTOCOLS rather than four knobs:
+# The four observation settings, and they are four PROTOCOLS rather than four knobs:
 # a decoder selected under `final_snapshot` is solving a different problem from
 # one selected under `partial_times`, so the rows are reported separately and
-# never pooled (§8.3).
+# never pooled.
 partial_nodes = "partial_nodes"  # (a) a subsample of the infected set, NO times
 partial_times = "partial_times"  # (c-i) the same subsample, WITH activation times
 final_snapshot = "final_snapshot"  # (c-ii) the terminal state only: DITTO's DASH
 hidden_nodes = "hidden_nodes"  # (d) nodes deleted from the graph, not merely unobserved
 valid_settings = (partial_nodes, partial_times, final_snapshot, hidden_nodes)
 
-# Fraction of the infected set that is REPORTED. §8.2 trap 1: this literature
+# Fraction of the infected set that is REPORTED. This literature
 # cannot agree on the direction of its own masking parameter: Xiao sweeps report
 # probability, Sadikov sweeps sample ratio, and Zong sweeps UNCERTAINTY, which is
 # the complement of Sadikov's under the same symbol. Ours is the report
@@ -85,14 +85,14 @@ default_hidden_rate = 0.1
 
 # Instances one reward evaluation sweeps over. Every candidate decoder pays this
 # many executions, and under @monte_carlo each execution pays its own kernel
-# samples, so it is the M of §2.4.2's P * M * (S * T).
+# samples, so it is the M of the P * M * (S * T) cost accounting.
 default_instances = 20
 
 
 @dataclass()
 class Observation:
     """
-    What a decoder is allowed to see: §2.5.1's dataclass, verbatim.
+    What a decoder is allowed to see.
 
     `reported` maps an observed node to its activation time, or to None for
     "known infected, time unknown". `final_state` is the terminal snapshot, which
@@ -141,7 +141,7 @@ class CascadeInstance:
     # node -> activation step, for every node that ever activated
     true_times: dict[int, int]
     # node -> the causing node(s). None when the dataset carries no transmission
-    # edge at all, which makes every tree metric unscoreable (§2.6).
+    # edge at all, which makes every tree metric unscoreable.
     true_parents: dict[int, list[int]] | None
     observation: Observation
     final_state: np.ndarray
@@ -170,10 +170,10 @@ class StepOracle:
 
     Held as an object rather than a bare closure for the same reason
     `localization.ForwardOracle` is: the call count is the whole cost claim.
-    §2.4.2 puts a trajectory decoder two orders of magnitude above a localizer,
-    10^4 kernel evaluations per instance against 10^2, and §11 records that the
-    sampling arm's budget is dominated by a constant nobody has published, so it
-    has to be measured rather than assumed.
+    A trajectory decoder sits two orders of magnitude above a localizer, 10^4
+    kernel evaluations per instance against 10^2, and the sampling arm's budget
+    is dominated by a constant nobody has published, so it has to be measured
+    rather than assumed.
     """
 
     environment: object
@@ -198,8 +198,8 @@ def unavailable_step_marginals(_infected, _frontier) -> np.ndarray:
     Raising rather than being absent for the same reason
     `localization.unavailable_forward_oracle` does: an AttributeError traceback
     costs a whole refinement iteration, a message that names the condition costs
-    one repair turn. The experimental condition is identical either way: §2.9
-    arm 3 exists to answer whether a kernel in the decode loop is worth anything
+    one repair turn. The experimental condition is identical either way: arm 3
+    exists to answer whether a kernel in the decode loop is worth anything
     at all, so the program must be a pure structural or temporal heuristic.
     """
     raise StrategyError(
@@ -218,16 +218,16 @@ def transition_logprob(
     """
     `log p(s_{t+1} | s_t, G)` from one kernel evaluation.
 
-    §2.5.2: this DERIVES from `step_marginals` rather than being a second oracle,
+    This DERIVES from `step_marginals` rather than being a second oracle,
     so one kernel call is behind both. Under IC each susceptible node activates
     independently given the frontier, so the step's log-likelihood is the sum of
     `log p_v` over the nodes that did activate and `log(1 - p_v)` over the
     susceptible ones that did not.
 
-    §8.1 marks trajectory log-likelihood "nobody: this is ours to add": it is the
-    one metric in this literature that needs a kernel to evaluate under, which is
-    exactly why it is the natural INTERNAL signal for a decoder on unlabelled data
-    (§2.8). Labels select the program; the program itself may run on this.
+    No published work reports trajectory log-likelihood: it is the one metric in
+    this literature that needs a kernel to evaluate under, which is exactly why it
+    is the natural INTERNAL signal for a decoder on unlabelled data. Labels
+    select the program; the program itself may run on this.
     """
     marginal = np.clip(np.asarray(marginal, dtype=np.float64), 1e-12, 1.0 - 1e-12)
     active = np.zeros(marginal.shape[0], dtype=bool)
@@ -251,9 +251,10 @@ def mask_observation(
     """
     One episode's stored history, masked into the observation a decoder gets.
 
-    Zero generator changes: §2.2's whole asset is that the ground truth these
-    papers spend sections approximating is something we can read back. The mask is
-    a PROTOCOL parameter and the four settings are four experiments (§8.3):
+    Zero generator changes: the whole asset here is that the ground truth
+    published papers spend sections approximating is something we can read
+    back. The mask is a PROTOCOL parameter and the four settings are four
+    experiments:
 
       * `partial_nodes`: each infected node is reported w.p. `observation_rate`,
         with its time withheld. The Xiao/Sadikov/NetFill regime.
@@ -362,10 +363,10 @@ def load_cascades(
     decoder would be selected against one seeding process.
 
     `require_parents` RAISES on a dataset generated without `--trace-parents`
-    rather than quietly falling back to Event F1. §2.6 is explicit that a
-    tree-weighted reward is a precondition and not an enhancement: a search
-    rewarded on the node half alone converges on decoders that never attempt the
-    tree, and a run that silently did that would look like a result.
+    rather than quietly falling back to Event F1. A tree-weighted reward is a
+    precondition and not an enhancement: a search rewarded on the node half
+    alone converges on decoders that never attempt the tree, and a run that
+    silently did that would look like a result.
     """
     episodes = load_episode_trajectories(data_dir, diffusion_model, split)
 
@@ -384,7 +385,7 @@ def load_cascades(
         raise ValueError(
             f"{data_dir} carries no transmission edge, so PathPrecision cannot be "
             f"scored and the outer loop's reward would collapse onto Event F1: "
-            f"which research/cascade_reconstruction.md §2.6 shows makes a program "
+            f"which makes a program "
             f"search discard the tree half entirely. Regenerate with "
             f"`data/generate_wm_data.py --trace-parents` (the pipeline sets it "
             f"automatically for --task cascade_reconstruction), or pass "
@@ -896,8 +897,8 @@ def evaluate_reconstructor(
             "tree_weight": tree_weight,
             "metrics": means,
             "per_instance": per_instance,
-            # The cost axis §2.4.2 exists to measure, and the number §11 says
-            # nobody has published: kernel evaluations the PROGRAM made per
+            # The cost axis this task exists to measure, and a number nobody has
+            # published: kernel evaluations the PROGRAM made per
             # decoded instance. The harness's own scoring steps are separate.
             "kernel_calls": getattr(oracle, "calls", 0),
             "kernel_calls_per_instance": round(
@@ -990,7 +991,7 @@ def trivial_decoder_reward(
     """
     What "predict everyone reachable, assign parents by BFS" scores.
 
-    §2.11 risk 1 makes this a REQUIRED check rather than a diagnostic: a trivial
+    This is a REQUIRED check rather than a diagnostic: a trivial
     decoder has to score badly under the reward, or the reward is wrong. Two
     numbers, because two rewards are in play: `trivial_decoder_reward` is the
     label-free likelihood reward the search runs on (needs the arm's evaluator),

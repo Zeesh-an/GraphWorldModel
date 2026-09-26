@@ -105,7 +105,7 @@ adaptive_anchor_algorithms = ("adapt_epic", "adapt_degree_discount", "static_spl
 # The leaderboard for a CONTAINMENT task, which the IM anchors would be nonsense
 # for: they return seed sets, and this planner spends its budget on removals.
 # `adaptive_degree` heads the list because it is the row that actually has to be
-# beaten (research/critical_node_detection.md §9.3 item 2). `greedy_blocking` is
+# beaten. `greedy_blocking` is
 # deliberately absent for the same reason `adapt_greedy` is: it costs
 # k x candidates x mc_runs episodes and would dominate startup for a table that
 # exists to set a bar. Run it as its own --baselines arm when you want its number.
@@ -119,12 +119,12 @@ dismantling_anchor_algorithms = (
 
 # The leaderboard for an EPIDEMIC CONTROL task, per lever. `degree_immunization`
 # heads the node list because it is the row that actually has to be beaten
-# (research/epidemic_control.md §9.4, §5.1: RLGN's own Table 2 has Degree tying
-# Eigenvector to within 0.1 on two of five graphs). `netshield` and `dava` are the
-# two published methods this task is positioned BETWEEN, and running both is the
-# only way §8.2 trap 1 is visible: the spectral method wins the eigendrop and the
-# data-aware one wins the attack rate. `acquaintance_immunization` is on the list
-# because §8.3 names it as the row that most embarrasses learned methods, and
+# (RLGN's own Table 2 has Degree tying Eigenvector to within 0.1 on two of five
+# graphs). `netshield` and `dava` are the two published methods this task is
+# positioned BETWEEN, and running both is the only way their disagreement is
+# visible: the spectral method wins the eigendrop and the data-aware one wins the
+# attack rate. `acquaintance_immunization` is on the list because the literature
+# names it as the row that most embarrasses learned methods, and
 # `random_immunization` is not a throwaway floor: the GAP between it and degree is
 # Pastor-Satorras & Vespignani's founding result. `mc_greedy_immunization` is
 # deliberately absent for the same reason `greedy_blocking` and `adapt_greedy` are.
@@ -164,7 +164,7 @@ immunization_anchor_algorithms = {
 no_immunization = "no_immunization"
 
 # The leaderboard for an INVERSE task. `lpsi` heads it because it is the row that
-# actually has to be beaten (research/source_localization.md §2.9 risk 1): a 2017
+# actually has to be beaten: a 2017
 # label-propagation method with no learning beats both SL-VAE and DDMSL on Digg,
 # and it sits inside the agent's own expressible space. `resim_greedy` is
 # deliberately absent for the same reason `greedy_blocking` and `adapt_greedy`
@@ -180,14 +180,13 @@ localization_anchor_algorithms = (
 )
 
 # The leaderboard for a CASCADE RECONSTRUCTION task. `delayed_bfs` heads it
-# because it is the row that actually has to be beaten
-# (research/cascade_reconstruction.md §5.6): Xiao SDM'18's methods reach node
-# precision > 0.8 from an O(m + k log k) BFS variant, and it sits inside the
-# agent's own expressible space. `personalized_pagerank` is second for the
-# opposite reason: §8.2 trap 4 records that it BEATS tree sampling on `ca_grqc`
+# because it is the row that actually has to be beaten: Xiao SDM'18's methods
+# reach node precision > 0.8 from an O(m + k log k) BFS variant, and it sits
+# inside the agent's own expressible space. `personalized_pagerank` is second for
+# the opposite reason: it is published to BEAT tree sampling on `ca_grqc`
 # specifically, so an arm that does not clear it there has demonstrated nothing.
-# `observed_only` is Rozenshtein's `Reports` control and the concrete answer to
-# §2.11 risk 1: a trivial decoder has to score badly under the chosen reward.
+# `observed_only` is Rozenshtein's `Reports` control and the concrete check that
+# a trivial decoder scores badly under the chosen reward.
 # `mcmc_decode` and `forward_backward` are deliberately absent for the same reason
 # `resim_greedy` and `adapt_greedy` are: they call the kernel thousands of times
 # per instance and would dominate startup for a table that exists to set a bar.
@@ -202,13 +201,13 @@ reconstruction_anchor_algorithms = (
 )
 
 # The leaderboard for a CASCADE PREDICTION task. `szabo_huberman` heads it because
-# it is the row that actually has to be beaten
-# (research/cascade_prediction.md §3.1): one feature, one line, from 2008, and
-# every paper in §5 still prints it as "Feature-S&H". `seismic` and `hawkes` are the
-# generative pair, and they are here for their DECLINE behaviour as much as their
-# error: §5.4 shows Hawkes beating SEISMIC on both mean ARE and on how many
-# cascades it can score at all, which is the pairing §8.4 says to always report
-# together. `mean_size` and `persistence` are the two floors: under a LOG-space
+# it is the row that actually has to be beaten: one feature, one line, from 2008,
+# and every paper in this literature still prints it as "Feature-S&H". `seismic`
+# and `hawkes` are the generative pair, and they are here for their DECLINE
+# behaviour as much as their error: published results show Hawkes beating SEISMIC
+# on both mean ARE and on how many cascades it can score at all, which is why the
+# two should always be reported together. `mean_size` and `persistence` are the
+# two floors: under a LOG-space
 # error an instance-blind constant is far stronger than intuition suggests, and an
 # arm that only ties with them has learned the corpus's size distribution rather
 # than anything about the instance. `mc_forward` is deliberately absent for the same
@@ -225,10 +224,10 @@ prediction_anchor_algorithms = (
 )
 
 # The leaderboard for an INFLUENCE BLOCKING task, per lever. `proximity` heads the
-# counter-seeding list because it is the row that actually has to be beaten
-# (research/influence_blocking.md §5.4, §5.6), and `degree_blocking` is on it for the
-# opposite reason: CLDAG reports the degree heuristic fails outright here, so an arm
-# that only beats degree has demonstrated nothing. `greedy_prevention` and
+# counter-seeding list because it is the row that actually has to be beaten, and
+# `degree_blocking` is on it for the opposite reason: CLDAG reports the degree
+# heuristic fails outright here, so an arm that only beats degree has demonstrated
+# nothing. `greedy_prevention` and
 # `cmia_o` are deliberately absent: the first re-simulates the whole competitive
 # cascade per candidate and would dominate startup, the second runs a Dijkstra per
 # candidate per pick. Run either as its own --baselines arm when you want its number.
@@ -848,13 +847,13 @@ def wrap_exogenous(
     the difference is not cosmetic: the containment wrapper seeds the outbreak as
     `add_node` ops, and under two cascades `add_node` means the POSITIVE one, so
     reusing it would have every arm start the rumour's own counter-cascade for it.
-    The rumour is committed by the simulator's `reset` there (§2.1), and the wrapper's
+    The rumour is committed by the simulator's `reset` there, and the wrapper's
     remaining jobs are the detection delay and the removal expansion.
 
     A COMPARTMENTAL task takes the epidemic wrapper, and that difference is not
     cosmetic either: `vaccinate` expands a bare `remove_node` into the node PLUS its
     incident arcs while `quarantine` expands it into the arcs ALONE, and the
-    containment wrapper only knows the first (research/epidemic_control.md §2.5).
+    containment wrapper only knows the first.
     """
     if task.immunizes:
         immunization = build_immunization(graph, task)
@@ -918,7 +917,7 @@ def evaluate_strategy(
             raise StrategyError(
                 "no logged cascades were loaded for this forecasting task; the data "
                 "stage must have replayed a real corpus for this (dataset, dynamics, "
-                "split). research/cascade_prediction.md §2.2: running this on "
+                "split). Running this on "
                 "simulated transitions closes exactly the loop it exists to break."
             )
 
@@ -1376,7 +1375,7 @@ def baseline_anchor(
         # An influence-blocking task's floor is the BLOCKING library, and the row
         # that matters is `no_blocking`: sigma(S_N, empty), the rumour with nobody
         # stopping it. Every other row is only interesting as a difference from it,
-        # which is what "prevented influence" means (§8.1).
+        # which is what "prevented influence" means.
         lever = lever_of(task)
         scored = [
             (no_blocking, evaluate_strategy(
@@ -1416,7 +1415,7 @@ def baseline_anchor(
         # An epidemic-control task's floor is the IMMUNIZATION library, and the row
         # that matters is `no_immunization`: the outbreak with nobody dosed. Every
         # other row is only interesting as a difference from it, which is what
-        # "prevented infections" means (§8.3).
+        # "prevented infections" means.
         lever = task.epi_lever
         scored = [
             (no_immunization, evaluate_strategy(

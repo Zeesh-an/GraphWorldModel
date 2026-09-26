@@ -375,7 +375,7 @@ def adaptive_baselines_run_through_the_real_environment() -> None:
 
 
 def the_gap_divides_by_the_best_static_arm() -> None:
-    """The denominator is max over static arms, not a nominated one (§1.1)."""
+    """The denominator is max over static arms, not a nominated one."""
     def record(method, arm, spread):
         return {
             "method": method,
@@ -529,7 +529,7 @@ def multi_round_unions_separate_campaigns() -> None:
     # sized; only the union is larger
     assert all(value < union.reward for value in union.cost["campaign_rewards"])
 
-    # `infected` carries the union into the next campaign (§2.4e), so the policy
+    # `infected` carries the union into the next campaign, so the policy
     # sees a growing set at t=0 of each campaign. The MC environment loops
     # (episode, then timestep), so t=0 fires once per episode and each campaign
     # contributes mc_runs entries: the union is a per-campaign constant, which

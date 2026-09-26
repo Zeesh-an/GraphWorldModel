@@ -5,12 +5,12 @@ Source: https://sociopatterns.org/datasets.html
     - 75 nodes, 1,139 undirected edges, 32,424 timestamped contacts [derived]
     - Undirected, unweighted after aggregation
     - 4 role labels (MED / NUR / ADM / PAT), which is the ward's own block structure
-Warning: THE CANONICAL EMPIRICAL CONTACT NETWORK of this literature and the graph
-`research/epidemic_control.md` §6.6 ranks FIRST to add: 75 nodes, so the entire
+Warning: THE CANONICAL EMPIRICAL CONTACT NETWORK of this literature and the FIRST
+one to add: 75 nodes, so the entire
 pipeline runs in seconds, and it is the network every intervention paper on
 real contact data cites. Vanhems et al. (PLoS ONE 2013) is the study.
 
-Warning: NOT the Lyon primary school. §6.4 records that LH10 (75 nodes, a hospital
+Warning: NOT the Lyon primary school. LH10 (75 nodes, a hospital
 ward) and LyonSchool (242 nodes, a primary school) are frequently conflated and are
 separate studies on separate populations. This is the ward.
 """

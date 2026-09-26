@@ -12,8 +12,7 @@ daily snapshots of one network: the closest thing the spectral line has to a
 same-graph replicate.
 
 Warning: FOUR Gnutella snapshots now live in this repo under names that differ only
-by a suffix (§6.4 of both `research/epidemic_control.md` and
-`research/influence_blocking.md`). `p2p_gnutella05` and `06` are GreedyWalk's;
+by a suffix. `p2p_gnutella05` and `06` are GreedyWalk's;
 `p2p_gnutella08` and `24` are the influence-blocking benchmarks; `p2p_gnutella` is
 Gnutella31's giant component at 62,561. All five are different graphs.
 """

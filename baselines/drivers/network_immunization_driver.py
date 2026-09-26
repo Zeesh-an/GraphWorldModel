@@ -9,8 +9,8 @@ one driver serves all of them and the five rows are produced under identical
 conditions.
 
 Warning: THIS REPO IS THE ONLY PUBLIC NETSHIELD AND THE ONLY PUBLIC DAVA. Both
-papers shipped no code: `research/epidemic_control.md` §11 lists them among the
-five methods with "no public release", and §3.2's widely-repeated claim that
+papers shipped no code and are usually listed among the methods with
+"no public release", and the widely-repeated claim that
 EpiLearn ships a NetShield implementation is WRONG: that repo's tree has no shield,
 immunization or intervention code at all [derived, 2026-08-05]. So these arms are
 not a convenience, they are the only way a NetShield or DAVA number in our table is

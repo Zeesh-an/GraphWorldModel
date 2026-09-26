@@ -7,11 +7,11 @@ Source: https://public.websites.umich.edu/~mejn/netdata/football.zip
     - 12 conference labels: the ground-truth communities
 
 Girvan & Newman's (PNAS 2002) football graph: Division I-A teams, an edge per
-regular-season game, and conference membership as the ground-truth partition. In
-`research/epidemic_control.md` §6.3's catalogue and loaded here for one reason: at
+regular-season game, and conference membership as the ground-truth partition. Part
+of the epidemic-control benchmark catalogue and loaded here for one reason: at
 115 nodes with 12 known communities and near-regular degree (mean 10.7, max 12), it
 is the one graph in this repo where the DEGREE heuristic has almost nothing to
-grab. §9.4 predicts a heuristic-collapse result on power-law graphs; this is the
+grab. A heuristic-collapse result is expected on power-law graphs; this is the
 control that shows what happens when the tail is gone.
 """
 

@@ -3,11 +3,11 @@ Drive CTCP (IJCAI'23) on OUR cascades and dump per-cascade predictions.
 
 CTCP is the continuous-time, cross-cascade method: one evolving user/cascade state
 updated event by event and shared across ALL cascades, rather than a per-cascade
-encoder. `research/cascade_prediction.md` §5.3 makes it the interesting arm to run
+encoder. It is the interesting arm to run
 beside CasFlow: under CasTemp's leak-free split it is one of the two methods whose
 train-vs-test loss curves stay flat while CasFlow's and CasDO's diverge, so it is
-the published method least likely to be exploiting the temporal shortcut §8.3
-describes.
+the published method least likely to be exploiting the temporal shortcut a
+leaky random split allows.
 
 **Its input is a plain event table**, which is what makes it wireable without
 touching its preprocessing at all. `utils/data_processing.get_data` reads exactly

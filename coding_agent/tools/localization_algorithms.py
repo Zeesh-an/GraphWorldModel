@@ -15,24 +15,23 @@ with, and `dismantling_algorithms.py`, whose members return nodes to delete.
 Each name also has a paired scorer in `localization_scorers` returning a per-node
 score vector. The two answer different questions and the literature reports both:
 F1 scores the SET the selector returns, AUC scores the RANKING the scorer
-produces (`research/source_localization.md` §8.1). Where a method's selection is
+produces. Where a method's selection is
 intrinsically sequential (NETSLEUTH's deflation, OJC's ball cover) the two are
 deliberately not top-k of one another, and that is the honest reading.
 
-Read `research/source_localization.md` §2.9 risk 1 before treating any of these
-as a weak floor. In ascending order of danger:
+None of these is a weak floor. In ascending order of danger:
 
   1. `random_sources`, the Comin-Costa infected-subgraph centralities: free wins.
   2. **`lpsi` (LPSI, AAAI 2017)**: SIDSL's Table 1 puts this 2017 label-propagation
      method at F1 **0.544** on Digg, beating both SL-VAE (0.479) and DDMSL (0.517)
-     [verified, §5.5]. It has no learning whatsoever and it sits INSIDE the coding
+     [verified]. It has no learning whatsoever and it sits INSIDE the coding
      agent's expressible space, so "the search rediscovers LPSI" is the realistic
      floor and anything that does not clear it has not cleared the bar.
   3. **`netsleuth`**: the multi-source MDL reference, and the only classical member
      that beats LPSI on Power Grid in SL-VAE's Table 1 (F1 0.5428 vs 0.4737).
   4. `rumor_centrality` / `jordan_center`: SINGLE-SOURCE estimators. They rank all
      N nodes and are exact on trees; evaluated as multi-source at k = 10% of N they
-     score near zero by construction (§8.2), which is a property of the protocol
+     score near zero by construction, which is a property of the protocol
      rather than of the method. They are here because they are the founding
      estimators of the field and because a `--budgets 1` arm makes them admissible.
 
@@ -41,7 +40,7 @@ docstring states where it deviates from its paper, and three deviations are shar
 widely enough to name up front:
 
   * **`k` is given, never inferred.** The harness hands every member the source
-    count (§2.4.1), which removes NETSLEUTH's MDL half outright.
+    count, which removes NETSLEUTH's MDL half outright.
   * **Full observation only.** Our episodes record a state snapshot, so the
     sparse-observer methods (OJC here, Pinto, Thiran, Vetterli not implemented at
     all) run outside the regime they were designed for.
@@ -49,13 +48,13 @@ widely enough to name up front:
     (`dmp_localize`, `dynamic_age`, `resim_greedy`). The bounds are module globals
     at the top of this file, not buried constants.
 
-Two methods from `research/source_localization.md` §3 are absent and neither is an
+Two published classical methods are absent and neither is an
 oversight. **Pinto, Thiran, Vetterli (2012)** estimates from per-node ARRIVAL TIMES
 at a sparse observer set; our transitions record states, not timestamps, so it has
 no input to consume without a generation change. **Belief propagation (Altarelli
 et al. 2014)** is a full posterior over initial conditions on a time-unrolled
 factor graph; `dmp_localize` is its tractable relative and is implemented instead.
-Every method in §4 is LEARNED and is registered as an external repo in
+The published LEARNED methods are registered as external repos in
 `baselines/registry.py` rather than reimplemented here.
 
 Three conventions everything here obeys:
@@ -69,7 +68,7 @@ Three conventions everything here obeys:
     restricts to `observation >= infected_threshold` and only tops up outside it
     when the infected set is smaller than the budget.
   * **No labels.** These run at inference time on `(G, y, k)` alone. The ground
-    truth source set exists only in the outer loop's reward (§2.3.3), never here.
+    truth source set exists only in the outer loop's reward, never here.
 """
 
 import numpy as np
@@ -372,7 +371,7 @@ def netsleuth(
     Warning: **The MDL half of the paper is not implemented.** NETSLEUTH's headline
     contribution is that it INFERS the number of sources, by encoding the source
     set plus the ripple that grows from it and picking the `k` that minimizes total
-    description length. This harness is given `k` (§2.4.1: `budget` is the source
+    description length. This harness is given `k` (`budget` is the source
     count, and the whole arm set is compared at matched `k`), so only the
     seed-SELECTION half runs. Under the given-k convention that is the right
     comparison and it is what SL-VAE's own table reports NETSLEUTH under, but it
@@ -531,7 +530,7 @@ def rumor_centrality(
     Rumor centrality (Shah & Zaman, SIGMETRICS 2010): the paper that founded the field.
 
     SINGLE-SOURCE. Evaluated as multi-source at k = 10% of N it scores near zero by
-    construction (`research/source_localization.md` §8.2), which is a property of
+    construction, which is a property of
     the protocol, not of the estimator: run it at `--budgets 1` for its own number.
     """
     scores = _restricted(rumor_centrality_scores(graph, observation), observation)
@@ -1072,10 +1071,10 @@ def resim_greedy(
     """
     Greedy minimization of the re-simulation error ||y - f(x_hat)||^2.
 
-    The forward-model-using classical baseline, and the shape §2.3.4 sketches. Its
-    `predict` argument is the one axis that matters: pass a forward oracle (a canned baseline receives one; a generated program is offline).
-    from a generated program and the calls go through the arm's own METERED
-    evaluator; leave it None and it falls back to a private NDlib estimator, which
+    The forward-model-using classical baseline. Its
+    `predict` argument is the one axis that matters: pass a forward oracle (a
+    canned baseline receives one; a generated program is offline) and the calls go
+    through the arm's own METERED evaluator; leave it None and it falls back to a private NDlib estimator, which
     is the honest classical cost and is invisible to `real_env_episodes`. That
     invisibility is why it is blocked from generated scripts by default, exactly
     as `celf` and `greedy_blocking` are.
@@ -1114,7 +1113,7 @@ def resim_greedy(
 
 
 localization_algorithms = {
-    # label propagation: the bar (§2.9 risk 1)
+    # label propagation: the bar
     "lpsi": lpsi,
     # MDL / spectral, multi-source
     "netsleuth": netsleuth,
@@ -1139,7 +1138,7 @@ localization_algorithms = {
 }
 
 # Per-node score vectors for the same names. F1 scores the SET, AUC scores the
-# RANKING (research/source_localization.md §8.1), so both are needed and they are
+# RANKING, so both are needed and they are
 # deliberately not top-k of one another for the sequential members.
 localization_scorers = {
     "lpsi": lpsi_scores,

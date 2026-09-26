@@ -52,7 +52,7 @@ import numpy as np
 methods = ("jordan", "netsleuth", "lisn", "rumor_centrality")
 
 # rumor_centrality is a single-source estimator: exact on trees, near zero BY
-# CONSTRUCTION under a multi-source protocol at k = 10% of N (§8.2). Run it at
+# CONSTRUCTION under a multi-source protocol at k = 10% of N. Run it at
 # --budgets 1.
 
 

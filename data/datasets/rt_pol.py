@@ -12,13 +12,13 @@ Source: https://networkrepository.com/rt-pol.php
 DITTO's `Pol` row [verified, Table 2], and one of its four REAL-diffusion
 datasets: the retweet TIMES are the cascade, `T = 40` days, and it is the graph on
 which DITTO's own F1 (.7471) barely clears its MLE baseline CRI (.7468) while both
-supervised imputers OOM entirely (§5.1.2). That makes it the single most useful
+supervised imputers OOM entirely. That makes it the single most useful
 scale reference in this literature.
 
 Warning: we load the GRAPH only. The timestamps are dropped here, because our
 episodes are simulated on the topology: using its real retweet times would be the
-logged-trajectory experiment `research/cascade_reconstruction.md` §2.11 risk 4
-calls the untested claim, not this loader.
+logged-trajectory experiment, which is still an untested claim, and not this
+loader.
 """
 
 from pathlib import Path

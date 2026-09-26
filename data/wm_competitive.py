@@ -4,16 +4,15 @@ Two-cascade competitive IC / CLT simulator: the dynamics `influence_blocking` ru
 A negative cascade (the rumour, `S_N`) and a positive one (the blocker's
 counter-cascade) spread over the same graph, and a susceptible node reached by both
 in the same step is resolved by an explicit, recorded TIE-BREAK. That last clause is
-why this file exists at all rather than reusing NDlib
-(`research/influence_blocking.md` §2.4): no NDlib model carries two competing
+why this file exists at all rather than reusing NDlib: no NDlib model carries two competing
 cascade labels, `Blocked: -1` is a static non-adopter set, and `CompositeModel`
 loops its rules in registration order and breaks on the first that fires, so its
 only expressible tie-break is a single global "first rule wins".
 
 Three parameters decide what is being simulated, and all three are recorded in
-`data/metadata.json` because §5.1 shows each one moves the published numbers:
+`data/metadata.json` because each one moves the published numbers:
 
-  * **tie_break**: `negative` / `positive` / `fixed` dominance (§8.4). `auto`
+  * **tie_break**: `negative` / `positive` / `fixed` dominance. `auto`
     resolves to each dynamics' own founding paper: PD under IC, because Budak's
     MCICM and COICM both hard-code "if the bad and the good information reach a node
     at the same step, the good information takes effect"; ND under LT, because He
@@ -30,8 +29,8 @@ Three parameters decide what is being simulated, and all three are recorded in
     a removed node is deleted, uncounted, and cannot transmit or be infected by
     either cascade.
 
-Warning: A NOTE ON §2.2's COICM CAVEAT, because it changes what the head has to be.
-That section warns that a two-MLP product form "silently assumes MCICM, not COICM",
+Warning: A NOTE ON THE COICM CAVEAT, because it changes what the head has to be.
+The caveat is that a two-MLP product form silently assumes MCICM rather than COICM,
 on the grounds that COICM shares one coin per edge between the campaigns and so
 makes `p^N` and `p^P` dependent. Under the LIVE-EDGE characterisation that is right.
 Under the stepwise simulation it does not bite, and the reason is worth stating
@@ -50,7 +49,7 @@ import numpy as np
 
 from data.wm_simulator import ActionOp, State, blocked, valid_remove_semantics
 
-# Which cascade wins a susceptible node reached by both in the same step (§8.4).
+# Which cascade wins a susceptible node reached by both in the same step.
 # The rules differ ONLY in how ties in arrival time resolve, which is a one-line
 # change in a simulator and a large change in the reported numbers.
 negative_dominance = "negative"
@@ -124,7 +123,7 @@ class CompetitiveSimulator:
     PRE-STEP frontiers and only then committed.
 
     `add_node` always seeds the POSITIVE cascade. The negative seed set is an input
-    to the episode rather than an action (§2.1) (it is committed by `reset`) so the
+    to the episode rather than an action (it is committed by `reset`) so the
     three action channels keep the meaning they have in every other task and the
     blocker can only ever help itself.
     """
@@ -348,7 +347,7 @@ class CompetitiveSimulator:
         Commit one step's arrivals under the configured tie-break.
 
         The three rules differ only for a node BOTH cascades reached, which is the
-        whole content of §8.4, and the reason this is one function rather than
+        whole content of the tie-break, and the reason this is one function rather than
         three scattered conditionals.
         """
         new_negative, new_positive = set(), set()
@@ -396,7 +395,7 @@ class CompetitiveSimulator:
         One-step marginals for both cascades: the four soft targets the head is fit on.
 
         Same shape as `Simulator.advance_marginal` with four count dicts instead of
-        two (§2.1). The action is applied ONCE (it is deterministic) and only the
+        two. The action is applied ONCE (it is deterministic) and only the
         diffusion step is redrawn.
         """
         if num_mc < 1:

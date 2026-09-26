@@ -2,7 +2,7 @@
 Orkut Dataset Loader
 
 Downloads and loads the SNAP com-Orkut friendship network: the largest of Han
-et al.'s adaptive-IM benchmarks (research/adaptive_online_im.md §5.2, §6.2).
+et al.'s adaptive-IM benchmarks.
 
 Source: https://snap.stanford.edu/data/com-Orkut.html
     - 3,072,441 nodes (members), 117,185,083 undirected friendships

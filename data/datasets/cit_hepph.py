@@ -8,7 +8,7 @@ Source: https://snap.stanford.edu/data/cit-HepPh.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-Tong & Wu's `HepPh` (NeurIPS 2018, §5.8), which they quote as 34,546 PAPERS and
+Tong & Wu's `HepPh` (NeurIPS 2018), which they quote as 34,546 PAPERS and
 run under weighted-cascade 1/deg(v): the same probability model as our
 `--prob-model weighted`. They give no edge count, so ours is the file's own.
 """

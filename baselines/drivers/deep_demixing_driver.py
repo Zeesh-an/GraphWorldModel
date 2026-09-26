@@ -43,7 +43,7 @@ prior heads against nothing and is the easiest way to get a plausible-looking bu
 untrained decoder.
 
 Warning: SUPERVISED, like its two siblings. It is also the WEAKEST published row in
-`research/cascade_reconstruction.md` §5.2: DIPT reports it at Path Precision
+this literature: DIPT reports it at Path Precision
 0.062-0.327 and Jaccard 0.031-0.195 across five graphs, and its own paper says
 accuracy degrades as `T` grows because the solution space blows up. A low number
 here is the expected outcome, not a wiring failure.

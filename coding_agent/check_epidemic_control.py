@@ -3,16 +3,16 @@ Runnable self-check for the epidemic-control contract.
 
     python -m coding_agent.check_epidemic_control
 
-Everything `research/epidemic_control.md` says must hold, asserted rather than
+Everything the epidemic-control design says must hold, asserted rather than
 assumed. The checks are grouped by what would break if one failed, and the two
 groups that matter most are the first and the last:
 
   * **The simulator IS a compartmental process.** SIR at `gamma = 1.0` reproduces
-    Independent Cascade to MC precision (§2.1: an infectious node transmits once
+    Independent Cascade to MC precision (an infectious node transmits once
     and is then spent, which is IC's rule exactly), the infectious set SHRINKS
     under all three dynamics, and SIS returns nodes to susceptible while `ever`
     stays monotone.
-  * **The compartment head is EXACT under its oracle form.** §2.4 is the whole
+  * **The compartment head is EXACT under its oracle form.** This is the whole
     modelling contribution of this task: `ICTransmissionHead` composes
     `y_inf = infected + (1 - infected) * p_new`, which is monotone by construction
     and provably cannot represent recovery. The replacement is a per-node
@@ -22,8 +22,8 @@ groups that matter most are the first and the last:
     means anything.
 
 Between them sit the harness rules: the four levers, the dose expansion, the
-no-dosing-patient-zero rule, the budget accounting, and the eigendrop-vs-attack-rate
-disagreement §8.2 trap 1 predicts.
+no-dosing-patient-zero rule, the budget accounting, and the predicted
+eigendrop-vs-attack-rate disagreement.
 """
 
 import numpy as np
@@ -160,7 +160,7 @@ def check_registry() -> None:
 # 2. The simulator --------------------------------------------------------------
 def check_sir_at_gamma_one_is_ic() -> None:
     """
-    §2.1's cheapest correctness check, and the reason it is first.
+    The simulator's cheapest correctness check, and the reason it is first.
 
     A node that enters `I` at step `t` transmits once at `t -> t+1` and, at
     `gamma = 1`, leaves `I` in that same step. That is exactly IC's "a newly
@@ -213,7 +213,7 @@ def check_sir_at_gamma_one_is_ic() -> None:
 
 def check_infectious_set_shrinks() -> None:
     """
-    The non-monotone property this whole task exists to test (§2.4).
+    The non-monotone property this whole task exists to test.
 
     `infected` (ever) must never shrink under any dynamics; `frontier` (currently
     infectious) MUST shrink under all three, because that is precisely what
@@ -274,7 +274,7 @@ def check_infectious_set_shrinks() -> None:
 
 def check_vaccination_is_not_recovery() -> None:
     """
-    §8.2 trap 7: a node in `R` is still in the graph and still counted; a VACCINATED
+    A node in `R` is still in the graph and still counted; a VACCINATED
     node is neither. Conflating them is what makes "nodes saved" mean two different
     things across two papers.
     """
@@ -304,7 +304,7 @@ def check_vaccination_is_not_recovery() -> None:
 
 def check_contact_reduction_is_graded() -> None:
     """
-    The lever §2.2 says NDlib cannot express, and the reason we wrote our own stepper.
+    The lever NDlib cannot express, and the reason we wrote our own stepper.
 
     Scaling an arc's `beta` down must produce an outbreak strictly between the
     unmodified one and the fully-cut one. Under NDlib's SIR this test is not even
@@ -347,7 +347,7 @@ def check_contact_reduction_is_graded() -> None:
 # 3. The compartment head -------------------------------------------------------
 def check_head_matches_simulator() -> None:
     """
-    Warning: THE CHECK THIS TASK STANDS ON (§2.4).
+    Warning: THE CHECK THIS TASK STANDS ON.
 
     `structured_oracle` pins the transition matrix to the simulator's own rates:
     `q = beta_scale * w`, `gamma_hat = gamma`, `alpha_hat = alpha`. Every one of its
@@ -432,7 +432,7 @@ def check_head_matches_simulator() -> None:
 
 def check_head_can_shrink_the_infectious_set() -> None:
     """
-    The property `ICTransmissionHead` provably lacks, stated as a test (§2.4).
+    The property `ICTransmissionHead` provably lacks, stated as a test.
 
     Feed the compartment head a state with an infectious node that has NO
     susceptible neighbours left. A monotone head must predict it still infectious;
@@ -644,12 +644,12 @@ def check_library() -> None:
 
 def check_spectral_disagreement() -> None:
     """
-    §8.2 trap 1, measured rather than asserted.
+    The eigendrop and the attack rate disagree, measured rather than asserted.
 
     A method can post the LARGEST eigendrop and prevent the FEWEST infections,
     because `lambda_1` is a global property that says nothing about where the
     outbreak currently is. That gap is DAVA's entire contribution and the reason
-    §9.4 says to position this task against DAVA rather than NetShield, so if the
+    this task is positioned against DAVA rather than NetShield, so if the
     two columns ever agree perfectly, the surrogate was sufficient and the task had
     nothing to add.
     """
@@ -700,7 +700,7 @@ def check_spectral_disagreement() -> None:
 
 
 def check_curve_metrics() -> None:
-    """§2.6's four shape metrics, and the SIS one that replaces final size."""
+    """The four outbreak-shape metrics, and the SIS one that replaces final size."""
     metrics = epidemic_curve_metrics([0, 2, 6, 14, 25, 18, 9, 4, 1, 0], 100)
 
     check("peak_prevalence_is_the_max", metrics["peak_prevalence"] == 25)

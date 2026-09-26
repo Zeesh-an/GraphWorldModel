@@ -10,8 +10,7 @@ and returns a REMOVAL set of size `budget`: the nodes to delete from the graph,
 not the nodes to seed. That is the whole difference from `algorithms.py`, whose
 members return a seed set to maximize with.
 
-Read `research/critical_node_detection.md` §9.3 before treating any of these as a
-weak floor. In ascending order of danger:
+None of these is a weak floor. In ascending order of danger:
 
   1. `random_removal`, `pagerank_removal`, static `betweenness_removal`: free wins.
   2. **`adaptive_degree` (HDA)**: MIND's Table 5 puts plain recompute-the-degree at
@@ -24,16 +23,16 @@ weak floor. In ascending order of danger:
      cases across 13 competitors, and almost no learned dismantling paper reports
      it. Omitting it reproduces the exact methodological gap that survey calls out.
   4. **`gnd`**: on NetScience a 2019 spectral heuristic still beats every learned
-     method except SPR (§5.4).
+     method except SPR.
 
 Two conventions everything here obeys:
 
-  * **Undirected.** The entire dismantling literature is undirected (§8.2 trap 9),
+  * **Undirected.** The entire dismantling literature is undirected,
     so every routine works over `containment.neighbour_sets`, i.e. the symmetrized
     view. Our directed datasets are symmetrized to be scored at all.
   * **Sequential-adaptive, unless the name says otherwise.** Removing `k` nodes at
     once and recomputing after every removal are DIFFERENT algorithms and their
-    numbers are not interconvertible (§8.2 trap 1): NIRM's own ablation puts the
+    numbers are not interconvertible: NIRM's own ablation puts the
     gap at 1.96x on `UsPower`. `degree_removal` and `betweenness_removal` are the
     one-pass controls; everything else recomputes.
 """
@@ -246,7 +245,7 @@ def _reinsert(
     neighbours: list[set[int]], removed: list[int], threshold: float
 ) -> list[int]:
     """
-    Reverse-greedy reinsertion (Min-Sum / CoreHD / GNDR §3.3, §8.2 trap 2).
+    Reverse-greedy reinsertion (Min-Sum / CoreHD / GNDR).
 
     Put back, cheapest first, every removed node whose return does not push the
     giant component past the bar. What survives is the reduced removal set. GND and
@@ -534,9 +533,9 @@ def collective_influence_r(
     greedy reinsertion pass.
 
     `collective_influence_removal` is only the first half. The paper's CI is
-    "adaptive removal + greedy reinsertion", and §8.2 trap 2 is explicit that a
-    method and its reinserting variant are different methods routinely cited under
-    one name, so the bare version should not be reported as "CI".
+    "adaptive removal + greedy reinsertion", and a method and its reinserting
+    variant are different methods routinely cited under one name, so the bare
+    version should not be reported as "CI".
     """
     return _reinsert_and_refill(
         graph,
@@ -557,7 +556,7 @@ def corehd(
     because a node outside the 2-core is on a tree and cannot be holding the giant
     component together. When the 2-core empties, `_pad` finishes the job: the
     paper's own tree-breaking stage, minus the reinsertion pass that `corehd_r`
-    adds separately (§8.2 trap 2).
+    adds separately.
     """
     neighbours = neighbour_sets(graph)
     removed = set()
@@ -752,7 +751,7 @@ def decycling(
 ) -> list[int]:
     """
     Greedy decycling then tree breaking: the Min-Sum / BPD pipeline with a greedy
-    stage 1 instead of message passing (§3.3).
+    stage 1 instead of message passing.
 
     Stage 1 removes the highest-degree node of the 2-core until the residual is a
     FOREST; stage 2 breaks the surviving trees at their centroids. `bpd` is the
@@ -913,9 +912,9 @@ def gnd(
     here, because our budget is CARDINALITY (`k` nodes). GND's contribution is the
     generalized `cost="degree"` instantiation, which prices removal by degree and
     so prefers many cheap separators over one expensive hub: a genuinely different
-    optimum that a cardinality metric scores unfairly in both directions
-    (research/critical_node_detection.md §8.2 trap 4). Pass `cost="degree"` to get
-    it, and report it against a cost budget or not at all.
+    optimum that a cardinality metric scores unfairly in both directions.
+    Pass `cost="degree"` to get it, and report it against a cost budget or not at
+    all.
 
     ponytail: the cut is covered by a greedy max-coverage-per-cost rule rather than
     the paper's LP 2-approximation, and the bisection uses the plain normalized
@@ -1004,8 +1003,8 @@ def egnd(
     to cover. This sweeps the split quantile and keeps the removal set with the
     smallest residual giant component.
 
-    Warning: §3.3 lists EGND as a distinct baseline in the GDM and Artime tables but
-    gives it **no paper and no code**, so "ensemble of GND cuts" is the entire
+    Warning: EGND appears as a distinct baseline in the GDM and Artime tables but
+    has **no paper and no code**, so "ensemble of GND cuts" is the entire
     published specification and the quantile sweep is our reading of it. Report it
     as our variant, not as the EGND of those tables.
     """
@@ -1120,8 +1119,8 @@ def netshield(
     epidemic threshold of both SIS and IC-like dynamics scales as 1/lambda_max, so
     shrinking lambda_max is directly shrinking the outbreak. That makes it the
     strongest non-simulation baseline for the diffusion variant this task actually
-    evaluates (research/critical_node_detection.md §2.2), and the one whose
-    ranking a connectivity-driven method is least likely to reproduce (§5.8).
+    evaluates, and the one whose
+    ranking a connectivity-driven method is least likely to reproduce.
 
     Shield value of adding node j to S:
         v(j) = (2*lambda - A_jj) * u_j^2 - 2 * u_j * sum_{i in S} A_ij * u_i

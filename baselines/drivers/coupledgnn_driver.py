@@ -1,7 +1,7 @@
 """
 Drive CoupledGNN (WSDM'20) on OUR cascades and dump per-cascade predictions.
 
-`research/cascade_prediction.md` §4.1 calls this **the closest published method to
+This is **the closest published method to
 our own formulation**, and that is why it is wired despite being the hardest of the
 three: two COUPLED graph neural networks, one propagating node ACTIVATION STATE and
 one propagating INFLUENCE, iterated over `K` layers to imitate the cascading effect
@@ -9,7 +9,7 @@ on the global graph. That is structurally what our structured head does with
 `infected` and `frontier`, so this is the one external row where a difference is a
 statement about the architecture rather than about the feature pipeline.
 
-It is also the only entry here whose protocol withholds TIMESTAMPS entirely (§5.5):
+It is also the only entry here whose protocol withholds TIMESTAMPS entirely:
 it sees the early adopter SET plus the global graph and nothing else, which is the
 protocol our own `neighborhood_size` and `degree_scaled` rows sit under. Its
 published numbers are MRSE / mRSE / MAPE / WroPerc rather than MSLE for that
@@ -32,7 +32,7 @@ its own preprocessed pickles and needs two inputs it does not ship a derivation 
 
 Neither is the method's contribution (the coupled propagation is) but a reader
 comparing this row against the paper's own Table 1 has to know that the inputs are
-ours. §5.5's numbers are on CoupledGNN's own Weibo-D subset (23,681 users / 3,228
+ours. Its published numbers are on CoupledGNN's own Weibo-D subset (23,681 users / 3,228
 cascades) and are not comparable to a row produced here in any case.
 
 **TensorFlow 1 is patched, not ported.** The registry rewrites `import tensorflow
@@ -197,7 +197,7 @@ def write_repo_inputs(work_dir: Path, data: dict) -> tuple[dict, dict, int]:
             continue
 
         paths = json.loads(str(data["paths"][index]))
-        # `x[i] = [(t, u), ...]`: the OBSERVED prefix. §5.5: this protocol
+        # `x[i] = [(t, u), ...]`: the OBSERVED prefix. This protocol
         # withholds timestamps and the model reads only which nodes are in it, but
         # the tuple shape is the repo's own and `get_batch_data` unpacks it.
         adopters = [(float(when), int(nodes[-1])) for nodes, when in paths]

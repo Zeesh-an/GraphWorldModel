@@ -141,7 +141,7 @@ The `f_v > 0` gate gives the same self-terminating bound as IC. One-step metrics
 
 Feeds the encoder and the head **ones** in place of the true `p(u→v)`, at the one choke point every path goes through (`build_graph_input`), so training, one-step eval, the ensemble rollout, planning regret, and the coding agent's world-model environment all see the same masked graph. The **simulator is untouched**: this masks the model's view of the world, not the world.
 
-Two reasons it exists, and they are the same reason from two directions. It is the **online/bandit information state** (the graph is known, the transmission probabilities are not), which is what makes `research/adaptive_online_im.md` §2.4b's branch (b) reachable. And it is the honest answer to the wrinkle that our IC heads otherwise consume the true `w` as an input feature, so the "recovers unknown dynamics from data" claim currently rests on LT rather than IC.
+Two reasons it exists, and they are the same reason from two directions. It is the **online/bandit information state** (the graph is known, the transmission probabilities are not), which is what makes the online branch of adaptive influence maximization reachable. And it is the honest answer to the wrinkle that our IC heads otherwise consume the true `w` as an input feature, so the "recovers unknown dynamics from data" claim currently rests on LT rather than IC.
 
 **Requires `--head structured` (or `linear`).** `structured_residual` anchors `q` on `logit(w)`, which at `w = 1` pins every edge near `q = 1` and saturates the rollout; `structured_oracle` *is* `q = w`. Masking either is not an ablation of them, it is a corruption of them, so both are refused with that message.
 
@@ -159,7 +159,7 @@ IC: `ICTransmissionHead(oracle=True)` skips the MLP and sets `q = edge_weight` (
 
 ## Training: `train_wm.py`
 
-**Memory.** Training memory is per-arc activations: 103 bytes per arc per hidden unit under message conditioning and 29 without it (measured; 3-layer SAGE, structured head, forward plus backward; the modulator's per-arc MLP inputs are what autograd keeps), so digg at hidden 128 is 53 GB per graph and twitter at hidden 256 is 46 GB, against 15 and 13 GB unconditioned. One optimizer step still sees `--batch-size` transitions, but `micro_batches` runs them in sub-batches whose `arcs x hidden` stay under `--max-batch-arc-hidden` (2^28, about 28 GB; `MAX_BATCH_ARC_HIDDEN` in `pipeline.sbatch`), each sub-batch's mean loss weighted by its node share so the accumulated gradient equals the whole batch's, and a single graph over the budget runs alone. Batch 2 of digg (106 GB) and batch 8 of twitter (371 GB) both exceeded a 95 GB card before this; both rows need an 80 GB or larger card even now.
+**Memory.** Training memory is per-arc activations: 103 bytes per arc per hidden unit under message conditioning and 29 without it (measured; 3-layer SAGE, structured head, forward plus backward; the modulator's per-arc MLP inputs are what autograd keeps), so digg at hidden 128 is 53 GB per graph and twitter at hidden 256 is 46 GB, against 15 and 13 GB unconditioned. One optimizer step still sees `--batch-size` transitions, but `micro_batches` runs them in sub-batches whose `arcs x hidden` stay under `--max-batch-arc-hidden` (2^28, about 28 GB), each sub-batch's mean loss weighted by its node share so the accumulated gradient equals the whole batch's, and a single graph over the budget runs alone. Batch 2 of digg (106 GB) and batch 8 of twitter (371 GB) both exceeded a 95 GB card before this; both rows need an 80 GB or larger card even now.
 
 **Teacher-forced one-step.** Each batch is a set of true `(s_t, a_t)` inputs; the model predicts the next-state marginals and is scored against the MC targets:
 
@@ -196,7 +196,7 @@ python -m world_model.train_wm \
 
 ## Evaluation: `wm_eval.py`
 
-Three families of metrics, all written into the results JSON. Full definitions and worked SAGE numbers are in [`checkpoints/RESULTS.md`](checkpoints/RESULTS.md).
+Three families of metrics, all written into the results JSON.
 
 ### 1. One-step (`evaluate_one_step`): block `test`
 
@@ -352,12 +352,11 @@ These reload a `.pt` checkpoint named by a results JSON (from the checkpoint's o
 | `../coding_agent/check_containment.py` | runnable self-check for the critical-node-detection contract (outbreak, removal budget, minimize sense, structural metrics) |
 | `../coding_agent/check_source_localization.py` | runnable self-check for the inverse contract (localize, the four oracle bindings, label extraction, PR/RE/F1/AUC, the scored harness, an end-to-end generated program) |
 | `model/*.py`                | the five backbone encoders |
-| `checkpoints/`              | `RESULTS.md` and, under `old/`, the BA-100 five-backbone results JSONs it reads; no weights are tracked, new runs write to `results/<task>/<dataset>/<run>/world_model/` |
 
 
 ## Compartmental heads (`--task epidemic_control`)
 
-`CompartmentTransitionHead` is the one head here that is not a variation on the others, and `research/epidemic_control.md` §2.4 is why it had to be new rather than an edit.
+`CompartmentTransitionHead` is the one head here that is not a variation on the others, and it had to be new rather than an edit.
 
 `ICTransmissionHead` composes
 
@@ -365,7 +364,7 @@ These reload a `.pt` checkpoint named by a results JSON (from the checkpoint's o
 y_inf = infected + (1 - infected) * p_new
 ```
 
-which is monotone non-decreasing in `infected` **by construction**: `p_new >= 0`, so `y_inf >= infected` for every assignment of encoder weights and every value of `q(u -> v)`. There is no way to make that expression predict a node LEAVING the infected set, and `LTThresholdHead` has the identical shape. That monotonicity is load-bearing, `checkpoints/RESULTS.md` records it as what fixed rollout saturation, `count_bias` +49 -> +0.27, and it is exactly what `I -> R` under SIR/SEIR and `I -> S` under SIS violate.
+which is monotone non-decreasing in `infected` **by construction**: `p_new >= 0`, so `y_inf >= infected` for every assignment of encoder weights and every value of `q(u -> v)`. There is no way to make that expression predict a node LEAVING the infected set, and `LTThresholdHead` has the identical shape. That monotonicity is load-bearing: it is what fixed rollout saturation (`count_bias` +49 -> +0.27), and it is exactly what `I -> R` under SIR/SEIR and `I -> S` under SIS violate.
 
 The replacement is a per-node row-stochastic **transition matrix**:
 
@@ -391,13 +390,13 @@ The number to read first in the rollout block is `ens_prevalence_bias`, not `ens
 
 ## Forecasting on REAL cascades (`--task cascade_prediction`)
 
-The one task that trains this model on transitions **no simulator produced**, and the reason it is here is the reason `research/cascade_prediction.md` §9.1 gives: every other evaluation in this file measures a learned model against traces drawn from the same NDlib simulator that trained it, which is a closed loop that can only report LEARNING error. A replayed Weibo corpus breaks the loop, and `--referee` (with `--mc-agreement` for the NDlib replay) then reports the quantity that loop hides, the **modelling error** of the forward model itself, with no program involved.
+The one task that trains this model on transitions **no simulator produced**, and the reason it is here is this: every other evaluation in this file measures a learned model against traces drawn from the same NDlib simulator that trained it, which is a closed loop that can only report LEARNING error. A replayed Weibo corpus breaks the loop, and `--referee` (with `--mc-agreement` for the NDlib replay) then reports the quantity that loop hides, the **modelling error** of the forward model itself, with no program involved.
 
 Three things change for the model, none of them a flag:
 
-- **The targets are HARD.** `next_marginal_infected` is a realized 0/1 indicator rather than an MC average, because a real cascade happened once. §2.4 calls this the main technical risk of the whole exercise, and §11 records that how much it costs one-step `delta_f1` is unestablished by anything in that literature: nobody there ever had soft targets to lose. Train with `--pos-weight off` as usual for a structured head; the class imbalance is worse here, not better.
-- **`--hide-edge-weights` is not an ablation here, it IS the setting.** §9.5: our IC heads consume the true transmission probability `w` as an input feature and `structured_residual` literally anchors on `logit(w)`, so the "recovers unknown dynamics" claim currently rests on LT rather than IC. **Real cascades have no `w`.** What our loaders synthesize is a weighted-cascade prior over the observed propagation ties, not a measured probability, so `--head structured` with `--hide-edge-weights` is the honest configuration and `structured_residual` is the one to justify rather than assume.
-- **`ens_count_bias` is the diagnostic to read first.** §2.2 predicts the direction of failure: an IC-shaped kernel on a process with repeated exposure and exogenous arrivals over-predicts, which is exactly the saturation this metric was built to catch. `coding_agent/prediction.summarize_prediction` reports the same thing in the outer loop as the sign of the mean log residual, and flags a systematic multiplicative bias explicitly because it is one line to fix and is usually most of the gap.
+- **The targets are HARD.** `next_marginal_infected` is a realized 0/1 indicator rather than an MC average, because a real cascade happened once. This is the main technical risk of the whole exercise, and how much it costs one-step `delta_f1` is unestablished by anything in the cascade-prediction literature: nobody there ever had soft targets to lose. Train with `--pos-weight off` as usual for a structured head; the class imbalance is worse here, not better.
+- **`--hide-edge-weights` is not an ablation here, it IS the setting.** Our IC heads consume the true transmission probability `w` as an input feature and `structured_residual` literally anchors on `logit(w)`, so the "recovers unknown dynamics" claim currently rests on LT rather than IC. **Real cascades have no `w`.** What our loaders synthesize is a weighted-cascade prior over the observed propagation ties, not a measured probability, so `--head structured` with `--hide-edge-weights` is the honest configuration and `structured_residual` is the one to justify rather than assume.
+- **`ens_count_bias` is the diagnostic to read first.** The direction of failure is predictable: an IC-shaped kernel on a process with repeated exposure and exogenous arrivals over-predicts, which is exactly the saturation this metric was built to catch. `coding_agent/prediction.summarize_prediction` reports the same thing in the outer loop as the sign of the mean log residual, and flags a systematic multiplicative bias explicitly because it is one line to fix and is usually most of the gap.
 
-`wm_metrics.popularity_metrics` is the metric layer, and it computes every variant this literature prints rather than one: §8.1's "get MSLE right or nothing else matters" is about three independent choices (log base 2 vs natural, total `P(t_p)` vs increment `ΔP`, the `+0` / `+1` / `+2` smoothing), and §5.7 difference 4 records that the field's headline table prints two of them under one name. `--cp-metric` names which one the reward is; every other one still lands in the results JSON and the report.
+`wm_metrics.popularity_metrics` is the metric layer, and it computes every variant this literature prints rather than one: getting MSLE right means making three independent choices (log base 2 vs natural, total `P(t_p)` vs increment `ΔP`, the `+0` / `+1` / `+2` smoothing), and the field's headline table prints two of them under one name. `--cp-metric` names which one the reward is; every other one still lands in the results JSON and the report.
 

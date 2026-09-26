@@ -12,7 +12,7 @@ Source: https://snap.stanford.edu/data/wiki-Vote.html
     - No node labels
 
 ToupleGDD reports this graph as "Wiki-2"; its "Wiki-1" is a DIFFERENT 889-node
-graph from Network Repository (research/influence_maximization.md §6.3).
+graph from Network Repository.
 MOEIM reports the largest
 connected component, 7,066 / 103,663.
 

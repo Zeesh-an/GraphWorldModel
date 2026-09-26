@@ -2,25 +2,25 @@
 Influence blocking: the four levers, the negative cascade, and prevented influence.
 
 The harness piece `influence_blocking` needs and the other tasks do not. Three
-things live here, and each one is a decision
-`research/influence_blocking.md` forces rather than a convenience:
+things live here, and each one is a decision the published literature forces
+rather than a convenience:
 
-  * **The four levers (§1.1).** This literature splits cleanly by what the blocker is
+  * **The four levers.** This literature splits cleanly by what the blocker is
     allowed to DO, and that split maps one-to-one onto our action ops:
     counter-seeding (`add_node`), node blocking (`remove_node`), edge blocking
     (`remove_edge`) and weight reduction (`set_edge_weight`). `--blocking-lever`
     picks one, and it sets `budget_op` and `allowed_ops` together so an arm can never
-    be budgeted for one op and permitted another. §7 is why this is worth having at
-    all: the seeding line and the structural line of this literature share no metric,
+    be budgeted for one op and permitted another. This is worth having at all
+    because the seeding line and the structural line of this literature share no metric,
     so a single evaluator that scores all three interventions on one graph under one
     metric does not currently exist.
 
-  * **The negative cascade.** `S_N` is an INPUT to the episode, not an action (§2.1),
-    so it is committed by `CompetitiveSimulator.reset` rather than injected as a bag
-, which is the whole reason `add_node` can keep meaning "seed positively" and the
+  * **The negative cascade.** `S_N` is an INPUT to the episode, not an action, so
+    it is committed by `CompetitiveSimulator.reset` rather than injected as a bag,
+    which is the whole reason `add_node` can keep meaning "seed positively" and the
     three action channels keep the meaning they have in every other task.
 
-  * **Prevented influence (§8.1).** One quantity, five published names, all of them
+  * **Prevented influence.** One quantity, five published names, all of them
     `sigma(S_N alone) - sigma(S_N | blockers)`. Budak's framing is the sharp one and
     is worth restating exactly: a blocker that protects nodes the rumour would never
     have reached scores ZERO. The reward the search optimizes is the remaining
@@ -28,7 +28,7 @@ things live here, and each one is a decision
     influence is that number subtracted from the unopposed reference, and it is what
     every table in this literature reports.
 
-Warning: THE BUDGET AXIS IS NOT PERCENT OF N HERE (§8.2). Our `--budget-pcts 1 5 10 20`
+Warning: THE BUDGET AXIS IS NOT PERCENT OF N HERE. Our `--budget-pcts 1 5 10 20`
 speaks to no blocking paper at all: SandIMIN, Xie and TC-AIBM all report absolute
 `k in {10..50}` or `{10..100}`, and the INFORMATIVE ratio is `|S_P| / |S_N|` rather
 than `|S_P| / |V|`. The task registry therefore ships `default_budgets` instead of
@@ -41,8 +41,8 @@ import numpy as np
 from coding_agent.containment import expand_removals
 from coding_agent.types import ActionFn, ActionOp, GraphInfo, State, TaskSpec
 
-# §1.1's table, as the (budget_op, allowed_ops) pair each row implies. The names are
-# the paper-facing ones; the ops are ours.
+# The literature's four blocking levers, as the (budget_op, allowed_ops) pair each
+# implies. The names are the paper-facing ones; the ops are ours.
 counter_seed = "counter_seed"
 node_block = "node_block"
 edge_block = "edge_block"
@@ -89,7 +89,7 @@ def edge_weight_caps(graph: GraphInfo) -> dict:
     `{(u, v): p}`, the transmission probability each arc starts at.
 
     The cap the weight lever is validated against: DiffIM's relaxation is
-    `p~(u,v) = p(u,v) * r~(u,v)` with `r~ in [0, 1]` (§2.3), so a blocker may only
+    `p~(u,v) = p(u,v) * r~(u,v)` with `r~ in [0, 1]`, so a blocker may only
     REDUCE an edge. Letting it raise one would be an unbudgeted boost to the
     counter-cascade dressed up as a blocking action.
     """
@@ -107,7 +107,7 @@ class NegativeCascade:
 
     sources: tuple
     graph: GraphInfo
-    # Budak's DETECTION DELAY r (§8.3): the bad campaign is detected r steps late and
+    # Budak's DETECTION DELAY r: the bad campaign is detected r steps late and
     # the blocker only acts from then. 0 is the usual setting and the one every
     # published table uses; larger is the axis that makes the task non-trivial, and
     # it is the same statement as CLDAG's "first mover has a clear advantage".
@@ -120,8 +120,8 @@ class NegativeCascade:
         Deliberately NOT the containment wrapper's job of seeding the outbreak:
         `S_N` starts the NEGATIVE cascade, and an `add_node` bag would start the
         positive one, which is the opposite intervention. The simulator commits it in
-        `reset` instead, which is what §2.1 means by "an input to the episode, not an
-        action".
+        `reset` instead, which is what it means for `S_N` to be "an input to the
+        episode, not an action".
 
         Applied AFTER validation, for the same two reasons the containment wrapper
         is: a node deletion's incident `remove_edge` ops are the mechanics of one
@@ -209,7 +209,7 @@ def blocking_plan(
                 continue
 
             seen.add((source, target))
-            # The weight lever is "blocking as p -> 0" (§1.1), which is the r~ = 0
+            # The weight lever is "blocking as p -> 0", which is the r~ = 0
             # end of DiffIM's own continuous relaxation
             bag.append(
                 ActionOp(budget_op, source, target, 0.0)
@@ -260,7 +260,7 @@ def blocking_metrics(
     actions: list[list[ActionOp]],
 ) -> dict:
     """
-    The prevented-influence block every blocking table reports (§8.1).
+    The prevented-influence block every blocking table reports.
 
     `unopposed` is `sigma(S_N, empty)` (the rumour with no blocker at all) measured
     on the same evaluator as `reward`, because a ratio of two different rulers means
@@ -287,7 +287,7 @@ def blocking_metrics(
             100.0 * prevented / unopposed if unopposed else 0.0
         ),
         "prevented_pct_of_nodes": 100.0 * prevented / max(graph.num_nodes, 1),
-        # §8.2: the informative budget axis here is |S_P| / |S_N|, not |S_P| / |V|.
+        # The informative budget axis here is |S_P| / |S_N|, not |S_P| / |V|.
         # CLDAG's Table 2 is read entirely off this ratio: it takes 20-30x the
         # attacker's seeds to cut the rumour to 10%.
         "budget_ratio": (
@@ -318,7 +318,7 @@ def proximity_ring(graph: GraphInfo, sources, hops: int = 1) -> list[int]:
     """
     Nodes within `hops` of the rumour's own seeds, nearest first.
 
-    §5.4's finding in one function: the degree heuristic "cannot be used for
+    A published finding in one function: the degree heuristic "cannot be used for
     influence blocking maximization at all", while proximity: the out-neighbours of
     the negative seeds: is the strong cheap baseline that only falls behind CLDAG
     once the rumour is strong enough to traverse long paths. It is used by the
@@ -353,7 +353,7 @@ def exposure_scores(
     Not a published method: it is the shared building block the proximity family and
     the prompt's exemplar both need, and it exists because the single most common way
     a blocking algorithm wastes its budget is protecting nodes the cascade never
-    reaches (§8.1: those score exactly zero).
+    reaches (those score exactly zero).
     """
     exposure = np.zeros(graph.num_nodes, dtype=np.float64)
     wave = {int(node): 1.0 for node in sources}

@@ -10,8 +10,8 @@ Source: https://snap.stanford.edu/data/gemsec-Deezer.html
     - No node labels (the archive ships genre lists we do not densify)
 
 Warning: **"Deezer" in this literature is the HUNGARY subgraph, not the whole release.**
-`research/source_localization.md` §6.2 quotes IVGD's Deezer as 47,538 / 222,887
-without saying which file that is, and the archive ships three separate country
+IVGD reports its Deezer as 47,538 / 222,887 without saying which file that
+is, and the archive ships three separate country
 graphs with overlapping 0-based ids. Counted from the downloaded files [derived]:
 
     HR   54,573 nodes   498,202 edges
@@ -25,8 +25,8 @@ wants them; point `country` at one to load it instead.
 
 IVGD uses this graph for its SCALABILITY column and nothing else, so its only
 published number here is a runtime, and even that could not have its column
-header confirmed (§5.2, marked [claim]). It is loaded for the same purpose: a size
-at which the cost claim of §2.3.2 has room to separate the arms, not a head-to-head
+header confirmed (marked [claim]). It is loaded for the same purpose: a size
+at which the cost claim has room to separate the arms, not a head-to-head
 F1 comparison there is no row to make.
 
 Original paper: Rozemberczki, Davies, Sarkar & Sutton, "GEMSEC: Graph Embedding

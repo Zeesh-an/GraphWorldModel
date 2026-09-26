@@ -7,10 +7,10 @@ Every predictor has the signature
     (graph, observation, horizon, **kw) -> float | None
 
 returning the popularity the cascade will have reached by `t_p`, or **None to
-DECLINE**. That second return is not politeness: `research/cascade_prediction.md`
-§8.4 records that generative models refuse to score supercritical cascades (SEISMIC
+DECLINE**. That second return is not politeness: generative models refuse to score
+supercritical cascades (SEISMIC
 produced no prediction at all for 1,022 of ~20K News cascades at five minutes),
-that papers report the mean over scoreable cascades only, and that this "silently
+papers report the mean over scoreable cascades only, and this "silently
 favours the model that gives up more often". Mishra et al. publish their failure
 counts and almost nobody else does, so `n_failed` is a column here rather than a
 footnote and declining is a first-class outcome rather than an error.
@@ -18,23 +18,22 @@ footnote and declining is a first-class outcome rather than an error.
 That is the whole difference from the other four pools. `algorithms.py` returns a
 seed set, `dismantling_algorithms.py` nodes to delete, `localization_algorithms.py`
 a source set, `reconstruction_algorithms.py` a trajectory, and this one returns a
-single number, because the task emits no action at all (§2.1).
+single number, because the task emits no action at all.
 
-Read §3 and §5 before treating any of these as a weak floor. In ascending order of
-danger:
+None of these is a weak floor. In ascending order of danger:
 
   1. `random_prediction`, `mean_size`, `persistence`: the three floors. Do not
      dismiss `mean_size`: MSLE is an error in LOG space, so predicting the training
      mean is far stronger than the same idea would be under squared error, and an
      arm that cannot clear it has learned nothing about the instance.
   2. **`szabo_huberman`**: the row that actually has to be beaten. One feature, one
-     line, from 2008, and every paper in §5 still prints it as "Feature-S&H"
-     (§3.1). Its whole content is that `log P(t_p)` is near-linear in `log P(t_o)`.
+     line, from 2008, and every published paper still prints it as "Feature-S&H".
+     Its whole content is that `log P(t_p)` is near-linear in `log P(t_o)`.
   3. **`feature_linear` / `feature_gbt`**: CTCP's own MLP and XGBoost rows over
-     Cheng et al.'s five feature classes, and §3.1 records CasFlow's own ablation
-     finding that feature models "in some cases even beat deep learning models".
+     Cheng et al.'s five feature classes, and CasFlow's own ablation found that
+     feature models "in some cases even beat deep learning models".
      Cheng et al.'s central result is that the TEMPORAL features dominate.
-  4. **`seismic` / `hawkes` / `hawkes_hybrid`**: §3.2's generative line, and the
+  4. **`seismic` / `hawkes` / `hawkes_hybrid`**: the generative line, and the
      closest classical analogue to a world model: a stated transition mechanism plus
      a fitted parameter, rolled forward. Their failure mode is ours too: SEISMIC
      diverges when the branching factor exceeds 1, which is the same runaway
@@ -52,7 +51,7 @@ deviations are shared widely enough to name up front:
     `run_baseline`'s module docstring forbids.
   * **No content features anywhere.** Cheng et al.'s five classes include content,
     and their own result is that content alone reaches 0.558 accuracy against 0.73
-    for the best temporal feature [verified, §5.6]. Our corpora carry no text, so
+    for the best temporal feature [verified]. Our corpora carry no text, so
     the content class is absent and the temporal class: the one that dominates,
     is not.
   * **Point-process fits are moment-matched, not MLE.** SEISMIC's and the Hawkes
@@ -69,7 +68,7 @@ from coding_agent.types import GraphInfo
 # Szabo & Huberman's model is `log P(t_p) = alpha * log P(t_o) + beta`. With no
 # fitted pair to hand (a single-instance call, or an unfitted arm) these are the
 # defaults: alpha = 1 and beta = log(2), i.e. "it doubles", which is exactly the
-# median outcome Cheng et al. built their balanced classification task around (§1.3).
+# median outcome Cheng et al. built their balanced classification task around.
 default_sh_slope = 1.0
 default_sh_intercept = math.log(2.0)
 
@@ -86,8 +85,8 @@ rpp_default_decay = 0.6
 hip_default_theta = 1.5
 
 # Branching-factor extrapolation stops here: a supercritical estimate diverges, and
-# §3.2 records that SEISMIC's honest response is to DECLINE rather than to emit a
-# number. Ours declines at the same boundary.
+# SEISMIC's honest response is to DECLINE rather than to emit a number. Ours
+# declines at the same boundary.
 supercritical_threshold = 0.999
 
 # Reachability's BFS depth. The structural ceiling is what a cascade COULD reach if
@@ -114,8 +113,8 @@ def cascade_features(graph: GraphInfo, observation) -> dict[str, float]:
     """
     Cheng et al.'s five feature classes, minus content, over the observed prefix.
 
-    §5.6 is the reason this exists as a shared function rather than inside one
-    predictor: that paper's finding is not "features work" but "TEMPORAL features
+    Cheng et al. are the reason this exists as a shared function rather than inside
+    one predictor: that paper's finding is not "features work" but "TEMPORAL features
     dominate", with the reshare rate in the second half of the observation window
     the single best one at 0.73 accuracy and the best STRUCTURAL feature at 0.65. A
     pool whose members each computed their own features could not show that, and the
@@ -266,8 +265,8 @@ def szabo_huberman(
     """
     Szabo & Huberman (CACM 2010): `log P(t_p) = alpha * log P(t_o) + beta`.
 
-    §3.1 calls it "the origin: one feature, one line" and notes that every paper
-    since still prints it as Feature-S&H. Fitted by least squares on the selection
+    The origin of the feature line, one feature and one line, and every paper since
+    still prints it as Feature-S&H. Fitted by least squares on the selection
     split when examples are available and held at the doubling constant otherwise.
 
     **This is the row that has to be beaten.** A learned method that does not clearly
@@ -315,7 +314,7 @@ def feature_linear(
     """
     Ridge regression on Cheng et al.'s feature classes: CTCP's "MLP" row's honest cousin.
 
-    §3.1: feature-driven regression is "still competitive", and CasFlow's own
+    Feature-driven regression is still competitive, and CasFlow's own
     ablation says it sometimes beats deep models. Linear rather than an MLP because
     the whole selling point of this row is that it is a one-screen model whose
     coefficients can be read; `feature_gbt` is the non-linear member of the pair.
@@ -340,7 +339,7 @@ def feature_gbt(
     Gradient-boosted trees on the same features: CTCP's XGBoost row.
 
     sklearn's `GradientBoostingRegressor` rather than xgboost, and stated rather than
-    hidden: CTCP reports XGBoost specifically [verified, §5.2] and the two are not
+    hidden: CTCP reports XGBoost specifically [verified] and the two are not
     identical, but adding a dependency for one baseline row is worse than a named
     substitution. Falls back to the linear fit when sklearn is unavailable.
     """
@@ -365,8 +364,8 @@ def weng_communities(graph: GraphInfo, observation, horizon: int, **_: object) -
     """
     Weng, Menczer & Ahn (2014): early diffusion ACROSS communities predicts virality.
 
-    §3.1: "community structure of the early adopter set predicts meme virality better
-    than volume". Their own measure needs a community partition of the whole graph;
+    Their finding: community structure of the early adopter set predicts meme virality
+    better than volume. Their own measure needs a community partition of the whole graph;
     ours uses the cheapest structural proxy a `GraphInfo` supports: the fraction of
     the adopter set's neighbourhood that is NOT already adopting, which is high
     exactly when the cascade has escaped its first neighbourhood. Deviation stated
@@ -388,10 +387,10 @@ def branching_factor(graph: GraphInfo, observation, horizon: int, **_: object) -
     """
     Galton-Watson extrapolation: estimate `R` from the observed waves and sum the tail.
 
-    The mechanism SEISMIC, our structured IC head and every branching-process model
-    in §3.2 share, in its barest form: if each adopter produces `R` more and `R < 1`,
-    the remaining total is `last_wave * R / (1 - R)`. **DECLINES when `R >= 1`**,
-    which is the supercritical case §3.2 says SEISMIC also refuses: the expected
+    The mechanism SEISMIC, our structured IC head and every generative
+    branching-process model share, in its barest form: if each adopter produces `R`
+    more and `R < 1`, the remaining total is `last_wave * R / (1 - R)`. **DECLINES
+    when `R >= 1`**, which is the supercritical case SEISMIC also refuses: the expected
     size diverges, and emitting a number there would be a guess dressed as a model.
     """
     waves = _waves(observation)
@@ -428,11 +427,10 @@ def seismic(graph: GraphInfo, observation, horizon: int, **_: object) -> float |
     follower count, which is exactly out-degree on our graphs).
 
     **DECLINES on supercritical cascades** (`p_t * n_star >= 1`), which is not a
-    limitation added here: §5.4 records SEISMIC failing on 507 of ~30K Tweet-1Mo
-    cascades at five minutes and 1,022 of ~20K News cascades, and §8.4 records that
-    reporting the mean over the rest is what "silently favours the model that gives
-    up more often". The decline is the honest behaviour and `n_failed` is where it
-    shows.
+    limitation added here: SEISMIC is published failing on 507 of ~30K Tweet-1Mo
+    cascades at five minutes and 1,022 of ~20K News cascades, and reporting the mean
+    over the rest silently favours the model that gives up more often. The decline
+    is the honest behaviour and `n_failed` is where it shows.
 
     Deviation: the published estimator fits `p_t` by a kernel-weighted count over
     exact event times. A binned replay has waves rather than instants, so `p_t` here
@@ -498,11 +496,11 @@ def hawkes(graph: GraphInfo, observation, horizon: int, **_: object) -> float | 
     """
     Mishra et al. (CIKM 2016): a marked Hawkes process fitted per cascade.
 
-    §5.4 is why this row matters more than SEISMIC's: on Tweet-1Mo at five minutes
+    This row matters more than SEISMIC's: on Tweet-1Mo at five minutes
     Hawkes reaches mean ARE 0.36 against SEISMIC's 2.61, and it fails on 302
     cascades against SEISMIC's 507: better on both the error AND on how many
-    cascades it can score at all, which is the pairing §8.4 says to always report
-    together.
+    cascades it can score at all, which is the pairing that should always be
+    reported together.
 
     Same supercritical decline as `seismic`, for the same reason: `A_1 / (1 - n*)`
     diverges at `n* = 1`.
@@ -525,9 +523,9 @@ def hawkes_hybrid(
     Mishra et al.'s hybrid: the generative estimate CORRECTED by a fitted layer.
 
     Their best row by a wide margin: 0.17 / 0.15 / 0.11 mean ARE against the pure
-    Hawkes 0.27 / 0.22 / 0.17 [verified, §5.4 Table 3], and §3.2 records why it
-    matters to us specifically: "a learned corrective layer on top of a generative
-    core is structurally identical to our `structured_residual` head". This is that
+    Hawkes 0.27 / 0.22 / 0.17 [verified], and it matters to us specifically: a
+    learned corrective layer on top of a generative core is structurally identical
+    to our `structured_residual` head. This is that
     architecture as a baseline, so 6-vs-this is a comparison of two corrections on
     two different cores rather than of a learned model against a heuristic.
 
@@ -598,7 +596,7 @@ def rpp(graph: GraphInfo, observation, horizon: int, **_: object) -> float:
     Deviation: the published model fits a log-normal aging kernel by MLE over exact
     arrival times. Ours holds the kernel exponential at a fitted decay, which a wave
     series identifies and a log-normal does not. Never declines: the model has no
-    divergence, which is the structural difference from §3.2's Hawkes line.
+    divergence, which is the structural difference from the Hawkes line.
     """
     waves = _waves(observation)
     _, theta = _hawkes_parameters(observation)
@@ -621,10 +619,10 @@ def hip(graph: GraphInfo, observation, horizon: int, **_: object) -> float:
     """
     Hawkes Intensity Process (Rizoiu et al., WWW 2017), endogenous half only.
 
-    §3.2: HIP's contribution is an EXOGENOUS promotion term, search, shares,
-    off-platform arrivals: "the term IC has no place for", and §2.2 lists exogenous
-    arrivals as one of three specific mechanisms by which real cascades violate our
-    structured head's composition rule. That makes it the most diagnostically
+    HIP's contribution is an EXOGENOUS promotion term, search, shares, off-platform
+    arrivals: the term IC has no place for, and exogenous arrivals are one of three
+    specific mechanisms by which real cascades violate our structured head's
+    composition rule. That makes it the most diagnostically
     interesting row in this pool.
 
     **Deviation, and it is a large one:** none of our corpora publish a separate
@@ -710,7 +708,7 @@ def degree_scaled(graph: GraphInfo, observation, horizon: int, **_: object) -> f
     `P(t_o)` scaled by the frontier's mean degree relative to the graph's.
 
     The structural analogue of Szabo & Huberman: a multiplier, but read off the
-    graph rather than fitted from history. In the pool because §5.5 (CoupledGNN) is
+    graph rather than fitted from history. In the pool because CoupledGNN's is
     the only published protocol that withholds timestamps entirely and uses the
     early adopter set plus the global graph alone: this is the crudest member of
     that family and sets the bar its whole line has to clear.
@@ -733,7 +731,7 @@ def random_prediction(
     """
     A draw from the training size distribution: the floor, and it is not a throwaway.
 
-    §1.4 is the reason: Salganik/Dodds/Watts and Watts (2007) argued cascade size is
+    The reason: Salganik/Dodds/Watts and Watts (2007) argued cascade size is
     close to inherently unpredictable, and Cheng et al. (WWW'14) is the direct
     rebuttal. The GAP between this row and everything else is the empirical form of
     that argument, exactly as the random-versus-degree gap is Pastor-Satorras &
@@ -758,7 +756,8 @@ def mc_forward(
     The "just simulate it" baseline, and the one that IS this repo's contribution
     wearing a baseline's clothes: under `@world_model` it is a forward pass of
     `f_theta`, under `@monte_carlo` it is `mc_runs` real episodes per step, and the
-    difference between those two rows is §2.4's cost claim with nothing else varying.
+    difference between those two rows is the world model's cost claim with nothing
+    else varying.
 
     Blocked from generated scripts by default, for the same reason `celf` and
     `mcmc_decode` are: a generated program is offline by construction and has no forward model,
@@ -781,19 +780,19 @@ def mc_forward(
 
 
 prediction_algorithms = {
-    # §3.1's feature line: `szabo_huberman` is the bar
+    # the feature line: `szabo_huberman` is the bar
     "szabo_huberman": szabo_huberman,
     "feature_linear": feature_linear,
     "feature_gbt": feature_gbt,
     "weng_communities": weng_communities,
-    # §3.2's generative line, and the two that DECLINE
+    # the generative line, and the two that DECLINE
     "seismic": seismic,
     "hawkes": hawkes,
     "hawkes_hybrid": hawkes_hybrid,
     "rpp": rpp,
     "hip": hip,
     "branching_factor": branching_factor,
-    # graph-only, the CoupledGNN family's floor (§5.5)
+    # graph-only, the CoupledGNN family's floor
     "neighborhood_size": neighborhood_size,
     "degree_scaled": degree_scaled,
     "reachability": reachability,

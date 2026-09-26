@@ -3,31 +3,31 @@ Runnable self-check for the cascade-reconstruction contract.
 
     python -m coding_agent.check_cascade_reconstruction
 
-Nine checks, each one a claim `research/cascade_reconstruction.md` makes that would
-be expensive to discover was false halfway through a sweep. They run on a tiny
-generated dataset in a temp directory and take a few seconds; nothing here needs a
-trained world model or an LLM.
+Nine checks, each one a claim about this task that would be expensive to discover
+was false halfway through a sweep. They run on a tiny generated dataset in a temp
+directory and take a few seconds; nothing here needs a trained world model or an
+LLM.
 
-  1. **The transmission edge exists and is real.** NDlib does not emit one (§9 item
-     9), so the traced models are ours, and a traced model that silently changed
+  1. **The transmission edge exists and is real.** NDlib does not emit one, so the
+     traced models are ours, and a traced model that silently changed
      the dynamics would invalidate every episode. Checked against the untraced
      model's own distribution, and every recorded `(u, v)` checked to be an arc.
   2. **A source has no parent and activates at t = 0.** The whole `parent = None`
      convention rests on it.
   3. **Every masking setting produces the observation it claims.** Four settings,
-     four protocols (§8.3), and a mislabelled one would run a different experiment
+     four protocols, and a mislabelled one would run a different experiment
      under the reported name.
   4. **The four kernel bindings differ, and @native raises.** Conditions 3-6 are an
-     ablation on one variable (§2.5.2); if the bindings were the same object the
+     ablation on one variable; if the bindings were the same object the
      ladder would measure nothing.
-  5. **The reward is not gameable by the easy half.** §2.6, and §2.11 risk 1's
-     explicit instruction: a trivial decoder must score badly.
+  5. **The reward is not gameable by the easy half.** A trivial decoder must score
+     badly.
   6. **...nor by naming almost nothing.** The second gaming corner, which the
      literature does not name because no published method has a search.
   7. **The contract rejects an incoherent trajectory.** A parent that is not an
      arc, a source at t > 0, a node at t > 0 with no parent.
   8. **`transition_logprob` agrees with the kernel it derives from.** One kernel
-     call behind both (§2.5.2), so a disagreement means one of them is wrong.
+     call behind both, so a disagreement means one of them is wrong.
   9. **Every library decoder returns a valid trajectory on every setting.** The
      condition-1 pool is the bar; a member that raises is a missing row, not a
      weak one.
@@ -295,7 +295,7 @@ def check_bindings(graph: GraphInfo) -> None:
         f"{len(reachable)} reachable, {len(outside)} impossible activations",
     )
 
-    # The episodes are charged to the arm, which is the cost claim of §2.4.2
+    # The episodes are charged to the arm, which is the task's cost claim
     check(
         "a kernel evaluation is charged to the arm's real-episode count",
         environment.episodes_used >= 30,

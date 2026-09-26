@@ -8,7 +8,7 @@ Source: https://snap.stanford.edu/data/soc-Pokec.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-SandIMIN's and fair IBM's largest graph (§6.2). SCALE WARNING: 30.6M arcs is past
+SandIMIN's and fair IBM's largest graph. SCALE WARNING: 30.6M arcs is past
 what the NDlib rollout path simulates in reasonable time, so this is a scalability
 target rather than a day-one dataset: the same standing as `twitter`, `digg` and
 `youtube`. SandIMIN's Table 5 row on it is the one where its trivial LHGA heuristic

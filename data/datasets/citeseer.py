@@ -12,21 +12,21 @@ Source: https://github.com/abojchevski/graph2gauss
     - Node features: bag-of-words vectors
     - Node labels: topic classes
 
-DIPT's third graph (`research/cascade_reconstruction.md` §5.2), reported at Path
+DIPT's third graph, reported at Path
 Precision 0.593 and Jaccard 0.421: between its Cora-ML (0.622) and its Power Grid
 (0.680), both of which we already load. Adding it makes THREE of DIPT's five rows
 reachable.
 
 Warning: OUR COUNT IS NOT THE ONE THAT CIRCULATES, and the gap is large. DIPT
-publishes NO dataset table (§11), and the "3,327 / 4,732" quoted for CiteSeer
+publishes NO dataset table, and the "3,327 / 4,732" quoted for CiteSeer
 everywhere is the LINQS release without a largest-component filter. graph2gauss's
 file standardized the way `cora_ml` is standardized gives 1,681 / 2,902: half the
 nodes, because CiteSeer is unusually fragmented and 2,549 of its 4,230 nodes sit
 outside the giant component. Both numbers are right about different objects.
 
 The consequence is concrete: a DIPT comparison on this row is NOT cell-for-cell
-until their preprocessing is confirmed, and §11 already marks the 3,327 / 4,732
-pair [claim] for exactly this reason. `cora_ml` and `power_grid` are the two DIPT
+until their preprocessing is confirmed, and the 3,327 / 4,732 pair is marked
+[claim] for exactly this reason. `cora_ml` and `power_grid` are the two DIPT
 rows where our graph is known to match, and they are the ones to lead with.
 
 Original paper: Giles, Bollacker & Lawrence, "CiteSeer: An Automatic Citation

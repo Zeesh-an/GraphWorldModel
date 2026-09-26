@@ -13,8 +13,8 @@ results/<task>/<dataset>/<run>/
     report.md                   final write-up (stage: report)
     pipeline.json               run manifest: config + per-stage status
 
-`task` is a key of `pipeline.tasks.tasks`, so the results tree and
-`research/<task>.md` are always spelled the same way. `run` separates variants of
+`task` is a key of `pipeline.tasks.tasks`, so the results tree and the task
+registry are always spelled the same way. `run` separates variants of
 the same (task, dataset) (backbones, ablations, seeds) and defaults to
 `default`.
 """

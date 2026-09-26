@@ -298,7 +298,7 @@ def dismantling_curve_is_sequential() -> None:
     s(q) recomputes the residual graph after EVERY removal.
 
     Batch and sequential removal are different settings whose numbers are not
-    interconvertible (research/critical_node_detection.md §8.2 trap 1), and the
+    interconvertible, and the
     curve is the sequential one by definition.
     """
     graph = _graph([(0, 1), (1, 2), (2, 3), (3, 4)], 5, directed=False)
@@ -314,7 +314,8 @@ def dismantling_curve_is_sequential() -> None:
 
 def degree_rank_spearman_catches_a_degree_ranking() -> None:
     """
-    §9.5's self-measurement: MIND put GDM at 0.762 against its own input features.
+    A degree-correlation self-measurement: MIND put GDM at 0.762 against its own
+    input features.
 
     A removal order that IS the degree order must read near +1, and the reverse
     near -1, or the column cannot detect what it exists to detect.

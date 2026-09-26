@@ -10,7 +10,7 @@ Source: http://konect.cc/networks/maayan-vidal/
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-Reported by DCRS and SPR (research/critical_node_detection.md §7), the two
+Reported by DCRS and SPR, the two
 strongest learned dismantlers with a printed per-network table, so this is one of
 the few graphs where a learned baseline number can actually be checked.
 

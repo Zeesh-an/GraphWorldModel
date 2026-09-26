@@ -9,7 +9,7 @@ Source: https://github.com/renxiaolong/Generalized-Network-Dismantling
 
 Brazilian corruption scandals 1987-2014: nodes are people, an edge means two
 people appeared in the same scandal. The giant component, as GND and NIRM report
-it (research/critical_node_detection.md §6.2).
+it.
 
 Original paper: Ribeiro, Alves, Martins, Lenzi, Perc, "The dynamical structure of
     political corruption networks", Journal of Complex Networks 6(6), 2018

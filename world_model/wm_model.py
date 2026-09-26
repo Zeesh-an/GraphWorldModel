@@ -362,7 +362,7 @@ class _EdgeTransmission(nn.Module):
     One campaign's per-edge propensity `q(u -> v)`, shared by both competitive heads.
 
     Exactly `ICTransmissionHead`'s edge model, factored out because a competitive
-    head needs TWO of them off one shared encoding (§2.2). `oracle` pins q to the
+    head needs TWO of them off one shared encoding. `oracle` pins q to the
     true probability, `residual` anchors it there and learns only a correction, and
     `positive_prob` overrides the anchor for the limiting campaign under MCICM,
     where `p_L` is a constant the edge weight does not carry.
@@ -447,7 +447,7 @@ def _resolve_tie(
     priority: torch.Tensor | None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    §2.2's tie-break table, in closed form and differentiable in both inputs.
+    The three tie-break rules, in closed form and differentiable in both inputs.
 
     All three rules preserve the property that made the single-cascade head work: a
     susceptible node with no active in-neighbour in EITHER cascade has
@@ -478,7 +478,7 @@ def _resolve_tie(
 class CompetitiveICHead(nn.Module):
     """
     Structured two-cascade IC head: run the IC product form TWICE off the shared
-    encoding, then compose with an explicit tie-break (§2.2).
+    encoding, then compose with an explicit tie-break.
 
         q^N_uv    = sigmoid(MLP_N([h_u, h_v, w_uv]))
         q^P_uv    = sigmoid(MLP_P([h_u, h_v, w_uv]))
@@ -486,7 +486,7 @@ class CompetitiveICHead(nn.Module):
         p^P_new(v) = 1 - prod (1 - q^P_uv * positive_frontier_u)
         (P(v -> negative), P(v -> positive)) = tie_break(p^N_new, p^P_new)
 
-    Warning: §2.2 warns that this factorization "silently assumes MCICM, not COICM",
+    Warning: an obvious objection is that this factorization assumes MCICM, not COICM,
     because COICM shares one coin per edge between the campaigns. That objection
     applies to the live-edge characterisation and NOT to the stepwise transition this
     head predicts: a node activates in at most one campaign, so each arc is ever
@@ -716,8 +716,8 @@ class CompartmentTransitionHead(nn.Module):
     Structured SIR / SIS / SEIR head: a per-node row-stochastic TRANSITION MATRIX,
     not a probability.
 
-    Warning: THIS IS THE ONE PLACE THE STRUCTURED-HEAD IDEA HAD TO CHANGE, and
-    research/epidemic_control.md §2.4 is the argument. `ICTransmissionHead` composes
+    Warning: THIS IS THE ONE PLACE THE STRUCTURED-HEAD IDEA HAD TO CHANGE.
+    `ICTransmissionHead` composes
 
         y_inf = infected + (1 - infected) * p_new
 
@@ -725,13 +725,13 @@ class CompartmentTransitionHead(nn.Module):
     `y_inf >= infected` for every assignment of encoder weights and every value of
     `q(u -> v)`. There is no way to make that expression predict a node LEAVING the
     infected set, and `LTThresholdHead` has the identical shape. That monotonicity
-    is load-bearing rather than incidental: `RESULTS.md` records it as what fixed
+    is load-bearing rather than incidental: it is what fixed
     rollout saturation (`count_bias` +49 -> +0.27), and it is exactly the
     assumption `I -> R` and `I -> S` violate. So this is a NEW head reusing the
     per-edge transmission model, not an edit to the existing ones, and IC/LT keep
     theirs untouched.
 
-    What replaces it is §2.4's matrix, with the same three structural properties:
+    What replaces it is this matrix, with the same three structural properties:
 
             S              E            I            R
         S   1 - p_inf      p_inf        .            .        <- infection is S's only exit
@@ -1073,8 +1073,7 @@ class WorldModel(nn.Module):
         # unstructured (N, 5) head has nothing making the four compartments a
         # simplex, nothing stopping `I` from growing without an infectious
         # neighbour, and (the point of the task) nothing that represents
-        # recovery as a transition rather than as a coincidence
-        # (research/epidemic_control.md §2.4).
+        # recovery as a transition rather than as a coincidence.
         if epidemic:
             if competitive:
                 raise ValueError(

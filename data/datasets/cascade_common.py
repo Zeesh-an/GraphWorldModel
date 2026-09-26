@@ -4,9 +4,9 @@ that carry diffusion traces rather than topology alone.
 
 Every other loader here answers one question ("what is the graph"). A cascade
 corpus answers two, and the second is what `--task cascade_prediction` exists for:
-`research/cascade_prediction.md` §6.1 records that not one graph we already load
-carries a cascade, and §9.4 that these corpora are the concrete, downloadable form
-of the "logged trajectories" our whole methodology note asserts exist.
+not one graph we already load carries a cascade, and these corpora are the
+concrete, downloadable form of the "logged trajectories" our whole methodology note
+asserts exist.
 
 So a corpus loader exposes THREE functions instead of two:
 
@@ -17,13 +17,13 @@ So a corpus loader exposes THREE functions instead of two:
 and `load_<name>` is built FROM the cascades rather than beside them, so a node id
 means the same thing in both. That is not a convenience: the underlying social
 graph published with these corpora is usually far too large to simulate on (Weibo
-is 6.7M nodes), and §6.5 records the way out: the union of the observed diffusion
+is 6.7M nodes), and there is a way out: the union of the observed diffusion
 paths IS a graph, it is the one CasFlow's own `generate_global_graph` builds, and
 it is small enough to run.
 
 **The canonical line format.** CasFlow's preprocessed bundle is the de-facto
-benchmark artefact of this literature (§8.5: "there is no leaderboard to enter and
-no split to inherit"; the bundle is the closest thing), and every later paper
+benchmark artefact of this literature (there is no leaderboard to enter and no
+split to inherit; the bundle is the closest thing), and every later paper
 starts from it. One line per cascade, five tab-separated fields:
 
     cascade_id \t root \t publish_time \t n \t path1:t1 path2:t2 ...
@@ -36,9 +36,9 @@ unobserved and every adopter is attributed to the root. That attribution is stat
 on each loader rather than hidden: it makes the path length 2 for every adopter,
 which is exactly what those corpora support and no more.
 
-**Warning: the same three names mean seven different things** (§6.4). Twitter has
+**Warning: the same three names mean seven different things**. Twitter has
 five published versions (88,440 / 86,764 / 19,718 / 67,760 / 569 cascades), Weibo
-four and APS three, and §5.7 shows a `< 10` vs `< 50` filter alone moves MSLE by
+four and APS three, and a `< 10` vs `< 50` filter alone moves MSLE by
 more than the gap between any two consecutive rows of the field's headline table.
 Every loader here states which version it is in its own docstring, and
 `corpus_statistics` prints the counts so a mismatch is visible in the log rather
@@ -53,13 +53,13 @@ import numpy as np
 import scipy.sparse as sp
 
 # CasFlow drops any cascade with fewer than this many participants inside the
-# observation window, and CasFT does the same. §8.4 is why it is a named constant
-# rather than a literal: dropping small cascades removes the hardest and most
+# observation window, and CasFT does the same. It is a named constant rather
+# than a literal because dropping small cascades removes the hardest and most
 # numerous cases and inflates every metric, so a table has to report it.
 default_min_observed = 10
 
-# ...and shows its model only the first this-many OBSERVED participants [verified,
-# §8.4]: `gene_emb.py` cuts the sequence at `max_seq` 100 while `gene_cas.py`
+# ...and shows its model only the first this-many OBSERVED participants
+# [verified]: `gene_emb.py` cuts the sequence at `max_seq` 100 while `gene_cas.py`
 # computes the label from the full cascade, so the cap bounds what a predictor
 # sees and never the target. A method that exploits long tails cannot show it
 # under this rule, which is also why it is reported rather than assumed.
@@ -74,8 +74,8 @@ class Cascade:
     `events` is `(adopter, elapsed, parent)` sorted by elapsed time, with `parent`
     None for the root. `parent` is the second-to-last id of the corpus's own path
     string, so it is a REAL transmission edge where the corpus records one and the
-    root everywhere else, which is exactly the distinction
-    `research/cascade_reconstruction.md` spends its §2.6 on, arriving here for free.
+    root everywhere else, which is exactly the distinction cascade reconstruction
+    turns on, arriving here for free.
     """
 
     cascade_id: str
@@ -126,7 +126,7 @@ def parse_casflow_line(line: str) -> Cascade | None:
 
     The path `u1/u2/u3:3655` means `u3` adopted at t=3655 from `u2`. The root's own
     entry is `u1:0`, a single-element path, and it is emitted with `parent = None`.
-    A repeated adopter keeps its FIRST time, which is what every method in §3 and §4
+    A repeated adopter keeps its FIRST time, which is what every published method
     assumes (a progressive cascade; a node adopts once).
     """
     parts = line.rstrip("\n").split("\t")
@@ -245,11 +245,11 @@ def events_to_cascade(
 
     The bridge for every corpus whose native format records WHEN each user adopted
     but not FROM WHOM: Digg's vote log and MemeTracker's phrase-cluster time series
-    are both like this, and §6.2 lists them as first-`k`-adopters (microscopic)
-    corpora for exactly that reason. Attributing every adopter to the root is the
-    honest reading: it is what the data supports, it makes the observed diffusion
-    "graph" a star, and each loader says so out loud rather than letting a reader
-    assume a tree was recovered.
+    are both like this, and this literature treats them as first-`k`-adopters
+    (microscopic) corpora for exactly that reason. Attributing every adopter to the
+    root is the honest reading: it is what the data supports, it makes the observed
+    diffusion "graph" a star, and each loader says so out loud rather than letting a
+    reader assume a tree was recovered.
     """
     if not adoptions:
         return None
@@ -294,10 +294,10 @@ def filter_cascades(
     participants INSIDE the window and every later adoption (CasFlow's model reads
     100 observed nodes; its label is the untruncated count, so capping the whole
     cascade would make the target a function of the prefix: on Digg, where every
-    story has more than 100 votes, it made every arm exact). Both are §8.4 landmines and
+    story has more than 100 votes, it made every arm exact). Both are known pitfalls and
     both are recorded in `data/metadata.json`, because a `< 10` versus `< 50`
     threshold moves MSLE by more than the gap between any two consecutive rows of
-    §5.1, so a number quoted without them is comparable to nothing.
+    a published results table, so a number quoted without them is comparable to nothing.
     """
     kept = []
 
@@ -326,10 +326,10 @@ def relabel_cascades(
     """
     Renumber corpus ids into `0..N-1`, optionally keeping only the busiest nodes.
 
-    `max_nodes` is what makes a 6.7M-node corpus runnable at all (§6.5): keep the
+    `max_nodes` is what makes a 6.7M-node corpus runnable at all: keep the
     `max_nodes` most frequently appearing participants and drop every cascade left
     with fewer than two events. That is CoupledGNN's own move: it samples the
-    1.78M-user AMiner following network down to 23,681 users [verified, §5.5], and
+    1.78M-user AMiner following network down to 23,681 users [verified], and
     like every reduction here it is reported rather than silent, since a corpus
     reduced this way is a fifth version of a name that already has four.
 
@@ -445,9 +445,9 @@ def cascade_arrays(
 
 def corpus_statistics(name: str, cascades: list[Cascade], num_nodes: int) -> None:
     """
-    Print what was actually loaded, in the columns §6.2's own table uses.
+    Print what was actually loaded, in the columns published corpus tables use.
 
-    Loud rather than optional: §6.4 is a table of seven artefacts sharing three
+    Loud rather than optional: seven published artefacts share three
     names, and the cascade count plus the average size is what tells them apart. A
     run whose log says 119,313 cascades is on Weibo-A; one that says 39,076 is on
     Weibo-B and its MSLE is not comparable to the first.
@@ -468,7 +468,7 @@ def manual_download(name: str, directory: Path, expected: str, instructions: str
 
     Four of these corpora are behind something a script cannot pass: APS behind a
     request form, the CasFlow bundle behind a Google Drive interstitial, and the
-    AMiner release behind a registration wall [verified, §6.3]. Guessing a URL that
+    AMiner release behind a registration wall [verified]. Guessing a URL that
     404s is worse than not shipping a loader, so this raises with the exact steps
     instead: the same standard `data/datasets/weibo.py` already sets.
     """

@@ -2,8 +2,8 @@
 CasFlow Weibo Cascade Corpus Loader (Weibo-A)
 
 The Sina Weibo retweet corpus from the DeepHawkes release, as preprocessed in
-CasFlow's bundle. **This is Weibo-A**, the version `research/cascade_prediction.md`
-§6.4 lists first and the one that carries almost every published number.
+CasFlow's bundle. **This is Weibo-A**, the first of the published Weibo
+versions and the one that carries almost every published number.
 
 Source: CasFlow's Drive bundle (manual; see `casflow_bundle.instructions`)
     - Underlying graph 6,738,040 nodes / 15,249,636 edges [verified, CasFlow Table 2]
@@ -13,17 +13,17 @@ Source: CasFlow's Drive bundle (manual; see `casflow_bundle.instructions`)
     - Undirected here: the union of the observed retweet paths
     - No inherent node features - uses log(1 + degree)
 
-Reported by: DeepHawkes, CasCN, VaCas, CasFlow, CCGL, MUCas, CasDO, CasFT (§7).
+Reported by: DeepHawkes, CasCN, VaCas, CasFlow, CCGL, MUCas, CasDO, CasFT.
 CasFT's own row at `t_o = 0.5 h` is **MSLE 2.1728 / MAPE 0.2448**, against CasFlow's
-2.3370 / 0.2665 [verified, §5.1 Table 2].
+2.3370 / 0.2665 [verified].
 
 **Warning: three other things are called Weibo.** CTCP's re-preprocessing is 39,076
 cascades, CasTemp's 48,693, CoupledGNN's coverage-sampled subset 3,228, and our own
-`--dataset weibo` is the AMiner FOLLOWING NETWORK with no cascades at all (§6.1).
+`--dataset weibo` is the AMiner FOLLOWING NETWORK with no cascades at all.
 A row is comparable only to rows on the same one.
 
 **Warning: the global graph is not the one we run on.** 6.7M nodes exceeds this
-pipeline (§6.5, and `research/influence_maximization.md` §6.1 flags the same graph);
+pipeline (the same graph is flagged as too large for influence maximization too);
 what we build is the union of the observed diffusion paths, which is exactly
 CasFlow's own `generate_global_graph` and is small enough to simulate.
 """

@@ -15,8 +15,8 @@ control beside `email_univ`.
 Warning: NAME COLLISION, recorded rather than resolved by renaming. Opsahl's full
 UC Irvine message log is 1,899 nodes; networkrepository's `ia-fb-messages` is the
 1,266-node version, which is the one Xiao's table quotes. Two graphs, one study,
-a 50% difference in node count: the same hazard §6.4 of the other task files
-documents for Digg and Epinions.
+a 50% difference in node count: the same hazard that affects Digg and
+Epinions.
 
 Matrix Market: `%` comments, one uncommented dimension header, then `row col`
 pairs. `skip_rows=1` drops the header.

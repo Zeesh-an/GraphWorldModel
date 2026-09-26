@@ -491,9 +491,10 @@ def _namespace(strategy_mode: str = "free", allow_mc_algorithms: bool = False) -
         ),
         # POPULARITY predictors for cascade prediction, on the same terms again.
         # `cascade_features` rides along because it is the shared feature extractor
-        # every §3.1 method here is defined over: Cheng et al.'s five classes, minus
-        # content, and the scored-mode harness takes its output directly, so hiding
-        # it would ask the model to reinvent the one thing that paper actually found.
+        # every feature-line method here is defined over: Cheng et al.'s five
+        # classes, minus content, and the scored-mode harness takes its output
+        # directly, so hiding it would ask the model to reinvent the one thing that
+        # paper actually found.
         "prediction_algorithms": SimpleNamespace(
             **{
                 name: (
@@ -628,10 +629,10 @@ def call_strategy(method: Callable, *args: object, allow_none: bool = False) -> 
 
     `allow_none` is the one exception, and it exists for exactly one contract:
     `predict()` returns None to DECLINE scoring a cascade, which is a legitimate
-    answer rather than a failure (research/cascade_prediction.md §8.4: a
-    generative model whose fit diverges on a supercritical cascade produces no
-    estimate, and reporting the mean over scoreable cascades alone "silently
-    favours the model that gives up more often"). Declines are COUNTED in
+    answer rather than a failure (a generative model whose fit diverges on a
+    supercritical cascade produces no estimate, and reporting the mean over
+    scoreable cascades alone "silently favours the model that gives up more
+    often"). Declines are COUNTED in
     `n_failed`, never scored as errors.
     """
     try:

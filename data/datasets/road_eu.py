@@ -12,7 +12,7 @@ Table I print the RAW `subelj_euroroad` counts (1,174 / 1,417) under the same
 name, so the two are not interchangeable: `--dataset euroroad` is the raw one.
 
 Mesh-like and near-planar (mean degree 2.5), which is the graph class
-research/critical_node_detection.md §9.4 predicts learned dismantlers lose on.
+learned dismantlers are expected to lose on.
 
 Original data: Šubelj & Bajec, "Robust network community detection using
     balanced propagation", Eur. Phys. J. B 81, 2011

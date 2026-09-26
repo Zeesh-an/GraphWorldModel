@@ -157,7 +157,7 @@ def evaluate_one_step(
     `dose_success`; and the three compartment columns get their own accuracy under
     `compartment_acc`, because a head that predicts the attack set well while
     getting `I` wrong has failed at the only thing that makes this task different
-    from critical node detection (research/epidemic_control.md §2.4).
+    from critical node detection.
     """
     model.eval()
     pos_pred_infected_parts = []
@@ -1024,8 +1024,8 @@ def epidemic_rollout_ensemble(
         non-monotone quantity, and a head that cannot shrink `I` shows up here
         first (as a positive bias that grows with `t`) while the attack-set bias
         still looks fine. This is the saturation guard for the compartmental case.
-      * **`ens_peak_model` / `ens_peak_true`**, the peak prevalence, which is what
-        §2.6 lists as the shape metric this literature grades on and the attack rate
+      * **`ens_peak_model` / `ens_peak_true`**, the peak prevalence, which is the
+        shape metric this literature grades on and the attack rate
         does not capture.
     """
     rng = np.random.default_rng(seed)
@@ -1433,14 +1433,15 @@ def blocking_regret(
 
     The competitive analogue of `planning_regret`, and it measures PREVENTED
     influence rather than spread: `sigma(S_N, empty) - sigma(S_N, blocker)`, the
-    quantity every name in research/influence_blocking.md §8.1 refers to. Regret is
+    quantity this literature reports under several names. Regret is
     against the best candidate in the same shortlist, so 0 means the model chose the
     node the simulator agrees was best.
 
-    Both comparison baselines are here for a reason §5.4 states outright: `degree` is
-    the heuristic that "cannot be used for influence blocking maximization at all",
-    and `proximity` (an out-neighbour of the rumour's own seeds) is the strong
-    cheap one. Beating random is not evidence here; beating proximity is.
+    Both comparison baselines are here for a reason the published literature states
+    outright: `degree` is the heuristic that "cannot be used for influence blocking
+    maximization at all", and `proximity` (an out-neighbour of the rumour's own
+    seeds) is the strong cheap one. Beating random is not evidence here; beating
+    proximity is.
     """
     rng = np.random.default_rng(seed)
     num_nodes = store_entry["num_nodes"]
@@ -1581,15 +1582,15 @@ def immunization_regret(
     One-dose choice: does the model pick the node whose vaccination saves the most?
 
     The compartmental analogue of `blocking_regret`, measuring PREVENTED INFECTIONS
-: `|R(inf)| unprotected - |R(inf)| with one dose`, which is what §8.3 says the
+: `|R(inf)| unprotected - |R(inf)| with one dose`, which is what the
     table should report rather than the eigendrop the spectral line optimizes.
     Regret is against the best candidate in the same shortlist, so 0 means the model
     chose the node the simulator agrees was best.
 
-    Three comparison baselines, chosen from §3.1 rather than for convenience:
+    Three comparison baselines, chosen from the literature rather than for convenience:
     `degree` is Pastor-Satorras & Vespignani's targeted immunization (and the row a
     learned method has to beat), `acquaintance` is Cohen et al.'s no-global-
-    information rule that most embarrasses learned methods on sparse graphs (§8.3),
+    information rule that most embarrasses learned methods on sparse graphs,
     and `random` is the control their whole line exists to beat. Beating random is
     not evidence here; beating degree and acquaintance is.
 

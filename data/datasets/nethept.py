@@ -17,7 +17,7 @@ Wei Chen's original `hep.txt` (see `netphy.py`, same archive) declares
 39 self-loops gives 31,359 undirected edges. This mirror has 31,376: the same
 graph to within 17 edges (0.05%). The "31.4K undirected" in the SSA/D-SSA
 benchmark table is this count; the "58,891" in IRIE's table is the raw line
-count. See research/influence_maximization.md §6.4.1.
+count.
 
 Original paper: Wei Chen et al., "Efficient Influence Maximization
     in Social Networks," KDD 2009

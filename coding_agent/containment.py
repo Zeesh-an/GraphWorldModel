@@ -1,8 +1,7 @@
 """
 Critical node detection: the exogenous outbreak, and node deletion as a bag.
 
-Two harness pieces the diffusion-CND variant needs and the seeding tasks do not
-(research/critical_node_detection.md §2.2). Both are wrappers around the action
+Two harness pieces the diffusion-CND variant needs and the seeding tasks do not. Both are wrappers around the action
 function, in the same shape as `stream.GraphEditStream.wrap`, which is why no
 environment changed:
 
@@ -12,7 +11,7 @@ environment changed:
     planner neither chooses nor pays for, exactly as the edit stream injects edge
     ops it is not charged for.
 
-  * **Deletion as a bag.** §2.3's "lazy fix": `remove_node(v)` plus one
+  * **Deletion as a bag.** The "lazy fix": `remove_node(v)` plus one
     `remove_edge` per incident arc, so node deletion needs no sixth op. This is
     not cosmetic. Both structured heads document that a blocked node's edges are
     "gone from edge_index" and rely on it: `ICTransmissionHead` zeroes the node's

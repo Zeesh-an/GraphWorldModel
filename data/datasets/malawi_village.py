@@ -9,9 +9,9 @@ Source: https://sociopatterns.org/datasets.html
 The pilot deployment in a rural Malawian village (Ozella et al. 2021), and the
 SPARSEST graph in the family by a wide margin: average degree 8.1 against the
 primary school's 68.7 on a comparable node count. That is what makes it worth
-loading rather than a fourth school: §8.3 names sparse graphs as exactly where
-`acquaintance_immunization` most embarrasses methods that read the whole graph, and
-this is the sparsest real contact graph available to test that on.
+loading rather than a fourth school: the published literature names sparse graphs
+as exactly where `acquaintance_immunization` most embarrasses methods that read the
+whole graph, and this is the sparsest real contact graph available to test that on.
 
 Warning: a CSV with a HEADER and an index column (`,contact_time,day,id1,id2`) so
 the node ids are columns 3 and 4, not 1 and 2. It is the only file in this family

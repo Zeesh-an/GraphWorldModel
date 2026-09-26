@@ -5,15 +5,15 @@ Source: https://sociopatterns.org/datasets.html
     - 327 nodes, 5,818 undirected edges, 188,508 timestamped contacts [derived]
     - Undirected, unweighted after aggregation
     - 9 class labels (2BIO1-3, MP, MP*1-2, PC, PC*, PSI*)
-§6.6 ranks this THIRD: it is the only multi-layer instance within reach, because
+Loaded because it is the only multi-layer instance within reach:
 Mastrandrea et al. (2015) published three DIFFERENT relations on the same students
 this proximity trace, a contact diary (120 nodes / 502 directed arcs) and a
-Facebook friendship graph (156 / 1,437 undirected) [all derived, §6.2]. Only the
+Facebook friendship graph (156 / 1,437 undirected) [all derived]. Only the
 proximity layer is loaded: the other two are different relations rather than
 contact networks, and an epidemic does not travel along a Facebook edge.
 
 Warning: THE FILE AND THE PAPER DISAGREE, and the file wins. Thiers13's metadata
-lists 329 students; 327 appear in the contacts [derived, §6.2]. Same discrepancy as
+lists 329 students; 327 appear in the contacts [derived]. Same discrepancy as
 SFHH (405 vs 403) and InVS15 (232 vs 217).
 """
 

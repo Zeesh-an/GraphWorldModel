@@ -1,7 +1,7 @@
 """
 CasFlow's preprocessed Weibo / Twitter / APS bundle: the de-facto benchmark.
 
-`research/cascade_prediction.md` §8.5 is the finding this module implements: there
+This module implements one finding about the field: there
 is **no** unified public benchmark for cascade prediction, no OGB or TGB analogue,
 no leaderboard to enter and no split to inherit. What exists instead is one Google
 Drive archive holding all three standard corpora in one line format, and every
@@ -9,19 +9,19 @@ paper since 2021 starts from it. So the closest thing to a benchmark is a file, 
 this is the parser for it.
 
 One entry point per corpus (`casflow_weibo`, `casflow_twitter`, `casflow_aps`),
-because §6.4 records seven artefacts sharing three names and a single `--dataset
+because seven published artefacts share three names and a single `--dataset
 casflow` would put us right back in that trap. Each states its own version, its own
 published counts, and its own two observation windows.
 
 **No auto-download.** The archive sits behind Google Drive's virus-scan
-interstitial, which `urlretrieve` receives as an HTML page [verified, §6.3]. Rather
+interstitial, which `urlretrieve` receives as an HTML page [verified]. Rather
 than guess at a confirm-token URL that breaks whenever Drive changes it, this
 raises with the exact manual steps: the standard `data/datasets/weibo.py` already
-sets and the one §6.5 asks for.
+sets.
 
 **The publisher's own preprocessing is reproduced, not approximated.** CasFlow's
 `gene_cas.py` applies three corpus-specific publication filters before anything
-else, and §8.4 lists all three as protocol landmines:
+else, and all three are protocol landmines:
 
   * **Weibo** keeps only posts published 08:00-18:00 Beijing time, so every cascade
     has at least six hours to accrue retweets before the 24-hour horizon. (CasFlow's
@@ -32,8 +32,8 @@ else, and §8.4 lists all three as protocol landmines:
     grow inside the 32-day horizon.
   * **APS** drops papers published after 1997, so each has 20 years of citations.
 
-A run that skips these is not on the same corpus as §5.1, whatever its cascade
-count says.
+A run that skips these is not on the same corpus as the published result tables,
+whatever its cascade count says.
 """
 
 import time
@@ -85,8 +85,8 @@ script. To install it:
 Each file is one cascade per line, five tab-separated fields:
     cascade_id \\t root \\t publish_time \\t n \\t path1:t1 path2:t2 ...
 
-research/cascade_prediction.md 6.3 has the provenance; 6.4 has the version table -
-read it before quoting any MSLE against a published row."""
+Each corpus name covers several published versions: confirm which one a published
+row was computed on before quoting any MSLE against it."""
 
 
 def bundle_path(corpus: str) -> Path:

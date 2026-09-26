@@ -9,7 +9,7 @@ Source: https://snap.stanford.edu/data/email-EuAll.html
     - No node labels
 
 One of the eight-graph suite the Xie / SandIMIN node-blocking line reports across
-four papers (§7), and the large sibling of our `email_eu_core`: same institution, all
+four papers, and the large sibling of our `email_eu_core`: same institution, all
 addresses rather than the 1,005-member core. SandIMIN's Table 5 reports decreased
 spread on it at k = 10..50 as `EmailAll`, which is directly our metric.
 """

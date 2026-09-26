@@ -31,13 +31,13 @@ default_action_ops = ("add_node", "remove_node")
 # The three COMPARTMENTAL dynamics, which `data/wm_epidemic.py` simulates rather
 # than NDlib. Named here because `--diffusion-model` is one flag across every task
 # and half the pipeline has to ask "is this one of the epidemic ones" without
-# importing the epidemic module (research/epidemic_control.md §2.1).
+# importing the epidemic module.
 epidemic_dynamics = ("SIR", "SIS", "SEIR")
 
 # Dynamics whose edges carry a real per-arc transmission probability, so
 # `GraphInput.edge_weight` must be the true w rather than ones. LT is the only
 # structural dynamics that does not, and it is what this set exists to exclude,
-# the epidemic ones DO, which is the whole reason §2.2 says to write our own
+# the epidemic ones DO, which is the whole reason we write our own
 # stepper instead of using NDlib's scalar-beta SIR/SIS/SEIR.
 weighted_dynamics = ("IC",) + epidemic_dynamics
 
@@ -98,8 +98,7 @@ class State:
     single-cascade JSONL is byte-identical to what it was before competition existed.
 
     A COMPARTMENTAL task (epidemic control) carries two more sets, and the mapping
-    is again deliberate rather than symmetric
-    (research/epidemic_control.md §2.3):
+    is again deliberate rather than symmetric:
 
       * `infected` is EVER-INFECTED: the attack set, the thing being minimized. It
         is monotone under SIR, SIS and SEIR alike (a node never un-becomes
@@ -171,7 +170,7 @@ class TracedICModel(epidemics.IndependentCascadesModel):
     NDlib never produces the transmission edge: its `iteration` sets
     `actual_status[v] = 1` on a successful coin flip without recording the
     responsible `u`, so every tree-level cascade-reconstruction metric is
-    unscoreable without this (research/cascade_reconstruction.md §9 item 9). The
+    unscoreable without this. The
     body below is NDlib's own, line for line, plus one append.
 
     Two properties of the ground truth it produces, both of which must be
@@ -262,7 +261,7 @@ class TracedThresholdModel(epidemics.ThresholdModel):
 
     LT has NO transmission edge: activation is a threshold crossing over the whole
     active neighbourhood, so the honest ground truth is a parent SET rather than a
-    parent (research/cascade_reconstruction.md §2.6). Every tree metric that wants
+    parent. Every tree metric that wants
     a single edge therefore reads LT as set-valued and says so.
 
     Same `build` trick as `TracedICModel`, for the same NDlib constructor bug.
@@ -720,8 +719,8 @@ class Simulator:
         Force the model into an ARBITRARY mid-cascade state.
 
         Evaluating the transition kernel at a proposed state is what a trajectory
-        decoder does thousands of times per instance
-        (research/cascade_reconstruction.md §2.5.2), and a fresh simulation cannot
+        decoder does thousands of times per instance,
+        and a fresh simulation cannot
         reach one: NDlib only ever advances forward from what it already holds.
         `snapshot`/`restore` rewind to a state this simulator VISITED; this writes
         one it never did, which is the difference between replaying an episode and

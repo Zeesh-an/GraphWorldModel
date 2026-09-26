@@ -4,25 +4,24 @@ F1 sweep that scores one recovered-source program.
 
 This is the harness for the INVERSE problem. Every other task in this repo has the
 planner choose an intervention and steers a forward process; here it writes an
-inference algorithm and the world model is a subroutine that algorithm calls
-(`research/source_localization.md` §2.3, §2.5). Three pieces, and each one is
-where a specific claim of that file lives:
+inference algorithm and the world model is a subroutine that algorithm calls. Three pieces, and each one is
+where a specific claim of the design lives:
 
   * **`load_instances`**: the labelled `(G, y, x)` episodes, regrouped from
-    transitions that already exist (§2.1). No new simulator, no new action op, no
+    transitions that already exist. No new simulator, no new action op, no
     regeneration run.
 
-  * **`bind_predict_marginals`**: the ONE new primitive (§2.4.3), and its four
+  * **`bind_predict_marginals`**: the ONE new primitive, and its four
     bindings. `@native` gets a raiser, `@monte_carlo` / `@oracle` / `@world_model`
     each get their own environment's `Trajectory.final_marginals`. The generated
     program is byte-identical across those arms and only its oracle changes, which
     is what makes conditions 3-6 an ablation on one variable. Routing every call
     through `environment.rollout` is also what puts them in `evaluator_calls` /
-    `evaluator_seconds` / `real_env_episodes`, i.e. §8.5.3's cost block.
+    `evaluator_seconds` / `real_env_episodes`, i.e. the inference-cost block.
 
   * **`evaluate_localizer`**: the outer loop's reward: mean F1 against the TRUE
-    source set, over held-out episodes. §2.3.3 is emphatic that re-simulation error
-    is the wrong selection signal here, because diffusion is many-to-one and a
+    source set, over held-out episodes. Re-simulation error is the wrong
+    selection signal here, because diffusion is many-to-one and a
     program that reliably recovers the wrong member of an equivalence class scores
     just as well under it. Labels select the program; they are never available to
     the program, which is what lets `A*` be deployed on real cascades.
@@ -31,8 +30,7 @@ The reward is EXACT rather than estimated, which is unusual for this pipeline an
 worth stating: F1 against a known source set carries no evaluator noise, so a
 recover task's `reward` is already comparable across conditions and does not need
 the referee to become so. The referee still runs, measuring the
-re-simulated error (§8.5.5): the metric this literature should report and does
-not (§11).
+re-simulated error: the metric this literature should report and does not.
 """
 
 import time
@@ -54,9 +52,9 @@ from world_model.wm_data import load_episode_endpoints
 from world_model.wm_metrics import localization_metrics, resimulation_error
 
 # Which form of `y` the program is handed. `marginal` is the MC-averaged
-# P(infected), `binary` a single realized draw. §2.9 risk 5: ours is strictly more
-# informative than the literature's, so the binarized column is the one comparable
-# to §5.1 and both are reported.
+# P(infected), `binary` a single realized draw. Ours is strictly more informative
+# than the literature's, so the binarized column is the one comparable to
+# published results and both are reported.
 marginal_observation = "marginal"
 binary_observation = "binary"
 valid_observations = (marginal_observation, binary_observation)
@@ -64,7 +62,7 @@ valid_observations = (marginal_observation, binary_observation)
 # Where `k` comes from. `episode` hands each localizer the episode's own source
 # count, which is SL-VAE's given-k convention and makes F1 = PR = RE when the
 # program spends its whole budget. `sweep` forces the pipeline's k on every
-# instance and filters the pool to episodes near it, which is how §8.5.1's
+# instance and filters the pool to episodes near it, which is how the
 # source-fraction axis is run.
 episode_budget = "episode"
 sweep_budget = "sweep"
@@ -76,7 +74,7 @@ default_source_tolerance = 0.5
 
 # Instances one reward evaluation sweeps over. Every candidate program pays this
 # many executions, and under @monte_carlo each execution pays its own rollouts, so
-# it is the multiplier M of §2.3.2's P * M * C.
+# it is the multiplier M of the P * M * C cost accounting.
 default_instances = 20
 
 
@@ -101,7 +99,7 @@ class SourceInstance:
     split: str = ""
     # The whole observed path, shape (T, N), one binary row per step. NOT given to
     # a generated program: its contract is a single snapshot, which is the
-    # setting every comparable published number uses (§8.3). It is carried for the
+    # setting every comparable published number uses. It is carried for the
     # external baselines that condition on intermediate observations rather than
     # on the endpoint alone, PDSL being the one wired today.
     trajectory: np.ndarray | None = None
@@ -117,9 +115,9 @@ class ForwardOracle:
     `predict_marginals`, bound to one arm's evaluator and counting its own calls.
 
     Held as an object rather than a bare closure so the call count survives into
-    the results JSON: `C` in §2.3.2's accounting is "forward evaluations one
-    program performs on one instance", and it is the number §8.5.3 asks for
-    per test instance. A closure would leave it uncounted.
+    the results JSON: `C` in the P * M * C cost accounting is "forward
+    evaluations one program performs on one instance", and it is the inference
+    cost to report per test instance. A closure would leave it uncounted.
     """
 
     environment: object
@@ -134,7 +132,7 @@ class ForwardOracle:
 
         # The seed commit is exactly the bag the generator writes at t = 0, so the
         # forward pass being asked for here is the same transition the world model
-        # was trained on (§2.4.1)
+        # was trained on
         plan = [[ActionOp("add_node", node) for node in nodes]] + [
             [] for _ in range(self.task.horizon)
         ]
@@ -158,7 +156,7 @@ def unavailable_forward_oracle(_seeds) -> np.ndarray:
     `executor._blocked_algorithm` raises: an AttributeError traceback costs a whole
     refinement iteration, while a message that names the condition costs one repair
     turn. The experimental condition is identical either way: the program cannot
-    call a forward model, so it has to be a pure structural heuristic (§2.4.3).
+    call a forward model, so it has to be a pure structural heuristic.
     """
     raise StrategyError(
         "self.predict_marginals is not available in this condition (@native): this "
@@ -468,8 +466,8 @@ def evaluate_localizer(
             "budget_mode": budget_mode,
             "metrics": means,
             "per_instance": per_instance,
-            # C in §2.3.2: forward evaluations the PROGRAM performed, in total and
-            # per instance. The inference-cost claim of §8.5.3 is read off this.
+            # C in P * M * C: forward evaluations the PROGRAM performed, in total and
+            # per instance. The inference-cost claim is read off this.
             "forward_calls": getattr(oracle, "calls", 0),
             "forward_calls_per_instance": round(
                 getattr(oracle, "calls", 0) / len(per_instance), 3
@@ -609,7 +607,7 @@ metric_keys = (
 
 
 def aggregate_metrics(per_instance: list[dict]) -> dict[str, float]:
-    """Instance-averaged PR / RE / F1 / AUC: SL-VAE's own aggregation (§8.4 trap 5)."""
+    """Instance-averaged PR / RE / F1 / AUC: SL-VAE's own aggregation."""
     return {
         key: float(np.nanmean([entry[key] for entry in per_instance]))
         for key in metric_keys

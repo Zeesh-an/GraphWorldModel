@@ -3,22 +3,22 @@ Runnable self-check for the cascade-prediction contract.
 
     python -m coding_agent.check_cascade_prediction
 
-Seven checks, each one a claim `research/cascade_prediction.md` makes that would be
-expensive to discover was false three stages into a sweep:
+Seven checks, each one a claim about this task that would be expensive to discover
+was false three stages into a sweep:
 
-  1. **The metric definitions are the published ones.** §8.1 opens with "Get MSLE
-     right or nothing else matters" and then lists three independent choices hiding
-     inside that name (log base, total vs increment, the smoothing offset) and
-     §5.7 difference 4 records that §5.1 prints two of the variants in ONE table.
+  1. **The metric definitions are the published ones.** MSLE has to be right before
+     anything else matters, and three independent choices hide inside that name
+     (log base, total vs increment, the smoothing offset); one published results
+     table prints two of the variants side by side.
      Checked against hand-worked values rather than against ourselves.
 
-  2. **Declining is counted, never scored.** §8.4: generative models refuse to score
+  2. **Declining is counted, never scored.** Generative models refuse to score
      supercritical cascades, and papers reporting the mean over scoreable cascades
      alone "silently favour the model that gives up more often". A decline must move
      `n_failed` and must not move the error.
 
-  3. **The chronological split is leak-free.** §8.3 is the most transferable finding
-     in the file: no training cascade's prediction window may reach past the first
+  3. **The chronological split is leak-free.** The most transferable finding in
+     this literature: no training cascade's prediction window may reach past the first
      test observation. Asserted directly rather than trusted.
 
   4. **A replayed cascade round-trips.** The whole task rests on
@@ -28,13 +28,13 @@ expensive to discover was false three stages into a sweep:
      a cascade that did not happen.
 
   5. **The generative predictors decline where the paper says they do.** SEISMIC and
-     the Hawkes line diverge at branching ratio 1 (§3.2, §5.4), and our
+     the Hawkes line diverge at branching ratio 1, and our
      reimplementations have to fail at the same boundary rather than emitting a
      plausible number.
 
   6. **The floors are computed and are strong.** Under a LOG-space error an
-     instance-blind constant is far stronger than intuition suggests, and §9's whole
-     framing depends on a reader being able to see that. The analogue of cascade
+     instance-blind constant is far stronger than intuition suggests, and the task's
+     whole framing depends on a reader being able to see that. The analogue of cascade
      reconstruction's `trivial_decoder_reward` check.
 
   7. **A predictor cannot see the answer.** The observation must contain no adopter
@@ -104,7 +104,7 @@ def _observation(adopters: dict[int, int], window: int, horizon: int) -> Cascade
 
 
 def check_metric_definitions() -> None:
-    """§8.1's three hidden choices, against arithmetic done by hand."""
+    """MSLE's three hidden choices, against arithmetic done by hand."""
     predicted = np.array([4.0, 16.0])
     actual = np.array([2.0, 8.0])
     observed = np.array([1.0, 4.0])
@@ -122,8 +122,8 @@ def check_metric_definitions() -> None:
     )
     assert abs(metrics["msle_offset"] - expected_offset) < tolerance
     assert metrics["msle_offset"] != metrics["msle"], (
-        "msle and msle_offset came out equal; §5.7 difference 4 is that they are "
-        "NOT the same metric and §5.1 prints both under one name"
+        "msle and msle_offset came out equal; they are NOT the same metric, and "
+        "published tables print both under one name"
     )
 
     # CTCP's loss uses natural log, a factor of (ln 2)^2 from CasFlow's
@@ -152,11 +152,11 @@ def check_metric_definitions() -> None:
     # Cheng et al.'s balanced framing: doubling means reaching 2 * observed
     assert abs(doubling_accuracy(predicted, actual, observed) - 1.0) < tolerance
 
-    print("[OK] metric definitions match §8.1's published forms, and the variants differ")
+    print("[OK] metric definitions match the published forms, and the variants differ")
 
 
 def check_declines_are_counted() -> None:
-    """§8.4: a decline moves `n_failed` and never the error."""
+    """A decline moves `n_failed` and never the error."""
     predicted = np.array([4.0, 16.0])
     actual = np.array([2.0, 8.0])
     observed = np.array([1.0, 4.0])
@@ -165,7 +165,7 @@ def check_declines_are_counted() -> None:
     with_declines = popularity_metrics(predicted, actual, observed, declined=8)
 
     assert abs(plain["msle"] - with_declines["msle"]) < tolerance, (
-        "declining changed the ERROR; §8.4's whole point is that papers report the "
+        "declining changed the ERROR; the whole point is that papers report the "
         "mean over SCOREABLE cascades, which is why the count has to be separate"
     )
     assert with_declines["n_failed"] == 8
@@ -204,7 +204,7 @@ def _corpus(count: int = 60, spacing: int = 100) -> list[Cascade]:
 
 
 def check_split_is_leak_free() -> None:
-    """§8.3: no training cascade's prediction window reaches a test observation."""
+    """No training cascade's prediction window reaches a test observation."""
     cascades = _corpus()
     config = ReplayConfig(
         dataset="synthetic",
@@ -232,7 +232,7 @@ def check_split_is_leak_free() -> None:
         assert cascade.publish_time + config.horizon <= first_test, (
             f"training cascade {cascade.cascade_id} predicts to "
             f"{cascade.publish_time + config.horizon} but the first test cascade is "
-            f"observed from {first_test}: that is exactly the leak §8.3 describes"
+            f"observed from {first_test}: that is exactly the temporal leak"
         )
 
     # ...and the ORDER is the only thing the random protocol changes, which is what
@@ -288,17 +288,17 @@ def check_replay_round_trip() -> None:
         "train",
     )
 
-    # `a_t = NULL` at every step but the seed commit: §2.1's defining property
+    # `a_t = NULL` at every step but the seed commit: the task's defining property
     assert records[0]["action"], "the t=0 record must carry the root's seed commit"
     assert all(not record["action"] for record in records[1:]), (
-        "a replayed cascade emitted an action after t=0; §2.1 is that nothing "
+        "a replayed cascade emitted an action after t=0; the task is that nothing "
         "intervenes and the cascade is only watched"
     )
 
     # HARD targets: a real cascade happened once, so every marginal is exactly 1
     for record in records:
         for value in record["next_marginal_infected"].values():
-            assert value == 1.0, "a replayed target was not a hard 0/1 (§2.4)"
+            assert value == 1.0, "a replayed target was not a hard 0/1"
 
     # Record `t` carries the wave binned at `t`: the invariant `observed_waves`
     # depends on, and the one that decides how much prefix a predictor is shown
@@ -337,7 +337,7 @@ def check_replay_round_trip() -> None:
 
 
 def check_generative_declines() -> None:
-    """§3.2 and §5.4: SEISMIC and Hawkes decline above branching ratio 1."""
+    """SEISMIC and Hawkes decline above branching ratio 1."""
     graph = _graph()
 
     # A cascade whose waves are GROWING: 1, 2, 4, 8 gives a branching ratio of 2
@@ -349,7 +349,7 @@ def check_generative_declines() -> None:
     )
     assert branching_factor(graph, growing, 10) is None, (
         "branching_factor emitted a number for a SUPERCRITICAL cascade; the expected "
-        "size diverges there and §3.2 records that SEISMIC's honest response is to "
+        "size diverges there and SEISMIC's honest response is to "
         "produce no prediction at all"
     )
     assert hawkes(graph, growing, 10) is None
@@ -369,11 +369,11 @@ def check_generative_declines() -> None:
     supercritical = seismic(graph, growing, 10)
     assert supercritical is None or supercritical >= growing.popularity
 
-    print("[OK] the generative predictors decline exactly where §3.2 says they do")
+    print("[OK] the generative predictors decline exactly where the literature says")
 
 
 def check_floors_are_strong() -> None:
-    """§9: under a LOG-space error an instance-blind constant is a real bar."""
+    """Under a LOG-space error an instance-blind constant is a real bar."""
     graph = _graph()
     instances = []
 
@@ -456,7 +456,7 @@ def check_predictor_cannot_see_the_answer() -> None:
     assert validate_prediction(12.0, instance) == 12.0
 
     # The feature extractor sees only the prefix, and its second-half rate: the
-    # single most predictive feature in §5.6: is computable from it
+    # single most predictive feature in the literature: is computable from it
     features = cascade_features(graph, observation)
     assert features["observed"] == 4
     assert "rate_second_half" in features and np.isfinite(features["rate_second_half"])
@@ -466,7 +466,7 @@ def check_predictor_cannot_see_the_answer() -> None:
 
 
 def check_filters_are_the_published_ones() -> None:
-    """§8.4: the participant filter and the truncation are CasFlow's own."""
+    """The participant filter and the truncation are CasFlow's own."""
     cascades = _corpus(count=5)
 
     # Every cascade here has 12 events, one at elapsed 0 and eleven at 10..110.
@@ -474,7 +474,7 @@ def check_filters_are_the_published_ones() -> None:
     kept = filter_cascades(cascades, observation=40, min_observed=10, truncate=100)
     assert not kept, (
         "the participant filter did not drop cascades with too few OBSERVED "
-        "adopters; §8.4 records that this threshold moves MSLE by more than the gap "
+        "adopters; this threshold moves MSLE by more than the gap "
         "between any two consecutive published rows"
     )
 

@@ -8,7 +8,7 @@ Source: http://konect.cc/networks/arenas-pgp/
     - No node labels
 
 A standard dismantling benchmark: Collective Influence, Min-Sum and Wandelt all
-report it (research/critical_node_detection.md §7). Sparse (mean degree 4.6) with
+report it. Sparse (mean degree 4.6) with
 a pronounced community structure, so it separates connectivity-driven methods
 from degree-driven ones far better than the hub-dominated social graphs do.
 

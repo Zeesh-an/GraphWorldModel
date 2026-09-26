@@ -8,7 +8,7 @@ Source: https://snap.stanford.edu/data/ca-HepTh.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-Xiao SDM'18's `arxiv-hep-th` row, quoted at 8,638 / 24,827 [verified, §6], which
+Xiao SDM'18's `arxiv-hep-th` row, quoted at 8,638 / 24,827 [verified], which
 is this file's largest connected component: the same LCC preprocessing switch
 `ca_grqc` documents, so `lcc=True` reproduces the published NODE count rather than
 the file's 9,877.

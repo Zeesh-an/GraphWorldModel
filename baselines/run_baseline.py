@@ -645,7 +645,7 @@ def _collect_forecasts(
     handed the wrong prefix), and a non-finite one means its fit diverged.
 
     A non-finite value is kept as an explicit DECLINE rather than dropped, because
-    research/cascade_prediction.md §8.4 makes the decline count a reported column:
+    the decline count is a reported column:
     a mean over scoreable cascades alone "silently favours the model that gives up
     more often", so a repo's give-ups have to reach the table.
     """
@@ -704,8 +704,7 @@ def _collect_forecasts(
             f"[baseline:{name}] WARNING: {impossible}/{len(instances)} predictions "
             f"were BELOW the already-observed popularity and were clamped up to it. "
             f"That usually means the repo returned an INCREMENT where a total was "
-            f"expected: check the driver's target convention "
-            f"(research/cascade_prediction.md §5.7 difference 3)."
+            f"expected: check the driver's target convention."
         )
 
     if declined:

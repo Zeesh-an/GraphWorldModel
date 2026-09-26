@@ -7,13 +7,13 @@ Source: https://snap.stanford.edu/data/Oregon-1.html
     - No inherent node features: uses log(1 + degree)
 
 GreedyWalk's Table 2 row, at 10,670 / 22,002 with a published **lambda_1 = 58.72**
-[verified, `research/epidemic_control.md` §5.2], which makes it one of only four
+[verified], which makes it one of only four
 graphs where our `wm_metrics.spectral_radius` can be checked against a number
-somebody else computed. §7 also has it in Gelling, DAVA and GreedyWalk, so it is
+somebody else computed. Gelling, DAVA and GreedyWalk also report it, so it is
 the closest thing the spectral line has to a shared benchmark.
 
 Warning: SNAP publishes NINE weekly Oregon-1 snapshots on one page and the papers
-say "Oregon" without a date (§6.4). This is `oregon1_010331`, the 31 March 2001
+say "Oregon" without a date. This is `oregon1_010331`, the 31 March 2001
 snapshot, which is the one whose counts match GreedyWalk's table. Its sibling
 `oregon2_010331` is the Oregon-2 graph from the same week; the `oregon2` key in
 this repo is a THIRD snapshot (`oregon2_010526`, 11,461 / 32,730), loaded for

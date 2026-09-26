@@ -169,21 +169,20 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
         "the true set (diffusion is many-to-one), and the gap between the two "
         "columns is that identifiability, measured. AUC is the tie-breaker; "
         "**accuracy is near-useless alone** (IVGD's Table 3 has GCNSI at `ACC "
-        "0.8840` with `F1 0.0218`), so it is reported only beside F1 "
-        "([`research/source_localization.md`](../../../../research/source_localization.md) "
-        "§8.1).",
+        "0.8840` with `F1 0.0218`), so it is reported only beside F1.",
         "",
         f"Every row is scored on the **held-out** `{first.get('eval_split', '?')}` "
         f"episodes, by re-running that arm's winning program unmodified. "
         f"`selection` is the reward on the `{first.get('select_split', '?')}` "
         f"episodes the outer loop optimized against, and `gap` the difference: a "
         f"large negative gap means the program memorized specific cascades rather "
-        f"than learning an algorithm, which is the failure §8.5.1 exists to catch.",
+        f"than learning an algorithm, which is the failure the held-out split "
+        f"exists to catch.",
         "",
         f"Observation: `{first.get('observation_mode', '?')}`. The MC marginal is "
         f"strictly MORE informative than the single binary realization the "
         f"published protocol observes, so a `marginal` table is optimistic against "
-        f"§5.1 and only the `binary` one is comparable (§2.9 risk 5).",
+        f"published results and only the `binary` one is comparable.",
         "",
         "Warning: **The `AUC from` column decides whether two AUCs are comparable.** An "
         "arm that supplied a per-node ranking (`source_scores`) is scored on that "
@@ -247,8 +246,8 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
             "",
             "The `referee` column, unpacked: the ground-truth simulator re-run from "
             "each arm's RECOVERED sources against what was observed, beside the TRUE "
-            "source set's own error. **No surveyed paper reports this at all** "
-            "(§11), so the column is self-contained and is not a cross-paper "
+            "source set's own error. **No surveyed paper reports this at all**, "
+            "so the column is self-contained and is not a cross-paper "
             "comparison. A ratio below 1 means the recovered set explains the "
             "observation better than the truth did, which is what an ill-posed "
             "instance looks like.",
@@ -277,7 +276,7 @@ def _localization_table(agent_results: list[dict]) -> list[str]:
             "### Transferred programs",
             "",
             "These rows ran a program selected on a DIFFERENT graph, unmodified. "
-            "That is the graph axis of §8.5.1 and the headline of the amortization "
+            "That is the graph axis and the headline of the amortization "
             "claim, and it is a comparison no per-instance method can enter, "
             "because SL-VAE, IVGD and DDMSL have no artifact to transfer.",
             "",
@@ -300,17 +299,15 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
 
     The forecasting task's results table. Two things it must do that no other table
     here does. First, it prints the PROTOCOL: corpus, window, horizon, split,
-    filters, because
-    [`research/cascade_prediction.md`](../../../../research/cascade_prediction.md)
-    §5.7 lists five independent incompatibilities between published tables and four
-    of them are protocol rather than method: three different corpora are called
+    filters, because published tables differ in five independent ways and four of
+    them are protocol rather than method: three different corpora are called
     "Twitter", a `< 10` versus `< 50` participant filter moves MSLE by more than the
     gap between any two consecutive published rows, and the random-over-cascades
     split LEAKS. A number without its protocol is comparable to nothing.
 
-    Second, it prints the DECLINE COUNT beside every error. §8.4: generative models
+    Second, it prints the DECLINE COUNT beside every error. Generative models
     refuse to score supercritical cascades, papers report the mean over scoreable
-    cascades only, and that "silently favours the model that gives up more often".
+    cascades only, and that silently favours the model that gives up more often.
     Mishra et al. publish their failure counts and almost nobody else does.
     """
     scored = [result for result in agent_results if result.get("prediction")]
@@ -348,8 +345,8 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
         "the same NDlib simulator that trained it, a closed loop that can only "
         "measure LEARNING error. Here the dynamics that produced the data are "
         "whatever they are, and our structured head's Independent-Cascade "
-        "composition rule is either an adequate approximation of them or it is not "
-        "(§9.1). Expect to lose to a method built for this task; the value is "
+        "composition rule is either an adequate approximation of them or it is not. "
+        "Expect to lose to a method built for this task; the value is "
         "diagnostic.",
         "",
         "### Protocol",
@@ -377,8 +374,8 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
 
     if first.get("split_protocol") == "random":
         lines += [
-            "> **Warning: this run used the RANDOM split over cascades.** §8.3: "
-            "cascades overlap in wall-clock time, so a training cascade's prediction "
+            "> **Warning: this run used the RANDOM split over cascades.** "
+            "Cascades overlap in wall-clock time, so a training cascade's prediction "
             "window can sit inside a test cascade's observation window, and the model "
             "learns a global temporal shortcut unavailable at deployment. Under the "
             "leak-free chronological fix, two 2021-24 SOTA methods fell BELOW a plain "
@@ -438,13 +435,13 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
             "",
             "### Modelling error: what the FORWARD MODEL alone predicts",
             "",
-            "The number §9.1 is actually about, and the one no other task in this "
+            "The number this task is actually about, and the one no other task in this "
             "repo can produce. Roll each arm's own forward model forward from the "
             "observed prefix with no program in the loop, and compare its expected "
             "popularity against what the log says happened. The gap between this "
             "column and the arm's own error is what the SEARCH bought; the LEVEL is "
             "how far an Independent-Cascade-shaped kernel is from a real adoption "
-            "process. §2.2 names three mechanisms by which it is wrong: adoption is "
+            "process. There are three mechanisms by which it is wrong: adoption is "
             "not memoryless, exposure is repeated rather than one-shot per "
             "neighbour, and exogenous arrivals have no infected in-neighbour at all.",
             "",
@@ -468,12 +465,12 @@ def _prediction_table(agent_results: list[dict]) -> list[str]:
         "**Published context, explicitly NOT a like-for-like comparison.** CasFT "
         "reports MSLE `2.1728` on Weibo at `t_o = 0.5 h`, `3.8546` on Twitter at "
         "1 d and `1.2468` on APS at 3 y, against CasFlow's `2.3370` / `4.7799` / "
-        "`1.4370` (§5.1, all under the random split). Under CasTemp's leak-free "
+        "`1.4370` (all under the random split). Under CasTemp's leak-free "
         "split the same field compresses to `1.475` / `1.171` / `1.926` for its own "
-        "method and `1.685` / `1.329` / `2.438` for CasFlow (§5.3). Our "
-        "preprocessing differs from all of them (§6.4 lists seven artefacts sharing "
+        "method and `1.685` / `1.329` / `2.438` for CasFlow. Our "
+        "preprocessing differs from all of them (seven artefacts share "
         "three names), so these are context markers for the order of magnitude and "
-        "nothing more. §9.9: do not chase the leaderboard, CasFlow is a "
+        "nothing more. Do not chase the leaderboard: CasFlow is a "
         "2M-parameter model tuned for this one task.",
         "",
     ]
@@ -488,9 +485,8 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
 
     The decoding task's table, and the one thing it must never do is lead with
     the easy half. Zong ICDM'12 reports `prec_v = 100%` alongside `prec_e =
-    78-86%` and DIPT's best path precision thirteen years later is `0.680`
-    ([`research/cascade_reconstruction.md`](../../../../research/cascade_reconstruction.md)
-    §5.2, §8.1): the node set is easy and the tree is hard.
+    78-86%` and DIPT's best path precision thirteen years later is `0.680`: the
+    node set is easy and the tree is hard.
     """
     first = agent_results[0]
     tree_weight = first.get("tree_weight")
@@ -527,8 +523,7 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
         f"PathPrecision + {1.0 - tree_weight:.2f} * EventF1`, computed against the "
         f"stored history AFTER the search and never fed to it. The two components "
         f"are printed separately because the gap between them is the result: "
-        f"recovering WHICH nodes were infected is nearly free and the tree is not "
-        f"(§2.6).",
+        f"recovering WHICH nodes were infected is nearly free and the tree is not.",
         "",
         f"Every row is scored on the **held-out** `{first.get('eval_split', '?')}` "
         f"cascades by re-running that arm's winning decoder unmodified; "
@@ -539,14 +534,14 @@ def _reconstruction_table(agent_results: list[dict]) -> list[str]:
         f"node reported at probability "
         f"`{_format_number(first.get('observation_rate'), 2)}`. The direction is "
         f"stated because this literature uses the symbol `sigma` for both the "
-        f"report rate and its complement (§8.2 trap 1). The four settings are four "
-        f"separate protocols and their rows are never pooled (§8.3).",
+        f"report rate and its complement. The four settings are four "
+        f"separate protocols and their rows are never pooled.",
         "",
     ]
 
     if trivial is not None or trivial_tree is not None:
         lines += [
-            f"**Reward sanity check (§2.11 risk 1): a trivial decoder, everyone "
+            f"**Reward sanity check: a trivial decoder, everyone "
             f"reachable, parents by BFS, scores `{_format_number(trivial, 4)}` under "
             f"the reward and `{_format_number(trivial_tree, 4)}` on the tree score.** "
             f"If either were competitive with the arms below, that reward would be "
@@ -826,9 +821,8 @@ def _adaptivity_section(agent_results: list[dict]) -> list[str]:
         "",
         "> **Read this before reading the numbers.** Peng & Chen bound the myopic "
         "adaptivity gap in `[e/(e−1), 4]` and prove non-adaptive greedy is no "
-        "worse than adaptive greedy across all graphs "
-        "([`research/adaptive_online_im.md`](../../../../research/adaptive_online_im.md) "
-        "§5.1). A gap near `1.00` is the expected result, not a failed run, and a "
+        "worse than adaptive greedy across all graphs. A gap near `1.00` is the "
+        "expected result, not a failed run, and a "
         "large gap is an instance effect rather than a general one. The claim "
         "this task supports is the **cost** columns: the MC arm re-estimates "
         "every candidate once per round, and a forward pass does not.",
@@ -861,9 +855,9 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
 
     Empty for every task with one cascade. The results table above reports the
     rumour's REMAINING size, which is what the search minimizes; this reports the
-    same numbers as a DIFFERENCE from the unopposed cascade, which is the form
-    research/influence_blocking.md §8.1 records under five different names and the
-    only form comparable to a published table.
+    same numbers as a DIFFERENCE from the unopposed cascade, which is the form this
+    literature reports under five different names and the only form comparable to a
+    published table.
     """
     scored = [result for result in agent_results if result.get("blocking")]
     if not scored:
@@ -889,8 +883,7 @@ def _blocking_section(agent_results: list[dict]) -> list[str]:
         f"`{head.get('competitive_model', '?')}`.",
         "",
         "> **Read the budget column as an absolute k, not a percentage.** "
-        "[`research/influence_blocking.md`](../../../../research/influence_blocking.md) "
-        "§8.2 records that percent-of-N budgets are used by **nobody** in this "
+        "Percent-of-N budgets are used by **nobody** in this "
         "literature, while `k` in `{10..50}` is the shared convention of SandIMIN, "
         "both Xie papers and TC-AIBM. The informative ratio is `|S_P| / |S_N|`, which "
         "is its own column below: CLDAG's Table 2 shows it takes 20-30x the rumour's "
@@ -943,15 +936,15 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
     Prevented infections and the outbreak's SHAPE: what an immunization table reports.
 
     Empty for every non-compartmental task. Three groups, and the order is the
-    argument this task makes (research/epidemic_control.md §8.3):
+    argument this task makes:
 
       1. `prevented` is the attack rate subtracted from the unprotected reference,
          both measured on the shared referee.
-      2. `peak` / `t_peak` / `AUC` are the SHAPE. §8.2 trap 4 is the reason they are
+      2. `peak` / `t_peak` / `AUC` are the SHAPE, and they are
          not optional: a good policy flattens rather than eliminates, so a
          terminal-state number alone can rank two policies backwards.
       3. `eigendrop` is the spectral line's own metric, and it is here as CONTEXT.
-         §8.2 trap 1: a method can win it and lose the attack rate, because
+         A method can win it and lose the attack rate, because
          `lambda_1` does not know where the outbreak IS. Seeing NetShield above
          DAVA in this column and below it in the previous one is the point of
          printing both.
@@ -987,8 +980,7 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
         + f". Lever: `{head.get('lever', '?')}` ({head.get('lever_papers', '')}).",
         "",
         "> **`beta` and `gamma` are free parameters and nobody standardizes them.** "
-        "[`research/epidemic_control.md`](../../../../research/epidemic_control.md) "
-        "§8.2 trap 2: NetShield reports against a normalized virus strength swept on "
+        "NetShield reports against a normalized virus strength swept on "
         "the x-axis, and most other papers fix one pair without justifying it. The "
         "rates above are stated for exactly that reason: this table is comparable "
         "to another run at the same rates and to nothing else.",
@@ -996,7 +988,7 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
         "> **Read `eigendrop` as context, never as the score.** It is what the "
         "spectral line (NetShield, NetMelt, Gelling, GreedyWalk) actually optimizes, "
         "and it needs no simulator at all, so it is the only column this table and "
-        "theirs share. It is also the column §8.2 trap 1 warns about: `lambda_1` says "
+        "theirs share. It is also the column to be wary of: `lambda_1` says "
         "nothing about WHERE the infection currently is, which is DAVA's entire "
         "contribution and the reason a data-aware method can post the smallest "
         "eigendrop here and still prevent the most infections.",
@@ -1039,7 +1031,7 @@ def _epidemic_section(agent_results: list[dict]) -> list[str]:
         lines += [
             "> **SIS has no terminal state**, so the attack rate above is the "
             "CUMULATIVE incidence (every node ever infected) rather than a final "
-            "size, and it grows monotonically with the horizon. §8.2 trap 6: the "
+            "size, and it grows monotonically with the horizon. The "
             "quantity this literature reports for SIS is the endemic prevalence "
             "`lim |I(t)|/N`, which is the `epi_endemic_prevalence` column of "
             "`summary.csv`. Read that one, not this one, when comparing to a "
@@ -1055,13 +1047,12 @@ def _structural_section(agent_results: list[dict]) -> list[str]:
     What each removal set did to the graph's CONNECTIVITY: context, not the score.
 
     Empty for every task that does not remove nodes. The framing matters as much
-    as the numbers: `research/critical_node_detection.md` §2.1 argues that
-    structural CNDP is not a world-model problem at all (its transition is
-    deterministic and `nx.connected_components` is cheaper than one forward pass),
-    so this table exists to bridge to the published dismantling literature, which
-    reports these functionals and not spread. §5.8 is the reason it can disagree
-    with the results table above: the same centralities rank in OPPOSITE orders
-    under a spreading objective and a connectivity objective.
+    as the numbers: structural CNDP is not a world-model problem at all (its
+    transition is deterministic and `nx.connected_components` is cheaper than one
+    forward pass), so this table exists to bridge to the published dismantling
+    literature, which reports these functionals and not spread. It can disagree
+    with the results table above because the same centralities rank in OPPOSITE
+    orders under a spreading objective and a connectivity objective.
     """
     with_structural = [
         result for result in agent_results if result.get("structural") is not None
@@ -1084,11 +1075,9 @@ def _structural_section(agent_results: list[dict]) -> list[str]:
         "target**: a k-layer message-passing model cannot represent "
         "giant-component membership on a graph of diameter > k, so the world model "
         "is fit on the diffusion transition and these describe the same removal "
-        "sets afterwards "
-        "([`research/critical_node_detection.md`](../../../../research/critical_node_detection.md) "
-        "§2.1, §8.3). They are the units the published dismantling literature "
-        "reports in, so they are the bridge to it, and §5.8 shows a method can "
-        "win the column above and lose every column here.",
+        "sets afterwards. They are the units the published dismantling literature "
+        "reports in, so they are the bridge to it, and a method can win the column "
+        "above and lose every column here.",
         "",
         f"Intact graph: pairwise connectivity {intact['pairwise_conn_intact']:,.0f}, "
         f"largest component {intact['largest_cc_intact']:,.0f}, "
@@ -1121,8 +1110,8 @@ def _structural_section(agent_results: list[dict]) -> list[str]:
     lines += [
         "",
         "**`degree-rank rho`** is the Spearman correlation between an arm's removal "
-        "ORDER and the degree of the nodes it removed: the self-measurement "
-        "§9.5 asks for. MIND found GDM's dismantling order correlates at **0.762** "
+        "ORDER and the degree of the nodes it removed, a self-measurement against "
+        "a known failure. MIND found GDM's dismantling order correlates at **0.762** "
         "with a PCA of its own handcrafted input features. We feed `log1p(degree)` "
         "as feature channel 2, so an arm near that value has re-derived the degree "
         "heuristic with extra steps, whatever its spread number says.",

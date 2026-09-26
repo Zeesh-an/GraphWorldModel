@@ -7,8 +7,8 @@ Source: https://snap.stanford.edu/data/com-DBLP.html
     - No inherent node features: uses log(1 + degree) as synthetic features
     - No node labels
 
-SandIMIN's, both Xie papers' and NAMM's `DBLP` (§6.2). Warning: NAMM quotes it as
-317K / 2.1M, which is the same graph counted as ARCS; §6.3 records the collision.
+SandIMIN's, both Xie papers' and NAMM's `DBLP`. Warning: NAMM quotes it as
+317K / 2.1M, which is the same graph counted as ARCS.
 Ours reports undirected edges, so 1,049,866 is the number to compare against
 SandIMIN's row rather than NAMM's.
 """

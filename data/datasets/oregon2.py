@@ -9,14 +9,14 @@ Source: https://snap.stanford.edu/data/Oregon-2.html
 
 DITTO's Table 2 row, at 11,461 / 32,730 [verified], and one of the two REAL graphs
 it simulates on (T = 15, infection 0.1, recovery 0.05, 10% sources). Loading it is
-what makes `research/cascade_reconstruction.md` §5.1's `Oregon2-SI` and
+what makes DITTO's published `Oregon2-SI` and
 `Oregon2-SIR` columns reachable: DITTO reports F1 .8280 / .7928 there against a
 supervised ideal of .8320 / .8024.
 
 `oregon2_010526` is the LAST of the nine weekly snapshots SNAP publishes under
 this name, and it is the one DITTO's `inc/data.py` fetches by URL; the other eight
 are different graphs with the same page. Stated because the collision is the norm
-in this literature (§6.4).
+in this literature.
 """
 
 from pathlib import Path

@@ -289,15 +289,15 @@ class PipelineConfig:
     action_encoding: str = basic_encoding
     # Where the action enters the LEARNED transition (sage only): `none` is the
     # historical model, `message` the action-conditioned message passing,
-    # `global` its locality ablation and `message_blind` the capacity control
-    # (research/action_conditioning_and_feedback.md). A checkpoint records it,
-    # and the train stage refuses to reuse one trained under another value.
+    # `global` its locality ablation and `message_blind` the capacity control.
+    # A checkpoint records it, and the train stage refuses to reuse one trained
+    # under another value.
     action_conditioning: str = no_conditioning
     # What each evolve generation is told after scoring: `default` is the full
     # summarize() feedback, f0-f3 the controlled ladder of diagnostic blocks
     feedback: str = feedback_default
     # Feed the world model ones instead of the true p(u->v): the online/bandit
-    # information state (research/adaptive_online_im.md §2.4b, §9.3 item 7)
+    # information state
     hide_edge_weights: bool = False
     wm_results_json: str | None = None
     # agent stage
@@ -382,9 +382,10 @@ class PipelineConfig:
     cr_tree_weight: float = 0.6
     # Cascade prediction; every field is inert unless the task forecasts, so one
     # sweep configuration serves all seven runnable tasks. The two that decide
-    # whether a number means anything are `cp_observation` (§8.2 pairs TWO windows
-    # per corpus and a single-window result is not publishable in this literature)
-    # and `cp_split` (§8.3: the field's own random-over-cascades split LEAKS, and
+    # whether a number means anything are `cp_observation`
+    # (published results pair TWO windows per corpus and a single-window result
+    # is not publishable in this literature)
+    # and `cp_split` (the field's own random-over-cascades split LEAKS, and
     # fixing it moved a decade of published numbers).
     cp_observation: int = 0
     cp_horizon: int = 0
@@ -685,7 +686,7 @@ def budget_points(config: PipelineConfig) -> list[tuple[str, float | None, int]]
     then the task's percentage sweep, then the 1/5/10/20 ladder. The absolute rung
     exists for influence blocking specifically: percent-of-N budgets are used by
     nobody in that literature, while k in {10..50} is the shared convention of every
-    comparable table (research/influence_blocking.md §8.2).
+    comparable table.
     """
     if config.budgets is not None:
         return [(budget_label(None, k), None, int(k)) for k in config.budgets]
@@ -757,10 +758,10 @@ def resolve_cascade_protocol(config: PipelineConfig) -> None:
     replayed corpus, and refuse a dataset that carries no cascades.
 
     Defaults come from the CORPUS's own published windows rather than from a flag,
-    for the reason research/cascade_prediction.md §8.2 gives: the standard settings
-    are per corpus (Weibo 0.5 h / 1 h to 24 h; Twitter 1 d / 2 d to 32 d; APS 3 y /
-    5 y to 20 y), and a run that silently used one corpus's window on another would
-    produce a number comparable to nothing. `--gen-horizon` is derived last, because
+    because the standard settings are per corpus (Weibo 0.5 h / 1 h to 24 h;
+    Twitter 1 d / 2 d to 32 d; APS 3 y / 5 y to 20 y), and a run that silently used
+    one corpus's window on another would produce a number comparable to nothing.
+    `--gen-horizon` is derived last, because
     it is the STEP COUNT the replay needs and getting it wrong truncates the very
     quantity being predicted.
     """
@@ -773,10 +774,9 @@ def resolve_cascade_protocol(config: PipelineConfig) -> None:
         raise ValueError(
             f"--task {config.task} replays REAL logged cascades, and dataset "
             f"{config.dataset!r} carries none. Corpora: {sorted(cascade_corpora)}. "
-            f"research/cascade_prediction.md §6.1 records that not one graph we load "
-            f"for the other tasks carries a trace: that is the whole reason this "
-            f"task needed new loaders, and §2.2 is why replaying a SIMULATOR here "
-            f"would close exactly the loop the task exists to break."
+            f"Not one graph we load for the other tasks carries a trace: that is "
+            f"the whole reason this task needed new loaders, and replaying a "
+            f"SIMULATOR here would close exactly the loop the task exists to break."
         )
 
     observation, horizon = corpus_defaults(config.dataset)
@@ -797,7 +797,7 @@ def resolve_cascade_protocol(config: PipelineConfig) -> None:
     # A replayed corpus holds ONE dynamics: the transitions are identical whatever
     # kernel label they carry (the log is the log), so writing both IC and LT would
     # double the file for no second experiment. The label decides which HEAD is fit
-    # to them, which is the actual axis (§2.2).
+    # to them, which is the actual axis.
     if len(config.gen_models) > 1:
         config.gen_models = (config.diffusion_model,)
 
@@ -897,8 +897,7 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         # From the registry unless --trace-parents overrides it: NDlib emits no
         # transmission edge, and cascade reconstruction's tree-weighted reward is
         # not computable without one, so a dataset generated by forgetting the
-        # flag would silently collapse the reward onto its easy half
-        # (research/cascade_reconstruction.md §2.6).
+        # flag would silently collapse the reward onto its easy half.
         trace_parents=(
             get_task(config.task).reconstructs
             if config.trace_parents is None
@@ -913,11 +912,12 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         ),
         negative_selectors=tuple(config.negative_selectors),
         blocker_selectors=tuple(config.blocker_selectors),
-        # Compartmental generation. The three rates are what §8.2 trap 2 says must
-        # be recorded rather than left implicit, and `train_wm` reads them back off
-        # metadata.json rather than off a flag, so a head can never be fit against
-        # transitions a different gamma produced. The generator switches simulators
-        # on `--gen-models`, so nothing here needs a `--epidemic` flag.
+        # Compartmental generation. The three rates are unstandardized in the
+        # literature and must be recorded rather than left implicit, and `train_wm`
+        # reads them back off metadata.json rather than off a flag, so a head can
+        # never be fit against transitions a different gamma produced. The generator
+        # switches simulators on `--gen-models`, so nothing here needs a `--epidemic`
+        # flag.
         epi_beta=config.epi_beta,
         epi_gamma=config.epi_gamma,
         epi_alpha=config.epi_alpha,
@@ -932,7 +932,7 @@ def stage_data(config: PipelineConfig, layout: Layout) -> dict:
         # REPLAY rather than simulate, from the registry rather than a flag, for
         # the same reason `competitive` and `trace_parents` are. A cascade-prediction
         # dataset generated by forgetting this would be an NDlib rollout wearing the
-        # name of a real corpus, which is the one thing §2.2 says invalidates every
+        # name of a real corpus, which is the one thing that invalidates every
         # number the task produces.
         cascade_corpus=get_task(config.task).observational,
         cp_observation=config.cp_observation,
@@ -2003,8 +2003,7 @@ if __name__ == "__main__":
         type=str,
         default="influence_maximization",
         choices=task_names(),
-        help="graph task; the first level of the results tree and the name of "
-        "its literature review in research/ "
+        help="graph task; the first level of the results tree "
         "(default: influence_maximization).",
     )
     parser.add_argument(
@@ -2561,8 +2560,8 @@ if __name__ == "__main__":
         help="epidemic control: which of the four interventions the budget buys. "
         "vaccinate = the node is immune, leaves the graph and is never counted "
         "(NetShield, DAVA, Pastor-Satorras & Vespignani, Cohen); quarantine = the "
-        "node is ISOLATED but stays in the graph and stays counted, which is §8.2 "
-        "trap 7's 'recovered is not removed'; edge_cut = cut arcs (Kimura, NetMelt, "
+        "node is ISOLATED but stays in the graph and stays counted ('recovered "
+        "is not removed'); edge_cut = cut arcs (Kimura, NetMelt, "
         "Van Mieghem); contact_reduce = scale arc probabilities down (social "
         "distancing, the lever NDlib's compartmental models cannot express) "
         f"(default: {vaccinate}).",
@@ -2584,7 +2583,7 @@ if __name__ == "__main__":
         "so beta_uv = clip(scale * p(u->v)). 1.0 leaves it at the weighted-cascade "
         "value; the literature's scalar-beta regime is --prob-model uniform "
         "--uniform-p <beta> with this at 1.0. Crosses all three stages and lands in "
-        "metadata.json, because §8.2 trap 2 records that a table which fixes beta "
+        "metadata.json, because a table which fixes beta "
         "without stating it is comparable only to itself (default: 1.0).",
     )
     parser.add_argument(
@@ -2610,7 +2609,7 @@ if __name__ == "__main__":
         help="epidemic control: fraction of the prevalence curve discarded before "
         "the endemic prevalence is time-averaged. SIS has NO terminal state, so "
         "final size is undefined there and this is the metric that replaces it "
-        f"(§8.2 trap 6) (default: {default_burn_in}).",
+        f"(default: {default_burn_in}).",
     )
     parser.add_argument(
         "--outbreak-selectors",
@@ -2847,9 +2846,8 @@ if __name__ == "__main__":
         "without a transmission edge (default: 0.6).",
     )
     # Cascade prediction. The whole point of this task is that the data is REAL, so
-    # the flags that shape it are protocol rather than tuning: research/
-    # cascade_prediction.md 5.7 lists five independent incompatibilities between
-    # published tables and four of them are set here.
+    # the flags that shape it are protocol rather than tuning: published tables
+    # differ in five independent ways and four of them are set here.
     parser.add_argument(
         "--cp-observation",
         type=int,

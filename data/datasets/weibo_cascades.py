@@ -2,8 +2,8 @@
 Weibo Retweet Cascade Corpus Loader (from the raw AMiner release)
 
 The retweet traces that ship in the SAME AMiner Influence-Locality archive we
-already fetch for the `weibo` follower graph. `research/cascade_prediction.md` §6.1
-calls this "the cheapest possible entry point" and it is exactly right: we already
+already fetch for the `weibo` follower graph. This is the cheapest possible entry
+point to a real cascade corpus: we already
 download and parse that release, the cascades live in a second file inside it, so
 adding them is a second parser rather than a second download.
 
@@ -19,13 +19,13 @@ Source: https://www.aminer.cn/influencelocality (manual; registration-gated)
 DeepHawkes-release preprocessing that carries every published number (119,313
 cascades after an 08:00-18:00 publication filter and a `< 10` participant filter).
 This loader reads the same underlying traces before any of that, so its counts are
-its own: a fifth artefact for a name §6.4 already lists four of. Use it when the
+its own: a fifth artefact for a name that already has four published versions. Use it when the
 bundle is unavailable or when you want the unfiltered corpus; use `casflow_weibo`
-for anything compared against §5.1.
+for anything compared against a published number.
 
 **Warning: `--dataset weibo` is a different object again.** That is the FOLLOWER
-GRAPH with no traces at all, and §6.1 records the pair explicitly: "same source,
-different artefact: we load the graph, they load the traces".
+GRAPH with no traces at all. Same source, different artefact: that loader reads
+the graph, this one reads the traces.
 
 **Format of `total.txt`** (the Influence-Locality release's own, four lines per
 cascade):
@@ -64,8 +64,8 @@ documents for the follower graph:
   2. Download the Influence-Locality archive (the one containing weibo_network.txt).
   3. Extract total.txt into {data_dir}/
 
-research/cascade_prediction.md 6.1 is why this is the cheapest corpus to add: it is
-the same download the `weibo` graph already needs."""
+This is the cheapest corpus to add: it is the same download the `weibo` graph
+already needs."""
 
 
 def download_weibo_cascades() -> Path:
@@ -196,7 +196,7 @@ def load_weibo_cascades(path: Path) -> tuple[sp.csr_matrix, np.ndarray, np.ndarr
     """
     The graph: the union of the observed retweet paths.
 
-    NOT the 1.79M-node follower network. §6.5 records that the global Weibo graph
+    NOT the 1.79M-node follower network. The global Weibo graph
     exceeds this pipeline while cascade-local graphs do not, and `weibo.py` is where
     the follower network lives for anyone who wants it.
     """

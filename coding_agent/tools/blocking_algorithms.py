@@ -2,9 +2,8 @@
 Named classical INFLUENCE BLOCKING baselines: the condition-1 floor for
 `--task influence_blocking`.
 
-Two contracts, because this literature has two shapes of intervention
-(`research/influence_blocking.md` §1.1) and no published work scores them under one
-metric (§7):
+Two contracts, because this literature has two shapes of intervention and no published work scores them under one
+metric:
 
     blocking_algorithms[name](graph, budget, diffusion_model, negative_seeds=(), **kw)
         -> list[int]              nodes to counter-seed, or nodes to delete
@@ -15,8 +14,8 @@ metric (§7):
 `blocking_levers` says which lever each member belongs to, so the harness emits the
 right op and charges the right budget.
 
-Read §5.4 and §5.3 before treating any of these as a weak floor. In ascending order
-of danger:
+Do not treat any of these as a weak floor: the published tables show each one
+holding its own. In ascending order of danger:
 
   1. `random_blocking`, `degree_blocking`: the free wins, and `degree_blocking` is
      free for a REASON worth internalizing: CLDAG's own §6.3 reports that "the
@@ -39,7 +38,7 @@ of danger:
 
 Two conventions everything here obeys:
 
-  * **The candidate set is the rumour's reachable region, not V.** §8.1: prevented
+  * **The candidate set is the rumour's reachable region, not V.** Prevented
     influence counts only nodes that WOULD have been infected, so a blocker placed
     where the cascade never arrives scores exactly zero however central it is. Every
     member below either restricts to that region or weights by it.
@@ -421,7 +420,7 @@ def _prevention_sets(
 
     Under the live-edge characterisation a node `w` reached by the rumour is saved by
     a positive seed `v` iff `v` reaches it no later than the rumour does: `<=` under
-    positive dominance and `<` under negative dominance (§8.4, TC-AIBM Lemma 1). So
+    positive dominance and `<` under negative dominance (TC-AIBM Lemma 1). So
     one sample is: draw a live-edge graph, draw a target `w` the rumour reaches,
     compute its distance from `S_N`, and collect every node whose distance to `w`
     clears that bar. Greedy max-coverage over these sets is exactly the RIS argument
@@ -615,8 +614,8 @@ def cmia_o(
     Wu & Pan (Computer Networks 2017) CMIA-O: greedy over MIA arborescences.
 
     Warning: WHAT THIS IMPLEMENTS. The paper is paywalled with no open PDF, no result
-    table and no code (research/influence_blocking.md §11 names it the largest single
-    hole in §5), so this is the MIA construction it is built on rather than a
+    table and no code (the largest single hole in this literature's published
+    results), so this is the MIA construction it is built on rather than a
     transcription: maximum-influence paths from `S_N` and from the blocker set,
     truncated at `mia_threshold`, with a node counted as saved when the positive path
     arrives no later than the negative one: `<=` under positive dominance and `<`
@@ -726,7 +725,7 @@ def cldag(
 
     Warning: WHAT THIS IMPLEMENTS. CLDAG's contribution is a local-DAG solver whose
     per-node influence is computed exactly within a thresholded DAG; the published
-    comparison is figure-only (§11) and no code was ever released. This is that
+    comparison is figure-only and no code was ever released. This is that
     scoring rule with the local DAG built as the thresholded maximum-weight path
     expansion the MIA family uses, under NEGATIVE dominance, which is what CLT
     hard-codes. Ranking is one-shot rather than greedy, because CLDAG's own
@@ -1081,7 +1080,7 @@ def edge_betweenness_blocking(
     for source in sources:
         # Shortest-path counts by BFS, credited to the arc each node was first
         # reached through: the sampled-pivot edge betweenness restricted to the
-        # rumour's own sources, which is the only region that can matter (§8.1)
+        # rumour's own sources, which is the only region that can matter
         distance = {source: 0}
         parent = {}
         queue = [source]
@@ -1226,7 +1225,7 @@ mc_blocking_algorithms = ("greedy_prevention",)
 # Condition 1's pool PER LEVER, because a lever can only emit what its own members
 # return: handing a counter-seeding arm `imin_lhga` gives it a node-deletion set, and
 # handing an edge arm `proximity` gives it node ids. Each list is ordered by how
-# dangerous the row is (§9.3), and each one leads with the baseline that actually has
+# dangerous the row is, and each one leads with the baseline that actually has
 # to be beaten rather than with a floor.
 #
 #   counter_seed  `proximity`: above every learned method except StratLearner on

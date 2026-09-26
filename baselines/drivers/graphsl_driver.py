@@ -286,8 +286,8 @@ def predict_slvae(adjacency, train_dataset, all_datasets, _payload, epochs, seed
     # the VAE's training latents, then descend the forward-reconstruction loss on
     # it per instance. Reproduced from `SLVAE.infer`, minus its metric block. Note
     # what this costs: one gradient loop PER TEST INSTANCE is exactly the
-    # per-instance optimization research/source_localization.md §1 puts SL-VAE in
-    # the non-amortized row for.
+    # per-instance optimization that puts SL-VAE among the
+    # non-amortized methods.
     slvae_model = slvae_model.to(model.device)
     slvae_model.eval()
     for parameter in slvae_model.parameters():

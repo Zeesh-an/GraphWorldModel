@@ -41,8 +41,8 @@ class MonteCarloEnvironment:
         # IC/LT. `reward` stays `len(state.infected)` because State maps the attack
         # set (the ever-infected nodes) onto that field, so nothing downstream has
         # to know which simulator ran. What IS new is `prevalence_curve`: |I(t)| is
-        # a different curve from the cumulative one and is what §2.6's peak,
-        # time-to-peak and AUC are all functions of.
+        # a different curve from the cumulative one and is what the epidemic
+        # peak, time-to-peak and AUC are all functions of.
         self.epidemic_config = epidemic_config
         # Influence blocking: run the TWO-cascade simulator with S_N committed at
         # t=0 by reset(), and score the negative cascade. `reward` stays
@@ -77,13 +77,13 @@ class MonteCarloEnvironment:
         `P(v newly infected at t + 1 | s_t)` by sampling the real simulator.
 
         The transition kernel evaluated at an ARBITRARY proposed state, which is
-        what a trajectory decoder needs and a rollout cannot give
-        (research/cascade_reconstruction.md §2.5.2). `Simulator.set_state` writes
+        what a trajectory decoder needs and a rollout cannot give.
+        `Simulator.set_state` writes
         the hypothesis in and `advance_marginal([], mc_runs)` averages `mc_runs`
         draws of one diffusion step out of it.
 
         The episodes are charged to `episodes_used` like any other, which is the
-        whole point of the @monte_carlo binding: §2.4.2 puts a decoder at ~10^4
+        whole point of the @monte_carlo binding: a decoder costs ~10^4
         kernel evaluations per instance, and whether that arm completes at all is
         the finding this column exists to report.
         """
@@ -149,8 +149,8 @@ class MonteCarloEnvironment:
                     config=self.competitive_config,
                 )
                 # NOT empty: the rumour moved first and is already committed, which
-                # is the premise of the whole task (§5.4, "first mover has a clear
-                # advantage")
+                # is the premise of the whole task (CLDAG's "first mover has a
+                # clear advantage")
                 state = simulator.current_state()
             else:
                 simulator = build_simulator(

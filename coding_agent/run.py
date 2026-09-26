@@ -275,18 +275,19 @@ class ExperimentConfig:
     outbreak_pct: float | None = None
     outbreak_selector: str = "random"
     # Influence blocking. `outbreak_pct` / `outbreak_selector` above double as |S_N|
-    # and the ATTACKER MODEL: §8.3's second experimental axis, which IM does not
-    # have, so nothing new is needed for those. What is new is the lever (which of
-    # §1.1's four interventions the budget buys), the tie-break, `p_L`, and Budak's
-    # detection delay. All four are inert unless the task is competitive.
+    # and the ATTACKER MODEL: the literature's second experimental axis, which IM
+    # does not have, so nothing new is needed for those. What is new is the lever
+    # (which of the four published interventions the budget buys), the tie-break,
+    # `p_L`, and Budak's detection delay. All four are inert unless the task is
+    # competitive.
     blocking_lever: str = counter_seed
     tie_break: str = auto_dominance
     positive_prob: str = shared_positive_prob
     detection_delay: int = 0
     # Epidemic control. `outbreak_pct` / `outbreak_selector` above double as the
     # index-case count and the OUTBREAK MODEL, so nothing new is needed for those.
-    # What is new is the lever (which of §2.5's four interventions the budget buys)
-    # and the three compartmental rates, which §8.2 trap 2 says must be reported
+    # What is new is the lever (which of the four published interventions the
+    # budget buys) and the three compartmental rates, which must be reported
     # rather than left implicit: beta and gamma are free parameters nobody
     # standardizes, so a table that fixes them without saying so is comparable only
     # to itself. All are inert unless the task registry marks the task epidemic.
@@ -296,8 +297,8 @@ class ExperimentConfig:
     epi_alpha: float = 0.5
     epi_burn_in: float = default_burn_in
     contact_reduction: float = default_contact_reduction
-    # Source localization. The two SPLITS are the load-bearing pair
-    # (research/source_localization.md §8.5.1): the outer loop's reward is computed
+    # Source localization. The two SPLITS are the load-bearing pair:
+    # the outer loop's reward is computed
     # on `sl_select_split` and the winning program is then re-scored, unmodified,
     # on `sl_eval_split`. Without that separation a program that memorized specific
     # cascades is indistinguishable from an algorithm, and the amortization claim
@@ -308,17 +309,16 @@ class ExperimentConfig:
     sl_observation: str = "marginal"
     sl_budget_mode: str = episode_budget
     sl_source_tolerance: float = 0.5
-    # §8.5.1's GRAPH axis: run the winning program of ANOTHER run, unmodified, on
+    # The GRAPH axis: run the winning program of ANOTHER run, unmodified, on
     # this dataset. That comparison is the headline of the amortization claim and
     # is one no per-instance method can even enter: SL-VAE has no artifact to
     # transfer. Points at another arm's results JSON; its `script` field is run as
     # a canned strategy here.
     transfer_from: str | None = None
-    # Cascade reconstruction. `cr_setting` is the load-bearing one
-    # (research/cascade_reconstruction.md §8.3): the four settings of §2.7 are four
-    # PROTOCOLS, not four knobs, and a decoder selected under `final_snapshot` is
-    # solving a different problem from one selected under `partial_times`. The
-    # masking DIRECTION is stated explicitly because §8.2 trap 1 records that two
+    # Cascade reconstruction. `cr_setting` is the load-bearing one: the four
+    # settings are four PROTOCOLS, not four knobs, and a decoder selected under
+    # `final_snapshot` is solving a different problem from one selected under
+    # `partial_times`. The masking DIRECTION is stated explicitly because two
     # papers in this literature use the symbol sigma for opposite quantities:
     # `cr_observation_rate` is the probability a node IS reported.
     cr_setting: str = partial_times
@@ -329,13 +329,13 @@ class ExperimentConfig:
     cr_eval_split: str = "test"
     # lambda in the REPORTED `lambda * PathPrecision + (1 - lambda) * EventF1`
     # tree score, computed against the stored history after the search. The
-    # search itself runs on the label-free kernel likelihood (§2.6's warning
-    # about a search that never attempts the tree is answered by the likelihood
-    # scoring the asserted transmissions, not by this weight).
+    # search itself runs on the label-free kernel likelihood (the risk of
+    # a search that never attempts the tree is answered by the likelihood scoring
+    # the asserted transmissions, not by this weight).
     cr_tree_weight: float = 0.6
     # Cascade prediction. The two SPLITS are the load-bearing pair for the same
     # reason source localization's are, plus one this task has and that one does
-    # not: research/cascade_prediction.md §8.3 shows that a decade of published
+    # not: a decade of published
     # numbers moved materially when the split stopped being random over cascades,
     # and our replay is chronological from the first commit for exactly that reason.
     # `cp_observation_steps` is how much of each cascade the predictor sees; 0 reads
@@ -347,14 +347,14 @@ class ExperimentConfig:
     cp_observation_steps: int = 0
     cp_metric: str = default_prediction_metric
     cp_target: str = increment_target
-    # Unrolls averaged inside one `forecast_marginals` call. The cost knob of §2.4:
+    # Unrolls averaged inside one `forecast_marginals` call. The cost knob:
     # an @monte_carlo arm pays `steps * samples * mc_runs` real episodes per call
     # and a @world_model arm pays `steps * samples` matmuls.
     cp_forecast_samples: int = default_forecast_samples
     # True when this arm is the @native condition. The evaluator has already been
     # resolved to monte_carlo with one episode by then, so the arm identity cannot
     # be recovered from `evaluator`, and it decides whether `predict_marginals`
-    # exists at all (§2.4.3).
+    # exists at all.
     native_arm: bool = False
     outer_iters: int = 20
     mc_runs: int = 200
@@ -702,7 +702,6 @@ def _build_environment(
         # ...and a non-compartmental checkpoint cannot be rolled out against an
         # epidemic task: its head is monotone by construction, so `I` could never
         # shrink and every rollout would report a cascade that transmits forever
-        # (research/epidemic_control.md §2.4)
         if epidemic and not environment.epidemic:
             raise ValueError(
                 f"checkpoint {config.wm_results_json} was trained on IC/LT "
@@ -1047,7 +1046,7 @@ def run_experiment(
 
     # The exogenous cascade, resolved BEFORE the environment so both the simulator and
     # the arm face the same one, and derived only from (graph, size, selector, seed).
-    # For influence blocking this IS S_N, and `--outbreak-selector` is §8.3's
+    # For influence blocking this IS S_N, and `--outbreak-selector` is the
     # attacker model rather than an outbreak rule: the same machinery, because the
     # published attacker models (degree, PageRank, random, IMM) are exactly the
     # selectors that machinery already has.
@@ -1092,7 +1091,7 @@ def run_experiment(
 
     # The labelled (G, y, x) episodes an inverse task is scored on. Two disjoint
     # pools, and the split between them is what makes the amortization claim
-    # testable at all (research/source_localization.md §8.5.1): the outer loop's
+    # testable at all: the outer loop's
     # reward is computed on `select`, and the winner is re-run unmodified on
     # `evaluate`. A program that memorized specific cascades scores well on the
     # first and badly on the second.
@@ -1101,7 +1100,7 @@ def run_experiment(
     if registry.forecasts:
         # The same two-pool split as both inverse tasks, and here it carries an
         # extra load: `load_forecasts` RAISES on a SIMULATED dataset rather than
-        # scoring it, because §2.2's whole argument collapses if the "real cascade"
+        # scoring it, because the whole argument collapses if the "real cascade"
         # is an NDlib rollout. The observation window comes off the dataset's own
         # `observed` block unless overridden, so a run cannot silently show the
         # predictor a different prefix than the one the corpus's published protocol
@@ -1136,10 +1135,10 @@ def run_experiment(
         if protocol["split_protocol"] != "chronological":
             print(
                 "[run] WARNING: this dataset used a RANDOM split over cascades. "
-                "research/cascade_prediction.md §8.3 shows that protocol leaks the "
+                "That protocol leaks the "
                 "future: cascades overlap in wall-clock time, so a training "
                 "cascade's prediction window can sit inside a test cascade's "
-                "observation window, and that two 2021-24 SOTA models fell BELOW a "
+                "observation window, and two 2021-24 SOTA models fell BELOW a "
                 "plain MLP once it was fixed. Numbers from this run are comparable "
                 "to the published tables and not to a leak-free one."
             )
@@ -1149,7 +1148,7 @@ def run_experiment(
         # memorized specific cascades is indistinguishable from an algorithm until
         # it meets episodes the search never saw. `require_parents` RAISES on a
         # dataset generated without --trace-parents rather than silently collapsing
-        # the reward onto Event F1, which is the failure §2.6 exists to prevent.
+        # the reward onto Event F1, which is the failure this guard exists to prevent.
         common = dict(
             graph_id=graph_id,
             setting=config.cr_setting,
@@ -1377,9 +1376,8 @@ def run_experiment(
         config.baseline = _parse_routing_choice(routing_reply, menu)
         print(f"[run] routing picked {config.baseline!r}")
 
-    # The graph axis of the amortization claim (source localization §8.5.1, and
-    # section 10 of final_results_plan.md for every task): the winning program of
-    # another run, executed here unmodified. Read before the canned-baseline
+    # The graph axis of the amortization claim, for every task: the winning
+    # program of another run, executed here unmodified. Read before the canned-baseline
     # branch so a transfer arm is a transfer arm regardless of what else was set.
     if config.transfer_from is not None:
         if canned_script is not None:
@@ -1529,7 +1527,7 @@ def run_experiment(
     # The held-out number, and the one every table reads. Selecting and reporting
     # on the same episodes proves nothing about amortization: a program that
     # memorized specific cascades is indistinguishable from an algorithm until it
-    # meets episodes the search never saw (research/source_localization.md §8.5.1).
+    # meets episodes the search never saw.
     heldout = None
     if task.forecasts and evaluate_instances:
         print(
@@ -1730,9 +1728,8 @@ def run_experiment(
         "forward_passes": getattr(environment, "forward_passes", 0),
         "timeline": timeline,
         # sigma(S, T) at every T <= horizon, ensemble-mean and padded, so a
-        # horizon-conditional number is readable instead of only the endpoint
-        # (research/adaptive_online_im.md §8.2 trap 5). Index t is the count
-        # AFTER the step at t - 1.
+        # horizon-conditional number is readable instead of only the endpoint.
+        # Index t is the count AFTER the step at t - 1.
         "spread_curve": trajectory.spread_curve,
         "spread_at_horizon": (
             trajectory.spread_curve[-1] if trajectory.spread_curve else None
@@ -1807,8 +1804,8 @@ def run_experiment(
         result["prediction_horizon"] = (
             select_instances[0].observation.horizon if select_instances else None
         )
-        # The protocol block, verbatim from the dataset. §5.7 lists five independent
-        # incompatibilities between published tables and four of them are here; a
+        # The protocol block, verbatim from the dataset. Published tables differ in
+        # five independent ways and four of them are here; a
         # row without them is comparable to nothing, which is why they travel with
         # the number rather than living in a config file.
         result["corpus"] = protocol.get("corpus")
@@ -1898,7 +1895,7 @@ def run_experiment(
         result["spread_pct"] = None
         result["per_instance"] = reported.cost.get("per_instance")
         result["summary"] = summarize(reported, graph, task)
-        # §2.11 risk 1 makes this a REQUIRED check rather than a diagnostic: a
+        # This is a REQUIRED check rather than a diagnostic: a
         # trivial decoder (everyone reachable, parents by BFS) must score badly
         # under the reward, or the reward is wrong. Both rewards in play are
         # reported, in the same file as the result, because a reader cannot
@@ -1940,7 +1937,7 @@ def run_experiment(
         )
         result["scoring_calls"] = reported.cost.get("scoring_calls")
         result["transfer_from"] = config.transfer_from
-        # The generalization gap §8.5.1 exists to expose, on the REWARD and on
+        # The generalization gap, exposed on the REWARD and on
         # the reported F1: a large negative gap means the program memorized the
         # episodes it was selected on rather than learning an algorithm
         result["generalization_gap"] = (
@@ -1961,11 +1958,12 @@ def run_experiment(
         result["summary"] = summarize(reported, graph, task)
 
     if task.blocks:
-        # §8.1's block. The reward is the rumour's remaining size (lower is better);
-        # PREVENTED influence is that subtracted from the unopposed reference, which
-        # is the quantity all five published names refer to. The reference is
-        # measured on THIS arm's evaluator, on purpose: a ratio of two different
-        # rulers means nothing, and the referee re-measures both on the shared kernel.
+        # The prevented-influence block. The reward is the rumour's remaining size
+        # (lower is better); PREVENTED influence is that subtracted from the
+        # unopposed reference, which is the quantity all five published names refer
+        # to. The reference is measured on THIS arm's evaluator, on purpose: a ratio
+        # of two different rulers means nothing, and the referee re-measures both on
+        # the shared kernel.
         print("[run] unopposed reference sigma(S_N, empty) on this evaluator...")
         unopposed = unopposed_reference(
             environment, task, config.horizon, config.budget
@@ -1986,9 +1984,9 @@ def run_experiment(
         )
 
     if task.immunizes:
-        # §8.3's block. The reward is the attack rate (lower is better); PREVENTED
-        # INFECTIONS is that subtracted from the unprotected reference, which is
-        # what an immunization table reports. The reference is measured on THIS
+        # The immunization block. The reward is the attack rate (lower is better);
+        # PREVENTED INFECTIONS is that subtracted from the unprotected reference,
+        # which is what an immunization table reports. The reference is measured on THIS
         # arm's evaluator, on purpose: a difference of two different rulers is not a
         # quantity, and the referee re-measures both on the shared kernel.
         print("[run] unprotected reference |R(inf)| on this evaluator...")
@@ -2048,7 +2046,7 @@ def run_experiment(
         # The budget's meaning: at or above the ring the row is trivial
         result["outbreak_ring"] = ring_size(graph, outbreak)
         result["ring_fits"] = config.budget >= result["outbreak_ring"]
-        # §8.3: the connectivity functionals reported ALONGSIDE the diffusion
+        # The connectivity functionals reported ALONGSIDE the diffusion
         # number, computed exactly, as context: never as the learned target.
         # Read off the executed bags rather than re-planning, for the same reason
         # the referee replays them: a randomized strategy returns a different set on
@@ -2081,7 +2079,7 @@ def run_experiment(
     if batches is not None:
         # (k, b, r) together, because the adaptive-IM literature splits three ways
         # on the budget convention and a spread number is not comparable without
-        # all three (research/adaptive_online_im.md §8.2 trap 3)
+        # all three
         result["adaptive"] = True
         result["rounds"] = len(batches)
         result["round_batches"] = batches
@@ -2154,7 +2152,7 @@ def run_experiment(
     # is a model estimate. `--mc-agreement` adds NDlib on the same winner, which is
     # the independent reference the oracle is measured against and the timing row.
     if task.forecasts:
-        # THE number §9.1 is actually about, and the one no other task in this repo
+        # THE number this task is actually about, and the one no other task in this repo
         # can produce. The reward already measures how good a PROGRAM is; this
         # measures how good the MODEL is: roll the arm's own forward model forward
         # from each observed prefix with no program in the loop, and compare its
@@ -2185,7 +2183,7 @@ def run_experiment(
                 evaluate_instances or list(task.instances),
                 # A DIAGNOSTIC rather than the reward, so it runs at a fixed small
                 # sample count instead of the search's: doubling its precision buys
-                # nothing a reader of §9.1 would act on, and under @monte_carlo it
+                # nothing a reader would act on, and under @monte_carlo it
                 # is the single most expensive thing in the run.
                 samples=referee_forecast_samples,
             )
@@ -2874,8 +2872,8 @@ if __name__ == "__main__":
         default=0,
         help="cascade prediction: replayed timesteps of each cascade the predictor "
         "sees. 0 reads it off the dataset's own `observed` block, which is where "
-        "the corpus's published window landed after binning: research/"
-        "cascade_prediction.md 8.2 pairs TWO windows per corpus deliberately, so "
+        "the corpus's published window landed after binning. The "
+        "literature pairs TWO windows per corpus deliberately, so "
         "sweep this rather than picking one (default: 0).",
     )
     parser.add_argument(
@@ -2886,7 +2884,7 @@ if __name__ == "__main__":
         help="cascade prediction: which error the reward IS. All of them MINIMIZE. "
         "`msle` is CasFlow's own code (log2, clamped at 1, no offset); "
         "`msle_offset` is CasFT's stated log2(P+1); `msle_natural` is CTCP's loss. "
-        "research/cascade_prediction.md 5.7 records that those three are printed "
+        "Those three are printed "
         "under one name in one published table "
         f"(default: {default_prediction_metric}).",
     )

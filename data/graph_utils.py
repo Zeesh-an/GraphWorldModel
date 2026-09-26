@@ -158,9 +158,7 @@ def largest_connected_component(
 
     Returns the restricted adjacency and the surviving node indices, so the
     caller can subset features and labels the same way. Several papers report
-    the LCC rather than the raw file (see research/influence_maximization.md
-    §6.3): this is what
-    reproduces their node counts.
+    the LCC rather than the raw file: this is what reproduces their node counts.
     """
     _, membership = csgraph.connected_components(adjacency, directed=False)
     keep = np.flatnonzero(membership == np.bincount(membership).argmax())

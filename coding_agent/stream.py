@@ -1,9 +1,9 @@
 """
 Dynamic / streaming IM: exogenous graph edits arriving while the policy seeds.
 
-Branch (d) of research/adaptive_online_im.md §1.4. The graph is not fixed: edges
+The dynamic branch of the IM literature. The graph is not fixed: edges
 appear and disappear as the campaign runs, and the seed set has to be chosen
-against a moving target. §2.4d puts the cost at "no new T_endo, no new
+against a moving target. The expected cost is "no new T_endo, no new
 simulator", and that holds: `reconstruct_episode_adjacency` and `apply_edge_ops`
 already replay a changing `A_t`. What was missing is a stream of edits
 INDEPENDENT of the action, which is what this file supplies.

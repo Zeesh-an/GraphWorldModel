@@ -8,29 +8,28 @@ Every decoder has the signature
 
 mapping each node it believes was infected to `(activation timestep, inferred
 parent)`, with `parent = None` marking a source and uninfected nodes simply
-absent. That single object carries everything `research/cascade_reconstruction.md`
-§8.1 scores: the `(node, t)` pairs give Event F1 and infection-time NRMSE, and the
-parent assignment gives Path Precision, Jaccard and order accuracy.
+absent. That single object carries everything the published metrics score: the
+`(node, t)` pairs give Event F1 and infection-time NRMSE, and the parent assignment
+gives Path Precision, Jaccard and order accuracy.
 
 That is the whole difference from the other three pools. `algorithms.py` returns a
 seed set to maximize with, `dismantling_algorithms.py` nodes to delete,
 `localization_algorithms.py` a source SET, and this one returns a whole
-trajectory, which is why §2.5.1 calls source localization the projection of this
+trajectory, which is why source localization is the projection of this
 task rather than a sibling of it (the subset with `parent = None` IS the recovered
 seed set).
 
-Read §2.9 and §8.2 before treating any of these as a weak floor. In ascending
-order of danger:
+None of these is a weak floor. In ascending order of danger:
 
   1. `random_reconstruction`, `observed_only`, `one_hop`: Rozenshtein's own two
      controls plus a floor. `observed_only` has node precision 1.0 BY CONSTRUCTION
-     and exists to prove the reward is not gameable (§2.11 risk 1).
+     and exists to prove the reward is not gameable.
   2. **`delayed_bfs` (Xiao SDM'18)**: the row that actually has to be beaten. All
      four of that paper's methods reach node precision > 0.8 and usually near 1.0
      [figure], `delayed-bfs` is `O(m + k log k)`, and it sits INSIDE the coding
      agent's expressible space.
-  3. **`personalized_pagerank`**: §8.2 trap 4, and the most specific warning in
-     that file: Xiao ICDM'18 found Personalized PageRank BEATS tree sampling on
+  3. **`personalized_pagerank`**: the most specific warning in this literature.
+     Xiao ICDM'18 found Personalized PageRank BEATS tree sampling on
      `grqc` (assortativity 0.164) and loses elsewhere [verified]. Our suite
      contains exactly that graph. If the search cannot clear PPR on `ca_grqc`, the
      result is not real.
@@ -42,7 +41,7 @@ order of danger:
 docstring states where it deviates. Three deviations are shared widely enough to
 name up front:
 
-  * **The parent assignment is shared.** Most published methods in §3 output a
+  * **The parent assignment is shared.** Most published methods output a
     node set and a time, not a tree; `finalize` turns any time assignment into a
     coherent tree by the same rule for all of them, so a Path Precision difference
     between two rows is a difference in their TIMES, not in a tree-building trick
@@ -83,7 +82,7 @@ max_backfill_rounds = 50
 closure_terminals = 120
 
 # Steiner trees sampled by `tree_sampling`. Xiao ICDM'18 uses 1,000 and reports
-# gains beyond that are marginal [verified, §8.2 trap 6]; 60 is what finishes
+# gains beyond that are marginal [verified]; 60 is what finishes
 # inside one refinement iteration, and it is the first number to raise before
 # quoting a tree-sampling comparison as anything but a smoke result.
 sampled_trees = 60
@@ -92,8 +91,8 @@ sampled_trees = 60
 pagerank_alpha = 0.85
 pagerank_iterations = 60
 
-# MCMC decoding: proposals per instance and burn-in fraction. §2.4.2 puts a real
-# decoder at ~10^4 kernel calls per instance; these are the smoke-test values.
+# MCMC decoding: proposals per instance and burn-in fraction. A real decoder
+# needs ~10^4 kernel calls per instance; these are the smoke-test values.
 mcmc_proposals = 400
 mcmc_burn_in = 0.25
 
@@ -115,8 +114,8 @@ def _probability_map(graph: GraphInfo) -> dict[tuple[int, int], float]:
 
 def _weighted_view(graph: GraphInfo) -> nx.DiGraph:
     """
-    The graph as `-log p` arc costs: the likelihood metric every Steiner-style
-    method in §3 is defined over.
+    The graph as `-log p` arc costs: the likelihood metric every published
+    Steiner-style method is defined over.
 
     A most-likely path is a shortest path under `-log p`, so one weighted view
     serves the tree methods, the consistent-tree methods and CulT alike. Built as
@@ -377,10 +376,10 @@ def observed_only(
     """
     Report exactly what was observed and infer nothing: Rozenshtein's `Reports`.
 
-    Node PRECISION is 1.0 by construction (§8.1: `Reports` is "trivially precision
-    1.0"), which is precisely why it belongs in the default pool: §2.11 risk 1
-    requires confirming that a trivial decoder scores badly under the chosen
-    reward before running a search, and this is that decoder. It scores badly
+    Node PRECISION is 1.0 by construction (`Reports` is trivially precision 1.0),
+    which is precisely why it belongs in the default pool: a trivial decoder has to
+    be confirmed to score badly under the chosen reward before a search is run,
+    and this is that decoder. It scores badly
     because it has no recall and, once `finalize` backfills the nodes needed to
     explain the reports, no tree either.
     """
@@ -639,7 +638,7 @@ def steiner_tree(
 
     The control the three ordered variants above are measured against: Xiao SDM'18
     reports `closure` / `greedy` / `delayed-bfs` all beat plain `steiner` on order
-    accuracy under every model and graph [figure, §6], and having it in the pool is
+    accuracy under every model and graph [figure], and having it in the pool is
     what makes that a measured claim here rather than a cited one.
     """
     members = set(reported_nodes(observation))
@@ -678,14 +677,14 @@ def tree_sampling(
     """
     Xiao ICDM'18: SAMPLE Steiner trees and read off per-node marginal probabilities.
 
-    The only classical method in §3 that outputs calibrated probabilities rather
+    The only published classical method that outputs calibrated probabilities rather
     than a binary set. Sampling is by randomized arc costs (`-log p` perturbed by
     an exponential draw) and a shortest-path tree per draw, which is the cheap
     relative of the paper's loop-erased-random-walk cycle popping; a node is kept
     when it appears in more than half the sampled trees, and its time is the modal
     hop at which it appeared.
 
-    §8.2 trap 6: the paper uses 1,000 trees and reports marginal gains beyond that.
+    The paper uses 1,000 trees and reports marginal gains beyond that.
     `n_trees` here defaults to `sampled_trees`, which is a smoke value.
     """
     members = set(reported_nodes(observation))
@@ -735,12 +734,12 @@ def personalized_pagerank(
     """
     Personalized PageRank from the reported nodes: the assortativity trap.
 
-    §8.2 trap 4 and §2.11 risk 5, and it is the most specific warning in that file:
-    Xiao ICDM'18 found this BEATS tree sampling on `grqc` (assortativity 0.164) and
-    loses elsewhere [verified], because an assortative graph makes the infected
-    subgraph densely connected and a random walker exploits exactly that. Our suite
-    contains that graph. **If a generated decoder cannot beat this row on
-    `ca_grqc`, the result is not real**: run it there specifically.
+    The most specific warning in this literature: Xiao ICDM'18 found this BEATS
+    tree sampling on `grqc` (assortativity 0.164) and loses elsewhere [verified],
+    because an assortative graph makes the infected subgraph densely connected and a
+    random walker exploits exactly that. Our suite contains that graph. **If a
+    generated decoder cannot beat this row on `ca_grqc`, the result is not real**:
+    run it there specifically.
 
     The kept set is sized to the reported set scaled by the observation rate the
     reports imply, so it does not silently predict the whole graph.
@@ -839,7 +838,7 @@ def dhrec(
     Deviation: DHREC needs the diffusion PARAMETERS to price a ball and handles
     SEIR; we price by hop count under IC/LT and take `k` from the cover rather than
     from a prize. DITTO's Tables 4-5 report DHREC at `F1 .50-.70`: 10 to 35% below
-    the supervised ideal, which is the bar this row is here to set [verified §5.1].
+    the supervised ideal, which is the bar this row is here to set [verified].
     """
     members = set(reported_nodes(observation))
     if not members:
@@ -915,7 +914,7 @@ def cri(
 
     Deviation, and the paper's own: CRI estimates infection times but NOT recovery
     times. Under IC/LT there is no recovery compartment, so nothing is lost here;
-    under SIR it would be. DITTO reports CRI at `F1 .57-.82` [verified §5.1].
+    under SIR it would be. DITTO reports CRI at `F1 .57-.82` [verified].
     """
     members = set(reported_nodes(observation))
     if not members:
@@ -1043,8 +1042,8 @@ def consistent_tree_wpct(
     The source of this task's central asymmetry: `prec_v = 100%` alongside
     `prec_e = 78-86%` on Enron and Twitter [verified, Table I]. Getting the node
     set right is much easier than getting the edges right, which is the same
-    finding DIPT reports thirteen years later and the reason §2.6 weights the
-    reward toward the tree.
+    finding DIPT reports thirteen years later and the reason the tree-weighted
+    score leans toward the tree.
     """
     return _consistent_tree(graph, observation, horizon, path_consistent=True)
 
@@ -1074,8 +1073,8 @@ def cult(
     Implemented as a Dijkstra from a virtual super-source whose arc into every
     candidate root costs `alpha`, which is the standard reduction.
 
-    **The honest ceiling for "what can you do without a kernel"** (§5.5): CulT is
-    the only method in §3 that assumes no propagation model at all, which makes it
+    **The honest ceiling for "what can you do without a kernel"**: CulT is the
+    only published method here that assumes no propagation model at all, which makes it
     the right thing for a learned kernel to beat. Its own paper publishes ZERO
     tables (`grep -c "Table"` returns 0) so its MCC 0.6-0.9 is [figure] and this
     row is a reimplementation of the method, not a reproduction of a number.
@@ -1142,13 +1141,13 @@ def jordan_backward(
     graph: GraphInfo, observation, horizon: int, **_kw: object
 ) -> dict[int, tuple[int, int | None]]:
     """
-    Greedy backward decode from the Jordan centres: the cheap first cut of §2.11.
+    Greedy backward decode from the Jordan centres: the cheap first cut.
 
     Name the centre of each observed component as a source, then walk the cascade
     FORWARD from those sources through the observed set, taking at each step the
-    most likely arc out of the current wave. The simplest thing in §2.4.3's table
-    and the one a generated program should regard as its own starting point rather
-    than its target.
+    most likely arc out of the current wave. The simplest decoder there is, and the
+    one a generated program should regard as its own starting point rather than its
+    target.
     """
     members = set(reported_nodes(observation))
     if not members:
@@ -1205,7 +1204,7 @@ def mcmc_decode(
     """
     Metropolis-Hastings over HISTORIES, scored under the transition kernel: DITTO, minus the learned proposal.
 
-    §2.4.3's third family. Start from `delayed_bfs`, then repeatedly perturb one
+    The sampling decoder family. Start from `delayed_bfs`, then repeatedly perturb one
     node's activation time by +/-1 and accept the move with probability
     `min(1, exp(Delta log p))`, where the trajectory log-likelihood is evaluated by
     unrolling `predict` over the proposed history. `predict` is
@@ -1298,11 +1297,12 @@ def forward_backward(
     """
     Forward-filter / backward-sample smoothing against the transition kernel.
 
-    §2.4.3's second family, and the one nobody in §3 does with a learned kernel:
+    The smoothing decoder family, and the one no published method runs with a
+    learned kernel:
     propagate the per-node activation marginal forward under `predict`, then walk
     backward assigning each node the step at which its forward marginal first
     crossed the threshold, subject to the observed times. Classical smoothing,
-    which the whole task is an instance of (§2.1).
+    which the whole task is an instance of.
 
     **Blocked from generated scripts by default**, on the same terms as
     `mcmc_decode`: it costs `horizon` kernel evaluations per particle and a
@@ -1370,7 +1370,7 @@ reconstruction_algorithms = {
     "steiner_tree": steiner_tree,
     # probabilistic tree sampling (Xiao ICDM'18)
     "tree_sampling": tree_sampling,
-    # the assortativity trap (§8.2 trap 4): run it on ca_grqc specifically
+    # the assortativity trap: run it on ca_grqc specifically
     "personalized_pagerank": personalized_pagerank,
     # consistent trees (Zong ICDM'12), both variants
     "consistent_tree_wpct": consistent_tree_wpct,

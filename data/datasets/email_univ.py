@@ -9,7 +9,7 @@ Source: http://networkrepository.com/ia-email-univ.php
 
 Xiao ICDM'18's `email-univ` row, at 1,133 / 5,451 with assortativity -0.0007
 [verified, Table I]. It is the ASSORTATIVITY-NEUTRAL member of that table and
-therefore the control for `ca_grqc`: §8.2 trap 4 records that Personalized
+therefore the control for `ca_grqc`: Xiao ICDM'18 found that Personalized
 PageRank beats tree sampling on `grqc` (assortativity 0.164) and LOSES elsewhere,
 and "elsewhere" is this graph. Running both is what turns that warning into a
 measurement.

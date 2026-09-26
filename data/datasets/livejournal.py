@@ -2,8 +2,7 @@
 LiveJournal Dataset Loader
 
 Downloads and loads the SNAP soc-LiveJournal1 friendship network: the second
-largest of Han et al.'s adaptive-IM benchmarks
-(research/adaptive_online_im.md §5.2, §6.2).
+largest of Han et al.'s adaptive-IM benchmarks.
 
 Source: https://snap.stanford.edu/data/soc-LiveJournal1.html
     - 4,847,571 nodes (members), 68,993,773 arcs (friendship declarations)

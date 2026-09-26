@@ -141,7 +141,7 @@ def check_registry() -> None:
         "infected and bias every prevented-influence number by exactly +k"
     )
     assert task.outbreak_pct > 0, "a blocker with no rumour to answer scores nothing"
-    # §8.2: percent-of-N budgets speak to no blocking paper at all
+    # Percent-of-N budgets speak to no blocking paper at all
     assert task.default_budgets == (10, 20, 30, 40, 50)
     assert result_sense([{"task": "influence_blocking"}]) == minimize
 
@@ -157,11 +157,11 @@ def check_registry() -> None:
             )
 
     assert default_blocking_baselines[counter_seed][0] == "proximity", (
-        "proximity is the row that has to be beaten (§5.4, §5.6)"
+        "proximity is the row that has to be beaten"
     )
     assert default_blocking_baselines[node_block][0] == "imin_lhga", (
         "SandIMIN's own trivial heuristic beats both of its principled methods in "
-        "6 of 30 cells (§5.3)"
+        "6 of 30 cells"
     )
     assert "degree_blocking" in default_blocking_baselines[counter_seed], (
         "degree is the published FAILURE mode here and belongs in the table"
@@ -439,8 +439,8 @@ def check_proximity_beats_degree() -> None:
 
     A star whose hub is far from the rumour: `degree_blocking` takes the hub and
     saves nobody, `proximity` takes the rumour's own out-neighbour and saves the
-    branch behind it. §5.4 states this outright and it is the reason degree is in the
-    default pool as a FAILURE mode rather than as a floor.
+    branch behind it. The literature states this outright and it is the reason
+    degree is in the default pool as a FAILURE mode rather than as a floor.
     """
     # 0 (rumour) -> 1 -> 2; and a high-degree hub 3 wired to 4..9, unreachable from 0
     edges = [(0, 1), (1, 2)] + [(3, node) for node in range(4, 10)]
@@ -598,11 +598,11 @@ def check_head_matches_simulator() -> None:
     """
     The oracle head's one-step marginals agree with the simulator's, per tie-break.
 
-    This is the claim §2.2 leaves open and this repo has to settle: the two-MLP
-    product form is exact under BOTH COICM and MCICM, because a node activates in at
-    most one campaign and the two arrival probabilities are products over disjoint
-    in-edge sets. If that argument were wrong, the oracle head and the simulator would
-    disagree exactly here.
+    This is the claim the literature leaves open and this repo has to settle: the
+    two-MLP product form is exact under BOTH COICM and MCICM, because a node
+    activates in at most one campaign and the two arrival probabilities are products
+    over disjoint in-edge sets. If that argument were wrong, the oracle head and the
+    simulator would disagree exactly here.
     """
     edges = [(0, 3), (1, 3), (2, 3)]
     graph = _graph(edges, 4)

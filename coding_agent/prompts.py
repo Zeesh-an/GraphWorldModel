@@ -529,7 +529,7 @@ blocking_budget_rules = {
 # EPIDEMIC CONTROL, per lever. Separate from the containment briefs because the
 # DYNAMICS differ, not only the intervention: nodes RECOVER here, which means the
 # outbreak burns out on its own and a dose is only worth what it saves BEFORE that
-# happens (research/epidemic_control.md §2.4, §8.3).
+# happens.
 epidemic_briefs = {
     "vaccinate": """\
 You are designing a network VACCINATION algorithm as an executable Python script.
@@ -1930,7 +1930,7 @@ def build_outbreak_block(task: TaskSpec) -> str:
         if task.blocks and task.detection_delay
         else ""
     )
-    # §8.4 is emphatic that the tie-break is a reported hyperparameter rather than an
+    # The tie-break is a reported hyperparameter rather than an
     # implementation detail, and it is the single fact that decides whether a
     # same-step arrival is worth anything, so it goes in the task block, not a
     # footnote
@@ -1948,7 +1948,7 @@ def build_outbreak_block(task: TaskSpec) -> str:
     )
     tie = f"TIE-BREAK: if you and the rumour reach a node on the SAME step, {rule}.\n" if rule else ""
 
-    # §8.2 trap 2: beta and gamma are free parameters nobody standardizes, so a
+    # Beta and gamma are free parameters nobody standardizes, so a
     # model told the wrong ones plans against dynamics it will not get. Stated in
     # the task block rather than a footnote for the same reason the tie-break is.
     rates = (
@@ -2018,13 +2018,12 @@ def build_mask_block(task: TaskSpec) -> str:
     """
     Which of the four settings is running, and what the episodes look like.
 
-    Spelled out because the setting is a PROTOCOL rather than a knob
-    (research/cascade_reconstruction.md §8.3): a decoder selected under
-    `final_snapshot` is solving a different problem from one selected under
-    `partial_times`, and a model told the wrong one writes for an input it will not
-    get. The masking DIRECTION is stated explicitly for the reason §8.2 trap 1
-    gives: two papers in this literature use the symbol sigma for opposite
-    quantities, so "reported with probability q" is written out rather than named.
+    Spelled out because the setting is a PROTOCOL rather than a knob: a decoder
+    selected under `final_snapshot` is solving a different problem from one
+    selected under `partial_times`, and a model told the wrong one writes for an
+    input it will not get. The masking DIRECTION is stated explicitly because two
+    papers in this literature use the symbol sigma for opposite quantities, so
+    "reported with probability q" is written out rather than named.
     """
     if not task.decodes:
         return ""
@@ -2071,8 +2070,8 @@ def build_observation_block(task: TaskSpec) -> str:
 
     Spelled out because the observation mode changes the problem: an MC marginal
     is a continuous, averaged view of the last wave, while a binarized draw is one
-    realization. Ours is strictly MORE informative than the published protocol's
-    (research/source_localization.md §2.9 risk 5), so a model told the wrong one
+    realization. Ours is strictly MORE informative than the published protocol's,
+    so a model told the wrong one
     calibrates its threshold against a distribution it will not see.
     """
     if not task.recovers or task.decodes:
@@ -2392,7 +2391,7 @@ horizon = {task.horizon} (timesteps)
 # never whole programs and never compositions over the library
 def _scored_localization_system(task: TaskSpec) -> str:
     """
-    Scored mode for the inverse task (research/source_localization.md §2.4.2).
+    Scored mode for the inverse task.
 
     The same trick as the intervention half: a fixed harness the agent cannot
     override, with one hook it can, and it is a better fit here than anywhere
@@ -2457,7 +2456,7 @@ def _scored_reconstruction_system(task: TaskSpec) -> str:
     """
     Scored mode for the decoding task, and the tightest of the three fits.
 
-    Every ordered-Steiner method in research/cascade_reconstruction.md §3 IS
+    Every published ordered-Steiner method IS
     exactly a shortest-path computation under an arc cost: `delayed-bfs`,
     `closure`, `greedy`, WPCT and CulT differ in their constraints and their
     attachment order, not in the shape of the object they optimize. Fixing the

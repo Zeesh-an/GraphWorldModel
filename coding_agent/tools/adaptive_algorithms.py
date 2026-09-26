@@ -8,7 +8,7 @@ Every algorithm here has the signature
 and returns at most `batch` seeds for ONE round, chosen against the realized
 `state` the previous round produced. That is the whole difference from
 `algorithms.py`, whose members return a single static seed set from the graph
-alone (research/adaptive_online_im.md §1.1).
+alone.
 
 These are the condition-1 floor for `--task adaptive_online_im`. Without them the
 task's `--baselines` arms are all static sets dealt at t=0, i.e. the CONTROL side
@@ -152,7 +152,7 @@ def adapt_greedy(
     `compute_marginal_gain` conditions on the already-active set by including it
     in the seed list, so a candidate is scored by what it adds ON TOP of what the
     cascade has already reached, which is exactly the quantity that changes
-    between rounds and invalidates CELF's cached gains (§2.3).
+    between rounds and invalidates CELF's cached gains.
 
     ponytail: candidates are pre-filtered to the top `n_candidates` by degree
     rather than scanning all N, because a full scan is O(N x mc_runs) simulations
@@ -260,7 +260,7 @@ def static_split(
     """
     A single STATIC seed set, dealt out one batch per round. The control.
 
-    This is §9.4's "non-adaptive strategy wearing a costume": it spends the same
+    This is a "non-adaptive strategy wearing a costume": it spends the same
     k on the same nodes a one-shot arm would, and only the timing differs. It is
     here so the adaptivity gap has a denominator computed under the identical
     round machinery, which isolates the timing penalty (a seed placed at round 3
