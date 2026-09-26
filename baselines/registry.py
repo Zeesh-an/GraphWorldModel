@@ -130,7 +130,7 @@ class ExternalBaseline:
     venue: str
     repo: str
     paper: str
-    entry: str  # what setup/run drives, for the README table
+    entry: str  # what setup/run drives
     # Which graph task this baseline solves; a key of pipeline.tasks.tasks.
     # Eight tasks have entries, and the field is what keeps a blocking or CND
     # baseline out of an IM sweep (`--baselines all` expands per task).
