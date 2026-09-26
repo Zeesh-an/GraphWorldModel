@@ -57,3 +57,5 @@ Thumbs.db
 
 # ------------------------------------------------------------ Overleaf paper
 paper/
+# Paper figures, written by scripts/paper_figures/ and uploaded to Overleaf by hand
+figures/
