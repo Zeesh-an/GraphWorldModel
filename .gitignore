@@ -45,6 +45,8 @@ registry/
 configs/
 scripts/
 pytest.ini
+# Carries the author's name; kept out until the anonymous review period ends.
+/LICENSE
 
 .DS_Store
 Thumbs.db
