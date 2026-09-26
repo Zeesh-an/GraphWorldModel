@@ -400,10 +400,9 @@ class ExperimentConfig:
     allow_mc_algorithms: bool = False
     # Wall-clock cap on one generated plan_horizon()/act() call; 0 disables
     strategy_timeout: float = executor.strategy_timeout_seconds
-    # USD per 1M tokens, for the cost line in the results JSON. The lab gateway
-    # bills nothing per token (it fronts Pro subscriptions), so there is no rate
-    # to hardcode: supply your own or the cost stays null while tokens are
-    # still counted exactly.
+    # USD per 1M tokens, for the cost line in the results JSON. Prices differ by
+    # provider and change over time, so there is no rate to hardcode: supply your
+    # own or the cost stays null while tokens are still counted exactly.
     llm_price_in: float | None = None
     llm_price_out: float | None = None
     # Resume a killed search from its checkpoint; --force turns this off so a
@@ -1657,8 +1656,8 @@ def run_experiment(
         ),
         # calls + token totals across every provider this run created (the
         # routing call included). cost_usd is None unless --llm-price-in/-out
-        # were given: the lab gateway bills nothing per token, so there is no
-        # rate to assume.
+        # were given, because prices differ by provider and there is no rate to
+        # assume.
         "llm_usage": _usage_report(providers, config),
         "cost": trajectory.cost,
         # Base seed for every rollout in this run; each rollout also records the
@@ -2518,8 +2517,8 @@ if __name__ == "__main__":
         type=float,
         default=None,
         help="USD per 1M prompt tokens, for the cost line in the results JSON. "
-        "The lab gateway fronts Pro subscriptions and bills nothing per token, so "
-        "there is no rate to assume: tokens are always counted exactly, cost stays "
+        "Prices differ by provider, so there is no rate to assume: tokens are "
+        "always counted exactly, cost stays "
         "null unless both price flags are given (default: None).",
     )
     parser.add_argument(

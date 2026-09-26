@@ -3103,9 +3103,9 @@ if __name__ == "__main__":
         "--llm-price-in",
         type=float,
         default=None,
-        help="USD per 1M prompt tokens, for the cost column. The lab gateway "
-        "fronts Pro subscriptions and bills nothing per token, so there is no rate "
-        "to assume: tokens are always counted, cost stays null unless both price "
+        help="USD per 1M prompt tokens, for the cost column. Prices differ by "
+        "provider, so there is no rate to assume: tokens are always counted, cost "
+        "stays null unless both price "
         "flags are given (default: None).",
     )
     parser.add_argument(

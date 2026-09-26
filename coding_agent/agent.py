@@ -89,7 +89,7 @@ def verify_gateway_model(model: str, available: list[str] | None = None) -> None
         raise RuntimeError(
             f"the gateway at {os.environ.get('GATEWAY_BASE_URL', '<unset>')} does not "
             f"serve model {model!r} for this token. Served: {served or 'nothing listed'}. "
-            f"Ask the gateway admin to enable it, or pass --llm-model / LLM_MODEL with "
+            f"Pass --llm-model / LLM_MODEL with "
             f"one of the served names."
         )
 
@@ -150,7 +150,7 @@ def fold_system(messages: list[dict]) -> list[dict]:
 
 
 class GatewayProvider:
-    """OpenAI-compatible gateway over ChatGPT/Claude Pro subscriptions."""
+    """Client for an OpenAI-compatible chat completions endpoint."""
 
     def __init__(
         self,
@@ -158,7 +158,7 @@ class GatewayProvider:
         temperature: float | None = None,
         reasoning_effort: str | None = default_reasoning_effort,
     ) -> None:
-        # Each subscription account has its own bearer token, so the token is picked from the model-name family (claude-* vs gpt-*)
+        # The key is picked from the model-name family (claude-* vs gpt-*), so one endpoint can serve both
         token_env = (
             "CLAUDE_GATEWAY_TOKEN"
             if model.startswith("claude")
@@ -177,7 +177,7 @@ class GatewayProvider:
         self.reasoning_effort = reasoning_effort
         # Cumulative across every call this provider makes, read back into the
         # results JSON. Retried attempts that never returned a completion are not
-        # billed by the gateway and are not counted here either.
+        # counted.
         self.usage = empty_usage()
 
     def complete(self, messages: list[dict]) -> str:
