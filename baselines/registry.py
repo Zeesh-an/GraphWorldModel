@@ -2942,7 +2942,6 @@ external_baselines = {
         # died on exactly that import. Installed after them, through the
         # torch-extension pre-install path where one is needed.
         # utils/graph_utils.py imports scipy, which its requirements never list
-        # either: the PDE venv failed at import on every budget (2026-09-08)
         pip_packages=('torch-scatter', 'scipy'),
         export=_touplegdd_export,
         command=_touplegdd_command,
