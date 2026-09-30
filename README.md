@@ -16,7 +16,7 @@
 </div>
 
 <p align="center">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/headline_figure.png" alt="A coding agent writes algorithms, a Network World Model rolls out how their interventions spread over a network, and a radar chart compares the designed algorithms with the strongest baseline across eight tasks." width="100%">
+  <img src="assets/headline_figure.png" alt="A coding agent writes algorithms, a Network World Model rolls out how their interventions spread over a network, and a radar chart compares the designed algorithms with the strongest baseline across eight tasks." width="100%">
 </p>
 
 <p align="center"><em>A coding agent writes algorithms that choose interventions on a network, and a Network World Model rolls out how each choice unfolds, returning a reward, feedback, and probe answers the agent uses to improve the algorithm (left). Across eight tasks on complex networks, the agent-designed algorithms outperform the strongest baselines, averaged over budgets (right).</em></p>
@@ -276,10 +276,10 @@ The designed algorithms improve on the strongest existing method in seven tasks 
 ### Gains hold across budgets
 
 <p align="center">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/budget_im_digg.png" alt="Influence maximization on Digg under IC" width="49%">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/budget_aim_digg.png" alt="Adaptive influence maximization on Digg under IC" width="49%">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/budget_cnd_pgp.png" alt="Critical node detection on PGP under IC" width="49%">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/budget_ib_gnutella24.png" alt="Influence blocking on Gnutella24 under IC" width="49%">
+  <img src="assets/budget_im_digg.png" alt="Influence maximization on Digg under IC" width="49%">
+  <img src="assets/budget_aim_digg.png" alt="Adaptive influence maximization on Digg under IC" width="49%">
+  <img src="assets/budget_cnd_pgp.png" alt="Critical node detection on PGP under IC" width="49%">
+  <img src="assets/budget_ib_gnutella24.png" alt="Influence blocking on Gnutella24 under IC" width="49%">
 </p>
 
 <p align="center"><em>Performance across intervention budgets under IC: influence maximization and adaptive influence maximization on Digg (top, higher is better), critical node detection on PGP and influence blocking on Gnutella24 (bottom, lower is better).</em></p>
@@ -302,10 +302,10 @@ Influence maximization on Network Science (spread, % of nodes activated, &uarr;)
 ### Robustness, transfer, scale and cost
 
 <p align="center">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/coding_model.png" alt="Returned algorithm under three coding models" width="49%">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/transfer_cnd.png" alt="Critical node detection algorithm designed on PGP, replayed on Power Grid and Gnutella31" width="49%">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/scale_im.png" alt="Influence maximization across network sizes" width="49%">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/cost_per_rollout.png" alt="Time per rollout of the world model and Monte Carlo simulation" width="49%">
+  <img src="assets/coding_model.png" alt="Returned algorithm under three coding models" width="49%">
+  <img src="assets/transfer_cnd.png" alt="Critical node detection algorithm designed on PGP, replayed on Power Grid and Gnutella31" width="49%">
+  <img src="assets/scale_im.png" alt="Influence maximization across network sizes" width="49%">
+  <img src="assets/cost_per_rollout.png" alt="Time per rollout of the world model and Monte Carlo simulation" width="49%">
 </p>
 
 - **Coding model.** Repeating the search with GPT-5.6 Sol, Terra, and Luna, the three finish within 0.1 points of one another on Network Science and within 0.3 points on Power Grid, averaged over budgets, and each beats the strongest baseline (top left).
@@ -336,7 +336,7 @@ For search, what matters is that the model orders candidates the way the true dy
 | WS (topology shift) | 0.860 [0.832, 0.887] | 1.18 | 10.07 |
 
 <p align="center">
-  <img src="https://rishabsa.github.io/NetworkWorldModel/static/images/rollout_bias_by_step.png" alt="Relative count bias of the free-running rollout by step on Network Science and Power Grid" width="90%">
+  <img src="assets/rollout_bias_by_step.png" alt="Relative count bias of the free-running rollout by step on Network Science and Power Grid" width="90%">
 </p>
 
 <p align="center"><em>Relative count bias of the free-running sampled rollout by step on the 50 held-out episodes of the main runs. The bias settles within the first few steps and does not grow, so one-step error does not compound over a rollout.</em></p>
